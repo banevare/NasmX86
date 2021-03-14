@@ -1,8 +1,7 @@
-# Generate and run [x64](https://en.wikipedia.org/wiki/X86-64) [Advanced Vector Extensions](https://en.wikipedia.org/wiki/AVX-512) assembler programs from Perl
-
+# Generate and run [x64](https://en.wikipedia.org/wiki/X86-64) [Advanced Vector Extensions](https://en.wikipedia.org/wiki/AVX-512) assembler programs from [Perl](http://www.perl.org/) 
 ![Test](https://github.com/philiprbrenan/Nasmx86/workflows/Test/badge.svg)
 
-This Perl [module](https://en.wikipedia.org/wiki/Modular_programming) generates and runs [x64](https://en.wikipedia.org/wiki/X86-64) [Advanced Vector Extensions](https://en.wikipedia.org/wiki/AVX-512) assembler programs. It contains
+This [Perl](http://www.perl.org/) [module](https://en.wikipedia.org/wiki/Modular_programming) generates and runs [x64](https://en.wikipedia.org/wiki/X86-64) [Advanced Vector Extensions](https://en.wikipedia.org/wiki/AVX-512) assembler programs. It contains
 methods to perform useful macro functions such as dumping x/y/zmm* registers to
 facilitate the debugging of the generated programs.
 
