@@ -38,4 +38,5 @@ jobs:
       if: always()
       run: |
         tar -xf sde.tar.bz2
+        mv sde-external-8.63.0-2021-01-18-lin/ sde/
         tree
