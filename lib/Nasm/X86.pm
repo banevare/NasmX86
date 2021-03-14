@@ -417,13 +417,13 @@ global _start, main
   $t
 END
 
-  my $c    = owf($debug ? q(z.asm) : undef, $a);                                # Source file
-  my $e    =     $debug ? q(z)     : temporaryFile;                             # Executable file
-  my $l    =     $debug ? q(z.txt) : temporaryFile;                             # Assembler listing
-  my $o    =     $debug ? q(z.o)   : temporaryFile;                             # Object file
+  my $c    = owf(q(z.asm), $a);                                                 # Source file
+  my $e    =     q(z);                                                          # Executable file
+  my $l    =     q(z.txt);                                                      # Assembler listing
+  my $o    =     q(z.o);                                                        # Object file
 
   my $cmd  = qq(nasm -f elf64 -g -l $l -o $o $c; ld -o $e $o; chmod 744 $e; $sde -- ./$e 2>&1);
-  say STDERR qq($cmd) if $debug;
+  say STDERR qq($cmd);
   my $R    = eval {qx($cmd)};
   say STDERR readFile($l) if $options{list};                                    # Print listing if requested
   say STDERR $R;
