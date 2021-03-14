@@ -31,11 +31,11 @@ jobs:
     - name: Download Intel Sde
       if: always()
       run: |
-        curl https://software.intel.com/content/dam/develop/external/us/en/documents/downloads/sde-external-8.63.0-2021-01-18-lin.tar.bz2
+        curl https://software.intel.com/content/dam/develop/external/us/en/documents/downloads/sde-external-8.63.0-2021-01-18-lin.tar.bz2 > sde.tar.bz2
         tree
 
     - name: Install Intel Sde
       if: always()
       run: |
-        tar -xf sde-external-8.63.0-2021-01-18-lin.tar.bz2
+        tar -xf sde.tar.bz2
         tree
