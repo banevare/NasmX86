@@ -29,13 +29,13 @@ jobs:
         sudo apt-get install -y tree
 
     - name: Download Intel Sde
+      if: always()
       run: |
         curl https://software.intel.com/content/dam/develop/external/us/en/documents/downloads/sde-external-8.63.0-2021-01-18-lin.tar.bz2
+        tree
 
     - name: Install Intel Sde
+      if: always()
       run: |
         tar -xf sde-external-8.63.0-2021-01-18-lin.tar.bz2
-
-    - name: Files
-      run: |
         tree
