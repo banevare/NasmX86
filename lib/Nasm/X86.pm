@@ -15,6 +15,7 @@ use feature qw(say current_sub);
 
 my $debug = -e q(/home/phil/);                                                  # Developing
 my $sde   = q(/home/phil/Downloads/sde-external-8.63.0-2021-01-18-lin/sde64);   # Intel emulator
+   $sde   = q(sde/sde64) unless $debug;
 
 my %rodata;                                                                     # Read only data already written
 my %rodatas;                                                                    # Read only string already written
