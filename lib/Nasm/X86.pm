@@ -1,6 +1,6 @@
 #!/usr/bin/perl -I/home/phil/perl/cpan/DataTableText/lib/ -I.
 #-------------------------------------------------------------------------------
-# Generate Nasm X86 code.
+# Generate Nasm X86 code
 # Philip R Brenan at appaapps dot com, Appa Apps Ltd Inc., 2021
 #-------------------------------------------------------------------------------
 # podDocumentation
