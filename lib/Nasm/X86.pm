@@ -1,6 +1,6 @@
 #!/usr/bin/perl -I/home/phil/perl/cpan/DataTableText/lib/ -I.
 #-------------------------------------------------------------------------------
-# Generate Nasm code
+# Generate Nasm X86 code
 # Philip R Brenan at appaapps dot com, Appa Apps Ltd Inc., 2021
 #-------------------------------------------------------------------------------
 # podDocumentation
@@ -14,7 +14,7 @@ use Data::Table::Text qw(:all);
 use feature qw(say current_sub);
 
 my $debug = -e q(/home/phil/);                                                  # Developing
-my $sde   = q(/home/phil/Downloads/sde-external-8.63.0-2021-01-18-lin/sde64);   # Intel emulator
+my $sde   = q(/var/isde/sde64);                                                 # Intel emulator
    $sde   = q(sde/sde64) unless $debug;
 
 my %rodata;                                                                     # Read only data already written
@@ -188,7 +188,7 @@ sub PopR(@)                                                                     
   push @text, map {"  pop $_\n"} reverse @r;
  }
 
-sub WriteOutNl()                                                                # Write a new line
+sub PrintOutNl()                                                                # Write a new line
  {SaveFirstFour;
   my $a = Rb(10);
   Comment "Write new line";
@@ -202,7 +202,7 @@ END
   RestoreFirstFour()
  }
 
-sub WriteStringOut($;$)                                                         # One: Write a constant string to sysout. Two write the bytes addressed for the specified length to sysout
+sub PrintOutString($;$)                                                         # One: Write a constant string to sysout. Two write the bytes addressed for the specified length to sysout
  {SaveFirstFour;
   Comment "Write String Out";
   if (@_ == 1)                                                                  # Constant string
@@ -237,7 +237,7 @@ END
   RestoreFirstFour()
  }
 
-sub PrintRaxInHex                                                               # Write the content of register rax to stderr in hexadecimal in big endian notation
+sub PrintOutRaxInHex                                                            # Write the content of register rax to stderr in hexadecimal in big endian notation
  {my ($r) = @_;                                                                 # Register
   Comment "Print Rax In Hex";
 
@@ -263,8 +263,8 @@ sub PrintRaxInHex                                                               
   shl rsi,1  ; Multiply by two because each entry in the translation table is two bytes long
   lea rsi,[$hexTranslateTable+rsi]
 END
-    WriteStringOut &rsi, 2;
-    WriteStringOut ' ' if $i % 2;
+    PrintOutString &rsi, 2;
+    PrintOutString ' ' if $i % 2;
    }
   PopR @regs;
  }
@@ -272,78 +272,37 @@ END
 sub PrintRegisterInHex($)                                                       # Print any register as a hex string
  {my ($r) = @_;                                                                 # Name of the register to print
   Comment "Print register $r in Hex";
-  WriteStringOut "$r: ";
+  PrintOutString "$r: ";
 
-  if ($r =~ m(\Ar))                                                             # 64 bit
-   {if ($r !~ m(\Arax))
-     {push @text, <<END;
-  push rax
-  mov  rax,$r
-END
-     }
-    PrintRaxInHex;
-    if ($r !~ m(\Arax))
-     {push @text, <<END;
-  pop rax
-END
-     }
-   }
-  elsif ($r =~ m(\Ax))                                                          # xmm*
-   {my @regs = qw(rax rbx);                                                     # Work registers
+  my sub printReg($$@)                                                          # Print the contents of a x/y/zmm* register
+   {my ($r, $s, @regs) = @_;                                                    # Register to print, size in bytes, work registers
     PushR @regs;                                                                # Save work registers
-    push @text, <<END;
-  sub rsp,16
-  movdqu [rsp],$r
-END
-    PopR @regs;
-    PrintRaxInHex;
-    WriteStringOut("  ");
-    push @text, <<END;
-  mov rax, rbx
-END
-    PrintRaxInHex;
-    PopR @regs;
-   }
-  elsif ($r =~ m(\Ay))                                                          # ymm*
-   {my @regs = qw(rax rbx rcx rdx);                                             # Work registers
-    PushR @regs;                                                                # Save work registers
-    push @text, <<END;
-  sub rsp,32
+    push @text, <<END unless $s == 8;                                           # Place register contents on stack
+  sub rsp,$s
   vmovdqu8 [rsp],$r
 END
-    PopR @regs;
-    for my $R(@regs)
+    push @text, <<END     if $s == 8;                                           # Place register contents on stack
+  push $r
+END
+    PopR @regs;                                                                 # Load work registers
+    for my $R(@regs)                                                            # Print work registers to print input register
      {if ($R !~ m(\Arax))
-       {WriteStringOut("  ");
+       {PrintOutString("  ");
         push @text, <<END;
   mov rax, $R
 END
        }
-      PrintRaxInHex;
+      PrintOutRaxInHex;                                                         # Print work register
      }
     PopR @regs;
-   }
-  elsif ($r =~ m(\Az))                                                          # zmm*
-   {my @regs = qw(rax rbx rcx rdx r8 r9 r10 r11);                               # Work registers
-    PushR @regs;                                                                # Save work registers
-    push @text, <<END;
-  sub rsp,64
-  vmovdqu8 [rsp],$r
-END
-    PopR @regs;
-    for my $R(@regs)
-     {if ($R !~ m(\Arax))
-       {WriteStringOut("  ");
-        push @text, <<END;
-  mov rax, $R
-END
-       }
-      PrintRaxInHex;
-     }
-    PopR @regs;
-   }
+   };
 
-  WriteOutNl;
+  if    ($r =~ m(\Ar)) {printReg $r, 8,  qw(rax)}                               # 64 bit register requested
+  elsif ($r =~ m(\Ax)) {printReg $r, 16, qw(rax rbx)}                           # xmm*
+  elsif ($r =~ m(\Ay)) {printReg $r, 32, qw(rax rbx rcx rdx)}                   # ymm*
+  elsif ($r =~ m(\Az)) {printReg $r, 64, qw(rax rbx rcx rdx r8 r9 r10 r11)}     # zmm*
+
+  PrintOutNl;
  }
 
 sub PrintRegistersInHex                                                         # Print the general purpose registers in hex
@@ -353,9 +312,9 @@ sub PrintRegistersInHex                                                         
   push @text, <<END;
 $l: lea rax,[$l]
 END
-  WriteStringOut "rip: ";
-  PrintRaxInHex;
-  WriteOutNl;
+  PrintOutString "rip: ";
+  PrintOutRaxInHex;
+  PrintOutNl;
 
   my $w = registers_64();
   for my $r(sort @$w)
@@ -364,12 +323,12 @@ END
   pop rax
   push rax
 END
-    WriteStringOut reverse(pad(reverse($r), 3)).": ";
+    PrintOutString reverse(pad(reverse($r), 3)).": ";
     push @text, <<END;
   mov rax,$r
 END
-    PrintRaxInHex;
-    WriteOutNl;
+    PrintOutRaxInHex;
+    PrintOutNl;
    }
   PopR @regs;
  }
@@ -493,9 +452,9 @@ else
 
 my $start = time;                                                               # Tests
 
-if (1) {                                                                        #TExit #TWriteStringOut
+if (1) {                                                                        #TExit #TPrintOutString
   Start;
-  WriteStringOut "Hello World To you";
+  PrintOutString "Hello World To you";
   Exit;
   ok assemble =~ m(Hello World);
  }
@@ -505,18 +464,18 @@ if (1) {                                                                        
   my $s = "Hello World";
   my $m = Rs($s);
   Mov rsi, $m;
-  WriteStringOut rsi, length($s);
+  PrintOutString rsi, length($s);
   Exit;
   ok assemble =~ m(Hello World);
  }
 
-if (1) {                                                                        #TPrintRaxInHex
+if (1) {                                                                        #TPrintOutRaxInHex
   Start;
   my $q = Rs('abababab');
   Mov(rax, "[$q]");
-  WriteStringOut "rax: ";
-  PrintRaxInHex;
-  WriteOutNl;
+  PrintOutString "rax: ";
+  PrintOutRaxInHex;
+  PrintOutNl;
   Exit;
   ok assemble() =~ m(rax: 6261 6261 6261 6261)s;
  }
@@ -542,7 +501,7 @@ if (1) {                                                                        
   Vmovdqu32(xmm0, "[$q]");                                                      # Load
   Vprolq   (xmm0,   xmm0, 32);                                                  # Rotate double words in quad words
   Vmovdqu32("[$d]", xmm0);                                                      # Save
-  WriteStringOut($d, 16);
+  PrintOutString($d, 16);
   Exit;
   ok assemble() =~ m(efghabcdmnopijkl)s;
  }
@@ -554,7 +513,7 @@ if (1) {
   Vmovdqu32(ymm0, "[$q]");
   Vprolq   (ymm0,   ymm0, 32);
   Vmovdqu32("[$d]", ymm0);
-  WriteStringOut($d, 32);
+  PrintOutString($d, 32);
   Exit;
   ok assemble() =~ m(efghabcdmnopijklefghabcdmnopijkl)s;
  }
@@ -566,13 +525,13 @@ if (1) {
   Vmovdqu32(zmm0, "[$q]");
   Vprolq   (zmm0,   zmm0, 32);
   Vmovdqu32("[$d]", zmm0);
-  WriteStringOut($d, 64);
+  PrintOutString($d, 64);
   push @text, <<END;
   sub rsp,64
   vmovdqu64 [rsp],zmm0
   pop rax
 END
-  PrintRaxInHex;
+  PrintOutRaxInHex;
   Exit;
   ok assemble() =~ m(efghabcdmnopijklefghabcdmnopijklefghabcdmnopijklefghabcdmnopijkl)s;
  }
