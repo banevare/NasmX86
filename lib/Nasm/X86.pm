@@ -24,6 +24,8 @@ my @data;                                                                       
 my @bss;                                                                        # Block started by symbol
 my @text;                                                                       # Code
 
+my $sysout = 1;                                                                 # File descriptor for output
+
 BEGIN{
   my %r = (    map {$_=>'8'}    qw(al bl cl dl r8b r9b r10b r11b r12b r13b r14b r15b sil dil spl bpl ah bh ch dh));
      %r = (%r, map {$_=>'s'}    qw(cs ds es fs gs ss));
@@ -164,8 +166,54 @@ sub RestoreFirstFour()                                                          
 END
  }
 
+sub RestoreFirstFourExceptRax()                                                 # Restore the first 4 parameter registers except rax so it can return its value
+ {push @text, <<END;
+  pop rdx
+  pop rsi
+  pop rdi
+  add rsp, 8
+END
+ }
+
+sub SaveFirstSeven()                                                            # Save the first 7 parameter registers
+ {push @text, <<END;
+  push rax
+  push rdi
+  push rsi
+  push rdx
+  push r10
+  push r8
+  push r9
+END
+ }
+
+sub RestoreFirstSeven()                                                         # Restore the first 7 parameter registers
+ {push @text, <<END;
+  pop r9
+  pop r8
+  pop r10
+  pop rdx
+  pop rsi
+  pop rdi
+  pop rax
+END
+ }
+
+sub RestoreFirstSevenExceptRax()                                                # Restore the first 7 parameter registers except rax which is being used to return the result
+ {push @text, <<END;
+  pop r9
+  pop r8
+  pop r10
+  pop rdx
+  pop rsi
+  pop rdi
+  add rsp,8 ; Skip over value of rax so we can return rax instead
+END
+ }
+
 sub Lea($$)                                                                     # Load effective address
  {my ($target, $source) = @_;                                                   # Target, source
+  @_ == 2 or confess;
   push @text, <<END;
   lea $target,$source
 END
@@ -173,6 +221,7 @@ END
 
 sub Mov($$)                                                                     # Move data
  {my ($target, $source) = @_;                                                   # Target, source
+  @_ == 2 or confess;
   push @text, <<END;
   mov $target,$source
 END
@@ -190,6 +239,7 @@ sub PopR(@)                                                                     
 
 sub PrintOutNl()                                                                # Write a new line
  {SaveFirstFour;
+  @_ == 0 or confess;
   my $a = Rb(10);
   Comment "Write new line";
   push @text, <<END;
@@ -204,14 +254,14 @@ END
 
 sub PrintOutString($;$)                                                         # One: Write a constant string to sysout. Two write the bytes addressed for the specified length to sysout
  {SaveFirstFour;
-  Comment "Write String Out";
+  Comment "Write String Out: ", dump(\@_);
   if (@_ == 1)                                                                  # Constant string
    {my ($c) = @_;
     my $l = length($c);
     my $a = Rs($c);
     push @text, <<END;
   mov rax, 1              ; write
-  mov rdi, 1              ; sysout
+  mov rdi, $sysout              ; sysout
   mov rsi, $a             ; String
   mov rdx, $l             ; Length
   syscall                 ; write $l: $c
@@ -227,7 +277,7 @@ END
 END
     push @text, <<END;
   mov rax, 1              ; write
-  mov rdi, 1              ; sysout
+  mov rdi, $sysout              ; sysout
   syscall                 ; Write $l: $a
 END
    }
@@ -238,7 +288,7 @@ END
  }
 
 sub PrintOutRaxInHex                                                            # Write the content of register rax to stderr in hexadecimal in big endian notation
- {my ($r) = @_;                                                                 # Register
+ {@_ == 0 or confess;
   Comment "Print Rax In Hex";
 
   my $hexTranslateTable = sub
@@ -269,9 +319,10 @@ END
   PopR @regs;
  }
 
-sub PrintRegisterInHex($)                                                       # Print any register as a hex string
+sub PrintOutRegisterInHex($)                                                       # Print any register as a hex string
  {my ($r) = @_;                                                                 # Name of the register to print
   Comment "Print register $r in Hex";
+  @_ == 1 or confess;
   PrintOutString "$r: ";
 
   my sub printReg($$@)                                                          # Print the contents of a x/y/zmm* register
@@ -305,8 +356,9 @@ END
   PrintOutNl;
  }
 
-sub PrintRegistersInHex                                                         # Print the general purpose registers in hex
- {my @regs = qw(rax);
+sub PrintOutRegistersInHex                                                         # Print the general purpose registers in hex
+ {@_ == 0 or confess;
+  my @regs = qw(rax);
   PushR @regs;
   my $l = label;
   push @text, <<END;
@@ -333,8 +385,17 @@ END
   PopR @regs;
  }
 
+sub Xor($$)                                                                     # Xor one register into another
+ {my ($t, $s) = @_;                                                           # Target register, source register
+  @_ == 2 or confess;
+  push @text, <<END;
+  xor $t, $s
+END
+ }
+
 sub Vmovdqu8($$)                                                                # Move memory in 8 bit blocks to an x/y/zmm* register
  {my ($r, $m) = @_;                                                             # Register, memory
+  @_ == 2 or confess;
   push @text, <<END;
   VMOVDQU8 $r, $m
 END
@@ -342,6 +403,7 @@ END
 
 sub Vmovdqu32($$)                                                               # Move memory in 32 bit blocks to an x/y/zmm* register
  {my ($r, $m) = @_;                                                             # Register, memory
+  @_ == 2 or confess;
   push @text, <<END;
   VMOVDQU32 $r, $m
 END
@@ -349,9 +411,47 @@ END
 
 sub Vprolq($$$)                                                                 # Rotate left within quad word indicated number of bits
  {my ($r, $m, $bits) = @_;                                                      # Register, memory, number of bits to rotate
+  @_ == 3 or confess;
   push @text, <<END;
   VPROLQ $r, $m, $bits
 END
+ }
+
+sub allocateMemory($)                                                           # Allocate memory via mmap
+ {my ($s) = @_;                                                                 # Amount of memory to allocate
+  @_ == 1 or confess;
+  Comment "Allocate $s bytes of memory";
+  if (@_ == 1)                                                                  # Constant string
+   {SaveFirstSeven;
+    push @text, <<END;
+  mov rax, 9              ; mmap
+  xor rdi, rdi            ; Anywhere
+  mov rsi, $s             ; Amount of memory
+  mov rdx, 3              ; PROT_WRITE  == 2 | PROT_READ == 1
+  mov r10, 34             ; MAP_PRIVATE == 2 & MAP_ANON  == 32
+  mov r8,  -1             ; File descriptor for file backing memory if any
+  mov r9,  0              ; Offset into file
+  syscall                 ; mmap $s
+END
+    RestoreFirstSevenExceptRax;
+   }
+  else
+   {confess "Wrong number of parameters";
+   }
+ }
+
+sub freeMemory($$)                                                              # Free memory via mmap
+ {my ($a, $l) = @_;                                                             # Address of memory to free, length of memory to free
+  @_ == 2 or confess;
+  Comment "Free memory at:  $a length: $l";
+  SaveFirstFour;
+  push @text, <<END;
+  mov rax, 11             ; unmmap
+  mov rdi, $a             ; Address
+  mov rsi, $l             ; Length
+  syscall                 ; unmmap $a, $l
+END
+  RestoreFirstFourExceptRax;
  }
 
 sub assemble(%)                                                                 # Assemble the generated code
@@ -445,7 +545,7 @@ my $localTest = ((caller(1))[0]//'Nasm::X86') eq "Nasm::X86";                   
 
 Test::More->builder->output("/dev/null") if $localTest;                         # Reduce number of confirmation messages during testing
 
-if ($^O =~ m(bsd|linux)i) {plan tests => 11}                                     # Supported systems
+if ($^O =~ m(bsd|linux)i) {plan tests => 12}                                     # Supported systems
 else
  {plan skip_all =>qq(Not supported on: $^O);
  }
@@ -480,7 +580,7 @@ if (1) {                                                                        
   ok assemble() =~ m(rax: 6261 6261 6261 6261)s;
  }
 
-if (1) {                                                                        #TPrintRegistersInHex
+if (1) {                                                                        #TPrintOutRegistersInHex
   Start;
   my $q = Rs('abababab');
   Mov(rax, 1);
@@ -489,7 +589,7 @@ if (1) {                                                                        
   Mov(rdx, 4);
   Mov(r8,  5);
   Mov(r9,  6);
-  PrintRegistersInHex;
+  PrintOutRegistersInHex;
   Exit;
   ok assemble() =~ m(r8: 0000 0000 0000 0005.*rax: 0000 0000 0000 0001)s;
  }
@@ -536,11 +636,11 @@ END
   ok assemble() =~ m(efghabcdmnopijklefghabcdmnopijklefghabcdmnopijklefghabcdmnopijkl)s;
  }
 
-if (1) {                                                                        #TPrintRegisterInHex
+if (1) {                                                                        #TPrintOutRegisterInHex
   Start;
   my $q = Rs(('a'..'p')x4);
   Mov r8,"[$q]";
-  PrintRegisterInHex r8;
+  PrintOutRegisterInHex r8;
   Exit;
   ok assemble() =~ m(r8: 6867 6665 6463 6261)s;
  }
@@ -549,7 +649,7 @@ if (1) {
   Start;
   my $q = Rs('a'..'p');
   Vmovdqu8 xmm0, "[$q]";
-  PrintRegisterInHex xmm0;
+  PrintOutRegisterInHex xmm0;
   Exit;
   ok assemble() =~ m(xmm0: 706F 6E6D 6C6B 6A69   6867 6665 6463 6261)s;
  }
@@ -558,7 +658,7 @@ if (1) {
   Start;
   my $q = Rs('a'..'p', 'A'..'P', );
   Vmovdqu8 ymm0, "[$q]";
-  PrintRegisterInHex ymm0;
+  PrintOutRegisterInHex ymm0;
   Exit;
   ok assemble() =~ m(ymm0: 504F 4E4D 4C4B 4A49   4847 4645 4443 4241   706F 6E6D 6C6B 6A69   6867 6665 6463 6261)s;
  }
@@ -567,9 +667,29 @@ if (1) {
   Start;
   my $q = Rs(('a'..'p', 'A'..'P') x 2);
   Vmovdqu8 zmm0, "[$q]";
-  PrintRegisterInHex zmm0;
+  PrintOutRegisterInHex zmm0;
   Exit;
   ok assemble() =~ m(zmm0: 504F 4E4D 4C4B 4A49   4847 4645 4443 4241   706F 6E6D 6C6B 6A69   6867 6665 6463 6261   504F 4E4D 4C4B 4A49   4847 4645 4443 4241   706F 6E6D 6C6B 6A69   6867 6665 6463 6261)s;
+ }
+
+if (1) {                                                                        #TallocateMemory
+  Start;
+  my $N = 2048;
+  my $n = Rq($N);
+  my $q = Rs('a'..'p');
+  allocateMemory "[$n]";
+  PrintOutRegisterInHex rax;
+  Vmovdqu8 xmm0, "[$q]";
+  Vmovdqu8 "[rax]", xmm0;
+  PrintOutString rax,16;
+  PrintOutNl;
+
+  Mov rbx, rax;
+  freeMemory rbx, "[$n]";
+  PrintOutRegisterInHex rax;
+  Vmovdqu8 "[rbx]", xmm0;
+  Exit;
+  ok assemble() =~ m(abcdefghijklmnop)s;
  }
 
 lll "Finished:", time - $start;
