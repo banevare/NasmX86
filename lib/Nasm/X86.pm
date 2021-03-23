@@ -10,7 +10,7 @@ use warnings FATAL => qw(all);
 use strict;
 use Carp qw(confess cluck);
 use Data::Dump qw(dump);
-use Data::Table::Text qw(:all);
+use Data::Table::Text qw(:all !extractMacroDefinitionsFromIncludeFile);
 use feature qw(say current_sub);
 
 my $debug = -e q(/home/phil/);                                                  # Developing
@@ -51,6 +51,26 @@ BEGIN{
     eval "sub registers_$v\{".dump(\@r)."}";
     confess $@ if $@;
    }
+ }
+
+my %extractMacroDefinitionsFromIncludeFile;                                     # Cache macro definitions
+
+sub extractMacroDefinitionsFromIncludeFile($)                                   # Extract the macro definitions found in a C header file using gcc
+ {my ($includeFile) = @_;                                                       # Include file as it would be entered in a C program
+  my $d = $extractMacroDefinitionsFromIncludeFile{$includeFile};                # Cached macro definitions
+  return $d if $d;                                                              # Return cached value
+
+  confirmHasCommandLineCommand("gcc");                                          # Check gcc
+  my @l = qx(gcc -E -dM -include "$includeFile" - < /dev/null);                 # Use gcc to extract macro definitions
+
+  my %d;
+  for my $l(@l)                                                                 # Extract macro definitions
+   {if ($l =~ m(\A#define\s+(\S+)\s+(\S+)(.*)))
+     {$d{$1} = $2;
+     }
+   }
+
+  $extractMacroDefinitionsFromIncludeFile{$includeFile} = \%d;                  # Return definitions
  }
 
 #D1 Generate Network Assembler Code                                             # Generate assembler code that can be assembled with Nasm
