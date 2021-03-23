@@ -423,12 +423,16 @@ sub allocateMemory($)                                                           
   Comment "Allocate $s bytes of memory";
   if (@_ == 1)                                                                  # Constant string
    {SaveFirstSeven;
+    my $d = extractMacroDefinitionsFromIncludeFile "linux/mman.h";              # mmap constants
+    my $pa = $$d{MAP_PRIVATE} | $$d{MAP_ANONYMOUS};
+    my $wr = $$d{PROT_WRITE}  | $$d{PROT_READ};
+
     push @text, <<END;
   mov rax, 9              ; mmap
   xor rdi, rdi            ; Anywhere
   mov rsi, $s             ; Amount of memory
-  mov rdx, 3              ; PROT_WRITE  == 2 | PROT_READ == 1
-  mov r10, 34             ; MAP_PRIVATE == 2 & MAP_ANON  == 32
+  mov rdx, $wr            ; PROT_WRITE  | PROT_READ
+  mov r10, $pa            ; MAP_PRIVATE | MAP_ANON
   mov r8,  -1             ; File descriptor for file backing memory if any
   mov r9,  0              ; Offset into file
   syscall                 ; mmap $s
@@ -481,7 +485,7 @@ END
   my $l    =     q(z.txt);                                                      # Assembler listing
   my $o    =     q(z.o);                                                        # Object file
 
-  my $cmd  = qq(nasm -f elf64 -g -l $l -o $o $c; ld -o $e $o; chmod 744 $e; $sde -- ./$e 2>&1);
+  my $cmd  = qq(nasm -f elf64 -g -l $l -o $o $c; ld -o $e $o; chmod 744 $e; $sde -ptr-check -- ./$e 2>&1);
   say STDERR qq($cmd);
   my $R    = eval {qx($cmd)};
   say STDERR readFile($l) if $options{list};                                    # Print listing if requested
