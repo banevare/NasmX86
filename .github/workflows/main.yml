@@ -1,4 +1,4 @@
-# Test NasmX86 2021-03-26 at 05:46:34
+# Test NasmX86 2021-03-28 at 23:26:16
 
 name: Test
 
@@ -19,6 +19,10 @@ jobs:
     - name: Install GitHub::Crud
       run: |
         sudo cpan install -T Digest::SHA1
+
+    - name: Install Asm::C
+      run: |
+        sudo cpan install -T Asm::C
 
     - name: Install Nasm
       run: |
