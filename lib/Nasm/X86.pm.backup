@@ -5,7 +5,7 @@
 #-------------------------------------------------------------------------------
 # podDocumentation
 package Nasm::X86;
-our $VERSION = "20210329";
+our $VERSION = "20210330";
 use warnings FATAL => qw(all);
 use strict;
 use Carp qw(confess cluck);
@@ -57,7 +57,7 @@ BEGIN{
 #D1 Generate Network Assembler Code                                             # Generate assembler code that can be assembled with Nasm
 
 my $labels = 0;
-sub label                                                                       # Create a unique label
+sub label                                                                       #P Create a unique label
  {"l".++$labels;                                                                # Generate a label
  }
 
@@ -262,6 +262,14 @@ sub PopR(@)                                                                     
   push @text, map {"  pop $_\n"} reverse @r;
  }
 
+sub Sub($$)                                                                     # Subtract
+ {my ($target, $source) = @_;                                                   # Target, source
+  @_ == 2 or confess;
+  push @text, <<END;
+  sub $target,$source
+END
+ }
+
 sub PrintOutNl()                                                                # Write a new line
  {SaveFirstFour;
   @_ == 0 or confess;
@@ -435,6 +443,14 @@ sub Vmovdqu32($$)                                                               
 END
  }
 
+sub Vmovdqu64($$)                                                               # Move memory in 64 bit blocks to an x/y/zmm* register
+ {my ($r, $m) = @_;                                                             # Register, memory
+  @_ == 2 or confess;
+  push @text, <<END;
+  VMOVDQU64 $r, $m
+END
+ }
+
 sub Vprolq($$$)                                                                 # Rotate left within quad word indicated number of bits
  {my ($r, $m, $bits) = @_;                                                      # Register, memory, number of bits to rotate
   @_ == 3 or confess;
@@ -563,7 +579,7 @@ Nasm::X86 - Generate Nasm assembler code
 Generate Nasm assembler code
 
 
-Version "20210329".
+Version "20210330".
 
 
 The following sections describe the methods in each functional area of this
@@ -574,34 +590,6 @@ module.  For an alphabetic listing of all methods by name see L<Index|/Index>.
 =head1 Generate Network Assembler Code
 
 Generate assembler code that can be assembled with Nasm
-
-=head2 label()
-
-Create a unique label
-
-
-B<Example:>
-
-
-    Start;
-    my $q = Rs(('a'..'p')x4);
-    my $d = Ds('0'x128);
-    Vmovdqu32(zmm0, "[$q]");
-    Vprolq   (zmm0,   zmm0, 32);
-    Vmovdqu32("[$d]", zmm0);
-    PrintOutString($d, 64);
-
-    my $l = label;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
-
-    push @text, <<END;
-    $l: sub rsp,64
-    vmovdqu64 [rsp],zmm0
-  END
-    PopR rax;
-    PrintOutRaxInHex;
-    Exit;
-    ok assemble() =~ m(efghabcdmnopijklefghabcdmnopijklefghabcdmnopijklefghabcdmnopijkl)s;
-
 
 =head2 Start()
 
@@ -814,6 +802,24 @@ Load effective address
   1  $target    Target
   2  $source    Source
 
+B<Example:>
+
+
+    Start;
+    my $q = Rs('abababab');
+    Mov(rax, 1);
+    Mov(rbx, 2);
+    Mov(rcx, 3);
+    Mov(rdx, 4);
+    Mov(r8,  5);
+
+    Lea r9,  "[rax+rbx]";  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+
+    PrintOutRegistersInHex;
+    Exit;
+    ok assemble() =~ m(r8: 0000 0000 0000 0005.*r9: 0000 0000 0000 0003.*rax: 0000 0000 0000 0001)s;
+
+
 =head2 Mov($target, $source)
 
 Move data
@@ -861,11 +867,8 @@ B<Example:>
     Vprolq   (zmm0,   zmm0, 32);
     Vmovdqu32("[$d]", zmm0);
     PrintOutString($d, 64);
-    my $l = label;
-    push @text, <<END;
-    $l: sub rsp,64
-    vmovdqu64 [rsp],zmm0
-  END
+    Sub rsp, 64;
+    Vmovdqu64 "[rsp]", zmm0;
 
     PopR rax;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
@@ -873,6 +876,14 @@ B<Example:>
     Exit;
     ok assemble() =~ m(efghabcdmnopijklefghabcdmnopijklefghabcdmnopijklefghabcdmnopijkl)s;
 
+
+=head2 Sub($target, $source)
+
+Subtract
+
+     Parameter  Description
+  1  $target    Target
+  2  $source    Source
 
 =head2 PrintOutNl()
 
@@ -972,12 +983,12 @@ B<Example:>
     Mov(rcx, 3);
     Mov(rdx, 4);
     Mov(r8,  5);
-    Mov(r9,  6);
+    Lea r9,  "[rax+rbx]";
 
     PrintOutRegistersInHex;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     Exit;
-    ok assemble() =~ m(r8: 0000 0000 0000 0005.*rax: 0000 0000 0000 0001)s;
+    ok assemble() =~ m(r8: 0000 0000 0000 0005.*r9: 0000 0000 0000 0003.*rax: 0000 0000 0000 0001)s;
 
 
 =head2 Xor($t, $s)
@@ -1053,6 +1064,14 @@ B<Example:>
     Exit;
     ok assemble() =~ m(efghabcdmnopijkl)s;
 
+
+=head2 Vmovdqu64($r, $m)
+
+Move memory in 64 bit blocks to an x/y/zmm* register
+
+     Parameter  Description
+  1  $r         Register
+  2  $m         Memory
 
 =head2 Vprolq($r, $m, $bits)
 
@@ -1183,6 +1202,14 @@ B<Example:>
 
 
 
+=head1 Private Methods
+
+=head2 label()
+
+Create a unique label
+
+
+
 =head1 Index
 
 
@@ -1256,13 +1283,17 @@ B<Example:>
 
 35 L<Start|/Start> - Initialize the assembler
 
-36 L<Vmovdqu32|/Vmovdqu32> - Move memory in 32 bit blocks to an x/y/zmm* register
+36 L<Sub|/Sub> - Subtract
 
-37 L<Vmovdqu8|/Vmovdqu8> - Move memory in 8 bit blocks to an x/y/zmm* register
+37 L<Vmovdqu32|/Vmovdqu32> - Move memory in 32 bit blocks to an x/y/zmm* register
 
-38 L<Vprolq|/Vprolq> - Rotate left within quad word indicated number of bits
+38 L<Vmovdqu64|/Vmovdqu64> - Move memory in 64 bit blocks to an x/y/zmm* register
 
-39 L<Xor|/Xor> - Xor one register into another
+39 L<Vmovdqu8|/Vmovdqu8> - Move memory in 8 bit blocks to an x/y/zmm* register
+
+40 L<Vprolq|/Vprolq> - Rotate left within quad word indicated number of bits
+
+41 L<Xor|/Xor> - Xor one register into another
 
 =head1 Installation
 
@@ -1313,7 +1344,14 @@ my $localTest = ((caller(1))[0]//'Nasm::X86') eq "Nasm::X86";                   
 
 Test::More->builder->output("/dev/null") if $localTest;                         # Reduce number of confirmation messages during testing
 
-if ($^O =~ m(bsd|linux)i) {plan tests => 13}                                    # Supported systems
+if ($^O =~ m(bsd|linux)i)                                                       # Supported systems
+ {if (confirmHasCommandLineCommand(q(nasm)))
+   {plan tests => 13;
+   }
+  else
+   {plan skip_all =>qq(Nasm not available);
+   }
+ }
 else
  {plan skip_all =>qq(Not supported on: $^O);
  }
@@ -1391,7 +1429,7 @@ if (1) {
   ok assemble() =~ m(efghabcdmnopijklefghabcdmnopijkl)s;
  }
 
-if (1) {                                                                        #Tlabel #TPopR
+if (1) {                                                                        #TPopR #TVmovdqu64
   Start;
   my $q = Rs(('a'..'p')x4);
   my $d = Ds('0'x128);
@@ -1399,11 +1437,8 @@ if (1) {                                                                        
   Vprolq   (zmm0,   zmm0, 32);
   Vmovdqu32("[$d]", zmm0);
   PrintOutString($d, 64);
-  my $l = label;
-  push @text, <<END;
-  $l: sub rsp,64
-  vmovdqu64 [rsp],zmm0
-END
+  Sub rsp, 64;
+  Vmovdqu64 "[rsp]", zmm0;
   PopR rax;
   PrintOutRaxInHex;
   Exit;
