@@ -1,6 +1,6 @@
 #!/usr/bin/perl -I/home/phil/perl/cpan/DataTableText/lib/ -I. -I/home/phil/perl/cpan/AsmC/lib/
 #-------------------------------------------------------------------------------
-# Generate Nasm X86 code
+# Generate Nasm X86 code from Perl.
 # Philip R Brenan at appaapps dot com, Appa Apps Ltd Inc., 2021
 #-------------------------------------------------------------------------------
 # podDocumentation
@@ -99,10 +99,22 @@ END
   $l                                                                            # Return label
  }
 
-sub Db(@) {Dbwdq 'b', @_}                                                       # Layout bytes in the data segment and return their label
-sub Dw(@) {Dbwdq 'w', @_}                                                       # Layout words in the data segment and return their label
-sub Dd(@) {Dbwdq 'd', @_}                                                       # Layout double words in the data segment and return their label
-sub Dq(@) {Dbwdq 'q', @_}                                                       # Layout quad words in the data segment and return their label
+sub Db(@)                                                                       # Layout bytes in the data segment and return their label
+ {my (@bytes) = @_;                                                             # Bytes to layout
+  Dbwdq 'b', @_;
+ }
+sub Dw(@)                                                                       # Layout words in the data segment and return their label
+ {my (@words) = @_;                                                             # Words to layout
+  Dbwdq 'w', @_;
+ }
+sub Dd(@)                                                                       # Layout double words in the data segment and return their label
+ {my (@dwords) = @_;                                                            # Double words to layout
+  Dbwdq 'd', @_;
+ }
+sub Dq(@)                                                                       # Layout quad words in the data segment and return their label
+ {my (@qwords) = @_;                                                            # Quad words to layout
+  Dbwdq 'q', @_;
+ }
 
 sub Rbwdq($@)                                                                   # Layout data
  {my ($s, @d) = @_;                                                             # Element size, data to be laid out
@@ -116,10 +128,22 @@ END
   $l                                                                            # Return label
  }
 
-sub Rb(@) {Rbwdq 'b', @_}                                                       # Layout bytes in the data segment and return their label
-sub Rw(@) {Rbwdq 'w', @_}                                                       # Layout words in the data segment and return their label
-sub Rd(@) {Rbwdq 'd', @_}                                                       # Layout double words in the data segment and return their label
-sub Rq(@) {Rbwdq 'q', @_}                                                       # Layout quad words in the data segment and return their label
+sub Rb(@)                                                                       # Layout bytes in the data segment and return their label
+ {my (@bytes) = @_;                                                             # Bytes to layout
+  Rbwdq 'b', @_;
+ }
+sub Rw(@)                                                                       # Layout words in the data segment and return their label
+ {my (@words) = @_;                                                             # Words to layout
+  Rbwdq 'w', @_;
+ }
+sub Rd(@)                                                                       # Layout double words in the data segment and return their label
+ {my (@dwords) = @_;                                                            # Double words to layout
+  Rbwdq 'd', @_;
+ }
+sub Rq(@)                                                                       # Layout quad words in the data segment and return their label
+ {my (@qwords) = @_;                                                            # Quad words to layout
+  Rbwdq 'q', @_;
+ }
 
 sub Comment(@)                                                                  # Insert a comment into the assembly code
  {my (@comment) = @_;                                                           # Text of comment
@@ -324,7 +348,7 @@ sub PrintOutRegisterInHex($)                                                    
  {my ($r) = @_;                                                                 # Name of the register to print
   Comment "Print register $r in Hex";
   @_ == 1 or confess;
-  PrintOutString "$r: ";
+  PrintOutString lpad($r, 6).": ";
 
   my sub printReg($$@)                                                          # Print the contents of a x/y/zmm* register
    {my ($r, $s, @regs) = @_;                                                    # Register to print, size in bytes, work registers
@@ -357,7 +381,7 @@ END
   PrintOutNl;
  }
 
-sub PrintOutRegistersInHex                                                         # Print the general purpose registers in hex
+sub PrintOutRegistersInHex                                                      # Print the general purpose registers in hex
  {@_ == 0 or confess;
   my @regs = qw(rax);
   PushR @regs;
@@ -459,6 +483,19 @@ END
   RestoreFirstFourExceptRax;
  }
 
+sub readTimeStampCounter()                                                      # Read the time stamp counter
+ {@_ == 0 or confess;
+  Comment "Read Time-Stamp Counter";
+  push @text, <<END;
+  push rdx
+  RDTSC
+  shl rdx,32
+  or rax,rdx
+  pop rdx
+END
+  RestoreFirstFourExceptRax;
+ }
+
 sub assemble(%)                                                                 # Assemble the generated code
  {my (%options) = @_;                                                           # Options
   my $r = join "\n", map {s/\s+\Z//sr} @rodata;
@@ -550,7 +587,7 @@ my $localTest = ((caller(1))[0]//'Nasm::X86') eq "Nasm::X86";                   
 
 Test::More->builder->output("/dev/null") if $localTest;                         # Reduce number of confirmation messages during testing
 
-if ($^O =~ m(bsd|linux)i) {plan tests => 12}                                     # Supported systems
+if ($^O =~ m(bsd|linux)i) {plan tests => 13}                                     # Supported systems
 else
  {plan skip_all =>qq(Not supported on: $^O);
  }
@@ -695,6 +732,18 @@ if (1) {                                                                        
   Vmovdqu8 "[rbx]", xmm0;
   Exit;
   ok assemble() =~ m(abcdefghijklmnop)s;
+ }
+
+if (1) {                                                                        #TreadTimeStampCounter
+  Start;
+  for(1..10)
+   {readTimeStampCounter;
+    PrintOutRegisterInHex rax;
+   }
+  Exit;
+  my @s = split /\n/, assemble();
+  my @S = sort @s;
+  is_deeply \@s, \@S;
  }
 
 lll "Finished:", time - $start;
