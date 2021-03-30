@@ -1,11 +1,11 @@
 #!/usr/bin/perl -I/home/phil/perl/cpan/DataTableText/lib/ -I. -I/home/phil/perl/cpan/AsmC/lib/
 #-------------------------------------------------------------------------------
-# Generate Nasm X86 code
+# Generate Nasm X86 code from Perl.
 # Philip R Brenan at appaapps dot com, Appa Apps Ltd Inc., 2021
 #-------------------------------------------------------------------------------
 # podDocumentation
 package Nasm::X86;
-our $VERSION = "20210304";
+our $VERSION = "20210329";
 use warnings FATAL => qw(all);
 use strict;
 use Carp qw(confess cluck);
@@ -99,10 +99,22 @@ END
   $l                                                                            # Return label
  }
 
-sub Db(@) {Dbwdq 'b', @_}                                                       # Layout bytes in the data segment and return their label
-sub Dw(@) {Dbwdq 'w', @_}                                                       # Layout words in the data segment and return their label
-sub Dd(@) {Dbwdq 'd', @_}                                                       # Layout double words in the data segment and return their label
-sub Dq(@) {Dbwdq 'q', @_}                                                       # Layout quad words in the data segment and return their label
+sub Db(@)                                                                       # Layout bytes in the data segment and return their label
+ {my (@bytes) = @_;                                                             # Bytes to layout
+  Dbwdq 'b', @_;
+ }
+sub Dw(@)                                                                       # Layout words in the data segment and return their label
+ {my (@words) = @_;                                                             # Words to layout
+  Dbwdq 'w', @_;
+ }
+sub Dd(@)                                                                       # Layout double words in the data segment and return their label
+ {my (@dwords) = @_;                                                            # Double words to layout
+  Dbwdq 'd', @_;
+ }
+sub Dq(@)                                                                       # Layout quad words in the data segment and return their label
+ {my (@qwords) = @_;                                                            # Quad words to layout
+  Dbwdq 'q', @_;
+ }
 
 sub Rbwdq($@)                                                                   # Layout data
  {my ($s, @d) = @_;                                                             # Element size, data to be laid out
@@ -116,10 +128,22 @@ END
   $l                                                                            # Return label
  }
 
-sub Rb(@) {Rbwdq 'b', @_}                                                       # Layout bytes in the data segment and return their label
-sub Rw(@) {Rbwdq 'w', @_}                                                       # Layout words in the data segment and return their label
-sub Rd(@) {Rbwdq 'd', @_}                                                       # Layout double words in the data segment and return their label
-sub Rq(@) {Rbwdq 'q', @_}                                                       # Layout quad words in the data segment and return their label
+sub Rb(@)                                                                       # Layout bytes in the data segment and return their label
+ {my (@bytes) = @_;                                                             # Bytes to layout
+  Rbwdq 'b', @_;
+ }
+sub Rw(@)                                                                       # Layout words in the data segment and return their label
+ {my (@words) = @_;                                                             # Words to layout
+  Rbwdq 'w', @_;
+ }
+sub Rd(@)                                                                       # Layout double words in the data segment and return their label
+ {my (@dwords) = @_;                                                            # Double words to layout
+  Rbwdq 'd', @_;
+ }
+sub Rq(@)                                                                       # Layout quad words in the data segment and return their label
+ {my (@qwords) = @_;                                                            # Quad words to layout
+  Rbwdq 'q', @_;
+ }
 
 sub Comment(@)                                                                  # Insert a comment into the assembly code
  {my (@comment) = @_;                                                           # Text of comment
@@ -254,7 +278,8 @@ END
  }
 
 sub PrintOutString($;$)                                                         # One: Write a constant string to sysout. Two write the bytes addressed for the specified length to sysout
- {SaveFirstFour;
+ {my ($string, $length) = @_;                                                   # String, length
+  SaveFirstFour;
   Comment "Write String Out: ", dump(\@_);
   if (@_ == 1)                                                                  # Constant string
    {my ($c) = @_;
@@ -324,7 +349,7 @@ sub PrintOutRegisterInHex($)                                                    
  {my ($r) = @_;                                                                 # Name of the register to print
   Comment "Print register $r in Hex";
   @_ == 1 or confess;
-  PrintOutString "$r: ";
+  PrintOutString sprintf("%6s: ", $r);
 
   my sub printReg($$@)                                                          # Print the contents of a x/y/zmm* register
    {my ($r, $s, @regs) = @_;                                                    # Register to print, size in bytes, work registers
@@ -357,7 +382,7 @@ END
   PrintOutNl;
  }
 
-sub PrintOutRegistersInHex                                                         # Print the general purpose registers in hex
+sub PrintOutRegistersInHex                                                      # Print the general purpose registers in hex
  {@_ == 0 or confess;
   my @regs = qw(rax);
   PushR @regs;
@@ -459,6 +484,19 @@ END
   RestoreFirstFourExceptRax;
  }
 
+sub readTimeStampCounter()                                                      # Read the time stamp counter
+ {@_ == 0 or confess;
+  Comment "Read Time-Stamp Counter";
+  push @text, <<END;
+  push rdx
+  RDTSC
+  shl rdx,32
+  or rax,rdx
+  pop rdx
+END
+  RestoreFirstFourExceptRax;
+ }
+
 sub assemble(%)                                                                 # Assemble the generated code
  {my (%options) = @_;                                                           # Options
   my $r = join "\n", map {s/\s+\Z//sr} @rodata;
@@ -521,9 +559,752 @@ Nasm::X86 - Generate Nasm assembler code
 =head1 Synopsis
 
 =head1 Description
- as Perl itself.
+
+Generate Nasm assembler code
+
+
+Version "20210329".
+
+
+The following sections describe the methods in each functional area of this
+module.  For an alphabetic listing of all methods by name see L<Index|/Index>.
+
+
+
+=head1 Generate Network Assembler Code
+
+Generate assembler code that can be assembled with Nasm
+
+=head2 label()
+
+Create a unique label
+
+
+B<Example:>
+
+
+    Start;
+    my $q = Rs(('a'..'p')x4);
+    my $d = Ds('0'x128);
+    Vmovdqu32(zmm0, "[$q]");
+    Vprolq   (zmm0,   zmm0, 32);
+    Vmovdqu32("[$d]", zmm0);
+    PrintOutString($d, 64);
+
+    my $l = label;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+
+    push @text, <<END;
+    $l: sub rsp,64
+    vmovdqu64 [rsp],zmm0
+  END
+    PopR rax;
+    PrintOutRaxInHex;
+    Exit;
+    ok assemble() =~ m(efghabcdmnopijklefghabcdmnopijklefghabcdmnopijklefghabcdmnopijkl)s;
+
+
+=head2 Start()
+
+Initialize the assembler
+
+
+B<Example:>
+
+
+
+    Start;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+
+    PrintOutString "Hello World";
+    Exit;
+    ok assemble =~ m(Hello World);
+
+
+=head2 Ds(@d)
+
+Layout bytes in memory and return their label
+
+     Parameter  Description
+  1  @d         Data to be laid out
+
+B<Example:>
+
+
+    Start;
+    my $q = Rs('a'..'z');
+
+    my $d = Ds('0'x64);                                                           # Output area  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+
+    Vmovdqu32(xmm0, "[$q]");                                                      # Load
+    Vprolq   (xmm0,   xmm0, 32);                                                  # Rotate double words in quad words
+    Vmovdqu32("[$d]", xmm0);                                                      # Save
+    PrintOutString($d, 16);
+    Exit;
+    ok assemble() =~ m(efghabcdmnopijkl)s;
+
+
+=head2 Rs(@d)
+
+Layout bytes in read only memory and return their label
+
+     Parameter  Description
+  1  @d         Data to be laid out
+
+B<Example:>
+
+
+    Start;
+    Comment "Print a string from memory";
+    my $s = "Hello World";
+
+    my $m = Rs($s);  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+
+    Mov rsi, $m;
+    PrintOutString rsi, length($s);
+    Exit;
+    ok assemble =~ m(Hello World);
+
+
+=head2 Dbwdq($s, @d)
+
+Layout data
+
+     Parameter  Description
+  1  $s         Element size
+  2  @d         Data to be laid out
+
+=head2 Db(@bytes)
+
+Layout bytes in the data segment and return their label
+
+     Parameter  Description
+  1  @bytes     Bytes to layout
+
+=head2 Dw(@words)
+
+Layout words in the data segment and return their label
+
+     Parameter  Description
+  1  @words     Words to layout
+
+=head2 Dd(@dwords)
+
+Layout double words in the data segment and return their label
+
+     Parameter  Description
+  1  @dwords    Double words to layout
+
+=head2 Dq(@qwords)
+
+Layout quad words in the data segment and return their label
+
+     Parameter  Description
+  1  @qwords    Quad words to layout
+
+=head2 Rbwdq($s, @d)
+
+Layout data
+
+     Parameter  Description
+  1  $s         Element size
+  2  @d         Data to be laid out
+
+=head2 Rb(@bytes)
+
+Layout bytes in the data segment and return their label
+
+     Parameter  Description
+  1  @bytes     Bytes to layout
+
+=head2 Rw(@words)
+
+Layout words in the data segment and return their label
+
+     Parameter  Description
+  1  @words     Words to layout
+
+=head2 Rd(@dwords)
+
+Layout double words in the data segment and return their label
+
+     Parameter  Description
+  1  @dwords    Double words to layout
+
+=head2 Rq(@qwords)
+
+Layout quad words in the data segment and return their label
+
+     Parameter  Description
+  1  @qwords    Quad words to layout
+
+=head2 Comment(@comment)
+
+Insert a comment into the assembly code
+
+     Parameter  Description
+  1  @comment   Text of comment
+
+B<Example:>
+
+
+    Start;
+
+    Comment "Print a string from memory";  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+
+    my $s = "Hello World";
+    my $m = Rs($s);
+    Mov rsi, $m;
+    PrintOutString rsi, length($s);
+    Exit;
+    ok assemble =~ m(Hello World);
+
+
+=head2 Exit($c)
+
+Exit with the specified return code or zero if no return code supplied
+
+     Parameter  Description
+  1  $c         Return code
+
+B<Example:>
+
+
+    Start;
+    PrintOutString "Hello World";
+
+    Exit;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+
+    ok assemble =~ m(Hello World);
+
+
+=head2 SaveFirstFour()
+
+Save the first 4 parameter registers
+
+
+=head2 RestoreFirstFour()
+
+Restore the first 4 parameter registers
+
+
+=head2 RestoreFirstFourExceptRax()
+
+Restore the first 4 parameter registers except rax so it can return its value
+
+
+=head2 SaveFirstSeven()
+
+Save the first 7 parameter registers
+
+
+=head2 RestoreFirstSeven()
+
+Restore the first 7 parameter registers
+
+
+=head2 RestoreFirstSevenExceptRax()
+
+Restore the first 7 parameter registers except rax which is being used to return the result
+
+
+=head2 Lea($target, $source)
+
+Load effective address
+
+     Parameter  Description
+  1  $target    Target
+  2  $source    Source
+
+B<Example:>
+
+
+    Start;
+    my $q = Rs('abababab');
+    Mov(rax, 1);
+    Mov(rbx, 2);
+    Mov(rcx, 3);
+    Mov(rdx, 4);
+    Mov(r8,  5);
+
+    Lea r9,  "[rax+rbx]";  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+
+    PrintOutRegistersInHex;
+    Exit;
+    ok assemble() =~ m(r8: 0000 0000 0000 0005.*r9: 0000 0000 0000 0003.*rax: 0000 0000 0000 0001)s;
+
+
+=head2 Mov($target, $source)
+
+Move data
+
+     Parameter  Description
+  1  $target    Target
+  2  $source    Source
+
+B<Example:>
+
+
+    Start;
+    Comment "Print a string from memory";
+    my $s = "Hello World";
+    my $m = Rs($s);
+
+    Mov rsi, $m;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+
+    PrintOutString rsi, length($s);
+    Exit;
+    ok assemble =~ m(Hello World);
+
+
+=head2 PushR(@r)
+
+Push registers onto the stack
+
+     Parameter  Description
+  1  @r         Register
+
+=head2 PopR(@r)
+
+Pop registers in reverse order from the stack so the same parameter list can be shared with pushR
+
+     Parameter  Description
+  1  @r         Register
+
+B<Example:>
+
+
+    Start;
+    my $q = Rs(('a'..'p')x4);
+    my $d = Ds('0'x128);
+    Vmovdqu32(zmm0, "[$q]");
+    Vprolq   (zmm0,   zmm0, 32);
+    Vmovdqu32("[$d]", zmm0);
+    PrintOutString($d, 64);
+    my $l = label;
+    push @text, <<END;
+    $l: sub rsp,64
+    vmovdqu64 [rsp],zmm0
+  END
+
+    PopR rax;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+
+    PrintOutRaxInHex;
+    Exit;
+    ok assemble() =~ m(efghabcdmnopijklefghabcdmnopijklefghabcdmnopijklefghabcdmnopijkl)s;
+
+
+=head2 PrintOutNl()
+
+Write a new line
+
+
+B<Example:>
+
+
+    Start;
+    Comment "Print a string from memory";
+    my $s = "Hello World";
+    my $m = Rs($s);
+    Mov rsi, $m;
+    PrintOutString rsi, length($s);
+    Exit;
+    ok assemble =~ m(Hello World);
+
+
+=head2 PrintOutString($string, $length)
+
+One: Write a constant string to sysout. Two write the bytes addressed for the specified length to sysout
+
+     Parameter  Description
+  1  $string    String
+  2  $length    Length
+
+B<Example:>
+
+
+    Start;
+
+    PrintOutString "Hello World";  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+
+    Exit;
+    ok assemble =~ m(Hello World);
+
+
+=head2 PrintOutRaxInHex()
+
+Write the content of register rax to stderr in hexadecimal in big endian notation
+
+
+B<Example:>
+
+
+    Start;
+    my $q = Rs('abababab');
+    Mov(rax, "[$q]");
+    PrintOutString "rax: ";
+
+    PrintOutRaxInHex;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+
+    PrintOutNl;
+    Xor rax, rax;
+    PrintOutString "rax: ";
+
+    PrintOutRaxInHex;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+
+    PrintOutNl;
+    Exit;
+    ok assemble() =~ m(rax: 6261 6261 6261 6261.*rax: 0000 0000 0000 0000)s;
+
+
+=head2 PrintOutRegisterInHex($r)
+
+Print any register as a hex string
+
+     Parameter  Description
+  1  $r         Name of the register to print
+
+B<Example:>
+
+
+    Start;
+    my $q = Rs(('a'..'p')x4);
+    Mov r8,"[$q]";
+
+    PrintOutRegisterInHex r8;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+
+    Exit;
+    ok assemble() =~ m(r8: 6867 6665 6463 6261)s;
+
+
+=head2 PrintOutRegistersInHex()
+
+Print the general purpose registers in hex
+
+
+B<Example:>
+
+
+    Start;
+    my $q = Rs('abababab');
+    Mov(rax, 1);
+    Mov(rbx, 2);
+    Mov(rcx, 3);
+    Mov(rdx, 4);
+    Mov(r8,  5);
+    Lea r9,  "[rax+rbx]";
+
+    PrintOutRegistersInHex;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+
+    Exit;
+    ok assemble() =~ m(r8: 0000 0000 0000 0005.*r9: 0000 0000 0000 0003.*rax: 0000 0000 0000 0001)s;
+
+
+=head2 Xor($t, $s)
+
+Xor one register into another
+
+     Parameter  Description
+  1  $t         Target register
+  2  $s         Source register
+
+B<Example:>
+
+
+    Start;
+    my $q = Rs('abababab');
+    Mov(rax, "[$q]");
+    PrintOutString "rax: ";
+    PrintOutRaxInHex;
+    PrintOutNl;
+
+    Xor rax, rax;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+
+    PrintOutString "rax: ";
+    PrintOutRaxInHex;
+    PrintOutNl;
+    Exit;
+    ok assemble() =~ m(rax: 6261 6261 6261 6261.*rax: 0000 0000 0000 0000)s;
+
+
+=head2 Vmovdqu8($r, $m)
+
+Move memory in 8 bit blocks to an x/y/zmm* register
+
+     Parameter  Description
+  1  $r         Register
+  2  $m         Memory
+
+B<Example:>
+
+
+    Start;
+    my $q = Rs('a'..'p');
+
+    Vmovdqu8 xmm0, "[$q]";  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+
+    PrintOutRegisterInHex xmm0;
+    Exit;
+    ok assemble() =~ m(xmm0: 706F 6E6D 6C6B 6A69   6867 6665 6463 6261)s;
+
+
+=head2 Vmovdqu32($r, $m)
+
+Move memory in 32 bit blocks to an x/y/zmm* register
+
+     Parameter  Description
+  1  $r         Register
+  2  $m         Memory
+
+B<Example:>
+
+
+    Start;
+    my $q = Rs('a'..'z');
+    my $d = Ds('0'x64);                                                           # Output area
+
+    Vmovdqu32(xmm0, "[$q]");                                                      # Load  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+
+    Vprolq   (xmm0,   xmm0, 32);                                                  # Rotate double words in quad words
+
+    Vmovdqu32("[$d]", xmm0);                                                      # Save  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+
+    PrintOutString($d, 16);
+    Exit;
+    ok assemble() =~ m(efghabcdmnopijkl)s;
+
+
+=head2 Vprolq($r, $m, $bits)
+
+Rotate left within quad word indicated number of bits
+
+     Parameter  Description
+  1  $r         Register
+  2  $m         Memory
+  3  $bits      Number of bits to rotate
+
+B<Example:>
+
+
+    Start;
+    my $q = Rs('a'..'z');
+    my $d = Ds('0'x64);                                                           # Output area
+    Vmovdqu32(xmm0, "[$q]");                                                      # Load
+
+    Vprolq   (xmm0,   xmm0, 32);                                                  # Rotate double words in quad words  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+
+    Vmovdqu32("[$d]", xmm0);                                                      # Save
+    PrintOutString($d, 16);
+    Exit;
+    ok assemble() =~ m(efghabcdmnopijkl)s;
+
+
+=head2 allocateMemory($s)
+
+Allocate memory via mmap
+
+     Parameter  Description
+  1  $s         Amount of memory to allocate
+
+B<Example:>
+
+
+    Start;
+    my $N = 2048;
+    my $n = Rq($N);
+    my $q = Rs('a'..'p');
+
+    allocateMemory "[$n]";  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+
+    PrintOutRegisterInHex rax;
+    Vmovdqu8 xmm0, "[$q]";
+    Vmovdqu8 "[rax]", xmm0;
+    PrintOutString rax,16;
+    PrintOutNl;
+
+    Mov rbx, rax;
+    freeMemory rbx, "[$n]";
+    PrintOutRegisterInHex rax;
+    Vmovdqu8 "[rbx]", xmm0;
+    Exit;
+    ok assemble() =~ m(abcdefghijklmnop)s;
+
+
+=head2 freeMemory($a, $l)
+
+Free memory via mmap
+
+     Parameter  Description
+  1  $a         Address of memory to free
+  2  $l         Length of memory to free
+
+B<Example:>
+
+
+    Start;
+    my $N = 2048;
+    my $n = Rq($N);
+    my $q = Rs('a'..'p');
+    allocateMemory "[$n]";
+    PrintOutRegisterInHex rax;
+    Vmovdqu8 xmm0, "[$q]";
+    Vmovdqu8 "[rax]", xmm0;
+    PrintOutString rax,16;
+    PrintOutNl;
+
+    Mov rbx, rax;
+
+    freeMemory rbx, "[$n]";  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+
+    PrintOutRegisterInHex rax;
+    Vmovdqu8 "[rbx]", xmm0;
+    Exit;
+    ok assemble() =~ m(abcdefghijklmnop)s;
+
+
+=head2 readTimeStampCounter()
+
+Read the time stamp counter
+
+
+B<Example:>
+
+
+    Start;
+    for(1..10)
+
+     {readTimeStampCounter;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+
+      PrintOutRegisterInHex rax;
+     }
+    Exit;
+    my @s = split /
+/, assemble();
+    my @S = sort @s;
+    is_deeply \@s, \@S;
+
+
+=head2 assemble(%options)
+
+Assemble the generated code
+
+     Parameter  Description
+  1  %options   Options
+
+B<Example:>
+
+
+    Start;
+    PrintOutString "Hello World";
+    Exit;
+
+    ok assemble =~ m(Hello World);  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+
+
+
+
+=head1 Index
+
+
+1 L<allocateMemory|/allocateMemory> - Allocate memory via mmap
+
+2 L<assemble|/assemble> - Assemble the generated code
+
+3 L<Comment|/Comment> - Insert a comment into the assembly code
+
+4 L<Db|/Db> - Layout bytes in the data segment and return their label
+
+5 L<Dbwdq|/Dbwdq> - Layout data
+
+6 L<Dd|/Dd> - Layout double words in the data segment and return their label
+
+7 L<Dq|/Dq> - Layout quad words in the data segment and return their label
+
+8 L<Ds|/Ds> - Layout bytes in memory and return their label
+
+9 L<Dw|/Dw> - Layout words in the data segment and return their label
+
+10 L<Exit|/Exit> - Exit with the specified return code or zero if no return code supplied
+
+11 L<freeMemory|/freeMemory> - Free memory via mmap
+
+12 L<label|/label> - Create a unique label
+
+13 L<Lea|/Lea> - Load effective address
+
+14 L<Mov|/Mov> - Move data
+
+15 L<PopR|/PopR> - Pop registers in reverse order from the stack so the same parameter list can be shared with pushR
+
+16 L<PrintOutNl|/PrintOutNl> - Write a new line
+
+17 L<PrintOutRaxInHex|/PrintOutRaxInHex> - Write the content of register rax to stderr in hexadecimal in big endian notation
+
+18 L<PrintOutRegisterInHex|/PrintOutRegisterInHex> - Print any register as a hex string
+
+19 L<PrintOutRegistersInHex|/PrintOutRegistersInHex> - Print the general purpose registers in hex
+
+20 L<PrintOutString|/PrintOutString> - One: Write a constant string to sysout.
+
+21 L<PushR|/PushR> - Push registers onto the stack
+
+22 L<Rb|/Rb> - Layout bytes in the data segment and return their label
+
+23 L<Rbwdq|/Rbwdq> - Layout data
+
+24 L<Rd|/Rd> - Layout double words in the data segment and return their label
+
+25 L<readTimeStampCounter|/readTimeStampCounter> - Read the time stamp counter
+
+26 L<RestoreFirstFour|/RestoreFirstFour> - Restore the first 4 parameter registers
+
+27 L<RestoreFirstFourExceptRax|/RestoreFirstFourExceptRax> - Restore the first 4 parameter registers except rax so it can return its value
+
+28 L<RestoreFirstSeven|/RestoreFirstSeven> - Restore the first 7 parameter registers
+
+29 L<RestoreFirstSevenExceptRax|/RestoreFirstSevenExceptRax> - Restore the first 7 parameter registers except rax which is being used to return the result
+
+30 L<Rq|/Rq> - Layout quad words in the data segment and return their label
+
+31 L<Rs|/Rs> - Layout bytes in read only memory and return their label
+
+32 L<Rw|/Rw> - Layout words in the data segment and return their label
+
+33 L<SaveFirstFour|/SaveFirstFour> - Save the first 4 parameter registers
+
+34 L<SaveFirstSeven|/SaveFirstSeven> - Save the first 7 parameter registers
+
+35 L<Start|/Start> - Initialize the assembler
+
+36 L<Vmovdqu32|/Vmovdqu32> - Move memory in 32 bit blocks to an x/y/zmm* register
+
+37 L<Vmovdqu8|/Vmovdqu8> - Move memory in 8 bit blocks to an x/y/zmm* register
+
+38 L<Vprolq|/Vprolq> - Rotate left within quad word indicated number of bits
+
+39 L<Xor|/Xor> - Xor one register into another
+
+=head1 Installation
+
+This module is written in 100% Pure Perl and, thus, it is easy to read,
+comprehend, use, modify and install via B<cpan>:
+
+  sudo cpan install Nasm::X86
+
+=head1 Author
+
+L<philiprbrenan@gmail.com|mailto:philiprbrenan@gmail.com>
+
+L<http://www.appaapps.com|http://www.appaapps.com>
+
+=head1 Copyright
+
+Copyright (c) 2016-2021 Philip R Brenan.
+
+This module is free software. It may be used, redistributed and/or modified
+under the same terms as Perl itself.
 
 =cut
+
+
 
 # Tests and documentation
 
@@ -550,22 +1331,30 @@ my $localTest = ((caller(1))[0]//'Nasm::X86') eq "Nasm::X86";                   
 
 Test::More->builder->output("/dev/null") if $localTest;                         # Reduce number of confirmation messages during testing
 
-if ($^O =~ m(bsd|linux)i) {plan tests => 12}                                     # Supported systems
+if ($^O =~ m(bsd|linux)i)                                                       # Supported systems
+ {if (confirmHasCommandLineCommand(q(nasm)))
+   {plan tests => 13;
+   }
+  else
+   {plan skip_all =>qq(Nasm not available);
+   }
+ }
 else
  {plan skip_all =>qq(Not supported on: $^O);
  }
 
 my $start = time;                                                               # Tests
 
-if (1) {                                                                        #TExit #TPrintOutString
+if (1) {                                                                        #TExit #TPrintOutString #Tassemble #TStart
   Start;
-  PrintOutString "Hello World To you";
+  PrintOutString "Hello World";
   Exit;
   ok assemble =~ m(Hello World);
  }
 
-if (1) {                                                                        #TMov
+if (1) {                                                                        #TMov #TComment #TRs #TPrintOutNl
   Start;
+  Comment "Print a string from memory";
   my $s = "Hello World";
   my $m = Rs($s);
   Mov rsi, $m;
@@ -574,18 +1363,22 @@ if (1) {                                                                        
   ok assemble =~ m(Hello World);
  }
 
-if (1) {                                                                        #TPrintOutRaxInHex
+if (1) {                                                                        #TPrintOutRaxInHex #TXor
   Start;
   my $q = Rs('abababab');
   Mov(rax, "[$q]");
   PrintOutString "rax: ";
   PrintOutRaxInHex;
   PrintOutNl;
+  Xor rax, rax;
+  PrintOutString "rax: ";
+  PrintOutRaxInHex;
+  PrintOutNl;
   Exit;
-  ok assemble() =~ m(rax: 6261 6261 6261 6261)s;
+  ok assemble() =~ m(rax: 6261 6261 6261 6261.*rax: 0000 0000 0000 0000)s;
  }
 
-if (1) {                                                                        #TPrintOutRegistersInHex
+if (1) {                                                                        #TPrintOutRegistersInHex #TLea
   Start;
   my $q = Rs('abababab');
   Mov(rax, 1);
@@ -593,13 +1386,13 @@ if (1) {                                                                        
   Mov(rcx, 3);
   Mov(rdx, 4);
   Mov(r8,  5);
-  Mov(r9,  6);
+  Lea r9,  "[rax+rbx]";
   PrintOutRegistersInHex;
   Exit;
-  ok assemble() =~ m(r8: 0000 0000 0000 0005.*rax: 0000 0000 0000 0001)s;
+  ok assemble() =~ m(r8: 0000 0000 0000 0005.*r9: 0000 0000 0000 0003.*rax: 0000 0000 0000 0001)s;
  }
 
-if (1) {                                                                        #TVmovdqu32 #TVprolq
+if (1) {                                                                        #TVmovdqu32 #TVprolq  #TDs
   Start;
   my $q = Rs('a'..'z');
   my $d = Ds('0'x64);                                                           # Output area
@@ -623,7 +1416,7 @@ if (1) {
   ok assemble() =~ m(efghabcdmnopijklefghabcdmnopijkl)s;
  }
 
-if (1) {
+if (1) {                                                                        #Tlabel #TPopR
   Start;
   my $q = Rs(('a'..'p')x4);
   my $d = Ds('0'x128);
@@ -631,11 +1424,12 @@ if (1) {
   Vprolq   (zmm0,   zmm0, 32);
   Vmovdqu32("[$d]", zmm0);
   PrintOutString($d, 64);
+  my $l = label;
   push @text, <<END;
-  sub rsp,64
+  $l: sub rsp,64
   vmovdqu64 [rsp],zmm0
-  pop rax
 END
+  PopR rax;
   PrintOutRaxInHex;
   Exit;
   ok assemble() =~ m(efghabcdmnopijklefghabcdmnopijklefghabcdmnopijklefghabcdmnopijkl)s;
@@ -650,7 +1444,7 @@ if (1) {                                                                        
   ok assemble() =~ m(r8: 6867 6665 6463 6261)s;
  }
 
-if (1) {
+if (1) {                                                                        #TVmovdqu8
   Start;
   my $q = Rs('a'..'p');
   Vmovdqu8 xmm0, "[$q]";
@@ -677,7 +1471,7 @@ if (1) {
   ok assemble() =~ m(zmm0: 504F 4E4D 4C4B 4A49   4847 4645 4443 4241   706F 6E6D 6C6B 6A69   6867 6665 6463 6261   504F 4E4D 4C4B 4A49   4847 4645 4443 4241   706F 6E6D 6C6B 6A69   6867 6665 6463 6261)s;
  }
 
-if (1) {                                                                        #TallocateMemory
+if (1) {                                                                        #TallocateMemory #TfreeMemory
   Start;
   my $N = 2048;
   my $n = Rq($N);
@@ -695,6 +1489,18 @@ if (1) {                                                                        
   Vmovdqu8 "[rbx]", xmm0;
   Exit;
   ok assemble() =~ m(abcdefghijklmnop)s;
+ }
+
+if (1) {                                                                        #TreadTimeStampCounter
+  Start;
+  for(1..10)
+   {readTimeStampCounter;
+    PrintOutRegisterInHex rax;
+   }
+  Exit;
+  my @s = split /\n/, assemble();
+  my @S = sort @s;
+  is_deeply \@s, \@S;
  }
 
 lll "Finished:", time - $start;
