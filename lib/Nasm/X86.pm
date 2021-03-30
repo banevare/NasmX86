@@ -5,7 +5,7 @@
 #-------------------------------------------------------------------------------
 # podDocumentation
 package Nasm::X86;
-our $VERSION = "20210329";
+our $VERSION = "20210330";
 use warnings FATAL => qw(all);
 use strict;
 use Carp qw(confess cluck);
@@ -57,7 +57,7 @@ BEGIN{
 #D1 Generate Network Assembler Code                                             # Generate assembler code that can be assembled with Nasm
 
 my $labels = 0;
-sub label                                                                       # Create a unique label
+sub label                                                                       #P Create a unique label
  {"l".++$labels;                                                                # Generate a label
  }
 
@@ -262,6 +262,14 @@ sub PopR(@)                                                                     
   push @text, map {"  pop $_\n"} reverse @r;
  }
 
+sub Sub($$)                                                                     # Subtract
+ {my ($target, $source) = @_;                                                   # Target, source
+  @_ == 2 or confess;
+  push @text, <<END;
+  sub $target,$source
+END
+ }
+
 sub PrintOutNl()                                                                # Write a new line
  {SaveFirstFour;
   @_ == 0 or confess;
@@ -435,6 +443,14 @@ sub Vmovdqu32($$)                                                               
 END
  }
 
+sub Vmovdqu64($$)                                                               # Move memory in 64 bit blocks to an x/y/zmm* register
+ {my ($r, $m) = @_;                                                             # Register, memory
+  @_ == 2 or confess;
+  push @text, <<END;
+  VMOVDQU64 $r, $m
+END
+ }
+
 sub Vprolq($$$)                                                                 # Rotate left within quad word indicated number of bits
  {my ($r, $m, $bits) = @_;                                                      # Register, memory, number of bits to rotate
   @_ == 3 or confess;
@@ -563,7 +579,7 @@ Nasm::X86 - Generate Nasm assembler code
 Generate Nasm assembler code
 
 
-Version "20210329".
+Version "20210330".
 
 
 The following sections describe the methods in each functional area of this
@@ -575,34 +591,6 @@ module.  For an alphabetic listing of all methods by name see L<Index|/Index>.
 
 Generate assembler code that can be assembled with Nasm
 
-=head2 label()
-
-Create a unique label
-
-
-B<Example:>
-
-
-    Start;
-    my $q = Rs(('a'..'p')x4);
-    my $d = Ds('0'x128);
-    Vmovdqu32(zmm0, "[$q]");
-    Vprolq   (zmm0,   zmm0, 32);
-    Vmovdqu32("[$d]", zmm0);
-    PrintOutString($d, 64);
-
-    my $l = label;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
-
-    push @text, <<END;
-    $l: sub rsp,64
-    vmovdqu64 [rsp],zmm0
-  END
-    PopR rax;
-    PrintOutRaxInHex;
-    Exit;
-    ok assemble() =~ m(efghabcdmnopijklefghabcdmnopijklefghabcdmnopijklefghabcdmnopijkl)s;
-
-
 =head2 Start()
 
 Initialize the assembler
@@ -611,13 +599,13 @@ Initialize the assembler
 B<Example:>
 
 
-
+  
     Start;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutString "Hello World";
     Exit;
     ok assemble =~ m(Hello World);
-
+  
 
 =head2 Ds(@d)
 
@@ -631,7 +619,7 @@ B<Example:>
 
     Start;
     my $q = Rs('a'..'z');
-
+  
     my $d = Ds('0'x64);                                                           # Output area  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     Vmovdqu32(xmm0, "[$q]");                                                      # Load
@@ -640,7 +628,7 @@ B<Example:>
     PrintOutString($d, 16);
     Exit;
     ok assemble() =~ m(efghabcdmnopijkl)s;
-
+  
 
 =head2 Rs(@d)
 
@@ -655,14 +643,14 @@ B<Example:>
     Start;
     Comment "Print a string from memory";
     my $s = "Hello World";
-
+  
     my $m = Rs($s);  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     Mov rsi, $m;
     PrintOutString rsi, length($s);
     Exit;
     ok assemble =~ m(Hello World);
-
+  
 
 =head2 Dbwdq($s, @d)
 
@@ -747,7 +735,7 @@ B<Example:>
 
 
     Start;
-
+  
     Comment "Print a string from memory";  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     my $s = "Hello World";
@@ -756,7 +744,7 @@ B<Example:>
     PrintOutString rsi, length($s);
     Exit;
     ok assemble =~ m(Hello World);
-
+  
 
 =head2 Exit($c)
 
@@ -770,11 +758,11 @@ B<Example:>
 
     Start;
     PrintOutString "Hello World";
-
+  
     Exit;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     ok assemble =~ m(Hello World);
-
+  
 
 =head2 SaveFirstFour()
 
@@ -824,13 +812,13 @@ B<Example:>
     Mov(rcx, 3);
     Mov(rdx, 4);
     Mov(r8,  5);
-
+  
     Lea r9,  "[rax+rbx]";  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutRegistersInHex;
     Exit;
     ok assemble() =~ m(r8: 0000 0000 0000 0005.*r9: 0000 0000 0000 0003.*rax: 0000 0000 0000 0001)s;
-
+  
 
 =head2 Mov($target, $source)
 
@@ -847,13 +835,13 @@ B<Example:>
     Comment "Print a string from memory";
     my $s = "Hello World";
     my $m = Rs($s);
-
+  
     Mov rsi, $m;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutString rsi, length($s);
     Exit;
     ok assemble =~ m(Hello World);
-
+  
 
 =head2 PushR(@r)
 
@@ -879,18 +867,23 @@ B<Example:>
     Vprolq   (zmm0,   zmm0, 32);
     Vmovdqu32("[$d]", zmm0);
     PrintOutString($d, 64);
-    my $l = label;
-    push @text, <<END;
-    $l: sub rsp,64
-    vmovdqu64 [rsp],zmm0
-  END
-
+    Sub rsp, 64;
+    Vmovdqu64 "[rsp]", zmm0;
+  
     PopR rax;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutRaxInHex;
     Exit;
     ok assemble() =~ m(efghabcdmnopijklefghabcdmnopijklefghabcdmnopijklefghabcdmnopijkl)s;
+  
 
+=head2 Sub($target, $source)
+
+Subtract
+
+     Parameter  Description
+  1  $target    Target
+  2  $source    Source
 
 =head2 PrintOutNl()
 
@@ -908,7 +901,7 @@ B<Example:>
     PrintOutString rsi, length($s);
     Exit;
     ok assemble =~ m(Hello World);
-
+  
 
 =head2 PrintOutString($string, $length)
 
@@ -922,12 +915,12 @@ B<Example:>
 
 
     Start;
-
+  
     PrintOutString "Hello World";  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     Exit;
     ok assemble =~ m(Hello World);
-
+  
 
 =head2 PrintOutRaxInHex()
 
@@ -941,19 +934,19 @@ B<Example:>
     my $q = Rs('abababab');
     Mov(rax, "[$q]");
     PrintOutString "rax: ";
-
+  
     PrintOutRaxInHex;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutNl;
     Xor rax, rax;
     PrintOutString "rax: ";
-
+  
     PrintOutRaxInHex;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutNl;
     Exit;
     ok assemble() =~ m(rax: 6261 6261 6261 6261.*rax: 0000 0000 0000 0000)s;
-
+  
 
 =head2 PrintOutRegisterInHex($r)
 
@@ -968,12 +961,12 @@ B<Example:>
     Start;
     my $q = Rs(('a'..'p')x4);
     Mov r8,"[$q]";
-
+  
     PrintOutRegisterInHex r8;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     Exit;
     ok assemble() =~ m(r8: 6867 6665 6463 6261)s;
-
+  
 
 =head2 PrintOutRegistersInHex()
 
@@ -991,12 +984,12 @@ B<Example:>
     Mov(rdx, 4);
     Mov(r8,  5);
     Lea r9,  "[rax+rbx]";
-
+  
     PrintOutRegistersInHex;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     Exit;
     ok assemble() =~ m(r8: 0000 0000 0000 0005.*r9: 0000 0000 0000 0003.*rax: 0000 0000 0000 0001)s;
-
+  
 
 =head2 Xor($t, $s)
 
@@ -1015,7 +1008,7 @@ B<Example:>
     PrintOutString "rax: ";
     PrintOutRaxInHex;
     PrintOutNl;
-
+  
     Xor rax, rax;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutString "rax: ";
@@ -1023,7 +1016,7 @@ B<Example:>
     PrintOutNl;
     Exit;
     ok assemble() =~ m(rax: 6261 6261 6261 6261.*rax: 0000 0000 0000 0000)s;
-
+  
 
 =head2 Vmovdqu8($r, $m)
 
@@ -1038,13 +1031,13 @@ B<Example:>
 
     Start;
     my $q = Rs('a'..'p');
-
+  
     Vmovdqu8 xmm0, "[$q]";  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutRegisterInHex xmm0;
     Exit;
     ok assemble() =~ m(xmm0: 706F 6E6D 6C6B 6A69   6867 6665 6463 6261)s;
-
+  
 
 =head2 Vmovdqu32($r, $m)
 
@@ -1060,17 +1053,45 @@ B<Example:>
     Start;
     my $q = Rs('a'..'z');
     my $d = Ds('0'x64);                                                           # Output area
-
+  
     Vmovdqu32(xmm0, "[$q]");                                                      # Load  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     Vprolq   (xmm0,   xmm0, 32);                                                  # Rotate double words in quad words
-
+  
     Vmovdqu32("[$d]", xmm0);                                                      # Save  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutString($d, 16);
     Exit;
     ok assemble() =~ m(efghabcdmnopijkl)s;
+  
 
+=head2 Vmovdqu64($r, $m)
+
+Move memory in 64 bit blocks to an x/y/zmm* register
+
+     Parameter  Description
+  1  $r         Register
+  2  $m         Memory
+
+B<Example:>
+
+
+    Start;
+    my $q = Rs(('a'..'p')x4);
+    my $d = Ds('0'x128);
+    Vmovdqu32(zmm0, "[$q]");
+    Vprolq   (zmm0,   zmm0, 32);
+    Vmovdqu32("[$d]", zmm0);
+    PrintOutString($d, 64);
+    Sub rsp, 64;
+  
+    Vmovdqu64 "[rsp]", zmm0;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+
+    PopR rax;
+    PrintOutRaxInHex;
+    Exit;
+    ok assemble() =~ m(efghabcdmnopijklefghabcdmnopijklefghabcdmnopijklefghabcdmnopijkl)s;
+  
 
 =head2 Vprolq($r, $m, $bits)
 
@@ -1088,14 +1109,14 @@ B<Example:>
     my $q = Rs('a'..'z');
     my $d = Ds('0'x64);                                                           # Output area
     Vmovdqu32(xmm0, "[$q]");                                                      # Load
-
+  
     Vprolq   (xmm0,   xmm0, 32);                                                  # Rotate double words in quad words  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     Vmovdqu32("[$d]", xmm0);                                                      # Save
     PrintOutString($d, 16);
     Exit;
     ok assemble() =~ m(efghabcdmnopijkl)s;
-
+  
 
 =head2 allocateMemory($s)
 
@@ -1111,7 +1132,7 @@ B<Example:>
     my $N = 2048;
     my $n = Rq($N);
     my $q = Rs('a'..'p');
-
+  
     allocateMemory "[$n]";  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutRegisterInHex rax;
@@ -1119,14 +1140,14 @@ B<Example:>
     Vmovdqu8 "[rax]", xmm0;
     PrintOutString rax,16;
     PrintOutNl;
-
+  
     Mov rbx, rax;
     freeMemory rbx, "[$n]";
     PrintOutRegisterInHex rax;
     Vmovdqu8 "[rbx]", xmm0;
     Exit;
     ok assemble() =~ m(abcdefghijklmnop)s;
-
+  
 
 =head2 freeMemory($a, $l)
 
@@ -1149,16 +1170,16 @@ B<Example:>
     Vmovdqu8 "[rax]", xmm0;
     PrintOutString rax,16;
     PrintOutNl;
-
+  
     Mov rbx, rax;
-
+  
     freeMemory rbx, "[$n]";  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutRegisterInHex rax;
     Vmovdqu8 "[rbx]", xmm0;
     Exit;
     ok assemble() =~ m(abcdefghijklmnop)s;
-
+  
 
 =head2 readTimeStampCounter()
 
@@ -1170,7 +1191,7 @@ B<Example:>
 
     Start;
     for(1..10)
-
+  
      {readTimeStampCounter;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
       PrintOutRegisterInHex rax;
@@ -1180,7 +1201,7 @@ B<Example:>
 /, assemble();
     my @S = sort @s;
     is_deeply \@s, \@S;
-
+  
 
 =head2 assemble(%options)
 
@@ -1195,9 +1216,17 @@ B<Example:>
     Start;
     PrintOutString "Hello World";
     Exit;
-
+  
     ok assemble =~ m(Hello World);  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
+  
+
+
+=head1 Private Methods
+
+=head2 label()
+
+Create a unique label
 
 
 
@@ -1274,13 +1303,17 @@ B<Example:>
 
 35 L<Start|/Start> - Initialize the assembler
 
-36 L<Vmovdqu32|/Vmovdqu32> - Move memory in 32 bit blocks to an x/y/zmm* register
+36 L<Sub|/Sub> - Subtract
 
-37 L<Vmovdqu8|/Vmovdqu8> - Move memory in 8 bit blocks to an x/y/zmm* register
+37 L<Vmovdqu32|/Vmovdqu32> - Move memory in 32 bit blocks to an x/y/zmm* register
 
-38 L<Vprolq|/Vprolq> - Rotate left within quad word indicated number of bits
+38 L<Vmovdqu64|/Vmovdqu64> - Move memory in 64 bit blocks to an x/y/zmm* register
 
-39 L<Xor|/Xor> - Xor one register into another
+39 L<Vmovdqu8|/Vmovdqu8> - Move memory in 8 bit blocks to an x/y/zmm* register
+
+40 L<Vprolq|/Vprolq> - Rotate left within quad word indicated number of bits
+
+41 L<Xor|/Xor> - Xor one register into another
 
 =head1 Installation
 
@@ -1416,7 +1449,7 @@ if (1) {
   ok assemble() =~ m(efghabcdmnopijklefghabcdmnopijkl)s;
  }
 
-if (1) {                                                                        #Tlabel #TPopR
+if (1) {                                                                        #TPopR #TVmovdqu64
   Start;
   my $q = Rs(('a'..'p')x4);
   my $d = Ds('0'x128);
@@ -1424,11 +1457,8 @@ if (1) {                                                                        
   Vprolq   (zmm0,   zmm0, 32);
   Vmovdqu32("[$d]", zmm0);
   PrintOutString($d, 64);
-  my $l = label;
-  push @text, <<END;
-  $l: sub rsp,64
-  vmovdqu64 [rsp],zmm0
-END
+  Sub rsp, 64;
+  Vmovdqu64 "[rsp]", zmm0;
   PopR rax;
   PrintOutRaxInHex;
   Exit;
