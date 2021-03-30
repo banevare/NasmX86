@@ -348,7 +348,7 @@ sub PrintOutRegisterInHex($)                                                    
  {my ($r) = @_;                                                                 # Name of the register to print
   Comment "Print register $r in Hex";
   @_ == 1 or confess;
-  PrintOutString lpad($r, 6).": ";
+  PrintOutString sprintf("%6s: ", $r);
 
   my sub printReg($$@)                                                          # Print the contents of a x/y/zmm* register
    {my ($r, $s, @regs) = @_;                                                    # Register to print, size in bytes, work registers
