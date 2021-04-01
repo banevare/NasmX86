@@ -16,18 +16,18 @@
    "prereqs" : {
       "configure" : {
          "requires" : {
-            "Module::Build" : "0.4224"
+            "Module::Build" : 0.4224
          }
       },
       "runtime" : {
          "requires" : {
-            "Asm::C" : "0",
-            "Carp" : "0",
-            "Data::Dump" : "0",
-            "Data::Table::Text" : "0",
-            "Test2::API" : "0",
-            "Test::More" : "0",
-            "feature" : "0"
+            "Asm::C" : 0,
+            "Carp" : 0,
+            "Data::Dump" : 0,
+            "Data::Table::Text" : 0,
+            "Test2::API" : 0,
+            "Test::More" : 0,
+            "feature" : 0
          }
       }
    },
