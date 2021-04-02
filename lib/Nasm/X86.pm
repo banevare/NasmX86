@@ -5,7 +5,7 @@
 #-------------------------------------------------------------------------------
 # podDocumentation
 package Nasm::X86;
-our $VERSION = "20210401";
+our $VERSION = "20210402";
 use warnings FATAL => qw(all);
 use strict;
 use Carp qw(confess cluck);
@@ -517,9 +517,19 @@ sub Fork()                                                                      
 END
  }
 
-sub GetPid()                                                                    # Get process identifier - at the moment it will return the id of the parent process due to a documented error in getpid.  We should read: /proc/self to get the current pid accurately
+sub GetPid()                                                                    # Get process identifier
  {@_ == 0 or confess;
   Comment "Get Pid";
+
+  push @text, <<END;
+  mov rax, 39
+  syscall
+END
+ }
+
+sub GetPPid()                                                                   # Get parent process identifier
+ {@_ == 0 or confess;
+  Comment "Get Parent Pid";
 
   push @text, <<END;
   mov rax, 110
@@ -649,35 +659,50 @@ Nasm::X86 - Generate Nasm assembler code
 
 =head1 Synopsis
 
-Write and run some assembler code to start a process and wait for it:
+Write and run some assembler code to start a child process and wait for it,
+printing out the process identifiers of each process involved:
 
-  Start;
-  Fork;
+  Start;                                                                        # Start the program
+  Fork;                                                                         # Fork
+
   Test rax,rax;
   If                                                                            # Parent
    {Mov rbx, rax;
     WaitPid;
-    Mov rcx, rax;
-    PrintOutRegisterInHex rcx;
+    PrintOutRegisterInHex rax;
     PrintOutRegisterInHex rbx;
+    GetPid;                                                                     # Pid of parent as seen in parent
+    Mov rcx,rax;
+    PrintOutRegisterInHex rcx;
    }
   sub                                                                           # Child
-   {PrintOutRegisterInHex rax;
+   {Mov r8,rax;
+    PrintOutRegisterInHex r8;
+    GetPid;                                                                     # Child pid as seen in child
+    Mov r9,rax;
+    PrintOutRegisterInHex r9;
+    GetPPid;                                                                    # Parent pid as seen in child
+    Mov r10,rax;
+    PrintOutRegisterInHex r10;
    };
-  Exit;
 
-  assemble();
+  Exit;                                                                         # Return to operating system
 
- #   rax: 0000 0000 0000 0000  Pid as seen by child
- #   rcx: 0000 0000 0002 EB35  Pid that terminated as seen by parent
- #   rbx: 0000 0000 0002 EB35  Pid of child as seen by parent
+  my $r = assemble();
+
+  #    r8: 0000 0000 0000 0000   #1 Return from fork as seen by child
+  #    r9: 0000 0000 0003 0C63   #2 Pid of child
+  #   r10: 0000 0000 0003 0C60   #3 Pid of parent from child
+  #   rax: 0000 0000 0003 0C63   #4 Return from fork as seen by parent
+  #   rbx: 0000 0000 0003 0C63   #5 Wait for child pid result
+  #   rcx: 0000 0000 0003 0C60   #6 Pid of parent
 
 =head1 Description
 
 Generate Nasm assembler code
 
 
-Version "20210401".
+Version "20210402".
 
 
 The following sections describe the methods in each functional area of this
@@ -1295,67 +1320,156 @@ Fork
 B<Example:>
 
 
-    Start;
+    Start;                                                                        # Start the program
   
-    Fork;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+    Fork;                                                                         # Fork  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
+  
     Test rax,rax;
     If                                                                            # Parent
      {Mov rbx, rax;
       WaitPid;
-      Mov rcx, rax;
-      PrintOutRegisterInHex rcx;
+      PrintOutRegisterInHex rax;
       PrintOutRegisterInHex rbx;
-     }  sub                                                                       # Child
-     {PrintOutRegisterInHex rax;
+      GetPid;                                                                     # Pid of parent as seen in parent
+      Mov rcx,rax;
+      PrintOutRegisterInHex rcx;
+     }
+    sub                                                                           # Child
+     {Mov r8,rax;
+      PrintOutRegisterInHex r8;
+      GetPid;                                                                     # Child pid as seen in child
+      Mov r9,rax;
+      PrintOutRegisterInHex r9;
+      GetPPid;                                                                    # Parent pid as seen in child
+      Mov r10,rax;
+      PrintOutRegisterInHex r10;
      };
-    Exit;
+  
+    Exit;                                                                         # Return to operating system
+  
     my $r = assemble();
   
-  #   rax: 0000 0000 0000 0000  Pid as seen by child
-  #   rcx: 0000 0000 0002 EB35  Pid that terminated as seen by parent
-  #   rbx: 0000 0000 0002 EB35  Pid of child as seen by parent
+  #    r8: 0000 0000 0000 0000   #1 Return from fork as seen by child
+  #    r9: 0000 0000 0003 0C63   #2 Pid of child
+  #   r10: 0000 0000 0003 0C60   #3 Pid of parent from child
+  #   rax: 0000 0000 0003 0C63   #4 Return from fork as seen by parent
+  #   rbx: 0000 0000 0003 0C63   #5 Wait for child pid result
+  #   rcx: 0000 0000 0003 0C60   #6 Pid of parent
   
-    if ($r =~ m(rax:( 0000){4} .*rcx:(.*)\s{5,}rbx:(.*)\s{2,})s)
-     {ok $2 eq $3;
-     }
-    else
-     {ok 0;
+    if ($r =~ m(r8:( 0000){4}.*r9:(.*)\s{5,}r10:(.*)\s{5,}rax:(.*)\s{5,}rbx:(.*)\s{5,}rcx:(.*)\s{2,})s)
+     {ok $2 eq $4;
+      ok $2 eq $5;
+      ok $3 eq $6;
+      ok $2 gt $6;
      }
   
 
 =head2 GetPid()
 
-Get process identifier - at the moment it will return the id of the parent process due to a documented error in getpid.  We should read: /proc/self to get the current pid accurately
+Get process identifier
 
 
 B<Example:>
 
 
-    Start;
-    Fork;
+    Start;                                                                        # Start the program
+    Fork;                                                                         # Fork
+  
     Test rax,rax;
     If                                                                            # Parent
      {Mov rbx, rax;
       WaitPid;
-      Mov rcx, rax;
-      PrintOutRegisterInHex rcx;
+      PrintOutRegisterInHex rax;
       PrintOutRegisterInHex rbx;
-     }  sub                                                                       # Child
-     {PrintOutRegisterInHex rax;
+  
+      GetPid;                                                                     # Pid of parent as seen in parent  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+
+      Mov rcx,rax;
+      PrintOutRegisterInHex rcx;
+     }
+    sub                                                                           # Child
+     {Mov r8,rax;
+      PrintOutRegisterInHex r8;
+  
+      GetPid;                                                                     # Child pid as seen in child  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+
+      Mov r9,rax;
+      PrintOutRegisterInHex r9;
+      GetPPid;                                                                    # Parent pid as seen in child
+      Mov r10,rax;
+      PrintOutRegisterInHex r10;
      };
-    Exit;
+  
+    Exit;                                                                         # Return to operating system
+  
     my $r = assemble();
   
-  #   rax: 0000 0000 0000 0000  Pid as seen by child
-  #   rcx: 0000 0000 0002 EB35  Pid that terminated as seen by parent
-  #   rbx: 0000 0000 0002 EB35  Pid of child as seen by parent
+  #    r8: 0000 0000 0000 0000   #1 Return from fork as seen by child
+  #    r9: 0000 0000 0003 0C63   #2 Pid of child
+  #   r10: 0000 0000 0003 0C60   #3 Pid of parent from child
+  #   rax: 0000 0000 0003 0C63   #4 Return from fork as seen by parent
+  #   rbx: 0000 0000 0003 0C63   #5 Wait for child pid result
+  #   rcx: 0000 0000 0003 0C60   #6 Pid of parent
   
-    if ($r =~ m(rax:( 0000){4} .*rcx:(.*)\s{5,}rbx:(.*)\s{2,})s)
-     {ok $2 eq $3;
+    if ($r =~ m(r8:( 0000){4}.*r9:(.*)\s{5,}r10:(.*)\s{5,}rax:(.*)\s{5,}rbx:(.*)\s{5,}rcx:(.*)\s{2,})s)
+     {ok $2 eq $4;
+      ok $2 eq $5;
+      ok $3 eq $6;
+      ok $2 gt $6;
      }
-    else
-     {ok 0;
+  
+
+=head2 GetPPid()
+
+Get parent process identifier
+
+
+B<Example:>
+
+
+    Start;                                                                        # Start the program
+    Fork;                                                                         # Fork
+  
+    Test rax,rax;
+    If                                                                            # Parent
+     {Mov rbx, rax;
+      WaitPid;
+      PrintOutRegisterInHex rax;
+      PrintOutRegisterInHex rbx;
+      GetPid;                                                                     # Pid of parent as seen in parent
+      Mov rcx,rax;
+      PrintOutRegisterInHex rcx;
+     }
+    sub                                                                           # Child
+     {Mov r8,rax;
+      PrintOutRegisterInHex r8;
+      GetPid;                                                                     # Child pid as seen in child
+      Mov r9,rax;
+      PrintOutRegisterInHex r9;
+  
+      GetPPid;                                                                    # Parent pid as seen in child  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+
+      Mov r10,rax;
+      PrintOutRegisterInHex r10;
+     };
+  
+    Exit;                                                                         # Return to operating system
+  
+    my $r = assemble();
+  
+  #    r8: 0000 0000 0000 0000   #1 Return from fork as seen by child
+  #    r9: 0000 0000 0003 0C63   #2 Pid of child
+  #   r10: 0000 0000 0003 0C60   #3 Pid of parent from child
+  #   rax: 0000 0000 0003 0C63   #4 Return from fork as seen by parent
+  #   rbx: 0000 0000 0003 0C63   #5 Wait for child pid result
+  #   rcx: 0000 0000 0003 0C60   #6 Pid of parent
+  
+    if ($r =~ m(r8:( 0000){4}.*r9:(.*)\s{5,}r10:(.*)\s{5,}rax:(.*)\s{5,}rbx:(.*)\s{5,}rcx:(.*)\s{2,})s)
+     {ok $2 eq $4;
+      ok $2 eq $5;
+      ok $3 eq $6;
+      ok $2 gt $6;
      }
   
 
@@ -1367,32 +1481,48 @@ Wait for the pid in rax to complete
 B<Example:>
 
 
-    Start;
-    Fork;
+    Start;                                                                        # Start the program
+    Fork;                                                                         # Fork
+  
     Test rax,rax;
     If                                                                            # Parent
      {Mov rbx, rax;
   
       WaitPid;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-      Mov rcx, rax;
-      PrintOutRegisterInHex rcx;
+      PrintOutRegisterInHex rax;
       PrintOutRegisterInHex rbx;
-     }  sub                                                                       # Child
-     {PrintOutRegisterInHex rax;
+      GetPid;                                                                     # Pid of parent as seen in parent
+      Mov rcx,rax;
+      PrintOutRegisterInHex rcx;
+     }
+    sub                                                                           # Child
+     {Mov r8,rax;
+      PrintOutRegisterInHex r8;
+      GetPid;                                                                     # Child pid as seen in child
+      Mov r9,rax;
+      PrintOutRegisterInHex r9;
+      GetPPid;                                                                    # Parent pid as seen in child
+      Mov r10,rax;
+      PrintOutRegisterInHex r10;
      };
-    Exit;
+  
+    Exit;                                                                         # Return to operating system
+  
     my $r = assemble();
   
-  #   rax: 0000 0000 0000 0000  Pid as seen by child
-  #   rcx: 0000 0000 0002 EB35  Pid that terminated as seen by parent
-  #   rbx: 0000 0000 0002 EB35  Pid of child as seen by parent
+  #    r8: 0000 0000 0000 0000   #1 Return from fork as seen by child
+  #    r9: 0000 0000 0003 0C63   #2 Pid of child
+  #   r10: 0000 0000 0003 0C60   #3 Pid of parent from child
+  #   rax: 0000 0000 0003 0C63   #4 Return from fork as seen by parent
+  #   rbx: 0000 0000 0003 0C63   #5 Wait for child pid result
+  #   rcx: 0000 0000 0003 0C60   #6 Pid of parent
   
-    if ($r =~ m(rax:( 0000){4} .*rcx:(.*)\s{5,}rbx:(.*)\s{2,})s)
-     {ok $2 eq $3;
-     }
-    else
-     {ok 0;
+    if ($r =~ m(r8:( 0000){4}.*r9:(.*)\s{5,}r10:(.*)\s{5,}rax:(.*)\s{5,}rbx:(.*)\s{5,}rcx:(.*)\s{2,})s)
+     {ok $2 eq $4;
+      ok $2 eq $5;
+      ok $3 eq $6;
+      ok $2 gt $6;
      }
   
 
@@ -1506,73 +1636,75 @@ Create a unique label
 
 12 L<freeMemory|/freeMemory> - Free memory via mmap
 
-13 L<GetPid|/GetPid> - Get process identifier - at the moment it will return the id of the parent process due to a documented error in getpid.
+13 L<GetPid|/GetPid> - Get process identifier
 
-14 L<If|/If> - If
+14 L<GetPPid|/GetPPid> - Get parent process identifier
 
-15 L<label|/label> - Create a unique label
+15 L<If|/If> - If
 
-16 L<Lea|/Lea> - Load effective address
+16 L<label|/label> - Create a unique label
 
-17 L<Mov|/Mov> - Move data
+17 L<Lea|/Lea> - Load effective address
 
-18 L<PopR|/PopR> - Pop registers in reverse order from the stack so the same parameter list can be shared with pushR
+18 L<Mov|/Mov> - Move data
 
-19 L<PrintOutNl|/PrintOutNl> - Write a new line
+19 L<PopR|/PopR> - Pop registers in reverse order from the stack so the same parameter list can be shared with pushR
 
-20 L<PrintOutRaxInHex|/PrintOutRaxInHex> - Write the content of register rax to stderr in hexadecimal in big endian notation
+20 L<PrintOutNl|/PrintOutNl> - Write a new line
 
-21 L<PrintOutRegisterInHex|/PrintOutRegisterInHex> - Print any register as a hex string
+21 L<PrintOutRaxInHex|/PrintOutRaxInHex> - Write the content of register rax to stderr in hexadecimal in big endian notation
 
-22 L<PrintOutRegistersInHex|/PrintOutRegistersInHex> - Print the general purpose registers in hex
+22 L<PrintOutRegisterInHex|/PrintOutRegisterInHex> - Print any register as a hex string
 
-23 L<PrintOutString|/PrintOutString> - One: Write a constant string to sysout.
+23 L<PrintOutRegistersInHex|/PrintOutRegistersInHex> - Print the general purpose registers in hex
 
-24 L<PushR|/PushR> - Push registers onto the stack
+24 L<PrintOutString|/PrintOutString> - One: Write a constant string to sysout.
 
-25 L<Rb|/Rb> - Layout bytes in the data segment and return their label
+25 L<PushR|/PushR> - Push registers onto the stack
 
-26 L<Rbwdq|/Rbwdq> - Layout data
+26 L<Rb|/Rb> - Layout bytes in the data segment and return their label
 
-27 L<Rd|/Rd> - Layout double words in the data segment and return their label
+27 L<Rbwdq|/Rbwdq> - Layout data
 
-28 L<readTimeStampCounter|/readTimeStampCounter> - Read the time stamp counter
+28 L<Rd|/Rd> - Layout double words in the data segment and return their label
 
-29 L<RestoreFirstFour|/RestoreFirstFour> - Restore the first 4 parameter registers
+29 L<readTimeStampCounter|/readTimeStampCounter> - Read the time stamp counter
 
-30 L<RestoreFirstFourExceptRax|/RestoreFirstFourExceptRax> - Restore the first 4 parameter registers except rax so it can return its value
+30 L<RestoreFirstFour|/RestoreFirstFour> - Restore the first 4 parameter registers
 
-31 L<RestoreFirstSeven|/RestoreFirstSeven> - Restore the first 7 parameter registers
+31 L<RestoreFirstFourExceptRax|/RestoreFirstFourExceptRax> - Restore the first 4 parameter registers except rax so it can return its value
 
-32 L<RestoreFirstSevenExceptRax|/RestoreFirstSevenExceptRax> - Restore the first 7 parameter registers except rax which is being used to return the result
+32 L<RestoreFirstSeven|/RestoreFirstSeven> - Restore the first 7 parameter registers
 
-33 L<Rq|/Rq> - Layout quad words in the data segment and return their label
+33 L<RestoreFirstSevenExceptRax|/RestoreFirstSevenExceptRax> - Restore the first 7 parameter registers except rax which is being used to return the result
 
-34 L<Rs|/Rs> - Layout bytes in read only memory and return their label
+34 L<Rq|/Rq> - Layout quad words in the data segment and return their label
 
-35 L<Rw|/Rw> - Layout words in the data segment and return their label
+35 L<Rs|/Rs> - Layout bytes in read only memory and return their label
 
-36 L<SaveFirstFour|/SaveFirstFour> - Save the first 4 parameter registers
+36 L<Rw|/Rw> - Layout words in the data segment and return their label
 
-37 L<SaveFirstSeven|/SaveFirstSeven> - Save the first 7 parameter registers
+37 L<SaveFirstFour|/SaveFirstFour> - Save the first 4 parameter registers
 
-38 L<Start|/Start> - Initialize the assembler
+38 L<SaveFirstSeven|/SaveFirstSeven> - Save the first 7 parameter registers
 
-39 L<Sub|/Sub> - Subtract
+39 L<Start|/Start> - Initialize the assembler
 
-40 L<Test|/Test> - Test
+40 L<Sub|/Sub> - Subtract
 
-41 L<Vmovdqu32|/Vmovdqu32> - Move memory in 32 bit blocks to an x/y/zmm* register
+41 L<Test|/Test> - Test
 
-42 L<Vmovdqu64|/Vmovdqu64> - Move memory in 64 bit blocks to an x/y/zmm* register
+42 L<Vmovdqu32|/Vmovdqu32> - Move memory in 32 bit blocks to an x/y/zmm* register
 
-43 L<Vmovdqu8|/Vmovdqu8> - Move memory in 8 bit blocks to an x/y/zmm* register
+43 L<Vmovdqu64|/Vmovdqu64> - Move memory in 64 bit blocks to an x/y/zmm* register
 
-44 L<Vprolq|/Vprolq> - Rotate left within quad word indicated number of bits
+44 L<Vmovdqu8|/Vmovdqu8> - Move memory in 8 bit blocks to an x/y/zmm* register
 
-45 L<WaitPid|/WaitPid> - Wait for the pid in rax to complete
+45 L<Vprolq|/Vprolq> - Rotate left within quad word indicated number of bits
 
-46 L<Xor|/Xor> - Xor
+46 L<WaitPid|/WaitPid> - Wait for the pid in rax to complete
+
+47 L<Xor|/Xor> - Xor
 
 =head1 Installation
 
@@ -1623,12 +1755,15 @@ my $localTest = ((caller(1))[0]//'Nasm::X86') eq "Nasm::X86";                   
 
 Test::More->builder->output("/dev/null") if $localTest;                         # Reduce number of confirmation messages during testing
 
+$ENV{PATH} = $ENV{PATH}.":/var/isde";                                           # Intel emulator
+
 if ($^O =~ m(bsd|linux)i)                                                       # Supported systems
- {if (confirmHasCommandLineCommand(q(nasm)))
-   {plan tests => 15;
+ {if (confirmHasCommandLineCommand(q(nasm)) and                                 # Network assembler
+      confirmHasCommandLineCommand(q(sde64)))                                   # Intel emulator
+   {plan tests => 18;
    }
   else
-   {plan skip_all =>qq(Nasm not available);
+   {plan skip_all =>qq(Nasm or Intel 64 emulator not available);
    }
  }
 else
@@ -1816,31 +1951,47 @@ if (1) {                                                                        
 
 latest:;
 
-if (1) {                                                                        #TFork #TGetPid #TWaitPid
-  Start;
-  Fork;
+if (1) {                                                                        #TFork #TGetPid #TGetPPid #TWaitPid
+  Start;                                                                        # Start the program
+  Fork;                                                                         # Fork
+
   Test rax,rax;
   If                                                                            # Parent
    {Mov rbx, rax;
     WaitPid;
-    Mov rcx, rax;
-    PrintOutRegisterInHex rcx;
+    PrintOutRegisterInHex rax;
     PrintOutRegisterInHex rbx;
-   }  sub                                                                       # Child
-   {PrintOutRegisterInHex rax;
+    GetPid;                                                                     # Pid of parent as seen in parent
+    Mov rcx,rax;
+    PrintOutRegisterInHex rcx;
+   }
+  sub                                                                           # Child
+   {Mov r8,rax;
+    PrintOutRegisterInHex r8;
+    GetPid;                                                                     # Child pid as seen in child
+    Mov r9,rax;
+    PrintOutRegisterInHex r9;
+    GetPPid;                                                                    # Parent pid as seen in child
+    Mov r10,rax;
+    PrintOutRegisterInHex r10;
    };
-  Exit;
+
+  Exit;                                                                         # Return to operating system
+
   my $r = assemble();
 
-#   rax: 0000 0000 0000 0000  Pid as seen by child
-#   rcx: 0000 0000 0002 EB35  Pid that terminated as seen by parent
-#   rbx: 0000 0000 0002 EB35  Pid of child as seen by parent
+#    r8: 0000 0000 0000 0000   #1 Return from fork as seen by child
+#    r9: 0000 0000 0003 0C63   #2 Pid of child
+#   r10: 0000 0000 0003 0C60   #3 Pid of parent from child
+#   rax: 0000 0000 0003 0C63   #4 Return from fork as seen by parent
+#   rbx: 0000 0000 0003 0C63   #5 Wait for child pid result
+#   rcx: 0000 0000 0003 0C60   #6 Pid of parent
 
-  if ($r =~ m(rax:( 0000){4} .*rcx:(.*)\s{5,}rbx:(.*)\s{2,})s)
-   {ok $2 eq $3;
-   }
-  else
-   {ok 0;
+  if ($r =~ m(r8:( 0000){4}.*r9:(.*)\s{5,}r10:(.*)\s{5,}rax:(.*)\s{5,}rbx:(.*)\s{5,}rcx:(.*)\s{2,})s)
+   {ok $2 eq $4;
+    ok $2 eq $5;
+    ok $3 eq $6;
+    ok $2 gt $6;
    }
  }
 
