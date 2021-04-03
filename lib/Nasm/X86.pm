@@ -84,7 +84,7 @@ sub Rs(@)                                                                       
   my $l = label;
   $rodatas{$d} = $l;                                                            # Record label
   push @rodata, <<END;                                                          # Define bytes
-  $l: db  '$d';
+  $l: db  '$d',0;
 END
   $l                                                                            # Return label
  }
@@ -260,6 +260,14 @@ sub PushR(@)                                                                    
 sub PopR(@)                                                                     # Pop registers in reverse order from the stack so the same parameter list can be shared with pushR
  {my (@r) = @_;                                                                 # Register
   push @text, map {"  pop $_\n"} reverse @r;
+ }
+
+sub Add($$)                                                                     # Add
+ {my ($target, $source) = @_;                                                   # Target, source
+  @_ == 2 or confess;
+  push @text, <<END;
+  add $target,$source
+END
  }
 
 sub Sub($$)                                                                     # Subtract
@@ -537,6 +545,16 @@ sub GetPPid()                                                                   
 END
  }
 
+sub GetUid()                                                                    # Get userid of current process
+ {@_ == 0 or confess;
+  Comment "Get User id";
+
+  push @text, <<END;
+  mov rax, 102
+  syscall
+END
+ }
+
 sub WaitPid()                                                                   # Wait for the pid in rax to complete
  {@_ == 0 or confess;
   Comment "WaitPid - wait for the pid in rax";
@@ -561,6 +579,26 @@ sub readTimeStampCounter()                                                      
   shl rdx,32
   or rax,rdx
   pop rdx
+END
+  RestoreFirstFourExceptRax;
+ }
+
+sub StatSize($)                                                                 # Stat a file to get its size in rax
+ {my ($file) = @_;                                                              # File
+  @_ == 1 or confess;
+  Comment "Stat a file for size";
+  my $S = extractCStructure "#include <sys/stat.h>";                            # Get location of size field
+  my $Size = $$S{stat}{size};
+  my $off  = $$S{stat}{fields}{st_size}{loc};
+  SaveFirstFour;
+  push @text, <<END;
+  sub rsp, $Size;
+  mov rax,4
+  mov rdi,$file
+  mov rsi,rsp
+  syscall
+  mov rax, [$off+rsp]                                                           ; Place size in rax
+  add rsp, $Size;
 END
   RestoreFirstFourExceptRax;
  }
@@ -722,13 +760,13 @@ Initialize the assembler
 B<Example:>
 
 
-  
+
     Start;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutString "Hello World";
     Exit;
     ok assemble =~ m(Hello World);
-  
+
 
 =head2 Ds(@d)
 
@@ -742,7 +780,7 @@ B<Example:>
 
     Start;
     my $q = Rs('a'..'z');
-  
+
     my $d = Ds('0'x64);                                                           # Output area  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     Vmovdqu32(xmm0, "[$q]");                                                      # Load
@@ -751,7 +789,7 @@ B<Example:>
     PrintOutString($d, 16);
     Exit;
     ok assemble() =~ m(efghabcdmnopijkl)s;
-  
+
 
 =head2 Rs(@d)
 
@@ -766,14 +804,14 @@ B<Example:>
     Start;
     Comment "Print a string from memory";
     my $s = "Hello World";
-  
+
     my $m = Rs($s);  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     Mov rsi, $m;
     PrintOutString rsi, length($s);
     Exit;
     ok assemble =~ m(Hello World);
-  
+
 
 =head2 Dbwdq($s, @d)
 
@@ -858,7 +896,7 @@ B<Example:>
 
 
     Start;
-  
+
     Comment "Print a string from memory";  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     my $s = "Hello World";
@@ -867,7 +905,7 @@ B<Example:>
     PrintOutString rsi, length($s);
     Exit;
     ok assemble =~ m(Hello World);
-  
+
 
 =head2 Exit($c)
 
@@ -881,11 +919,11 @@ B<Example:>
 
     Start;
     PrintOutString "Hello World";
-  
+
     Exit;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     ok assemble =~ m(Hello World);
-  
+
 
 =head2 SaveFirstFour()
 
@@ -935,13 +973,13 @@ B<Example:>
     Mov(rcx, 3);
     Mov(rdx, 4);
     Mov(r8,  5);
-  
+
     Lea r9,  "[rax+rbx]";  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutRegistersInHex;
     Exit;
     ok assemble() =~ m(r8: 0000 0000 0000 0005.*r9: 0000 0000 0000 0003.*rax: 0000 0000 0000 0001)s;
-  
+
 
 =head2 Mov($target, $source)
 
@@ -958,13 +996,13 @@ B<Example:>
     Comment "Print a string from memory";
     my $s = "Hello World";
     my $m = Rs($s);
-  
+
     Mov rsi, $m;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutString rsi, length($s);
     Exit;
     ok assemble =~ m(Hello World);
-  
+
 
 =head2 PushR(@r)
 
@@ -992,13 +1030,13 @@ B<Example:>
     PrintOutString($d, 64);
     Sub rsp, 64;
     Vmovdqu64 "[rsp]", zmm0;
-  
+
     PopR rax;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutRaxInHex;
     Exit;
     ok assemble() =~ m(efghabcdmnopijklefghabcdmnopijklefghabcdmnopijklefghabcdmnopijkl)s;
-  
+
 
 =head2 Sub($target, $source)
 
@@ -1024,7 +1062,7 @@ B<Example:>
     PrintOutString rsi, length($s);
     Exit;
     ok assemble =~ m(Hello World);
-  
+
 
 =head2 PrintOutString($string, $length)
 
@@ -1038,12 +1076,12 @@ B<Example:>
 
 
     Start;
-  
+
     PrintOutString "Hello World";  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     Exit;
     ok assemble =~ m(Hello World);
-  
+
 
 =head2 PrintOutRaxInHex()
 
@@ -1057,19 +1095,19 @@ B<Example:>
     my $q = Rs('abababab');
     Mov(rax, "[$q]");
     PrintOutString "rax: ";
-  
+
     PrintOutRaxInHex;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutNl;
     Xor rax, rax;
     PrintOutString "rax: ";
-  
+
     PrintOutRaxInHex;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutNl;
     Exit;
     ok assemble() =~ m(rax: 6261 6261 6261 6261.*rax: 0000 0000 0000 0000)s;
-  
+
 
 =head2 PrintOutRegisterInHex($r)
 
@@ -1084,12 +1122,12 @@ B<Example:>
     Start;
     my $q = Rs(('a'..'p')x4);
     Mov r8,"[$q]";
-  
+
     PrintOutRegisterInHex r8;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     Exit;
     ok assemble() =~ m(r8: 6867 6665 6463 6261)s;
-  
+
 
 =head2 PrintOutRegistersInHex()
 
@@ -1107,12 +1145,12 @@ B<Example:>
     Mov(rdx, 4);
     Mov(r8,  5);
     Lea r9,  "[rax+rbx]";
-  
+
     PrintOutRegistersInHex;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     Exit;
     ok assemble() =~ m(r8: 0000 0000 0000 0005.*r9: 0000 0000 0000 0003.*rax: 0000 0000 0000 0001)s;
-  
+
 
 =head2 Xor($t, $s)
 
@@ -1131,7 +1169,7 @@ B<Example:>
     PrintOutString "rax: ";
     PrintOutRaxInHex;
     PrintOutNl;
-  
+
     Xor rax, rax;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutString "rax: ";
@@ -1139,7 +1177,7 @@ B<Example:>
     PrintOutNl;
     Exit;
     ok assemble() =~ m(rax: 6261 6261 6261 6261.*rax: 0000 0000 0000 0000)s;
-  
+
 
 =head2 Test($t, $s)
 
@@ -1162,13 +1200,13 @@ B<Example:>
 
     Start;
     my $q = Rs('a'..'p');
-  
+
     Vmovdqu8 xmm0, "[$q]";  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutRegisterInHex xmm0;
     Exit;
     ok assemble() =~ m(xmm0: 706F 6E6D 6C6B 6A69   6867 6665 6463 6261)s;
-  
+
 
 =head2 Vmovdqu32($r, $m)
 
@@ -1184,17 +1222,17 @@ B<Example:>
     Start;
     my $q = Rs('a'..'z');
     my $d = Ds('0'x64);                                                           # Output area
-  
+
     Vmovdqu32(xmm0, "[$q]");                                                      # Load  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     Vprolq   (xmm0,   xmm0, 32);                                                  # Rotate double words in quad words
-  
+
     Vmovdqu32("[$d]", xmm0);                                                      # Save  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutString($d, 16);
     Exit;
     ok assemble() =~ m(efghabcdmnopijkl)s;
-  
+
 
 =head2 Vmovdqu64($r, $m)
 
@@ -1215,14 +1253,14 @@ B<Example:>
     Vmovdqu32("[$d]", zmm0);
     PrintOutString($d, 64);
     Sub rsp, 64;
-  
+
     Vmovdqu64 "[rsp]", zmm0;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PopR rax;
     PrintOutRaxInHex;
     Exit;
     ok assemble() =~ m(efghabcdmnopijklefghabcdmnopijklefghabcdmnopijklefghabcdmnopijkl)s;
-  
+
 
 =head2 Vprolq($r, $m, $bits)
 
@@ -1240,14 +1278,14 @@ B<Example:>
     my $q = Rs('a'..'z');
     my $d = Ds('0'x64);                                                           # Output area
     Vmovdqu32(xmm0, "[$q]");                                                      # Load
-  
+
     Vprolq   (xmm0,   xmm0, 32);                                                  # Rotate double words in quad words  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     Vmovdqu32("[$d]", xmm0);                                                      # Save
     PrintOutString($d, 16);
     Exit;
     ok assemble() =~ m(efghabcdmnopijkl)s;
-  
+
 
 =head2 allocateMemory($s)
 
@@ -1263,7 +1301,7 @@ B<Example:>
     my $N = 2048;
     my $n = Rq($N);
     my $q = Rs('a'..'p');
-  
+
     allocateMemory "[$n]";  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutRegisterInHex rax;
@@ -1271,14 +1309,14 @@ B<Example:>
     Vmovdqu8 "[rax]", xmm0;
     PrintOutString rax,16;
     PrintOutNl;
-  
+
     Mov rbx, rax;
     freeMemory rbx, "[$n]";
     PrintOutRegisterInHex rax;
     Vmovdqu8 "[rbx]", xmm0;
     Exit;
     ok assemble() =~ m(abcdefghijklmnop)s;
-  
+
 
 =head2 freeMemory($a, $l)
 
@@ -1301,16 +1339,16 @@ B<Example:>
     Vmovdqu8 "[rax]", xmm0;
     PrintOutString rax,16;
     PrintOutNl;
-  
+
     Mov rbx, rax;
-  
+
     freeMemory rbx, "[$n]";  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutRegisterInHex rax;
     Vmovdqu8 "[rbx]", xmm0;
     Exit;
     ok assemble() =~ m(abcdefghijklmnop)s;
-  
+
 
 =head2 Fork()
 
@@ -1321,10 +1359,10 @@ B<Example:>
 
 
     Start;                                                                        # Start the program
-  
+
     Fork;                                                                         # Fork  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-  
+
     Test rax,rax;
     If                                                                            # Parent
      {Mov rbx, rax;
@@ -1345,25 +1383,25 @@ B<Example:>
       Mov r10,rax;
       PrintOutRegisterInHex r10;
      };
-  
+
     Exit;                                                                         # Return to operating system
-  
+
     my $r = assemble();
-  
+
   #    r8: 0000 0000 0000 0000   #1 Return from fork as seen by child
   #    r9: 0000 0000 0003 0C63   #2 Pid of child
   #   r10: 0000 0000 0003 0C60   #3 Pid of parent from child
   #   rax: 0000 0000 0003 0C63   #4 Return from fork as seen by parent
   #   rbx: 0000 0000 0003 0C63   #5 Wait for child pid result
   #   rcx: 0000 0000 0003 0C60   #6 Pid of parent
-  
+
     if ($r =~ m(r8:( 0000){4}.*r9:(.*)\s{5,}r10:(.*)\s{5,}rax:(.*)\s{5,}rbx:(.*)\s{5,}rcx:(.*)\s{2,})s)
      {ok $2 eq $4;
       ok $2 eq $5;
       ok $3 eq $6;
       ok $2 gt $6;
      }
-  
+
 
 =head2 GetPid()
 
@@ -1375,14 +1413,14 @@ B<Example:>
 
     Start;                                                                        # Start the program
     Fork;                                                                         # Fork
-  
+
     Test rax,rax;
     If                                                                            # Parent
      {Mov rbx, rax;
       WaitPid;
       PrintOutRegisterInHex rax;
       PrintOutRegisterInHex rbx;
-  
+
       GetPid;                                                                     # Pid of parent as seen in parent  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
       Mov rcx,rax;
@@ -1391,7 +1429,7 @@ B<Example:>
     sub                                                                           # Child
      {Mov r8,rax;
       PrintOutRegisterInHex r8;
-  
+
       GetPid;                                                                     # Child pid as seen in child  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
       Mov r9,rax;
@@ -1400,25 +1438,25 @@ B<Example:>
       Mov r10,rax;
       PrintOutRegisterInHex r10;
      };
-  
+
     Exit;                                                                         # Return to operating system
-  
+
     my $r = assemble();
-  
+
   #    r8: 0000 0000 0000 0000   #1 Return from fork as seen by child
   #    r9: 0000 0000 0003 0C63   #2 Pid of child
   #   r10: 0000 0000 0003 0C60   #3 Pid of parent from child
   #   rax: 0000 0000 0003 0C63   #4 Return from fork as seen by parent
   #   rbx: 0000 0000 0003 0C63   #5 Wait for child pid result
   #   rcx: 0000 0000 0003 0C60   #6 Pid of parent
-  
+
     if ($r =~ m(r8:( 0000){4}.*r9:(.*)\s{5,}r10:(.*)\s{5,}rax:(.*)\s{5,}rbx:(.*)\s{5,}rcx:(.*)\s{2,})s)
      {ok $2 eq $4;
       ok $2 eq $5;
       ok $3 eq $6;
       ok $2 gt $6;
      }
-  
+
 
 =head2 GetPPid()
 
@@ -1430,7 +1468,7 @@ B<Example:>
 
     Start;                                                                        # Start the program
     Fork;                                                                         # Fork
-  
+
     Test rax,rax;
     If                                                                            # Parent
      {Mov rbx, rax;
@@ -1447,31 +1485,31 @@ B<Example:>
       GetPid;                                                                     # Child pid as seen in child
       Mov r9,rax;
       PrintOutRegisterInHex r9;
-  
+
       GetPPid;                                                                    # Parent pid as seen in child  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
       Mov r10,rax;
       PrintOutRegisterInHex r10;
      };
-  
+
     Exit;                                                                         # Return to operating system
-  
+
     my $r = assemble();
-  
+
   #    r8: 0000 0000 0000 0000   #1 Return from fork as seen by child
   #    r9: 0000 0000 0003 0C63   #2 Pid of child
   #   r10: 0000 0000 0003 0C60   #3 Pid of parent from child
   #   rax: 0000 0000 0003 0C63   #4 Return from fork as seen by parent
   #   rbx: 0000 0000 0003 0C63   #5 Wait for child pid result
   #   rcx: 0000 0000 0003 0C60   #6 Pid of parent
-  
+
     if ($r =~ m(r8:( 0000){4}.*r9:(.*)\s{5,}r10:(.*)\s{5,}rax:(.*)\s{5,}rbx:(.*)\s{5,}rcx:(.*)\s{2,})s)
      {ok $2 eq $4;
       ok $2 eq $5;
       ok $3 eq $6;
       ok $2 gt $6;
      }
-  
+
 
 =head2 WaitPid()
 
@@ -1483,11 +1521,11 @@ B<Example:>
 
     Start;                                                                        # Start the program
     Fork;                                                                         # Fork
-  
+
     Test rax,rax;
     If                                                                            # Parent
      {Mov rbx, rax;
-  
+
       WaitPid;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
       PrintOutRegisterInHex rax;
@@ -1506,25 +1544,25 @@ B<Example:>
       Mov r10,rax;
       PrintOutRegisterInHex r10;
      };
-  
+
     Exit;                                                                         # Return to operating system
-  
+
     my $r = assemble();
-  
+
   #    r8: 0000 0000 0000 0000   #1 Return from fork as seen by child
   #    r9: 0000 0000 0003 0C63   #2 Pid of child
   #   r10: 0000 0000 0003 0C60   #3 Pid of parent from child
   #   rax: 0000 0000 0003 0C63   #4 Return from fork as seen by parent
   #   rbx: 0000 0000 0003 0C63   #5 Wait for child pid result
   #   rcx: 0000 0000 0003 0C60   #6 Pid of parent
-  
+
     if ($r =~ m(r8:( 0000){4}.*r9:(.*)\s{5,}r10:(.*)\s{5,}rax:(.*)\s{5,}rbx:(.*)\s{5,}rcx:(.*)\s{2,})s)
      {ok $2 eq $4;
       ok $2 eq $5;
       ok $3 eq $6;
       ok $2 gt $6;
      }
-  
+
 
 =head2 readTimeStampCounter()
 
@@ -1536,7 +1574,7 @@ B<Example:>
 
     Start;
     for(1..10)
-  
+
      {readTimeStampCounter;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
       PrintOutRegisterInHex rax;
@@ -1546,7 +1584,7 @@ B<Example:>
 /, assemble();
     my @S = sort @s;
     is_deeply \@s, \@S;
-  
+
 
 =head2 If($then, $else)
 
@@ -1562,7 +1600,7 @@ B<Example:>
     Start;
     Mov rax, 0;
     Test rax,rax;
-  
+
     If  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
      {PrintOutRegisterInHex rax;
@@ -1571,7 +1609,7 @@ B<Example:>
      };
     Mov rax, 1;
     Test rax,rax;
-  
+
     If  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
      {PrintOutRegisterInHex rcx;
@@ -1580,7 +1618,7 @@ B<Example:>
      };
     Exit;
     ok assemble() =~ m(rbx.*rcx)s;
-  
+
 
 =head2 assemble(%options)
 
@@ -1595,10 +1633,10 @@ B<Example:>
     Start;
     PrintOutString "Hello World";
     Exit;
-  
+
     ok assemble =~ m(Hello World);  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-  
+
 
 
 =head1 Private Methods
@@ -1760,7 +1798,7 @@ $ENV{PATH} = $ENV{PATH}.":/var/isde";                                           
 if ($^O =~ m(bsd|linux)i)                                                       # Supported systems
  {if (confirmHasCommandLineCommand(q(nasm)) and                                 # Network assembler
       confirmHasCommandLineCommand(q(sde64)))                                   # Intel emulator
-   {plan tests => 18;
+   {plan tests => 20;
    }
   else
    {plan skip_all =>qq(Nasm or Intel 64 emulator not available);
@@ -1949,8 +1987,6 @@ if (1) {                                                                        
   ok assemble() =~ m(rbx.*rcx)s;
  }
 
-latest:;
-
 if (1) {                                                                        #TFork #TGetPid #TGetPPid #TWaitPid
   Start;                                                                        # Start the program
   Fork;                                                                         # Fork
@@ -1992,6 +2028,28 @@ if (1) {                                                                        
     ok $2 eq $5;
     ok $3 eq $6;
     ok $2 gt $6;
+   }
+ }
+
+if (1) {                                                                        #TFork #TGetPid #TGetPPid #TWaitPid
+  Start;                                                                        # Start the program
+  GetUid;                                                                       # Userid
+  PrintOutRegisterInHex rax;
+  Exit;                                                                         # Return to operating system
+  my $r = assemble();
+  ok $r =~ m(rax:( 0000){3});
+ }
+
+latest:;
+if (1) {                                                                        #TStat
+  Start;                                                                        # Start the program
+  my $f = Rs($0);                                                               # File to stat
+  StatSize($f);                                                                 # Stat the file
+  PrintOutRegisterInHex rax;
+  Exit;                                                                         # Return to operating system
+  my $r = assemble() =~ s( ) ()gsr;
+  if ($r =~ m(rax:([0-9a-f]{16}))is)                                            # Compare file size obtained with that from fileSize()
+   {is_deeply $1, sprintf("%016X", fileSize($0));
    }
  }
 
