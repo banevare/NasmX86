@@ -1,4 +1,4 @@
-# Test NasmX86 2021-04-03 at 03:45:21
+# Test NasmX86 2021-04-03 at 04:05:39
 
 name: Test
 
@@ -33,19 +33,16 @@ jobs:
         sudo apt-get install -y tree
 
     - name: Download Intel Sde
-      if: always()
       run: |
         curl https://software.intel.com/content/dam/develop/external/us/en/documents/downloads/sde-external-8.63.0-2021-01-18-lin.tar.bz2 > sde.tar.bz2
         tree
 
     - name: Install Intel Sde
-      if: always()
       run: |
         tar -xf sde.tar.bz2
         mv sde-external-8.63.0-2021-01-18-lin/ sde/
         tree
 
     - name: Test
-      if: always()
       run: |
         perl lib/Nasm/X86.pm
