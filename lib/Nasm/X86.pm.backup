@@ -5,7 +5,7 @@
 #-------------------------------------------------------------------------------
 # podDocumentation
 package Nasm::X86;
-our $VERSION = "20210402";
+our $VERSION = "20210404";
 use warnings FATAL => qw(all);
 use strict;
 use Carp qw(confess cluck);
@@ -1051,6 +1051,14 @@ B<Example:>
     ok assemble() =~ m(efghabcdmnopijklefghabcdmnopijklefghabcdmnopijklefghabcdmnopijkl)s;
 
 
+=head2 Add($target, $source)
+
+Add
+
+     Parameter  Description
+  1  $target    Target
+  2  $source    Source
+
 =head2 Sub($target, $source)
 
 Subtract
@@ -1415,6 +1423,13 @@ B<Example:>
       ok $2 gt $6;
      }
 
+    Start;                                                                        # Start the program
+    GetUid;                                                                       # Userid
+    PrintOutRegisterInHex rax;
+    Exit;                                                                         # Return to operating system
+    my $r = assemble();
+    ok $r =~ m(rax:( 0000){3});
+
 
 =head2 GetPid()
 
@@ -1470,6 +1485,13 @@ B<Example:>
       ok $2 gt $6;
      }
 
+    Start;                                                                        # Start the program
+    GetUid;                                                                       # Userid
+    PrintOutRegisterInHex rax;
+    Exit;                                                                         # Return to operating system
+    my $r = assemble();
+    ok $r =~ m(rax:( 0000){3});
+
 
 =head2 GetPPid()
 
@@ -1522,6 +1544,18 @@ B<Example:>
       ok $3 eq $6;
       ok $2 gt $6;
      }
+
+    Start;                                                                        # Start the program
+    GetUid;                                                                       # Userid
+    PrintOutRegisterInHex rax;
+    Exit;                                                                         # Return to operating system
+    my $r = assemble();
+    ok $r =~ m(rax:( 0000){3});
+
+
+=head2 GetUid()
+
+Get userid of current process
 
 
 =head2 WaitPid()
@@ -1576,6 +1610,13 @@ B<Example:>
       ok $2 gt $6;
      }
 
+    Start;                                                                        # Start the program
+    GetUid;                                                                       # Userid
+    PrintOutRegisterInHex rax;
+    Exit;                                                                         # Return to operating system
+    my $r = assemble();
+    ok $r =~ m(rax:( 0000){3});
+
 
 =head2 readTimeStampCounter()
 
@@ -1598,6 +1639,13 @@ B<Example:>
     my @S = sort @s;
     is_deeply \@s, \@S;
 
+
+=head2 StatSize($file)
+
+Stat a file to get its size in rax
+
+     Parameter  Description
+  1  $file      File
 
 =head2 If($then, $else)
 
@@ -1663,99 +1711,105 @@ Create a unique label
 =head1 Index
 
 
-1 L<allocateMemory|/allocateMemory> - Allocate memory via mmap
+1 L<Add|/Add> - Add
 
-2 L<assemble|/assemble> - Assemble the generated code
+2 L<allocateMemory|/allocateMemory> - Allocate memory via mmap
 
-3 L<Comment|/Comment> - Insert a comment into the assembly code
+3 L<assemble|/assemble> - Assemble the generated code
 
-4 L<Db|/Db> - Layout bytes in the data segment and return their label
+4 L<Comment|/Comment> - Insert a comment into the assembly code
 
-5 L<Dbwdq|/Dbwdq> - Layout data
+5 L<Db|/Db> - Layout bytes in the data segment and return their label
 
-6 L<Dd|/Dd> - Layout double words in the data segment and return their label
+6 L<Dbwdq|/Dbwdq> - Layout data
 
-7 L<Dq|/Dq> - Layout quad words in the data segment and return their label
+7 L<Dd|/Dd> - Layout double words in the data segment and return their label
 
-8 L<Ds|/Ds> - Layout bytes in memory and return their label
+8 L<Dq|/Dq> - Layout quad words in the data segment and return their label
 
-9 L<Dw|/Dw> - Layout words in the data segment and return their label
+9 L<Ds|/Ds> - Layout bytes in memory and return their label
 
-10 L<Exit|/Exit> - Exit with the specified return code or zero if no return code supplied
+10 L<Dw|/Dw> - Layout words in the data segment and return their label
 
-11 L<Fork|/Fork> - Fork
+11 L<Exit|/Exit> - Exit with the specified return code or zero if no return code supplied
 
-12 L<freeMemory|/freeMemory> - Free memory via mmap
+12 L<Fork|/Fork> - Fork
 
-13 L<GetPid|/GetPid> - Get process identifier
+13 L<freeMemory|/freeMemory> - Free memory via mmap
 
-14 L<GetPPid|/GetPPid> - Get parent process identifier
+14 L<GetPid|/GetPid> - Get process identifier
 
-15 L<If|/If> - If
+15 L<GetPPid|/GetPPid> - Get parent process identifier
 
-16 L<label|/label> - Create a unique label
+16 L<GetUid|/GetUid> - Get userid of current process
 
-17 L<Lea|/Lea> - Load effective address
+17 L<If|/If> - If
 
-18 L<Mov|/Mov> - Move data
+18 L<label|/label> - Create a unique label
 
-19 L<PopR|/PopR> - Pop registers in reverse order from the stack so the same parameter list can be shared with pushR
+19 L<Lea|/Lea> - Load effective address
 
-20 L<PrintOutNl|/PrintOutNl> - Write a new line
+20 L<Mov|/Mov> - Move data
 
-21 L<PrintOutRaxInHex|/PrintOutRaxInHex> - Write the content of register rax to stderr in hexadecimal in big endian notation
+21 L<PopR|/PopR> - Pop registers in reverse order from the stack so the same parameter list can be shared with pushR
 
-22 L<PrintOutRegisterInHex|/PrintOutRegisterInHex> - Print any register as a hex string
+22 L<PrintOutNl|/PrintOutNl> - Write a new line
 
-23 L<PrintOutRegistersInHex|/PrintOutRegistersInHex> - Print the general purpose registers in hex
+23 L<PrintOutRaxInHex|/PrintOutRaxInHex> - Write the content of register rax to stderr in hexadecimal in big endian notation
 
-24 L<PrintOutString|/PrintOutString> - One: Write a constant string to sysout.
+24 L<PrintOutRegisterInHex|/PrintOutRegisterInHex> - Print any register as a hex string
 
-25 L<PushR|/PushR> - Push registers onto the stack
+25 L<PrintOutRegistersInHex|/PrintOutRegistersInHex> - Print the general purpose registers in hex
 
-26 L<Rb|/Rb> - Layout bytes in the data segment and return their label
+26 L<PrintOutString|/PrintOutString> - One: Write a constant string to sysout.
 
-27 L<Rbwdq|/Rbwdq> - Layout data
+27 L<PushR|/PushR> - Push registers onto the stack
 
-28 L<Rd|/Rd> - Layout double words in the data segment and return their label
+28 L<Rb|/Rb> - Layout bytes in the data segment and return their label
 
-29 L<readTimeStampCounter|/readTimeStampCounter> - Read the time stamp counter
+29 L<Rbwdq|/Rbwdq> - Layout data
 
-30 L<RestoreFirstFour|/RestoreFirstFour> - Restore the first 4 parameter registers
+30 L<Rd|/Rd> - Layout double words in the data segment and return their label
 
-31 L<RestoreFirstFourExceptRax|/RestoreFirstFourExceptRax> - Restore the first 4 parameter registers except rax so it can return its value
+31 L<readTimeStampCounter|/readTimeStampCounter> - Read the time stamp counter
 
-32 L<RestoreFirstSeven|/RestoreFirstSeven> - Restore the first 7 parameter registers
+32 L<RestoreFirstFour|/RestoreFirstFour> - Restore the first 4 parameter registers
 
-33 L<RestoreFirstSevenExceptRax|/RestoreFirstSevenExceptRax> - Restore the first 7 parameter registers except rax which is being used to return the result
+33 L<RestoreFirstFourExceptRax|/RestoreFirstFourExceptRax> - Restore the first 4 parameter registers except rax so it can return its value
 
-34 L<Rq|/Rq> - Layout quad words in the data segment and return their label
+34 L<RestoreFirstSeven|/RestoreFirstSeven> - Restore the first 7 parameter registers
 
-35 L<Rs|/Rs> - Layout bytes in read only memory and return their label
+35 L<RestoreFirstSevenExceptRax|/RestoreFirstSevenExceptRax> - Restore the first 7 parameter registers except rax which is being used to return the result
 
-36 L<Rw|/Rw> - Layout words in the data segment and return their label
+36 L<Rq|/Rq> - Layout quad words in the data segment and return their label
 
-37 L<SaveFirstFour|/SaveFirstFour> - Save the first 4 parameter registers
+37 L<Rs|/Rs> - Layout bytes in read only memory and return their label
 
-38 L<SaveFirstSeven|/SaveFirstSeven> - Save the first 7 parameter registers
+38 L<Rw|/Rw> - Layout words in the data segment and return their label
 
-39 L<Start|/Start> - Initialize the assembler
+39 L<SaveFirstFour|/SaveFirstFour> - Save the first 4 parameter registers
 
-40 L<Sub|/Sub> - Subtract
+40 L<SaveFirstSeven|/SaveFirstSeven> - Save the first 7 parameter registers
 
-41 L<Test|/Test> - Test
+41 L<Start|/Start> - Initialize the assembler
 
-42 L<Vmovdqu32|/Vmovdqu32> - Move memory in 32 bit blocks to an x/y/zmm* register
+42 L<StatSize|/StatSize> - Stat a file to get its size in rax
 
-43 L<Vmovdqu64|/Vmovdqu64> - Move memory in 64 bit blocks to an x/y/zmm* register
+43 L<Sub|/Sub> - Subtract
 
-44 L<Vmovdqu8|/Vmovdqu8> - Move memory in 8 bit blocks to an x/y/zmm* register
+44 L<Test|/Test> - Test
 
-45 L<Vprolq|/Vprolq> - Rotate left within quad word indicated number of bits
+45 L<Vmovdqu32|/Vmovdqu32> - Move memory in 32 bit blocks to an x/y/zmm* register
 
-46 L<WaitPid|/WaitPid> - Wait for the pid in rax to complete
+46 L<Vmovdqu64|/Vmovdqu64> - Move memory in 64 bit blocks to an x/y/zmm* register
 
-47 L<Xor|/Xor> - Xor
+47 L<Vmovdqu8|/Vmovdqu8> - Move memory in 8 bit blocks to an x/y/zmm* register
+
+48 L<Vprolq|/Vprolq> - Rotate left within quad word indicated number of bits
+
+49 L<WaitPid|/WaitPid> - Wait for the pid in rax to complete
+
+50 L<Xor|/Xor> - Xor
 
 =head1 Installation
 
@@ -1798,7 +1852,7 @@ test unless caller;
 
 1;
 # podDocumentation
-#__DATA__
+__DATA__
 use Time::HiRes qw(time);
 use Test::More;
 
