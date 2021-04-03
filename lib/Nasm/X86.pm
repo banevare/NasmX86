@@ -1793,7 +1793,7 @@ my $localTest = ((caller(1))[0]//'Nasm::X86') eq "Nasm::X86";                   
 
 Test::More->builder->output("/dev/null") if $localTest;                         # Reduce number of confirmation messages during testing
 
-$ENV{PATH} = $ENV{PATH}.":/var/isde";                                           # Intel emulator
+$ENV{PATH} = $ENV{PATH}.":/var/isde:sde";                                       # Intel emulator
 
 if ($^O =~ m(bsd|linux)i)                                                       # Supported systems
  {if (confirmHasCommandLineCommand(q(nasm)) and                                 # Network assembler
