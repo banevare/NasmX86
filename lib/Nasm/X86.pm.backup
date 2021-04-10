@@ -703,10 +703,10 @@ sub freeMemory($$)                                                              
   Comment "Free memory at:  $a length: $l";
   my $sub = S
    {SaveFirstFour;
-    Mov rax, 11;                                                                # unmmap
-    Mov rdi, $a;                                                                # Address
-    Mov rsi, $l;                                                                # Length
-    Syscall;                                                                    # unmmap $a, $l
+    Mov rax, 11;
+    Mov rdi, $a;
+    Mov rsi, $l;
+    Syscall;
     RestoreFirstFourExceptRax;
    } name=> "freeMemory";
 
@@ -1054,7 +1054,7 @@ see: L<https://github.com/philiprbrenan/NasmX86/blob/main/.github/workflows/main
 Generate Nasm assembler code
 
 
-Version "202104010".
+Version "202104011".
 
 
 The following sections describe the methods in each functional area of this
@@ -1320,6 +1320,14 @@ For
   3  $limit      Limit on loop
   4  $increment  Increment
 
+=head2 S($body, %options)
+
+Create a sub with optional parameters name=> the name of the subroutine so it can be reused rather than regenerated, comment=> a comment describing the sub
+
+     Parameter  Description
+  1  $body      Body
+  2  %options   Options.
+
 =head2 registerSize($r)
 
 Return the size of a register
@@ -1573,13 +1581,6 @@ B<Example:>
     Exit;
     ok assemble() =~ m(abcdefghijklmnop)s;
 
-
-=head2 ReadFileIntoMemory($file)
-
-Read a file into memory using mmap
-
-     Parameter  Description
-  1  $file      Address of file name
 
 =head2 freeMemory($a, $l)
 
@@ -1980,13 +1981,13 @@ Address a local variable on the stack
      Parameter  Description
   1  $variable  Variable
 
-=head2 LocalData::allocate8($local, $comment)
+=head2 LocalData::allocate8($local, @comments)
 
-Add an 8 byte local variable
+Add some 8 byte local variables and return an array of variable definitions
 
      Parameter  Description
   1  $local     Local data descriptor
-  2  $comment   Optional comment
+  2  @comments  Optional comment
 
 =head2 MemoryClear($addr, $length)
 
@@ -2005,13 +2006,14 @@ Read data the specified file descriptor into the specified buffer of specified l
   2  $addr      Stack offset of buffer address
   3  $length    Stack offset of length of buffer
 
-=head2 ReadFile($file, $reg)
+=head2 ReadFile($file, $addr, $length)
 
-Read a file into memory returning its address and length in the named x|y|zmm* register
+Read a file addressed by a local variable into memory writing the address and length of the memory into the specified local variables.
 
      Parameter  Description
-  1  $file      File
-  2  $reg       Register
+  1  $file      Address of file name in a local variable
+  2  $addr      Local variable for address of memory
+  3  $length    Local variable for length of file
 
 =head2 StatSize($file)
 
@@ -2108,7 +2110,7 @@ Create a unique label
 
 21 L<localData|/localData> - Map local data
 
-22 L<LocalData::allocate8|/LocalData::allocate8> - Add an 8 byte local variable
+22 L<LocalData::allocate8|/LocalData::allocate8> - Add some 8 byte local variables and return an array of variable definitions
 
 23 L<LocalData::free|/LocalData::free> - Free a local data area on the stack
 
@@ -2154,29 +2156,29 @@ Create a unique label
 
 44 L<Read|/Read> - Read data the specified file descriptor into the specified buffer of specified length
 
-45 L<ReadFile|/ReadFile> - Read a file into memory returning its address and length in the named x|y|zmm* register
+45 L<ReadFile|/ReadFile> - Read a file addressed by a local variable into memory writing the address and length of the memory into the specified local variables.
 
-46 L<ReadFileIntoMemory|/ReadFileIntoMemory> - Read a file into memory using mmap
+46 L<readTimeStampCounter|/readTimeStampCounter> - Read the time stamp counter
 
-47 L<readTimeStampCounter|/readTimeStampCounter> - Read the time stamp counter
+47 L<registerSize|/registerSize> - Return the size of a register
 
-48 L<registerSize|/registerSize> - Return the size of a register
+48 L<RestoreFirstFour|/RestoreFirstFour> - Restore the first 4 parameter registers
 
-49 L<RestoreFirstFour|/RestoreFirstFour> - Restore the first 4 parameter registers
+49 L<RestoreFirstFourExceptRax|/RestoreFirstFourExceptRax> - Restore the first 4 parameter registers except rax so it can return its value
 
-50 L<RestoreFirstFourExceptRax|/RestoreFirstFourExceptRax> - Restore the first 4 parameter registers except rax so it can return its value
+50 L<RestoreFirstSeven|/RestoreFirstSeven> - Restore the first 7 parameter registers
 
-51 L<RestoreFirstSeven|/RestoreFirstSeven> - Restore the first 7 parameter registers
+51 L<RestoreFirstSevenExceptRax|/RestoreFirstSevenExceptRax> - Restore the first 7 parameter registers except rax which is being used to return the result
 
-52 L<RestoreFirstSevenExceptRax|/RestoreFirstSevenExceptRax> - Restore the first 7 parameter registers except rax which is being used to return the result
+52 L<ReverseBytesInRax|/ReverseBytesInRax> - Reverse the bytes in rax
 
-53 L<ReverseBytesInRax|/ReverseBytesInRax> - Reverse the bytes in rax
+53 L<Rq|/Rq> - Layout quad words in the data segment and return their label
 
-54 L<Rq|/Rq> - Layout quad words in the data segment and return their label
+54 L<Rs|/Rs> - Layout bytes in read only memory and return their label
 
-55 L<Rs|/Rs> - Layout bytes in read only memory and return their label
+55 L<Rw|/Rw> - Layout words in the data segment and return their label
 
-56 L<Rw|/Rw> - Layout words in the data segment and return their label
+56 L<S|/S> - Create a sub with optional parameters name=> the name of the subroutine so it can be reused rather than regenerated, comment=> a comment describing the sub
 
 57 L<SaveFirstFour|/SaveFirstFour> - Save the first 4 parameter registers
 
