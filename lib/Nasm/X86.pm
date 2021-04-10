@@ -703,10 +703,10 @@ sub freeMemory($$)                                                              
   Comment "Free memory at:  $a length: $l";
   my $sub = S
    {SaveFirstFour;
-    Mov rax, 11;                                                                # unmmap
-    Mov rdi, $a;                                                                # Address
-    Mov rsi, $l;                                                                # Length
-    Syscall;                                                                    # unmmap $a, $l
+    Mov rax, 11;
+    Mov rdi, $a;
+    Mov rsi, $l;
+    Syscall;
     RestoreFirstFourExceptRax;
    } name=> "freeMemory";
 
