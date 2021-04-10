@@ -4,8 +4,9 @@
 # Philip R Brenan at appaapps dot com, Appa Apps Ltd Inc., 2021
 #-------------------------------------------------------------------------------
 # podDocumentation
+# Indent opcodes by call depth, - replace push @text with a method call
 package Nasm::X86;
-our $VERSION = "20210404";
+our $VERSION = "202104010";
 use warnings FATAL => qw(all);
 use strict;
 use Carp qw(confess cluck);
@@ -17,6 +18,8 @@ use feature qw(say current_sub);
 my $debug = -e q(/home/phil/);                                                  # Developing
 my $sde   = q(/var/isde/sde64);                                                 # Intel emulator
    $sde   = q(sde/sde64) unless $debug;
+
+binModeAllUtf8;
 
 my %rodata;                                                                     # Read only data already written
 my %rodatas;                                                                    # Read only string already written
@@ -34,12 +37,21 @@ BEGIN{
      %r = (%r, map {$_=>'32a'}  qw(eax  ebx ecx edx esi edi esp ebp));
      %r = (%r, map {$_=>'32b'}  qw(r8d r8l r9d r9l r10d r10l r11d r11l r12d r12l r13d r13l r14d r14l r15d r15l));
      %r = (%r, map {$_=>'f'}    qw(st0 st1 st2 st3 st4 st5 st6 st7));
-     %r = (%r, map {$_=>'64'}   qw(rax rbx rcx rdx r8 r9 r10 r11 r12 r13 r14 r15 rsi rdi rsp rbp rip));
+     %r = (%r, map {$_=>'64'}   qw(rax rbx rcx rdx r8 r9 r10 r11 r12 r13 r14 r15 rsi rdi rsp rbp rip rflags));
      %r = (%r, map {$_=>'64m'}  qw(mm0 mm1 mm2 mm3 mm4 mm5 mm6 mm7));
      %r = (%r, map {$_=>'128'}  qw(xmm0 xmm1 xmm2 xmm3 xmm4 xmm5 xmm6 xmm7 xmm8 xmm9 xmm10 xmm11 xmm12 xmm13 xmm14 xmm15 xmm16 xmm17 xmm18 xmm19 xmm20 xmm21 xmm22 xmm23 xmm24 xmm25 xmm26 xmm27 xmm28 xmm29 xmm30 xmm31));
      %r = (%r, map {$_=>'256'}  qw(ymm0 ymm1 ymm2 ymm3 ymm4 ymm5 ymm6 ymm7 ymm8 ymm9 ymm10 ymm11 ymm12 ymm13 ymm14 ymm15 ymm16 ymm17 ymm18 ymm19 ymm20 ymm21 ymm22 ymm23 ymm24 ymm25 ymm26 ymm27 ymm28 ymm29 ymm30 ymm31));
      %r = (%r, map {$_=>'512'}  qw(zmm0 zmm1 zmm2 zmm3 zmm4 zmm5 zmm6 zmm7 zmm8 zmm9 zmm10 zmm11 zmm12 zmm13 zmm14 zmm15 zmm16 zmm17 zmm18 zmm19 zmm20 zmm21 zmm22 zmm23 zmm24 zmm25 zmm26 zmm27 zmm28 zmm29 zmm30 zmm31));
      %r = (%r, map {$_=>'m'}    qw(k0 k1 k2 k3 k4 k5 k6 k7));
+
+  my @i0 = qw(pushfq rdtsc syscall);                                            # Zero operand instructions
+  my @i1 = qw(inc jge jmp jz pop push);                                         # Single operand instructions
+  my @i2 =  split /\s+/, <<END;                                                 # Double operand instructions
+add and cmp or lea mov shl shr sub test Vmovdqu8 vmovdqu32 vmovdqu64 xor
+END
+  my @i3 =  split /\s+/, <<END;                                                 # Triple operand instructions
+vprolq
+END
 
   for my $r(sort keys %r)
    {eval "sub $r\{q($r)\}";
@@ -52,13 +64,87 @@ BEGIN{
     eval "sub registers_$v\{".dump(\@r)."}";
     confess $@ if $@;
    }
+
+  if (1)                                                                        # Instructions that take zero operands
+   {my $s = '';
+    for my $i(@i0)
+      {my $I = ucfirst $i;
+       $s .= <<END;
+       sub $I()
+        {\@_ == 0 or confess "No arguments allowed";
+         push \@text, qq(  $i\\n);
+        }
+END
+     }
+    eval $s;
+    confess $@ if $@;
+   }
+
+  if (1)                                                                        # Instructions that take one operand
+   {my $s = '';
+    for my $i(@i1)
+      {my $I = ucfirst $i;
+       $s .= <<END;
+       sub $I(\$)
+        {my (\$target) = \@_;
+         \@_ == 1 or confess "One argument required";
+         push \@text, qq(  $i \$target\\n);
+        }
+END
+     }
+    eval $s;
+    confess $@ if $@;
+   }
+
+  if (1)                                                                        # Instructions that take two operands
+   {my $s = '';
+    for my $i(@i2)
+      {my $I = ucfirst $i;
+       $s .= <<END;
+       sub $I(\$\$)
+        {my (\$target, \$source) = \@_;
+         \@_ == 2 or confess "Two arguments required";
+         push \@text, qq(  $i \$target, \$source\\n);
+        }
+END
+     }
+    eval $s;
+    confess $@ if $@;
+   }
+
+  if (1)                                                                        # Instructions that take three operands
+   {my $s = '';
+    for my $i(@i3)
+      {my $I = ucfirst $i;
+       $s .= <<END;
+       sub $I(\$\$\$)
+        {my (\$target, \$source, \$bits) = \@_;
+         \@_ == 3 or confess "Three arguments required";
+         push \@text, qq(  $i \$target, \$source, \$bits\\n);
+        }
+END
+     }
+    eval $s;
+    confess $@ if $@;
+   }
  }
+
+sub ClearRegisters(@);                                                          # Clear registers by setting them to zero
+sub PrintOutRegisterInHex($);                                                    # Print any register as a hex string
+sub Syscall();                                                                  # System call in linux 64 format per: https://filippo.io/linux-syscall-table/
 
 #D1 Generate Network Assembler Code                                             # Generate assembler code that can be assembled with Nasm
 
 my $labels = 0;
 sub label                                                                       #P Create a unique label
  {"l".++$labels;                                                                # Generate a label
+ }
+
+sub SetLabel($)                                                                 # Set a label in the code section
+ {my ($l) = @_;                                                                 # Label
+  push @text, <<END;                                                            # Define bytes
+  $l:
+END
  }
 
 sub Start()                                                                     # Initialize the assembler
@@ -157,139 +243,171 @@ sub Exit(;$)                                                                    
  {my ($c) = @_;                                                                 # Return code
   if (@_ == 0 or $c == 0)
    {Comment "Exit code: 0";
-    push @text, <<END;
-  xor rdi, rdi            ; zero
-END
+    ClearRegisters rdi;
    }
   elsif (@_ == 1)
    {Comment "Exit code: $c";
-    push @text, <<END;
-  mov rdi, $c             ; Constant return code
-END
+    Mov rdi, $c;
    }
-  push @text, <<END;
-  mov rax, 60             ; 1 - sys_exit
-  syscall                 ; Exit
-END
+  Mov rax, 60;
+  Syscall;
  }
 
 sub SaveFirstFour()                                                             # Save the first 4 parameter registers
- {push @text, <<END;
-  push rax
-  push rdi
-  push rsi
-  push rdx
-END
+ {Push rax;
+  Push rdi;
+  Push rsi;
+  Push rdx;
+  4 * &registerSize(rax);                                                         # Space occupied by push
  }
 
 sub RestoreFirstFour()                                                          # Restore the first 4 parameter registers
- {push @text, <<END;
-  pop rdx
-  pop rsi
-  pop rdi
-  pop rax
-END
+ {Pop rdx;
+  Pop rsi;
+  Pop rdi;
+  Pop rax;
  }
 
 sub RestoreFirstFourExceptRax()                                                 # Restore the first 4 parameter registers except rax so it can return its value
- {push @text, <<END;
-  pop rdx
-  pop rsi
-  pop rdi
-  add rsp, 8
-END
+ {Pop rdx;
+  Pop rsi;
+  Pop rdi;
+  Add rsp, 8;
  }
 
 sub SaveFirstSeven()                                                            # Save the first 7 parameter registers
- {push @text, <<END;
-  push rax
-  push rdi
-  push rsi
-  push rdx
-  push r10
-  push r8
-  push r9
-END
+ {Push rax;
+  Push rdi;
+  Push rsi;
+  Push rdx;
+  Push r10;
+  Push r8;
+  Push r9;
+  7 * registerSize(rax);                                                        # Space occupied by push
  }
 
 sub RestoreFirstSeven()                                                         # Restore the first 7 parameter registers
- {push @text, <<END;
-  pop r9
-  pop r8
-  pop r10
-  pop rdx
-  pop rsi
-  pop rdi
-  pop rax
-END
+ {Pop r9;
+  Pop r8;
+  Pop r10;
+  Pop rdx;
+  Pop rsi;
+  Pop rdi;
+  Pop rax;
  }
 
 sub RestoreFirstSevenExceptRax()                                                # Restore the first 7 parameter registers except rax which is being used to return the result
- {push @text, <<END;
-  pop r9
-  pop r8
-  pop r10
-  pop rdx
-  pop rsi
-  pop rdi
-  add rsp,8 ; Skip over value of rax so we can return rax instead
-END
+ {Pop r9;
+  Pop r8;
+  Pop r10;
+  Pop rdx;
+  Pop rsi;
+  Pop rdi;
+  Add rsp, registerSize(rax);                                                   # Skip rax
  }
 
-sub Lea($$)                                                                     # Load effective address
- {my ($target, $source) = @_;                                                   # Target, source
-  @_ == 2 or confess;
-  push @text, <<END;
-  lea $target,$source
-END
+sub If(&;&)                                                                     # If
+ {my ($then, $else) = @_;                                                       # Then - required , else - optional
+  @_ >= 1 or confess;
+  if (@_ == 1)                                                                  # No else
+   {Comment "if then";
+    my $end = label;
+    Jz $end;
+    &$then;
+    SetLabel $end;
+   }
+  else                                                                          # With else
+   {Comment "if then else";
+    my $endIf     = label;
+    my $startElse = label;
+    Jz $startElse;
+    &$then;
+    Jmp $endIf;
+    SetLabel $startElse;
+    &$else;
+    SetLabel  $endIf;
+   }
  }
 
-sub Mov($$)                                                                     # Move data
- {my ($target, $source) = @_;                                                   # Target, source
-  @_ == 2 or confess;
-  push @text, <<END;
-  mov $target,$source
-END
+sub For(&$$$)                                                                   # For
+ {my ($body, $register, $limit, $increment) = @_;                               # Body, register, limit on loop, increment
+  @_ == 4 or confess;
+  Comment "For $register $limit";
+  my $start = label;
+  my $end   = label;
+  SetLabel $start;
+  Cmp $register, $limit;
+  Jge $end;
+
+  &$body;
+
+  if ($increment == 1)
+   {Inc $register;
+   }
+  else
+   {Add $register, $increment;
+   }
+  Jmp $start;
+  SetLabel $end;
+ }
+
+sub registerSize($)                                                             # Return the size of a register
+ {my ($r) = @_;                                                                 # Register
+  return 16 if $r =~ m(\Ax);
+  return 32 if $r =~ m(\Ay);
+  return 64 if $r =~ m(\Az);
+  8
  }
 
 sub PushR(@)                                                                    # Push registers onto the stack
  {my (@r) = @_;                                                                 # Register
-  push @text, map {"  push $_\n"} @r;
+  for my $r(@r)
+   {my $size = registerSize $r;
+    if    ($size > 8)
+     {Sub rsp, $size;
+      Vmovdqu32 "[rsp]", $r;
+     }
+    else
+     {Push $r;
+     }
+   }
  }
 
-sub PopR(@)                                                                     # Pop registers in reverse order from the stack so the same parameter list can be shared with pushR
+sub PopR(@)                                                                     # Pop registers from the stack
  {my (@r) = @_;                                                                 # Register
-  push @text, map {"  pop $_\n"} reverse @r;
+  for my $r(reverse @r)                                                         # Pop registers in reverse order
+   {my $size = registerSize $r;
+    if    ($size > 8)
+     {Vmovdqu32 $r, "[rsp]";
+      Add(rsp, $size);
+     }
+    else
+     {Pop $r;
+     }
+   }
  }
 
-sub Add($$)                                                                     # Add
- {my ($target, $source) = @_;                                                   # Target, source
-  @_ == 2 or confess;
-  push @text, <<END;
-  add $target,$source
-END
- }
-
-sub Sub($$)                                                                     # Subtract
- {my ($target, $source) = @_;                                                   # Target, source
-  @_ == 2 or confess;
-  push @text, <<END;
-  sub $target,$source
-END
+sub PeekR($)                                                                    # Peek at register on stack
+ {my ($r) = @_;                                                                 # Register
+  my $size = registerSize $r;
+  if    ($size > 8)                                                             # x|y|zmm*
+   {Vmovdqu32 $r, "[rsp]";
+   }
+  else                                                                          # 8 byte register
+   {Mov $r, "[rsp]";
+   }
  }
 
 sub PrintOutNl()                                                                # Write a new line
- {SaveFirstFour;
-  @_ == 0 or confess;
+ {@_ == 0 or confess;
   my $a = Rb(10);
   Comment "Write new line";
-  push @text, <<END;
-  mov rax, 1              ; write
-  mov rdi, 1              ; sysout
-  mov rsi, $a             ; New line
-  mov rdx, 1              ; Length of new line
-  syscall
-END
+  SaveFirstFour;
+  Mov rax, 1;
+  Mov rdi, 1;
+  Mov rsi, $a;
+  Mov rdx, 1;
+  Syscall;
   RestoreFirstFour()
  }
 
@@ -301,32 +419,24 @@ sub PrintOutString($;$)                                                         
    {my ($c) = @_;
     my $l = length($c);
     my $a = Rs($c);
-    push @text, <<END;
-  mov rax, 1              ; write
-  mov rdi, $sysout              ; sysout
-  mov rsi, $a             ; String
-  mov rdx, $l             ; Length
-  syscall                 ; write $l: $c
-END
+    Mov rax, 1;
+    Mov rdi, $sysout;
+    Mov rsi, $a;
+    Mov rdx, $l;
+    Syscall;
    }
   elsif (@_ == 2)                                                               # String, length
    {my ($a, $l) = @_;
-    push @text, <<END unless $a eq rsi;
-  mov rsi, $a             ; String
-END
-    push @text, <<END unless $l eq rdx;
-  mov rdx, $l             ; Length
-END
-    push @text, <<END;
-  mov rax, 1              ; write
-  mov rdi, $sysout              ; sysout
-  syscall                 ; Write $l: $a
-END
+    Mov rsi, $a unless $a eq rsi;
+    Mov rdx, $l unless $l eq rdx;
+    Mov rax, 1;
+    Mov rdi, $sysout;
+    Syscall;
    }
   else
    {confess "Wrong number of parameters";
    }
-  RestoreFirstFour()
+  RestoreFirstFour();
  }
 
 sub PrintOutRaxInHex                                                            # Write the content of register rax to stderr in hexadecimal in big endian notation
@@ -348,239 +458,389 @@ sub PrintOutRaxInHex                                                            
   PushR @regs;
   for my $i(0..7)
    {my $s = 8*$i;
-    push @text, <<END;
-  mov rsi,rax
-  shl rsi,$s ; Push selected byte high
-  shr rsi,56 ; Push select byte low
-  shl rsi,1  ; Multiply by two because each entry in the translation table is two bytes long
-  lea rsi,[$hexTranslateTable+rsi]
-END
+    Mov rsi,rax;
+    Shl rsi,$s;                                                                 # Push selected byte high
+    Shr rsi,56;                                                                 # Push select byte low
+    Shl rsi,1;                                                                  # Multiply by two because each entry in the translation table is two bytes long
+    Lea rsi, "[$hexTranslateTable+rsi]";
     PrintOutString &rsi, 2;
     PrintOutString ' ' if $i % 2;
    }
   PopR @regs;
  }
 
-sub PrintOutRegisterInHex($)                                                       # Print any register as a hex string
+sub ClearRegisters(@)                                                           # Clear registers by setting them to zero
+ {my (@registers) = @_;                                                         # Registers
+  @_ == 1 or confess;
+  for my $r(@registers) {&Xor($r,$r)}
+ }
+
+sub ReverseBytesInRax                                                           # Reverse the bytes in rax
+ {@_ == 0 or confess;
+  Comment "Reverse bytes in rax";
+
+  my $size = registerSize rax;
+  SaveFirstFour;
+  ClearRegisters rsi;
+  for(1..$size)                                                                 # Reverse on to stack
+   {Mov rdi,rax;
+    Shr rdi,($_-1)*8;
+    Shl rdi,($size-1)*8;                                                        # Up to end
+    Shr rdi,($_-1)*8;
+    Or  rsi,rdi;
+   }
+  Mov rax,rsi;
+  RestoreFirstFourExceptRax;
+ }
+
+sub PrintOutRaxInReverseInHex                                                   # Write the content of register rax to stderr in hexadecimal in little endian notation
+ {@_ == 0 or confess;
+  Comment "Print Rax In Reverse In Hex";
+  ReverseBytesInRax;
+  PrintOutRaxInHex;
+ }
+
+sub PrintOutRegisterInHex($)                                                    # Print any register as a hex string
  {my ($r) = @_;                                                                 # Name of the register to print
   Comment "Print register $r in Hex";
   @_ == 1 or confess;
   PrintOutString sprintf("%6s: ", $r);
 
-  my sub printReg($$@)                                                          # Print the contents of a x/y/zmm* register
-   {my ($r, $s, @regs) = @_;                                                    # Register to print, size in bytes, work registers
+  my sub printReg(@)                                                            # Print the contents of a register
+   {my (@regs) = @_;                                                            # Size in bytes, work registers
+    my $s = registerSize $r;                                                    # Size of the register
     PushR @regs;                                                                # Save work registers
-    push @text, <<END unless $s == 8;                                           # Place register contents on stack
-  sub rsp,$s
-  vmovdqu8 [rsp],$r
-END
-    push @text, <<END     if $s == 8;                                           # Place register contents on stack
-  push $r
-END
-    PopR @regs;                                                                 # Load work registers
+    PushR $r;                                                                   # Place register contents on stack
+    PopR  @regs;                                                                # Load work registers
     for my $R(@regs)                                                            # Print work registers to print input register
      {if ($R !~ m(\Arax))
        {PrintOutString("  ");
-        push @text, <<END;
-  mov rax, $R
-END
+        Mov rax, $R
        }
       PrintOutRaxInHex;                                                         # Print work register
      }
     PopR @regs;
    };
-
-  if    ($r =~ m(\Ar)) {printReg $r, 8,  qw(rax)}                               # 64 bit register requested
-  elsif ($r =~ m(\Ax)) {printReg $r, 16, qw(rax rbx)}                           # xmm*
-  elsif ($r =~ m(\Ay)) {printReg $r, 32, qw(rax rbx rcx rdx)}                   # ymm*
-  elsif ($r =~ m(\Az)) {printReg $r, 64, qw(rax rbx rcx rdx r8 r9 r10 r11)}     # zmm*
+  if    ($r =~ m(\Ar)) {printReg qw(rax)}                                       # 64 bit register requested
+  elsif ($r =~ m(\Ax)) {printReg qw(rax rbx)}                                   # xmm*
+  elsif ($r =~ m(\Ay)) {printReg qw(rax rbx rcx rdx)}                           # ymm*
+  elsif ($r =~ m(\Az)) {printReg qw(rax rbx rcx rdx r8 r9 r10 r11)}             # zmm*
 
   PrintOutNl;
  }
 
-sub PrintOutRegistersInHex                                                      # Print the general purpose registers in hex
+sub PrintOutRipInHex                                                            # Print the instruction pointer in hex
  {@_ == 0 or confess;
   my @regs = qw(rax);
   PushR @regs;
   my $l = label;
   push @text, <<END;
-$l: lea rax,[$l]
+$l:
 END
+  Lea rax, "[$l]";                                                              # Current instruction pointer
   PrintOutString "rip: ";
   PrintOutRaxInHex;
   PrintOutNl;
+  PopR @regs;
+ }
+
+sub PrintOutRflagsInHex                                                         # Print the flags register in hex
+ {@_ == 0 or confess;
+  my @regs = qw(rax);
+  PushR @regs;
+  Pushfq;
+  Pop rax;
+  PrintOutString "rfl: ";
+  PrintOutRaxInHex;
+  PrintOutNl;
+  PopR @regs;
+ }
+
+sub PrintOutRegistersInHex                                                      # Print the general purpose registers in hex
+ {@_ == 0 or confess;
+
+  PrintOutRipInHex;
+  PrintOutRflagsInHex;
+
+  my @regs = qw(rax);
+  PushR @regs;
 
   my $w = registers_64();
   for my $r(sort @$w)
-   {next if $r =~ m(rip);
-    push @text, <<END if $r eq rax;
-  pop rax
-  push rax
-END
+   {next if $r =~ m(rip|rflags);
+    if ($r eq rax)
+     {Pop rax;
+      Push rax
+     }
     PrintOutString reverse(pad(reverse($r), 3)).": ";
-    push @text, <<END;
-  mov rax,$r
-END
+    Mov rax, $r;
     PrintOutRaxInHex;
     PrintOutNl;
    }
   PopR @regs;
  }
 
-sub Xor($$)                                                                     # Xor
- {my ($t, $s) = @_;                                                             # Target, source
-  @_ == 2 or confess;
-  push @text, <<END;
-  xor $t, $s
-END
- }
-
-sub Test($$)                                                                    # Test
- {my ($t, $s) = @_;                                                             # Target, source
-  @_ == 2 or confess;
-  push @text, <<END;
-  test $t, $s
-END
- }
-
-sub Vmovdqu8($$)                                                                # Move memory in 8 bit blocks to an x/y/zmm* register
- {my ($r, $m) = @_;                                                             # Register, memory
-  @_ == 2 or confess;
-  push @text, <<END;
-  VMOVDQU8 $r, $m
-END
- }
-
-sub Vmovdqu32($$)                                                               # Move memory in 32 bit blocks to an x/y/zmm* register
- {my ($r, $m) = @_;                                                             # Register, memory
-  @_ == 2 or confess;
-  push @text, <<END;
-  VMOVDQU32 $r, $m
-END
- }
-
-sub Vmovdqu64($$)                                                               # Move memory in 64 bit blocks to an x/y/zmm* register
- {my ($r, $m) = @_;                                                             # Register, memory
-  @_ == 2 or confess;
-  push @text, <<END;
-  VMOVDQU64 $r, $m
-END
- }
-
-sub Vprolq($$$)                                                                 # Rotate left within quad word indicated number of bits
- {my ($r, $m, $bits) = @_;                                                      # Register, memory, number of bits to rotate
-  @_ == 3 or confess;
-  push @text, <<END;
-  VPROLQ $r, $m, $bits
-END
+sub PrintOutMemoryInHex($$)                                                     # Print the specified number of bytes from the specified address in hex
+ {my ($addr, $length) = @_;                                                     # Address, length
+  SaveFirstSeven;
+  Comment "Print out memory in hex: $addr, $length";
+  my $size = registerSize rax;
+  Mov r8, $addr;
+  Mov r9, r8;
+  Add r9, $length;
+  Sub r9, $size;
+  For                                                                           # Print string in blocks
+   {Mov rax, "[r8]";
+    ReverseBytesInRax;
+    PrintOutRaxInHex;
+   } r8, r9, $size;
+  RestoreFirstSeven()
  }
 
 sub allocateMemory($)                                                           # Allocate memory via mmap
  {my ($s) = @_;                                                                 # Amount of memory to allocate
   @_ == 1 or confess;
   Comment "Allocate $s bytes of memory";
-  if (@_ == 1)                                                                  # Constant string
-   {SaveFirstSeven;
-    my $d = extractMacroDefinitionsFromCHeaderFile "linux/mman.h";              # mmap constants
-    my $pa = $$d{MAP_PRIVATE} | $$d{MAP_ANONYMOUS};
-    my $wr = $$d{PROT_WRITE}  | $$d{PROT_READ};
+  SaveFirstSeven;
+  my $d = extractMacroDefinitionsFromCHeaderFile "linux/mman.h";                # mmap constants
+  my $pa = $$d{MAP_PRIVATE} | $$d{MAP_ANONYMOUS};
+  my $wr = $$d{PROT_WRITE}  | $$d{PROT_READ};
 
-    push @text, <<END;
-  mov rax, 9              ; mmap
-  xor rdi, rdi            ; Anywhere
-  mov rsi, $s             ; Amount of memory
-  mov rdx, $wr            ; PROT_WRITE  | PROT_READ
-  mov r10, $pa            ; MAP_PRIVATE | MAP_ANON
-  mov r8,  -1             ; File descriptor for file backing memory if any
-  mov r9,  0              ; Offset into file
-  syscall                 ; mmap $s
-END
-    RestoreFirstSevenExceptRax;
-   }
-  else
-   {confess "Wrong number of parameters";
-   }
+  Mov rax, 9;                                                                   # mmap
+  Xor rdi, rdi;                                                                 # Anywhere
+  Mov rsi, $s;                                                                  # Amount of memory
+  Mov rdx, $wr;                                                                 # Read write protections
+  Mov r10, $pa;                                                                 # Private and anonymous map
+  Mov r8,  -1;                                                                  # File descriptor for file backing memory if any
+  Mov r9,  0;                                                                   # Offset into file
+  Syscall;
+  RestoreFirstSevenExceptRax;
  }
+
+=pod
+_
+sub ReadFileIntoMemory($)                                                       # Read a file into memory using mmap
+ {my ($file) = @_;                                                              # address of file name
+  @_ == 1 or confess;
+  Comment "Read a file into memeory $file";
+  SaveFirstSeven;
+  my $d = extractMacroDefinitionsFromCHeaderFile "linux/mman.h";                # mmap constants
+  my $pa = $$d{MAP_PRIVATE} | $$d{MAP_ANONYMOUS};
+  my $wr = $$d{PROT_WRITE}  | $$d{PROT_READ};
+
+  Mov rax, 9;                                                                   # mmap
+  Xor rdi, rdi;                                                                 # Anywhere
+  Mov rsi, $s;                                                                  # Amount of memory
+  Mov rdx, $wr;                                                                 # PROT_WRITE  | PROT_READ
+  Mov r10, $pa;                                                                 # MAP_PRIVATE | MAP_ANON
+  Mov r8,  -1;                                                                  # File descriptor for file backing memory if any
+  Mov r9,  0;                                                                   # Offset into file
+  Syscall;
+  RestoreFirstSevenExceptRax;
+ }
+=cut
 
 sub freeMemory($$)                                                              # Free memory via mmap
  {my ($a, $l) = @_;                                                             # Address of memory to free, length of memory to free
   @_ == 2 or confess;
   Comment "Free memory at:  $a length: $l";
   SaveFirstFour;
-  push @text, <<END;
-  mov rax, 11             ; unmmap
-  mov rdi, $a             ; Address
-  mov rsi, $l             ; Length
-  syscall                 ; unmmap $a, $l
-END
+  Mov rax, 11;                                                                  # unmmap
+  Mov rdi, $a;                                                                  # Address
+  Mov rsi, $l;                                                                  # Length
+  Syscall;                                                                      # unmmap $a, $l
   RestoreFirstFourExceptRax;
  }
 
 sub Fork()                                                                      # Fork
  {@_ == 0 or confess;
   Comment "Fork";
-  push @text, <<END;
-  mov rax, 57             ; fork
-  syscall
-END
+  Mov rax, 57;
+  Syscall
  }
 
 sub GetPid()                                                                    # Get process identifier
  {@_ == 0 or confess;
   Comment "Get Pid";
 
-  push @text, <<END;
-  mov rax, 39
-  syscall
-END
+  Mov rax, 39;
+  Syscall
  }
 
 sub GetPPid()                                                                   # Get parent process identifier
  {@_ == 0 or confess;
   Comment "Get Parent Pid";
 
-  push @text, <<END;
-  mov rax, 110
-  syscall
-END
+  Mov rax, 110;
+  Syscall
  }
 
 sub GetUid()                                                                    # Get userid of current process
  {@_ == 0 or confess;
   Comment "Get User id";
 
-  push @text, <<END;
-  mov rax, 102
-  syscall
-END
+  Mov rax, 102;
+  Syscall
  }
 
 sub WaitPid()                                                                   # Wait for the pid in rax to complete
  {@_ == 0 or confess;
   Comment "WaitPid - wait for the pid in rax";
   SaveFirstSeven;
-  push @text, <<END;
-  mov rdi,rax
-  mov rax, 61
-  mov rsi, 0
-  mov rdx, 0
-  mov r10, 0
-  syscall
-END
+  Mov rdi,rax;
+  Mov rax, 61;
+  Mov rsi, 0;
+  Mov rdx, 0;
+  Mov r10, 0;
+  Syscall;
   RestoreFirstSevenExceptRax;
  }
 
 sub readTimeStampCounter()                                                      # Read the time stamp counter
  {@_ == 0 or confess;
   Comment "Read Time-Stamp Counter";
-  push @text, <<END;
-  push rdx
-  RDTSC
-  shl rdx,32
-  or rax,rdx
-  pop rdx
-END
+  Push rdx;
+  Rdtsc;
+  Shl rdx,32;                                                                   # Or upper half into rax
+  Or rax,rdx;
+  Pop rdx;
   RestoreFirstFourExceptRax;
+ }
+
+sub OpenRead($)                                                                 # Open a file for read
+ {my ($file) = @_;                                                              # File
+  @_ == 1 or confess;
+  Comment "Open a file for read";
+  my $S = extractMacroDefinitionsFromCHeaderFile "asm-generic/fcntl.h";         # Constants for reading a file
+  my $O_RDONLY = $$S{O_RDONLY};
+  SaveFirstFour;
+  Mov rax,2;
+  Mov rdi,$file;
+  Mov rsi,$O_RDONLY;
+  Xor rdx,rdx;
+  Syscall;
+  RestoreFirstFourExceptRax;
+ }
+
+sub Close($)                                                                    # Close a file descriptor
+ {my ($fdes) = @_;                                                              # File descriptor
+  @_ == 1 or confess;
+  Comment "Close a file";
+  SaveFirstFour;
+  Mov rdi,$fdes;
+  Mov rax,3;
+  Syscall;
+  RestoreFirstFourExceptRax;
+ }
+
+sub localData()                                                                 # Map local data
+ {@_ == 0 or confess;
+  my $local = genHash("LocalData",
+    size      => 0,
+    variables => [],
+   );
+ }
+
+sub LocalData::start($)                                                         # Start a local data area on the stack
+ {my ($local) = @_;                                                             # Local data descriptor
+  @_ == 1 or confess;
+  my $size = $local->size;                                                      # Size of local data
+  Sub rsp, $size;
+ }
+
+sub LocalData::free($)                                                          # Free a local data area on the stack
+ {my ($local) = @_;                                                             # Local data descriptor
+  @_ == 1 or confess;
+  my $size = $local->size;                                                      # Size of local data
+  Add rsp, $size;
+ }
+
+sub LocalData::variable($$;$)                                                   # Add a local variable
+ {my ($local, $length, $comment) = @_;                                          # Local data descriptor, length of data, optional comment
+  @_ >= 2 or confess;
+  my $variable = genHash("LocalVariable",
+    loc        => $local->size,
+    size       => $length,
+    comment    => $comment
+   );
+  $local->size += $length;                                                      # Update size of local data
+  $variable
+ }
+
+sub LocalVariable::stack($)                                                     # Address a local variable on the stack
+ {my ($variable) = @_;                                                          # Variable
+  @_ == 1 or confess;
+  my $loc = $variable->loc;                                                     # Location of variable on stack
+  "[$loc+rsp]"                                                                  # Address variable
+ }
+
+sub LocalData::allocate8($;$)                                                   # Add an 8 byte local variable
+ {my ($local, $comment) = @_;                                                   # Local data descriptor, optional comment
+  LocalData::variable($local, 8, $comment);
+ }
+
+sub MemoryClear($$)                                                             # Clear memory
+ {my ($addr, $length) = @_;                                                     # Stack offset of buffer address, stack offset of length of buffer
+  @_ == 2 or confess;
+  Comment "Clear memory $addr $length";
+
+  my $size = registerSize rax;
+  my $saveSize = SaveFirstSeven;                                                 # Generated code
+  Mov rdi, "[$addr   +$saveSize+rsp]";                                        # Address of buffer
+  Mov rsi, rdi;
+  Add rsi, "[$length  +$saveSize+rsp]";
+  Sub rsi, $size;
+  Xor rdx,rdx;
+  Mov rdx, 0x61626364;
+  Shl rdx,32;
+  Or  rdx, 0x65666768;
+  For                                                                           # Clear and test memory
+   {Mov "[rdi]", rdx;
+    Mov r8, "[rdi]";
+    Cmp r8,rdx;
+   } rdi, rsi, registerSize(rax);
+
+  RestoreFirstSevenExceptRax;
+ }
+
+sub Read($$$)                                                                   # Read data the specified file descriptor into the specified buffer of specified length
+ {my ($fileDes, $addr, $length) = @_;                                           # Stack offset of file descriptor, stack offset of buffer address, stack offset of length of buffer
+  @_ == 3 or confess;
+  Comment "Read data into memory";
+
+  my $saveSize = SaveFirstFour;                                                 # Generated code
+  Mov rdi, "$fileDes+$saveSize+rsp]";                                           # File descriptor
+  Mov rsi, "$addr   +$saveSize+rsp]";                                           # Address of buffer
+  Mov rdx, "$length +$saveSize+rsp]";                                           # Length of buffer
+  Syscall;
+  PrintOutRegistersInHex;
+  RestoreFirstFourExceptRax;
+ }
+
+sub ReadFile($$)                                                                # Read a file into memory returning its address and length in the named x|y|zmm* register
+ {my ($file, $reg) = @_;                                                        # File, register
+  @_ == 2 or confess;
+  Comment "Read a file into memory";
+
+  my $local      = localData;                                                   # Local data
+  my $bufferAddr = $local->allocate8;
+  my $fileSize   = $local->allocate8;
+  my $fileDes    = $local->allocate8;
+
+  SaveFirstFour;                                                                # Generated code
+  $local->start;                                                                # Start local data on stack
+  StatSize($file);                                                              # File size
+  Mov $fileSize->stack, rax;                                                    # Save file size
+  allocateMemory(rax);                                                          # Memory for data in file
+  Mov $bufferAddr->stack, rax;                                                  # Save memory location
+  MemoryClear $bufferAddr->loc, $fileSize->loc;
+  OpenRead($file);                                                              # Open file for read
+  Mov $fileDes->stack, rax;                                                     # Save file descriptor
+  Read $fileDes->loc, $bufferAddr->loc, $fileSize->loc;                         # Read the entire file into the allocated memory
+  Close $fileDes->loc;
+  Vmovdqu64 $reg, "[rsp]";                                                      # Load stack into specified register to save buffer address and length
+  $local->free;                                                                 # Release local data on stack
+  RestoreFirstFour;
  }
 
 sub StatSize($)                                                                 # Stat a file to get its size in rax
@@ -591,49 +851,12 @@ sub StatSize($)                                                                 
   my $Size = $$S{stat}{size};
   my $off  = $$S{stat}{fields}{st_size}{loc};
   SaveFirstFour;
-  push @text, <<END;
-  sub rsp, $Size;
-  mov rax,4
-  mov rdi,$file
-  mov rsi,rsp
-  syscall
-  mov rax, [$off+rsp]                                                           ; Place size in rax
-  add rsp, $Size;
-END
+  Mov rax,4;
+  Mov rdi,$file;
+  Lea rsi, "[rsp-$Size]";
+  Syscall;
+  Mov rax, "[$off+rsp-$Size]";                                                  # Place size in rax
   RestoreFirstFourExceptRax;
- }
-
-sub If(&;&)                                                                     # If
- {my ($then, $else) = @_;                                                       # Then - required , else - optional
-  @_ >= 1 or confess;
-  if (@_ == 1)                                                                  # No else
-   {Comment "if then";
-    my $end = label;
-    push @text, <<END;
-    jz $end
-END
-    &$then;
-    push @text, <<END;
-    $end:;
-END
-   }
-  else                                                                          # With else
-   {Comment "if then else";
-    my $endIf     = label;
-    my $startElse = label;
-    push @text, <<END;
-    jz $startElse
-END
-    &$then;
-    push @text, <<END;
-    jmp $endIf
-    $startElse:
-END
-    &$else;
-    push @text, <<END;
-    $endIf:
-END
-   }
  }
 
 sub assemble(%)                                                                 # Assemble the generated code
@@ -748,12 +971,18 @@ Get the size of this file:
    {is_deeply $1, sprintf("%016X", fileSize($0));
    }
 
+=head2 Installation
+
+You will need the Intel Software Development Emulator and the Networkwide
+Assembler installed on your test system.  For full details of how to do this
+see: L<https://github.com/philiprbrenan/NasmX86/blob/main/.github/workflows/main.yml>
+
 =head1 Description
 
 Generate Nasm assembler code
 
 
-Version "20210404".
+Version "202104010".
 
 
 The following sections describe the methods in each functional area of this
@@ -765,6 +994,13 @@ module.  For an alphabetic listing of all methods by name see L<Index|/Index>.
 
 Generate assembler code that can be assembled with Nasm
 
+=head2 SetLabel($l)
+
+Set a label in the code section
+
+     Parameter  Description
+  1  $l         Label
+
 =head2 Start()
 
 Initialize the assembler
@@ -773,13 +1009,13 @@ Initialize the assembler
 B<Example:>
 
 
-  
+
     Start;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutString "Hello World";
     Exit;
     ok assemble =~ m(Hello World);
-  
+
 
 =head2 Ds(@d)
 
@@ -793,7 +1029,7 @@ B<Example:>
 
     Start;
     my $q = Rs('a'..'z');
-  
+
     my $d = Ds('0'x64);                                                           # Output area  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     Vmovdqu32(xmm0, "[$q]");                                                      # Load
@@ -802,7 +1038,7 @@ B<Example:>
     PrintOutString($d, 16);
     Exit;
     ok assemble() =~ m(efghabcdmnopijkl)s;
-  
+
 
 =head2 Rs(@d)
 
@@ -817,14 +1053,14 @@ B<Example:>
     Start;
     Comment "Print a string from memory";
     my $s = "Hello World";
-  
+
     my $m = Rs($s);  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     Mov rsi, $m;
     PrintOutString rsi, length($s);
     Exit;
     ok assemble =~ m(Hello World);
-  
+
 
 =head2 Dbwdq($s, @d)
 
@@ -909,7 +1145,7 @@ B<Example:>
 
 
     Start;
-  
+
     Comment "Print a string from memory";  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     my $s = "Hello World";
@@ -918,7 +1154,7 @@ B<Example:>
     PrintOutString rsi, length($s);
     Exit;
     ok assemble =~ m(Hello World);
-  
+
 
 =head2 Exit($c)
 
@@ -932,11 +1168,11 @@ B<Example:>
 
     Start;
     PrintOutString "Hello World";
-  
+
     Exit;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     ok assemble =~ m(Hello World);
-  
+
 
 =head2 SaveFirstFour()
 
@@ -968,54 +1204,56 @@ Restore the first 7 parameter registers
 Restore the first 7 parameter registers except rax which is being used to return the result
 
 
-=head2 Lea($target, $source)
+=head2 If($then, $else)
 
-Load effective address
+If
 
      Parameter  Description
-  1  $target    Target
-  2  $source    Source
+  1  $then      Then - required
+  2  $else      Else - optional
 
 B<Example:>
 
 
     Start;
-    my $q = Rs('abababab');
-    Mov(rax, 1);
-    Mov(rbx, 2);
-    Mov(rcx, 3);
-    Mov(rdx, 4);
-    Mov(r8,  5);
-  
-    Lea r9,  "[rax+rbx]";  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+    Mov rax, 0;
+    Test rax,rax;
 
-    PrintOutRegistersInHex;
+    If  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+
+     {PrintOutRegisterInHex rax;
+     } sub
+     {PrintOutRegisterInHex rbx;
+     };
+    Mov rax, 1;
+    Test rax,rax;
+
+    If  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+
+     {PrintOutRegisterInHex rcx;
+     } sub
+     {PrintOutRegisterInHex rdx;
+     };
     Exit;
-    ok assemble() =~ m(r8: 0000 0000 0000 0005.*r9: 0000 0000 0000 0003.*rax: 0000 0000 0000 0001)s;
-  
+    ok assemble() =~ m(rbx.*rcx)s;
 
-=head2 Mov($target, $source)
 
-Move data
+=head2 For($body, $register, $limit, $increment)
+
+For
+
+     Parameter   Description
+  1  $body       Body
+  2  $register   Register
+  3  $limit      Limit on loop
+  4  $increment  Increment
+
+=head2 registerSize($r)
+
+Return the size of a register
 
      Parameter  Description
-  1  $target    Target
-  2  $source    Source
-
-B<Example:>
-
-
-    Start;
-    Comment "Print a string from memory";
-    my $s = "Hello World";
-    my $m = Rs($s);
-  
-    Mov rsi, $m;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
-
-    PrintOutString rsi, length($s);
-    Exit;
-    ok assemble =~ m(Hello World);
-  
+  1  $r         Register
 
 =head2 PushR(@r)
 
@@ -1026,7 +1264,7 @@ Push registers onto the stack
 
 =head2 PopR(@r)
 
-Pop registers in reverse order from the stack so the same parameter list can be shared with pushR
+Pop registers from the stack
 
      Parameter  Description
   1  @r         Register
@@ -1043,29 +1281,20 @@ B<Example:>
     PrintOutString($d, 64);
     Sub rsp, 64;
     Vmovdqu64 "[rsp]", zmm0;
-  
+
     PopR rax;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutRaxInHex;
     Exit;
     ok assemble() =~ m(efghabcdmnopijklefghabcdmnopijklefghabcdmnopijklefghabcdmnopijkl)s;
-  
 
-=head2 Add($target, $source)
 
-Add
+=head2 PeekR($r)
 
-     Parameter  Description
-  1  $target    Target
-  2  $source    Source
-
-=head2 Sub($target, $source)
-
-Subtract
+Peek at register on stack
 
      Parameter  Description
-  1  $target    Target
-  2  $source    Source
+  1  $r         Register
 
 =head2 PrintOutNl()
 
@@ -1083,7 +1312,7 @@ B<Example:>
     PrintOutString rsi, length($s);
     Exit;
     ok assemble =~ m(Hello World);
-  
+
 
 =head2 PrintOutString($string, $length)
 
@@ -1097,12 +1326,12 @@ B<Example:>
 
 
     Start;
-  
+
     PrintOutString "Hello World";  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     Exit;
     ok assemble =~ m(Hello World);
-  
+
 
 =head2 PrintOutRaxInHex()
 
@@ -1116,19 +1345,51 @@ B<Example:>
     my $q = Rs('abababab');
     Mov(rax, "[$q]");
     PrintOutString "rax: ";
-  
+
     PrintOutRaxInHex;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutNl;
     Xor rax, rax;
     PrintOutString "rax: ";
-  
+
     PrintOutRaxInHex;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutNl;
     Exit;
     ok assemble() =~ m(rax: 6261 6261 6261 6261.*rax: 0000 0000 0000 0000)s;
-  
+
+
+=head2 ClearRegisters(@registers)
+
+Clear registers by setting them to zero
+
+     Parameter   Description
+  1  @registers  Registers
+
+=head2 ReverseBytesInRax()
+
+Reverse the bytes in rax
+
+
+=head2 PrintOutRaxInReverseInHex()
+
+Write the content of register rax to stderr in hexadecimal in little endian notation
+
+
+B<Example:>
+
+
+    Start;
+    Mov rax, 0x88776655;
+    Shl rax, 32;
+    Or  rax, 0x44332211;
+    PrintOutRaxInHex;
+
+    PrintOutRaxInReverseInHex;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+
+    Exit;
+    ok assemble() =~ m(8877 6655 4433 2211 1122 3344 5566 7788)s;
+
 
 =head2 PrintOutRegisterInHex($r)
 
@@ -1143,12 +1404,22 @@ B<Example:>
     Start;
     my $q = Rs(('a'..'p')x4);
     Mov r8,"[$q]";
-  
+
     PrintOutRegisterInHex r8;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     Exit;
     ok assemble() =~ m(r8: 6867 6665 6463 6261)s;
-  
+
+
+=head2 PrintOutRipInHex()
+
+Print the instruction pointer in hex
+
+
+=head2 PrintOutRflagsInHex()
+
+Print the flags register in hex
+
 
 =head2 PrintOutRegistersInHex()
 
@@ -1166,147 +1437,22 @@ B<Example:>
     Mov(rdx, 4);
     Mov(r8,  5);
     Lea r9,  "[rax+rbx]";
-  
+
     PrintOutRegistersInHex;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     Exit;
-    ok assemble() =~ m(r8: 0000 0000 0000 0005.*r9: 0000 0000 0000 0003.*rax: 0000 0000 0000 0001)s;
-  
-
-=head2 Xor($t, $s)
-
-Xor
-
-     Parameter  Description
-  1  $t         Target
-  2  $s         Source
-
-B<Example:>
+    my $r = assemble();
+    ok $r =~ m( r8: 0000 0000 0000 0005.* r9: 0000 0000 0000 0003.*rax: 0000 0000 0000 0001)s;
+    ok $r =~ m(rbx: 0000 0000 0000 0002.*rcx: 0000 0000 0000 0003.*rdx: 0000 0000 0000 0004)s;
 
 
-    Start;
-    my $q = Rs('abababab');
-    Mov(rax, "[$q]");
-    PrintOutString "rax: ";
-    PrintOutRaxInHex;
-    PrintOutNl;
-  
-    Xor rax, rax;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+=head2 PrintOutMemoryInHex($addr, $length)
 
-    PrintOutString "rax: ";
-    PrintOutRaxInHex;
-    PrintOutNl;
-    Exit;
-    ok assemble() =~ m(rax: 6261 6261 6261 6261.*rax: 0000 0000 0000 0000)s;
-  
-
-=head2 Test($t, $s)
-
-Test
+Print the specified number of bytes from the specified address in hex
 
      Parameter  Description
-  1  $t         Target
-  2  $s         Source
-
-=head2 Vmovdqu8($r, $m)
-
-Move memory in 8 bit blocks to an x/y/zmm* register
-
-     Parameter  Description
-  1  $r         Register
-  2  $m         Memory
-
-B<Example:>
-
-
-    Start;
-    my $q = Rs('a'..'p');
-  
-    Vmovdqu8 xmm0, "[$q]";  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
-
-    PrintOutRegisterInHex xmm0;
-    Exit;
-    ok assemble() =~ m(xmm0: 706F 6E6D 6C6B 6A69   6867 6665 6463 6261)s;
-  
-
-=head2 Vmovdqu32($r, $m)
-
-Move memory in 32 bit blocks to an x/y/zmm* register
-
-     Parameter  Description
-  1  $r         Register
-  2  $m         Memory
-
-B<Example:>
-
-
-    Start;
-    my $q = Rs('a'..'z');
-    my $d = Ds('0'x64);                                                           # Output area
-  
-    Vmovdqu32(xmm0, "[$q]");                                                      # Load  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
-
-    Vprolq   (xmm0,   xmm0, 32);                                                  # Rotate double words in quad words
-  
-    Vmovdqu32("[$d]", xmm0);                                                      # Save  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
-
-    PrintOutString($d, 16);
-    Exit;
-    ok assemble() =~ m(efghabcdmnopijkl)s;
-  
-
-=head2 Vmovdqu64($r, $m)
-
-Move memory in 64 bit blocks to an x/y/zmm* register
-
-     Parameter  Description
-  1  $r         Register
-  2  $m         Memory
-
-B<Example:>
-
-
-    Start;
-    my $q = Rs(('a'..'p')x4);
-    my $d = Ds('0'x128);
-    Vmovdqu32(zmm0, "[$q]");
-    Vprolq   (zmm0,   zmm0, 32);
-    Vmovdqu32("[$d]", zmm0);
-    PrintOutString($d, 64);
-    Sub rsp, 64;
-  
-    Vmovdqu64 "[rsp]", zmm0;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
-
-    PopR rax;
-    PrintOutRaxInHex;
-    Exit;
-    ok assemble() =~ m(efghabcdmnopijklefghabcdmnopijklefghabcdmnopijklefghabcdmnopijkl)s;
-  
-
-=head2 Vprolq($r, $m, $bits)
-
-Rotate left within quad word indicated number of bits
-
-     Parameter  Description
-  1  $r         Register
-  2  $m         Memory
-  3  $bits      Number of bits to rotate
-
-B<Example:>
-
-
-    Start;
-    my $q = Rs('a'..'z');
-    my $d = Ds('0'x64);                                                           # Output area
-    Vmovdqu32(xmm0, "[$q]");                                                      # Load
-  
-    Vprolq   (xmm0,   xmm0, 32);                                                  # Rotate double words in quad words  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
-
-    Vmovdqu32("[$d]", xmm0);                                                      # Save
-    PrintOutString($d, 16);
-    Exit;
-    ok assemble() =~ m(efghabcdmnopijkl)s;
-  
+  1  $addr      Address
+  2  $length    Length
 
 =head2 allocateMemory($s)
 
@@ -1322,7 +1468,7 @@ B<Example:>
     my $N = 2048;
     my $n = Rq($N);
     my $q = Rs('a'..'p');
-  
+
     allocateMemory "[$n]";  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutRegisterInHex rax;
@@ -1330,14 +1476,38 @@ B<Example:>
     Vmovdqu8 "[rax]", xmm0;
     PrintOutString rax,16;
     PrintOutNl;
-  
+
     Mov rbx, rax;
     freeMemory rbx, "[$n]";
     PrintOutRegisterInHex rax;
     Vmovdqu8 "[rbx]", xmm0;
     Exit;
     ok assemble() =~ m(abcdefghijklmnop)s;
-  
+
+    Start;
+    my $N = 4096;
+    my $S = registerSize rax;
+
+    allocateMemory $N;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+
+    PrintOutRegistersInHex;
+    Mov rbx, $N;
+    PushR rbx;
+    PushR rax;
+    MemoryClear 0, $S;
+    Mov rbx, $N-5;
+    PrintOutString rax, rbx;
+    PrintOutMemoryInHex rax, rbx;
+    Exit;
+    ok assemble() =~ m(abcdefghijklmnop)s;
+
+
+=head2 ReadFileIntoMemory($file)
+
+Read a file into memory using mmap
+
+     Parameter  Description
+  1  $file      Address of file name
 
 =head2 freeMemory($a, $l)
 
@@ -1360,16 +1530,31 @@ B<Example:>
     Vmovdqu8 "[rax]", xmm0;
     PrintOutString rax,16;
     PrintOutNl;
-  
+
     Mov rbx, rax;
-  
+
     freeMemory rbx, "[$n]";  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutRegisterInHex rax;
     Vmovdqu8 "[rbx]", xmm0;
     Exit;
     ok assemble() =~ m(abcdefghijklmnop)s;
-  
+
+    Start;
+    my $N = 4096;
+    my $S = registerSize rax;
+    allocateMemory $N;
+    PrintOutRegistersInHex;
+    Mov rbx, $N;
+    PushR rbx;
+    PushR rax;
+    MemoryClear 0, $S;
+    Mov rbx, $N-5;
+    PrintOutString rax, rbx;
+    PrintOutMemoryInHex rax, rbx;
+    Exit;
+    ok assemble() =~ m(abcdefghijklmnop)s;
+
 
 =head2 Fork()
 
@@ -1380,10 +1565,10 @@ B<Example:>
 
 
     Start;                                                                        # Start the program
-  
+
     Fork;                                                                         # Fork  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-  
+
     Test rax,rax;
     If                                                                            # Parent
      {Mov rbx, rax;
@@ -1404,32 +1589,32 @@ B<Example:>
       Mov r10,rax;
       PrintOutRegisterInHex r10;
      };
-  
+
     Exit;                                                                         # Return to operating system
-  
+
     my $r = assemble();
-  
+
   #    r8: 0000 0000 0000 0000   #1 Return from fork as seen by child
   #    r9: 0000 0000 0003 0C63   #2 Pid of child
   #   r10: 0000 0000 0003 0C60   #3 Pid of parent from child
   #   rax: 0000 0000 0003 0C63   #4 Return from fork as seen by parent
   #   rbx: 0000 0000 0003 0C63   #5 Wait for child pid result
   #   rcx: 0000 0000 0003 0C60   #6 Pid of parent
-  
+
     if ($r =~ m(r8:( 0000){4}.*r9:(.*)\s{5,}r10:(.*)\s{5,}rax:(.*)\s{5,}rbx:(.*)\s{5,}rcx:(.*)\s{2,})s)
      {ok $2 eq $4;
       ok $2 eq $5;
       ok $3 eq $6;
       ok $2 gt $6;
      }
-  
+
     Start;                                                                        # Start the program
     GetUid;                                                                       # Userid
     PrintOutRegisterInHex rax;
     Exit;                                                                         # Return to operating system
     my $r = assemble();
     ok $r =~ m(rax:( 0000){3});
-  
+
 
 =head2 GetPid()
 
@@ -1441,14 +1626,14 @@ B<Example:>
 
     Start;                                                                        # Start the program
     Fork;                                                                         # Fork
-  
+
     Test rax,rax;
     If                                                                            # Parent
      {Mov rbx, rax;
       WaitPid;
       PrintOutRegisterInHex rax;
       PrintOutRegisterInHex rbx;
-  
+
       GetPid;                                                                     # Pid of parent as seen in parent  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
       Mov rcx,rax;
@@ -1457,7 +1642,7 @@ B<Example:>
     sub                                                                           # Child
      {Mov r8,rax;
       PrintOutRegisterInHex r8;
-  
+
       GetPid;                                                                     # Child pid as seen in child  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
       Mov r9,rax;
@@ -1466,32 +1651,32 @@ B<Example:>
       Mov r10,rax;
       PrintOutRegisterInHex r10;
      };
-  
+
     Exit;                                                                         # Return to operating system
-  
+
     my $r = assemble();
-  
+
   #    r8: 0000 0000 0000 0000   #1 Return from fork as seen by child
   #    r9: 0000 0000 0003 0C63   #2 Pid of child
   #   r10: 0000 0000 0003 0C60   #3 Pid of parent from child
   #   rax: 0000 0000 0003 0C63   #4 Return from fork as seen by parent
   #   rbx: 0000 0000 0003 0C63   #5 Wait for child pid result
   #   rcx: 0000 0000 0003 0C60   #6 Pid of parent
-  
+
     if ($r =~ m(r8:( 0000){4}.*r9:(.*)\s{5,}r10:(.*)\s{5,}rax:(.*)\s{5,}rbx:(.*)\s{5,}rcx:(.*)\s{2,})s)
      {ok $2 eq $4;
       ok $2 eq $5;
       ok $3 eq $6;
       ok $2 gt $6;
      }
-  
+
     Start;                                                                        # Start the program
     GetUid;                                                                       # Userid
     PrintOutRegisterInHex rax;
     Exit;                                                                         # Return to operating system
     my $r = assemble();
     ok $r =~ m(rax:( 0000){3});
-  
+
 
 =head2 GetPPid()
 
@@ -1503,7 +1688,7 @@ B<Example:>
 
     Start;                                                                        # Start the program
     Fork;                                                                         # Fork
-  
+
     Test rax,rax;
     If                                                                            # Parent
      {Mov rbx, rax;
@@ -1520,38 +1705,38 @@ B<Example:>
       GetPid;                                                                     # Child pid as seen in child
       Mov r9,rax;
       PrintOutRegisterInHex r9;
-  
+
       GetPPid;                                                                    # Parent pid as seen in child  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
       Mov r10,rax;
       PrintOutRegisterInHex r10;
      };
-  
+
     Exit;                                                                         # Return to operating system
-  
+
     my $r = assemble();
-  
+
   #    r8: 0000 0000 0000 0000   #1 Return from fork as seen by child
   #    r9: 0000 0000 0003 0C63   #2 Pid of child
   #   r10: 0000 0000 0003 0C60   #3 Pid of parent from child
   #   rax: 0000 0000 0003 0C63   #4 Return from fork as seen by parent
   #   rbx: 0000 0000 0003 0C63   #5 Wait for child pid result
   #   rcx: 0000 0000 0003 0C60   #6 Pid of parent
-  
+
     if ($r =~ m(r8:( 0000){4}.*r9:(.*)\s{5,}r10:(.*)\s{5,}rax:(.*)\s{5,}rbx:(.*)\s{5,}rcx:(.*)\s{2,})s)
      {ok $2 eq $4;
       ok $2 eq $5;
       ok $3 eq $6;
       ok $2 gt $6;
      }
-  
+
     Start;                                                                        # Start the program
     GetUid;                                                                       # Userid
     PrintOutRegisterInHex rax;
     Exit;                                                                         # Return to operating system
     my $r = assemble();
     ok $r =~ m(rax:( 0000){3});
-  
+
 
 =head2 GetUid()
 
@@ -1568,11 +1753,11 @@ B<Example:>
 
     Start;                                                                        # Start the program
     Fork;                                                                         # Fork
-  
+
     Test rax,rax;
     If                                                                            # Parent
      {Mov rbx, rax;
-  
+
       WaitPid;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
       PrintOutRegisterInHex rax;
@@ -1591,32 +1776,32 @@ B<Example:>
       Mov r10,rax;
       PrintOutRegisterInHex r10;
      };
-  
+
     Exit;                                                                         # Return to operating system
-  
+
     my $r = assemble();
-  
+
   #    r8: 0000 0000 0000 0000   #1 Return from fork as seen by child
   #    r9: 0000 0000 0003 0C63   #2 Pid of child
   #   r10: 0000 0000 0003 0C60   #3 Pid of parent from child
   #   rax: 0000 0000 0003 0C63   #4 Return from fork as seen by parent
   #   rbx: 0000 0000 0003 0C63   #5 Wait for child pid result
   #   rcx: 0000 0000 0003 0C60   #6 Pid of parent
-  
+
     if ($r =~ m(r8:( 0000){4}.*r9:(.*)\s{5,}r10:(.*)\s{5,}rax:(.*)\s{5,}rbx:(.*)\s{5,}rcx:(.*)\s{2,})s)
      {ok $2 eq $4;
       ok $2 eq $5;
       ok $3 eq $6;
       ok $2 gt $6;
      }
-  
+
     Start;                                                                        # Start the program
     GetUid;                                                                       # Userid
     PrintOutRegisterInHex rax;
     Exit;                                                                         # Return to operating system
     my $r = assemble();
     ok $r =~ m(rax:( 0000){3});
-  
+
 
 =head2 readTimeStampCounter()
 
@@ -1628,7 +1813,7 @@ B<Example:>
 
     Start;
     for(1..10)
-  
+
      {readTimeStampCounter;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
       PrintOutRegisterInHex rax;
@@ -1638,7 +1823,123 @@ B<Example:>
 /, assemble();
     my @S = sort @s;
     is_deeply \@s, \@S;
-  
+
+
+=head2 OpenRead($file)
+
+Open a file for read
+
+     Parameter  Description
+  1  $file      File
+
+B<Example:>
+
+
+    Start;                                                                        # Start the program
+    my $f = Rs($0);                                                               # File to stat
+
+    OpenRead($f);                                                                 # Open file  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+
+    PrintOutRegisterInHex rax;
+    Close(rax);                                                                   # Close file
+    PrintOutRegisterInHex rax;
+    Exit;                                                                         # Return to operating system
+    my $r = assemble();
+    ok $r =~ m(( 0000){3} 0003)i;                                                 # Expected file number
+    ok $r =~ m(( 0000){4})i;                                                      # Expected file number
+
+
+=head2 Close($fdes)
+
+Close a file descriptor
+
+     Parameter  Description
+  1  $fdes      File descriptor
+
+B<Example:>
+
+
+    Start;                                                                        # Start the program
+    my $f = Rs($0);                                                               # File to stat
+    OpenRead($f);                                                                 # Open file
+    PrintOutRegisterInHex rax;
+
+    Close(rax);                                                                   # Close file  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+
+    PrintOutRegisterInHex rax;
+    Exit;                                                                         # Return to operating system
+    my $r = assemble();
+    ok $r =~ m(( 0000){3} 0003)i;                                                 # Expected file number
+    ok $r =~ m(( 0000){4})i;                                                      # Expected file number
+
+
+=head2 localData()
+
+Map local data
+
+
+=head2 LocalData::start($local)
+
+Start a local data area on the stack
+
+     Parameter  Description
+  1  $local     Local data descriptor
+
+=head2 LocalData::free($local)
+
+Free a local data area on the stack
+
+     Parameter  Description
+  1  $local     Local data descriptor
+
+=head2 LocalData::variable($local, $length, $comment)
+
+Add a local variable
+
+     Parameter  Description
+  1  $local     Local data descriptor
+  2  $length    Length of data
+  3  $comment   Optional comment
+
+=head2 LocalVariable::stack($variable)
+
+Address a local variable on the stack
+
+     Parameter  Description
+  1  $variable  Variable
+
+=head2 LocalData::allocate8($local, $comment)
+
+Add an 8 byte local variable
+
+     Parameter  Description
+  1  $local     Local data descriptor
+  2  $comment   Optional comment
+
+=head2 MemoryClear($addr, $length)
+
+Clear memory
+
+     Parameter  Description
+  1  $addr      Stack offset of buffer address
+  2  $length    Stack offset of length of buffer
+
+=head2 Read($fileDes, $addr, $length)
+
+Read data the specified file descriptor into the specified buffer of specified length
+
+     Parameter  Description
+  1  $fileDes   Stack offset of file descriptor
+  2  $addr      Stack offset of buffer address
+  3  $length    Stack offset of length of buffer
+
+=head2 ReadFile($file, $reg)
+
+Read a file into memory returning its address and length in the named x|y|zmm* register
+
+     Parameter  Description
+  1  $file      File
+  2  $reg       Register
 
 =head2 StatSize($file)
 
@@ -1647,39 +1948,21 @@ Stat a file to get its size in rax
      Parameter  Description
   1  $file      File
 
-=head2 If($then, $else)
-
-If
-
-     Parameter  Description
-  1  $then      Then - required
-  2  $else      Else - optional
-
 B<Example:>
 
 
-    Start;
-    Mov rax, 0;
-    Test rax,rax;
-  
-    If  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+    Start;                                                                        # Start the program
+    my $f = Rs($0);                                                               # File to stat
 
-     {PrintOutRegisterInHex rax;
-     } sub
-     {PrintOutRegisterInHex rbx;
-     };
-    Mov rax, 1;
-    Test rax,rax;
-  
-    If  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+    StatSize($f);                                                                 # Stat the file  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-     {PrintOutRegisterInHex rcx;
-     } sub
-     {PrintOutRegisterInHex rdx;
-     };
-    Exit;
-    ok assemble() =~ m(rbx.*rcx)s;
-  
+    PrintOutRegisterInHex rax;
+    Exit;                                                                         # Return to operating system
+    my $r = assemble() =~ s( ) ()gsr;
+    if ($r =~ m(rax:([0-9a-f]{16}))is)                                            # Compare file size obtained with that from fileSize()
+     {is_deeply $1, sprintf("%016X", fileSize($0));
+     }
+
 
 =head2 assemble(%options)
 
@@ -1694,10 +1977,10 @@ B<Example:>
     Start;
     PrintOutString "Hello World";
     Exit;
-  
+
     ok assemble =~ m(Hello World);  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-  
+
 
 
 =head1 Private Methods
@@ -1711,105 +1994,129 @@ Create a unique label
 =head1 Index
 
 
-1 L<Add|/Add> - Add
+1 L<allocateMemory|/allocateMemory> - Allocate memory via mmap
 
-2 L<allocateMemory|/allocateMemory> - Allocate memory via mmap
+2 L<assemble|/assemble> - Assemble the generated code
 
-3 L<assemble|/assemble> - Assemble the generated code
+3 L<ClearRegisters|/ClearRegisters> - Clear registers by setting them to zero
 
-4 L<Comment|/Comment> - Insert a comment into the assembly code
+4 L<Close|/Close> - Close a file descriptor
 
-5 L<Db|/Db> - Layout bytes in the data segment and return their label
+5 L<Comment|/Comment> - Insert a comment into the assembly code
 
-6 L<Dbwdq|/Dbwdq> - Layout data
+6 L<Db|/Db> - Layout bytes in the data segment and return their label
 
-7 L<Dd|/Dd> - Layout double words in the data segment and return their label
+7 L<Dbwdq|/Dbwdq> - Layout data
 
-8 L<Dq|/Dq> - Layout quad words in the data segment and return their label
+8 L<Dd|/Dd> - Layout double words in the data segment and return their label
 
-9 L<Ds|/Ds> - Layout bytes in memory and return their label
+9 L<Dq|/Dq> - Layout quad words in the data segment and return their label
 
-10 L<Dw|/Dw> - Layout words in the data segment and return their label
+10 L<Ds|/Ds> - Layout bytes in memory and return their label
 
-11 L<Exit|/Exit> - Exit with the specified return code or zero if no return code supplied
+11 L<Dw|/Dw> - Layout words in the data segment and return their label
 
-12 L<Fork|/Fork> - Fork
+12 L<Exit|/Exit> - Exit with the specified return code or zero if no return code supplied
 
-13 L<freeMemory|/freeMemory> - Free memory via mmap
+13 L<For|/For> - For
 
-14 L<GetPid|/GetPid> - Get process identifier
+14 L<Fork|/Fork> - Fork
 
-15 L<GetPPid|/GetPPid> - Get parent process identifier
+15 L<freeMemory|/freeMemory> - Free memory via mmap
 
-16 L<GetUid|/GetUid> - Get userid of current process
+16 L<GetPid|/GetPid> - Get process identifier
 
-17 L<If|/If> - If
+17 L<GetPPid|/GetPPid> - Get parent process identifier
 
-18 L<label|/label> - Create a unique label
+18 L<GetUid|/GetUid> - Get userid of current process
 
-19 L<Lea|/Lea> - Load effective address
+19 L<If|/If> - If
 
-20 L<Mov|/Mov> - Move data
+20 L<label|/label> - Create a unique label
 
-21 L<PopR|/PopR> - Pop registers in reverse order from the stack so the same parameter list can be shared with pushR
+21 L<localData|/localData> - Map local data
 
-22 L<PrintOutNl|/PrintOutNl> - Write a new line
+22 L<LocalData::allocate8|/LocalData::allocate8> - Add an 8 byte local variable
 
-23 L<PrintOutRaxInHex|/PrintOutRaxInHex> - Write the content of register rax to stderr in hexadecimal in big endian notation
+23 L<LocalData::free|/LocalData::free> - Free a local data area on the stack
 
-24 L<PrintOutRegisterInHex|/PrintOutRegisterInHex> - Print any register as a hex string
+24 L<LocalData::start|/LocalData::start> - Start a local data area on the stack
 
-25 L<PrintOutRegistersInHex|/PrintOutRegistersInHex> - Print the general purpose registers in hex
+25 L<LocalData::variable|/LocalData::variable> - Add a local variable
 
-26 L<PrintOutString|/PrintOutString> - One: Write a constant string to sysout.
+26 L<LocalVariable::stack|/LocalVariable::stack> - Address a local variable on the stack
 
-27 L<PushR|/PushR> - Push registers onto the stack
+27 L<MemoryClear|/MemoryClear> - Clear memory
 
-28 L<Rb|/Rb> - Layout bytes in the data segment and return their label
+28 L<OpenRead|/OpenRead> - Open a file for read
 
-29 L<Rbwdq|/Rbwdq> - Layout data
+29 L<PeekR|/PeekR> - Peek at register on stack
 
-30 L<Rd|/Rd> - Layout double words in the data segment and return their label
+30 L<PopR|/PopR> - Pop registers from the stack
 
-31 L<readTimeStampCounter|/readTimeStampCounter> - Read the time stamp counter
+31 L<PrintOutMemoryInHex|/PrintOutMemoryInHex> - Print the specified number of bytes from the specified address in hex
 
-32 L<RestoreFirstFour|/RestoreFirstFour> - Restore the first 4 parameter registers
+32 L<PrintOutNl|/PrintOutNl> - Write a new line
 
-33 L<RestoreFirstFourExceptRax|/RestoreFirstFourExceptRax> - Restore the first 4 parameter registers except rax so it can return its value
+33 L<PrintOutRaxInHex|/PrintOutRaxInHex> - Write the content of register rax to stderr in hexadecimal in big endian notation
 
-34 L<RestoreFirstSeven|/RestoreFirstSeven> - Restore the first 7 parameter registers
+34 L<PrintOutRaxInReverseInHex|/PrintOutRaxInReverseInHex> - Write the content of register rax to stderr in hexadecimal in little endian notation
 
-35 L<RestoreFirstSevenExceptRax|/RestoreFirstSevenExceptRax> - Restore the first 7 parameter registers except rax which is being used to return the result
+35 L<PrintOutRegisterInHex|/PrintOutRegisterInHex> - Print any register as a hex string
 
-36 L<Rq|/Rq> - Layout quad words in the data segment and return their label
+36 L<PrintOutRegistersInHex|/PrintOutRegistersInHex> - Print the general purpose registers in hex
 
-37 L<Rs|/Rs> - Layout bytes in read only memory and return their label
+37 L<PrintOutRflagsInHex|/PrintOutRflagsInHex> - Print the flags register in hex
 
-38 L<Rw|/Rw> - Layout words in the data segment and return their label
+38 L<PrintOutRipInHex|/PrintOutRipInHex> - Print the instruction pointer in hex
 
-39 L<SaveFirstFour|/SaveFirstFour> - Save the first 4 parameter registers
+39 L<PrintOutString|/PrintOutString> - One: Write a constant string to sysout.
 
-40 L<SaveFirstSeven|/SaveFirstSeven> - Save the first 7 parameter registers
+40 L<PushR|/PushR> - Push registers onto the stack
 
-41 L<Start|/Start> - Initialize the assembler
+41 L<Rb|/Rb> - Layout bytes in the data segment and return their label
 
-42 L<StatSize|/StatSize> - Stat a file to get its size in rax
+42 L<Rbwdq|/Rbwdq> - Layout data
 
-43 L<Sub|/Sub> - Subtract
+43 L<Rd|/Rd> - Layout double words in the data segment and return their label
 
-44 L<Test|/Test> - Test
+44 L<Read|/Read> - Read data the specified file descriptor into the specified buffer of specified length
 
-45 L<Vmovdqu32|/Vmovdqu32> - Move memory in 32 bit blocks to an x/y/zmm* register
+45 L<ReadFile|/ReadFile> - Read a file into memory returning its address and length in the named x|y|zmm* register
 
-46 L<Vmovdqu64|/Vmovdqu64> - Move memory in 64 bit blocks to an x/y/zmm* register
+46 L<ReadFileIntoMemory|/ReadFileIntoMemory> - Read a file into memory using mmap
 
-47 L<Vmovdqu8|/Vmovdqu8> - Move memory in 8 bit blocks to an x/y/zmm* register
+47 L<readTimeStampCounter|/readTimeStampCounter> - Read the time stamp counter
 
-48 L<Vprolq|/Vprolq> - Rotate left within quad word indicated number of bits
+48 L<registerSize|/registerSize> - Return the size of a register
 
-49 L<WaitPid|/WaitPid> - Wait for the pid in rax to complete
+49 L<RestoreFirstFour|/RestoreFirstFour> - Restore the first 4 parameter registers
 
-50 L<Xor|/Xor> - Xor
+50 L<RestoreFirstFourExceptRax|/RestoreFirstFourExceptRax> - Restore the first 4 parameter registers except rax so it can return its value
+
+51 L<RestoreFirstSeven|/RestoreFirstSeven> - Restore the first 7 parameter registers
+
+52 L<RestoreFirstSevenExceptRax|/RestoreFirstSevenExceptRax> - Restore the first 7 parameter registers except rax which is being used to return the result
+
+53 L<ReverseBytesInRax|/ReverseBytesInRax> - Reverse the bytes in rax
+
+54 L<Rq|/Rq> - Layout quad words in the data segment and return their label
+
+55 L<Rs|/Rs> - Layout bytes in read only memory and return their label
+
+56 L<Rw|/Rw> - Layout words in the data segment and return their label
+
+57 L<SaveFirstFour|/SaveFirstFour> - Save the first 4 parameter registers
+
+58 L<SaveFirstSeven|/SaveFirstSeven> - Save the first 7 parameter registers
+
+59 L<SetLabel|/SetLabel> - Set a label in the code section
+
+60 L<Start|/Start> - Initialize the assembler
+
+61 L<StatSize|/StatSize> - Stat a file to get its size in rax
+
+62 L<WaitPid|/WaitPid> - Wait for the pid in rax to complete
 
 =head1 Installation
 
@@ -1865,7 +2172,7 @@ $ENV{PATH} = $ENV{PATH}.":/var/isde:sde";                                       
 if ($^O =~ m(bsd|linux)i)                                                       # Supported systems
  {if (confirmHasCommandLineCommand(q(nasm)) and                                 # Network assembler
       confirmHasCommandLineCommand(q(sde64)))                                   # Intel emulator
-   {plan tests => 20;
+   {plan tests => 26;
    }
   else
    {plan skip_all =>qq(Nasm or Intel 64 emulator not available);
@@ -1923,7 +2230,9 @@ if (1) {                                                                        
   Lea r9,  "[rax+rbx]";
   PrintOutRegistersInHex;
   Exit;
-  ok assemble() =~ m(r8: 0000 0000 0000 0005.*r9: 0000 0000 0000 0003.*rax: 0000 0000 0000 0001)s;
+  my $r = assemble();
+  ok $r =~ m( r8: 0000 0000 0000 0005.* r9: 0000 0000 0000 0003.*rax: 0000 0000 0000 0001)s;
+  ok $r =~ m(rbx: 0000 0000 0000 0002.*rcx: 0000 0000 0000 0003.*rdx: 0000 0000 0000 0004)s;
  }
 
 if (1) {                                                                        #TVmovdqu32 #TVprolq  #TDs
@@ -2107,9 +2416,7 @@ if (1) {                                                                        
   ok $r =~ m(rax:( 0000){3});
  }
 
-latest:;
-
-if (1) {                                                                        #TStat
+if (1) {                                                                        #TStatSize
   Start;                                                                        # Start the program
   my $f = Rs($0);                                                               # File to stat
   StatSize($f);                                                                 # Stat the file
@@ -2119,6 +2426,76 @@ if (1) {                                                                        
   if ($r =~ m(rax:([0-9a-f]{16}))is)                                            # Compare file size obtained with that from fileSize()
    {is_deeply $1, sprintf("%016X", fileSize($0));
    }
+ }
+
+if (1) {                                                                        #TOpenRead #TClose
+  Start;                                                                        # Start the program
+  my $f = Rs($0);                                                               # File to stat
+  OpenRead($f);                                                                 # Open file
+  PrintOutRegisterInHex rax;
+  Close(rax);                                                                   # Close file
+  PrintOutRegisterInHex rax;
+  Exit;                                                                         # Return to operating system
+  my $r = assemble();
+  ok $r =~ m(( 0000){3} 0003)i;                                                 # Expected file number
+  ok $r =~ m(( 0000){4})i;                                                      # Expected file number
+ }
+
+if (1) {                                                                        #TreadFile
+  Start;                                                                        # Start the program
+  For
+   {PrintOutRegisterInHex rax
+   } rax, 16, 1;
+  Exit;                                                                         # Return to operating system
+  my $r = assemble();
+  ok $r =~ m(( 0000){3} 0000)i;
+  ok $r =~ m(( 0000){3} 000F)i;
+ }
+
+if (1) {                                                                        #TPrintOutRaxInReverseInHex
+  Start;
+  Mov rax, 0x88776655;
+  Shl rax, 32;
+  Or  rax, 0x44332211;
+  PrintOutRaxInHex;
+  PrintOutRaxInReverseInHex;
+  Exit;
+  ok assemble() =~ m(8877 6655 4433 2211 1122 3344 5566 7788)s;
+ }
+
+if (0) {                                                                        #TallocateMemory #TfreeMemory
+  Start;
+  my $N = 4096;
+  my $S = registerSize rax;
+  allocateMemory $N;
+  PrintOutRegistersInHex;
+  Mov rbx, $N;
+  PushR rbx;
+  PushR rax;
+  MemoryClear 0, $S;
+  Mov rbx, $N-5;
+  PrintOutString rax, rbx;
+  PrintOutMemoryInHex rax, rbx;
+  Exit;
+  ok assemble() =~ m(abcdefghijklmnop)s;
+ }
+
+latest:;
+
+if (0) {                                                                        #TreadFile
+  say STDERR sprintf("%x", fileSize($0));
+  Start;                                                                        # Start the program
+  my $f = Rs($0);                                                               # File to stat
+  ReadFile($f, xmm0);                                                           # Read file
+  PrintOutRegisterInHex xmm0;
+  PushR xmm0;                                                                   # Stack xmm0
+  PopR (rbx,rax);                                                               # Unstack xmm0=(rax,rbx)=(buffer address, length)
+  PrintOutString rax, rbx;
+  #PrintOutMemoryInHex rax, rbx;
+  Exit;                                                                         # Return to operating system
+  my $r = assemble();
+#  ok $r =~ m(( 0000){3} 0003)i;                                                 # Expected file number
+#  ok $r =~ m(( 0000){4})i;                                                      # Expected file number
  }
 
 lll "Finished:", time - $start;
