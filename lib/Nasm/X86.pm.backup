@@ -6,7 +6,7 @@
 # podDocumentation
 # Indent opcodes by call depth, - replace push @text with a method call
 package Nasm::X86;
-our $VERSION = "20210404";
+our $VERSION = "202104010";
 use warnings FATAL => qw(all);
 use strict;
 use Carp qw(confess cluck);
@@ -994,6 +994,13 @@ module.  For an alphabetic listing of all methods by name see L<Index|/Index>.
 
 Generate assembler code that can be assembled with Nasm
 
+=head2 SetLabel($l)
+
+Set a label in the code section
+
+     Parameter  Description
+  1  $l         Label
+
 =head2 Start()
 
 Initialize the assembler
@@ -1197,54 +1204,56 @@ Restore the first 7 parameter registers
 Restore the first 7 parameter registers except rax which is being used to return the result
 
 
-=head2 Lea($target, $source)
+=head2 If($then, $else)
 
-Load effective address
+If
 
      Parameter  Description
-  1  $target    Target
-  2  $source    Source
+  1  $then      Then - required
+  2  $else      Else - optional
 
 B<Example:>
 
 
     Start;
-    my $q = Rs('abababab');
-    Mov(rax, 1);
-    Mov(rbx, 2);
-    Mov(rcx, 3);
-    Mov(rdx, 4);
-    Mov(r8,  5);
+    Mov rax, 0;
+    Test rax,rax;
 
-    Lea r9,  "[rax+rbx]";  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+    If  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-    PrintOutRegistersInHex;
+     {PrintOutRegisterInHex rax;
+     } sub
+     {PrintOutRegisterInHex rbx;
+     };
+    Mov rax, 1;
+    Test rax,rax;
+
+    If  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+
+     {PrintOutRegisterInHex rcx;
+     } sub
+     {PrintOutRegisterInHex rdx;
+     };
     Exit;
-    ok assemble() =~ m(r8: 0000 0000 0000 0005.*r9: 0000 0000 0000 0003.*rax: 0000 0000 0000 0001)s;
+    ok assemble() =~ m(rbx.*rcx)s;
 
 
-=head2 Mov($target, $source)
+=head2 For($body, $register, $limit, $increment)
 
-Move data
+For
+
+     Parameter   Description
+  1  $body       Body
+  2  $register   Register
+  3  $limit      Limit on loop
+  4  $increment  Increment
+
+=head2 registerSize($r)
+
+Return the size of a register
 
      Parameter  Description
-  1  $target    Target
-  2  $source    Source
-
-B<Example:>
-
-
-    Start;
-    Comment "Print a string from memory";
-    my $s = "Hello World";
-    my $m = Rs($s);
-
-    Mov rsi, $m;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
-
-    PrintOutString rsi, length($s);
-    Exit;
-    ok assemble =~ m(Hello World);
-
+  1  $r         Register
 
 =head2 PushR(@r)
 
@@ -1255,7 +1264,7 @@ Push registers onto the stack
 
 =head2 PopR(@r)
 
-Pop registers in reverse order from the stack so the same parameter list can be shared with pushR
+Pop registers from the stack
 
      Parameter  Description
   1  @r         Register
@@ -1280,21 +1289,12 @@ B<Example:>
     ok assemble() =~ m(efghabcdmnopijklefghabcdmnopijklefghabcdmnopijklefghabcdmnopijkl)s;
 
 
-=head2 Add($target, $source)
+=head2 PeekR($r)
 
-Add
-
-     Parameter  Description
-  1  $target    Target
-  2  $source    Source
-
-=head2 Sub($target, $source)
-
-Subtract
+Peek at register on stack
 
      Parameter  Description
-  1  $target    Target
-  2  $source    Source
+  1  $r         Register
 
 =head2 PrintOutNl()
 
@@ -1359,6 +1359,38 @@ B<Example:>
     ok assemble() =~ m(rax: 6261 6261 6261 6261.*rax: 0000 0000 0000 0000)s;
 
 
+=head2 ClearRegisters(@registers)
+
+Clear registers by setting them to zero
+
+     Parameter   Description
+  1  @registers  Registers
+
+=head2 ReverseBytesInRax()
+
+Reverse the bytes in rax
+
+
+=head2 PrintOutRaxInReverseInHex()
+
+Write the content of register rax to stderr in hexadecimal in little endian notation
+
+
+B<Example:>
+
+
+    Start;
+    Mov rax, 0x88776655;
+    Shl rax, 32;
+    Or  rax, 0x44332211;
+    PrintOutRaxInHex;
+
+    PrintOutRaxInReverseInHex;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+
+    Exit;
+    ok assemble() =~ m(8877 6655 4433 2211 1122 3344 5566 7788)s;
+
+
 =head2 PrintOutRegisterInHex($r)
 
 Print any register as a hex string
@@ -1377,6 +1409,16 @@ B<Example:>
 
     Exit;
     ok assemble() =~ m(r8: 6867 6665 6463 6261)s;
+
+
+=head2 PrintOutRipInHex()
+
+Print the instruction pointer in hex
+
+
+=head2 PrintOutRflagsInHex()
+
+Print the flags register in hex
 
 
 =head2 PrintOutRegistersInHex()
@@ -1399,143 +1441,18 @@ B<Example:>
     PrintOutRegistersInHex;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     Exit;
-    ok assemble() =~ m(r8: 0000 0000 0000 0005.*r9: 0000 0000 0000 0003.*rax: 0000 0000 0000 0001)s;
+    my $r = assemble();
+    ok $r =~ m( r8: 0000 0000 0000 0005.* r9: 0000 0000 0000 0003.*rax: 0000 0000 0000 0001)s;
+    ok $r =~ m(rbx: 0000 0000 0000 0002.*rcx: 0000 0000 0000 0003.*rdx: 0000 0000 0000 0004)s;
 
 
-=head2 Xor($t, $s)
+=head2 PrintOutMemoryInHex($addr, $length)
 
-Xor
-
-     Parameter  Description
-  1  $t         Target
-  2  $s         Source
-
-B<Example:>
-
-
-    Start;
-    my $q = Rs('abababab');
-    Mov(rax, "[$q]");
-    PrintOutString "rax: ";
-    PrintOutRaxInHex;
-    PrintOutNl;
-
-    Xor rax, rax;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
-
-    PrintOutString "rax: ";
-    PrintOutRaxInHex;
-    PrintOutNl;
-    Exit;
-    ok assemble() =~ m(rax: 6261 6261 6261 6261.*rax: 0000 0000 0000 0000)s;
-
-
-=head2 Test($t, $s)
-
-Test
+Print the specified number of bytes from the specified address in hex
 
      Parameter  Description
-  1  $t         Target
-  2  $s         Source
-
-=head2 Vmovdqu8($r, $m)
-
-Move memory in 8 bit blocks to an x/y/zmm* register
-
-     Parameter  Description
-  1  $r         Register
-  2  $m         Memory
-
-B<Example:>
-
-
-    Start;
-    my $q = Rs('a'..'p');
-
-    Vmovdqu8 xmm0, "[$q]";  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
-
-    PrintOutRegisterInHex xmm0;
-    Exit;
-    ok assemble() =~ m(xmm0: 706F 6E6D 6C6B 6A69   6867 6665 6463 6261)s;
-
-
-=head2 Vmovdqu32($r, $m)
-
-Move memory in 32 bit blocks to an x/y/zmm* register
-
-     Parameter  Description
-  1  $r         Register
-  2  $m         Memory
-
-B<Example:>
-
-
-    Start;
-    my $q = Rs('a'..'z');
-    my $d = Ds('0'x64);                                                           # Output area
-
-    Vmovdqu32(xmm0, "[$q]");                                                      # Load  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
-
-    Vprolq   (xmm0,   xmm0, 32);                                                  # Rotate double words in quad words
-
-    Vmovdqu32("[$d]", xmm0);                                                      # Save  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
-
-    PrintOutString($d, 16);
-    Exit;
-    ok assemble() =~ m(efghabcdmnopijkl)s;
-
-
-=head2 Vmovdqu64($r, $m)
-
-Move memory in 64 bit blocks to an x/y/zmm* register
-
-     Parameter  Description
-  1  $r         Register
-  2  $m         Memory
-
-B<Example:>
-
-
-    Start;
-    my $q = Rs(('a'..'p')x4);
-    my $d = Ds('0'x128);
-    Vmovdqu32(zmm0, "[$q]");
-    Vprolq   (zmm0,   zmm0, 32);
-    Vmovdqu32("[$d]", zmm0);
-    PrintOutString($d, 64);
-    Sub rsp, 64;
-
-    Vmovdqu64 "[rsp]", zmm0;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
-
-    PopR rax;
-    PrintOutRaxInHex;
-    Exit;
-    ok assemble() =~ m(efghabcdmnopijklefghabcdmnopijklefghabcdmnopijklefghabcdmnopijkl)s;
-
-
-=head2 Vprolq($r, $m, $bits)
-
-Rotate left within quad word indicated number of bits
-
-     Parameter  Description
-  1  $r         Register
-  2  $m         Memory
-  3  $bits      Number of bits to rotate
-
-B<Example:>
-
-
-    Start;
-    my $q = Rs('a'..'z');
-    my $d = Ds('0'x64);                                                           # Output area
-    Vmovdqu32(xmm0, "[$q]");                                                      # Load
-
-    Vprolq   (xmm0,   xmm0, 32);                                                  # Rotate double words in quad words  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
-
-    Vmovdqu32("[$d]", xmm0);                                                      # Save
-    PrintOutString($d, 16);
-    Exit;
-    ok assemble() =~ m(efghabcdmnopijkl)s;
-
+  1  $addr      Address
+  2  $length    Length
 
 =head2 allocateMemory($s)
 
@@ -1567,6 +1484,30 @@ B<Example:>
     Exit;
     ok assemble() =~ m(abcdefghijklmnop)s;
 
+    Start;
+    my $N = 4096;
+    my $S = registerSize rax;
+
+    allocateMemory $N;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+
+    PrintOutRegistersInHex;
+    Mov rbx, $N;
+    PushR rbx;
+    PushR rax;
+    MemoryClear 0, $S;
+    Mov rbx, $N-5;
+    PrintOutString rax, rbx;
+    PrintOutMemoryInHex rax, rbx;
+    Exit;
+    ok assemble() =~ m(abcdefghijklmnop)s;
+
+
+=head2 ReadFileIntoMemory($file)
+
+Read a file into memory using mmap
+
+     Parameter  Description
+  1  $file      Address of file name
 
 =head2 freeMemory($a, $l)
 
@@ -1596,6 +1537,21 @@ B<Example:>
 
     PrintOutRegisterInHex rax;
     Vmovdqu8 "[rbx]", xmm0;
+    Exit;
+    ok assemble() =~ m(abcdefghijklmnop)s;
+
+    Start;
+    my $N = 4096;
+    my $S = registerSize rax;
+    allocateMemory $N;
+    PrintOutRegistersInHex;
+    Mov rbx, $N;
+    PushR rbx;
+    PushR rax;
+    MemoryClear 0, $S;
+    Mov rbx, $N-5;
+    PrintOutString rax, rbx;
+    PrintOutMemoryInHex rax, rbx;
     Exit;
     ok assemble() =~ m(abcdefghijklmnop)s;
 
@@ -1869,6 +1825,122 @@ B<Example:>
     is_deeply \@s, \@S;
 
 
+=head2 OpenRead($file)
+
+Open a file for read
+
+     Parameter  Description
+  1  $file      File
+
+B<Example:>
+
+
+    Start;                                                                        # Start the program
+    my $f = Rs($0);                                                               # File to stat
+
+    OpenRead($f);                                                                 # Open file  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+
+    PrintOutRegisterInHex rax;
+    Close(rax);                                                                   # Close file
+    PrintOutRegisterInHex rax;
+    Exit;                                                                         # Return to operating system
+    my $r = assemble();
+    ok $r =~ m(( 0000){3} 0003)i;                                                 # Expected file number
+    ok $r =~ m(( 0000){4})i;                                                      # Expected file number
+
+
+=head2 Close($fdes)
+
+Close a file descriptor
+
+     Parameter  Description
+  1  $fdes      File descriptor
+
+B<Example:>
+
+
+    Start;                                                                        # Start the program
+    my $f = Rs($0);                                                               # File to stat
+    OpenRead($f);                                                                 # Open file
+    PrintOutRegisterInHex rax;
+
+    Close(rax);                                                                   # Close file  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+
+    PrintOutRegisterInHex rax;
+    Exit;                                                                         # Return to operating system
+    my $r = assemble();
+    ok $r =~ m(( 0000){3} 0003)i;                                                 # Expected file number
+    ok $r =~ m(( 0000){4})i;                                                      # Expected file number
+
+
+=head2 localData()
+
+Map local data
+
+
+=head2 LocalData::start($local)
+
+Start a local data area on the stack
+
+     Parameter  Description
+  1  $local     Local data descriptor
+
+=head2 LocalData::free($local)
+
+Free a local data area on the stack
+
+     Parameter  Description
+  1  $local     Local data descriptor
+
+=head2 LocalData::variable($local, $length, $comment)
+
+Add a local variable
+
+     Parameter  Description
+  1  $local     Local data descriptor
+  2  $length    Length of data
+  3  $comment   Optional comment
+
+=head2 LocalVariable::stack($variable)
+
+Address a local variable on the stack
+
+     Parameter  Description
+  1  $variable  Variable
+
+=head2 LocalData::allocate8($local, $comment)
+
+Add an 8 byte local variable
+
+     Parameter  Description
+  1  $local     Local data descriptor
+  2  $comment   Optional comment
+
+=head2 MemoryClear($addr, $length)
+
+Clear memory
+
+     Parameter  Description
+  1  $addr      Stack offset of buffer address
+  2  $length    Stack offset of length of buffer
+
+=head2 Read($fileDes, $addr, $length)
+
+Read data the specified file descriptor into the specified buffer of specified length
+
+     Parameter  Description
+  1  $fileDes   Stack offset of file descriptor
+  2  $addr      Stack offset of buffer address
+  3  $length    Stack offset of length of buffer
+
+=head2 ReadFile($file, $reg)
+
+Read a file into memory returning its address and length in the named x|y|zmm* register
+
+     Parameter  Description
+  1  $file      File
+  2  $reg       Register
+
 =head2 StatSize($file)
 
 Stat a file to get its size in rax
@@ -1876,38 +1948,20 @@ Stat a file to get its size in rax
      Parameter  Description
   1  $file      File
 
-=head2 If($then, $else)
-
-If
-
-     Parameter  Description
-  1  $then      Then - required
-  2  $else      Else - optional
-
 B<Example:>
 
 
-    Start;
-    Mov rax, 0;
-    Test rax,rax;
+    Start;                                                                        # Start the program
+    my $f = Rs($0);                                                               # File to stat
 
-    If  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+    StatSize($f);                                                                 # Stat the file  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-     {PrintOutRegisterInHex rax;
-     } sub
-     {PrintOutRegisterInHex rbx;
-     };
-    Mov rax, 1;
-    Test rax,rax;
-
-    If  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
-
-     {PrintOutRegisterInHex rcx;
-     } sub
-     {PrintOutRegisterInHex rdx;
-     };
-    Exit;
-    ok assemble() =~ m(rbx.*rcx)s;
+    PrintOutRegisterInHex rax;
+    Exit;                                                                         # Return to operating system
+    my $r = assemble() =~ s( ) ()gsr;
+    if ($r =~ m(rax:([0-9a-f]{16}))is)                                            # Compare file size obtained with that from fileSize()
+     {is_deeply $1, sprintf("%016X", fileSize($0));
+     }
 
 
 =head2 assemble(%options)
@@ -1940,105 +1994,129 @@ Create a unique label
 =head1 Index
 
 
-1 L<Add|/Add> - Add
+1 L<allocateMemory|/allocateMemory> - Allocate memory via mmap
 
-2 L<allocateMemory|/allocateMemory> - Allocate memory via mmap
+2 L<assemble|/assemble> - Assemble the generated code
 
-3 L<assemble|/assemble> - Assemble the generated code
+3 L<ClearRegisters|/ClearRegisters> - Clear registers by setting them to zero
 
-4 L<Comment|/Comment> - Insert a comment into the assembly code
+4 L<Close|/Close> - Close a file descriptor
 
-5 L<Db|/Db> - Layout bytes in the data segment and return their label
+5 L<Comment|/Comment> - Insert a comment into the assembly code
 
-6 L<Dbwdq|/Dbwdq> - Layout data
+6 L<Db|/Db> - Layout bytes in the data segment and return their label
 
-7 L<Dd|/Dd> - Layout double words in the data segment and return their label
+7 L<Dbwdq|/Dbwdq> - Layout data
 
-8 L<Dq|/Dq> - Layout quad words in the data segment and return their label
+8 L<Dd|/Dd> - Layout double words in the data segment and return their label
 
-9 L<Ds|/Ds> - Layout bytes in memory and return their label
+9 L<Dq|/Dq> - Layout quad words in the data segment and return their label
 
-10 L<Dw|/Dw> - Layout words in the data segment and return their label
+10 L<Ds|/Ds> - Layout bytes in memory and return their label
 
-11 L<Exit|/Exit> - Exit with the specified return code or zero if no return code supplied
+11 L<Dw|/Dw> - Layout words in the data segment and return their label
 
-12 L<Fork|/Fork> - Fork
+12 L<Exit|/Exit> - Exit with the specified return code or zero if no return code supplied
 
-13 L<freeMemory|/freeMemory> - Free memory via mmap
+13 L<For|/For> - For
 
-14 L<GetPid|/GetPid> - Get process identifier
+14 L<Fork|/Fork> - Fork
 
-15 L<GetPPid|/GetPPid> - Get parent process identifier
+15 L<freeMemory|/freeMemory> - Free memory via mmap
 
-16 L<GetUid|/GetUid> - Get userid of current process
+16 L<GetPid|/GetPid> - Get process identifier
 
-17 L<If|/If> - If
+17 L<GetPPid|/GetPPid> - Get parent process identifier
 
-18 L<label|/label> - Create a unique label
+18 L<GetUid|/GetUid> - Get userid of current process
 
-19 L<Lea|/Lea> - Load effective address
+19 L<If|/If> - If
 
-20 L<Mov|/Mov> - Move data
+20 L<label|/label> - Create a unique label
 
-21 L<PopR|/PopR> - Pop registers in reverse order from the stack so the same parameter list can be shared with pushR
+21 L<localData|/localData> - Map local data
 
-22 L<PrintOutNl|/PrintOutNl> - Write a new line
+22 L<LocalData::allocate8|/LocalData::allocate8> - Add an 8 byte local variable
 
-23 L<PrintOutRaxInHex|/PrintOutRaxInHex> - Write the content of register rax to stderr in hexadecimal in big endian notation
+23 L<LocalData::free|/LocalData::free> - Free a local data area on the stack
 
-24 L<PrintOutRegisterInHex|/PrintOutRegisterInHex> - Print any register as a hex string
+24 L<LocalData::start|/LocalData::start> - Start a local data area on the stack
 
-25 L<PrintOutRegistersInHex|/PrintOutRegistersInHex> - Print the general purpose registers in hex
+25 L<LocalData::variable|/LocalData::variable> - Add a local variable
 
-26 L<PrintOutString|/PrintOutString> - One: Write a constant string to sysout.
+26 L<LocalVariable::stack|/LocalVariable::stack> - Address a local variable on the stack
 
-27 L<PushR|/PushR> - Push registers onto the stack
+27 L<MemoryClear|/MemoryClear> - Clear memory
 
-28 L<Rb|/Rb> - Layout bytes in the data segment and return their label
+28 L<OpenRead|/OpenRead> - Open a file for read
 
-29 L<Rbwdq|/Rbwdq> - Layout data
+29 L<PeekR|/PeekR> - Peek at register on stack
 
-30 L<Rd|/Rd> - Layout double words in the data segment and return their label
+30 L<PopR|/PopR> - Pop registers from the stack
 
-31 L<readTimeStampCounter|/readTimeStampCounter> - Read the time stamp counter
+31 L<PrintOutMemoryInHex|/PrintOutMemoryInHex> - Print the specified number of bytes from the specified address in hex
 
-32 L<RestoreFirstFour|/RestoreFirstFour> - Restore the first 4 parameter registers
+32 L<PrintOutNl|/PrintOutNl> - Write a new line
 
-33 L<RestoreFirstFourExceptRax|/RestoreFirstFourExceptRax> - Restore the first 4 parameter registers except rax so it can return its value
+33 L<PrintOutRaxInHex|/PrintOutRaxInHex> - Write the content of register rax to stderr in hexadecimal in big endian notation
 
-34 L<RestoreFirstSeven|/RestoreFirstSeven> - Restore the first 7 parameter registers
+34 L<PrintOutRaxInReverseInHex|/PrintOutRaxInReverseInHex> - Write the content of register rax to stderr in hexadecimal in little endian notation
 
-35 L<RestoreFirstSevenExceptRax|/RestoreFirstSevenExceptRax> - Restore the first 7 parameter registers except rax which is being used to return the result
+35 L<PrintOutRegisterInHex|/PrintOutRegisterInHex> - Print any register as a hex string
 
-36 L<Rq|/Rq> - Layout quad words in the data segment and return their label
+36 L<PrintOutRegistersInHex|/PrintOutRegistersInHex> - Print the general purpose registers in hex
 
-37 L<Rs|/Rs> - Layout bytes in read only memory and return their label
+37 L<PrintOutRflagsInHex|/PrintOutRflagsInHex> - Print the flags register in hex
 
-38 L<Rw|/Rw> - Layout words in the data segment and return their label
+38 L<PrintOutRipInHex|/PrintOutRipInHex> - Print the instruction pointer in hex
 
-39 L<SaveFirstFour|/SaveFirstFour> - Save the first 4 parameter registers
+39 L<PrintOutString|/PrintOutString> - One: Write a constant string to sysout.
 
-40 L<SaveFirstSeven|/SaveFirstSeven> - Save the first 7 parameter registers
+40 L<PushR|/PushR> - Push registers onto the stack
 
-41 L<Start|/Start> - Initialize the assembler
+41 L<Rb|/Rb> - Layout bytes in the data segment and return their label
 
-42 L<StatSize|/StatSize> - Stat a file to get its size in rax
+42 L<Rbwdq|/Rbwdq> - Layout data
 
-43 L<Sub|/Sub> - Subtract
+43 L<Rd|/Rd> - Layout double words in the data segment and return their label
 
-44 L<Test|/Test> - Test
+44 L<Read|/Read> - Read data the specified file descriptor into the specified buffer of specified length
 
-45 L<Vmovdqu32|/Vmovdqu32> - Move memory in 32 bit blocks to an x/y/zmm* register
+45 L<ReadFile|/ReadFile> - Read a file into memory returning its address and length in the named x|y|zmm* register
 
-46 L<Vmovdqu64|/Vmovdqu64> - Move memory in 64 bit blocks to an x/y/zmm* register
+46 L<ReadFileIntoMemory|/ReadFileIntoMemory> - Read a file into memory using mmap
 
-47 L<Vmovdqu8|/Vmovdqu8> - Move memory in 8 bit blocks to an x/y/zmm* register
+47 L<readTimeStampCounter|/readTimeStampCounter> - Read the time stamp counter
 
-48 L<Vprolq|/Vprolq> - Rotate left within quad word indicated number of bits
+48 L<registerSize|/registerSize> - Return the size of a register
 
-49 L<WaitPid|/WaitPid> - Wait for the pid in rax to complete
+49 L<RestoreFirstFour|/RestoreFirstFour> - Restore the first 4 parameter registers
 
-50 L<Xor|/Xor> - Xor
+50 L<RestoreFirstFourExceptRax|/RestoreFirstFourExceptRax> - Restore the first 4 parameter registers except rax so it can return its value
+
+51 L<RestoreFirstSeven|/RestoreFirstSeven> - Restore the first 7 parameter registers
+
+52 L<RestoreFirstSevenExceptRax|/RestoreFirstSevenExceptRax> - Restore the first 7 parameter registers except rax which is being used to return the result
+
+53 L<ReverseBytesInRax|/ReverseBytesInRax> - Reverse the bytes in rax
+
+54 L<Rq|/Rq> - Layout quad words in the data segment and return their label
+
+55 L<Rs|/Rs> - Layout bytes in read only memory and return their label
+
+56 L<Rw|/Rw> - Layout words in the data segment and return their label
+
+57 L<SaveFirstFour|/SaveFirstFour> - Save the first 4 parameter registers
+
+58 L<SaveFirstSeven|/SaveFirstSeven> - Save the first 7 parameter registers
+
+59 L<SetLabel|/SetLabel> - Set a label in the code section
+
+60 L<Start|/Start> - Initialize the assembler
+
+61 L<StatSize|/StatSize> - Stat a file to get its size in rax
+
+62 L<WaitPid|/WaitPid> - Wait for the pid in rax to complete
 
 =head1 Installation
 
