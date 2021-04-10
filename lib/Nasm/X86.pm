@@ -6,7 +6,7 @@
 # podDocumentation
 # Indent opcodes by call depth, - replace push @text with a method call
 package Nasm::X86;
-our $VERSION = "20210404";
+our $VERSION = "202104010";
 use warnings FATAL => qw(all);
 use strict;
 use Carp qw(confess cluck);
@@ -982,7 +982,7 @@ see: L<https://github.com/philiprbrenan/NasmX86/blob/main/.github/workflows/main
 Generate Nasm assembler code
 
 
-Version "20210404".
+Version "202104010".
 
 
 The following sections describe the methods in each functional area of this
