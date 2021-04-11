@@ -6,7 +6,7 @@
 # podDocumentation
 # Indent opcodes by call depth, - replace push @text with a method call
 package Nasm::X86;
-our $VERSION = "202104012";
+our $VERSION = "202104013";
 use warnings FATAL => qw(all);
 use strict;
 use Carp qw(confess cluck);
@@ -979,8 +979,27 @@ Nasm::X86 - Generate Nasm assembler code
 
 =head1 Synopsis
 
-Write and run some assembler code to start a child process and wait for it,
-printing out the process identifiers of each process involved:
+Write and execute x64 instructions from perl, for example:
+
+Use avx512 instructions to reorder data using 512 bit zmm registers:
+
+  Start;
+  my $q = Rs my $s = join '', ('a'..'p')x4;;
+  Mov rax, Ds('0'x128);
+
+  Vmovdqu32 zmm0, "[$q]";
+  Vprolq    zmm1, zmm0, 32;
+  Vmovdqu32 "[rax]", zmm1;
+
+  Mov rdi, length $s;
+  PrintOutMemory;
+  Exit;
+
+  ok $s         =~ m(abcdefghijklmnopabcdefghijklmnopabcdefghijklmnopabcdefghijklmnop)s;
+  ok assemble() =~ m(efghabcdmnopijklefghabcdmnopijklefghabcdmnopijklefghabcdmnopijkl)s;
+
+Start a child process and wait for it, printing out the process identifiers of
+each process involved:
 
   Start;                                                                        # Start the program
   Fork;                                                                         # Fork
@@ -1039,7 +1058,7 @@ see: L<https://github.com/philiprbrenan/NasmX86/blob/main/.github/workflows/main
 Generate Nasm assembler code
 
 
-Version "202104012".
+Version "202104013".
 
 
 The following sections describe the methods in each functional area of this
@@ -1359,20 +1378,18 @@ B<Example:>
 
 
     Start;
-    my $q = Rs(('a'..'p')x4);
+    my $q = Rs my $s = join '', ('a'..'p')x4;;
     Mov rax, Ds('0'x128);
-    Vmovdqu32(zmm0, "[$q]");
-    Vprolq   (zmm0,   zmm0, 32);
-    Vmovdqu32("[rax]", zmm0);
-    Mov rdi, 64;
-    PrintOutMemory;
-    Sub rsp, 64;
-    Vmovdqu64 "[rsp]", zmm0;
   
-    PopR rax;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
-
-    PrintOutRaxInHex;
+    Vmovdqu32 zmm0, "[$q]";
+    Vprolq    zmm1, zmm0, 32;
+    Vmovdqu32 "[rax]", zmm1;
+  
+    Mov rdi, length $s;
+    PrintOutMemory;
     Exit;
+  
+    ok $s         =~ m(abcdefghijklmnopabcdefghijklmnopabcdefghijklmnopabcdefghijklmnop)s;
     ok assemble() =~ m(efghabcdmnopijklefghabcdmnopijklefghabcdmnopijklefghabcdmnopijkl)s;
   
 
@@ -1558,6 +1575,7 @@ B<Example:>
     allocateMemory;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutRegisterInHex rax;
+  
     Vmovdqu8 xmm0, "[$q]";
     Vmovdqu8 "[rax]", xmm0;
     Mov rdi,16;
@@ -1567,7 +1585,6 @@ B<Example:>
     Mov rdi, $N;
     freeMemory;
     PrintOutRegisterInHex rax;
-    Vmovdqu8 "[rbx]", xmm0;
     Exit;
     ok assemble() =~ m(abcdefghijklmnop)s;
   
@@ -1605,6 +1622,7 @@ B<Example:>
     Mov rax, $N;
     allocateMemory;
     PrintOutRegisterInHex rax;
+  
     Vmovdqu8 xmm0, "[$q]";
     Vmovdqu8 "[rax]", xmm0;
     Mov rdi,16;
@@ -1616,7 +1634,6 @@ B<Example:>
     freeMemory;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutRegisterInHex rax;
-    Vmovdqu8 "[rbx]", xmm0;
     Exit;
     ok assemble() =~ m(abcdefghijklmnop)s;
   
@@ -2260,7 +2277,7 @@ $ENV{PATH} = $ENV{PATH}.":/var/isde:sde";                                       
 if ($^O =~ m(bsd|linux)i)                                                       # Supported systems
  {if (confirmHasCommandLineCommand(q(nasm)) and                                 # Network assembler
       confirmHasCommandLineCommand(q(sde64)))                                   # Intel emulator
-   {plan tests => 29;
+   {plan tests => 30;
    }
   else
    {plan skip_all =>qq(Nasm or Intel 64 emulator not available);
@@ -2351,18 +2368,18 @@ if (1) {
 
 if (1) {                                                                        #TPopR #TVmovdqu64
   Start;
-  my $q = Rs(('a'..'p')x4);
+  my $q = Rs my $s = join '', ('a'..'p')x4;;
   Mov rax, Ds('0'x128);
-  Vmovdqu32(zmm0, "[$q]");
-  Vprolq   (zmm0,   zmm0, 32);
-  Vmovdqu32("[rax]", zmm0);
-  Mov rdi, 64;
+
+  Vmovdqu32 zmm0, "[$q]";
+  Vprolq    zmm1, zmm0, 32;
+  Vmovdqu32 "[rax]", zmm1;
+
+  Mov rdi, length $s;
   PrintOutMemory;
-  Sub rsp, 64;
-  Vmovdqu64 "[rsp]", zmm0;
-  PopR rax;
-  PrintOutRaxInHex;
   Exit;
+
+  ok $s         =~ m(abcdefghijklmnopabcdefghijklmnopabcdefghijklmnopabcdefghijklmnop)s;
   ok assemble() =~ m(efghabcdmnopijklefghabcdmnopijklefghabcdmnopijklefghabcdmnopijkl)s;
  }
 
@@ -2409,6 +2426,7 @@ if (1) {                                                                        
   Mov rax, $N;
   allocateMemory;
   PrintOutRegisterInHex rax;
+
   Vmovdqu8 xmm0, "[$q]";
   Vmovdqu8 "[rax]", xmm0;
   Mov rdi,16;
@@ -2418,7 +2436,6 @@ if (1) {                                                                        
   Mov rdi, $N;
   freeMemory;
   PrintOutRegisterInHex rax;
-  Vmovdqu8 "[rbx]", xmm0;
   Exit;
   ok assemble() =~ m(abcdefghijklmnop)s;
  }
