@@ -2616,7 +2616,7 @@ if (1) {                                                                        
   PrintOutMemory;                                                               # Print memory
   Exit;                                                                         # Return to operating system
   my $r = assemble();                                                           # Assemble and execute
-  ok index($r, readFile($0)) > -1;                                              # Output contains this file
+  ok index($r =~ s([^0x0-0x7f]) ()gsr, readFile($0) =~ s([^0x0-0x7f]) ()gsr)>-1;# Output contains this file
  }
 
 lll "Finished:", time - $start;
