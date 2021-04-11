@@ -644,7 +644,7 @@ sub PrintOutRegistersInHex                                                      
   Call $sub;
  }
 
-sub PrintOutMemoryInHex                                                         # Dump memeory from teh address in rax for the length in rdi
+sub PrintOutMemoryInHex                                                         # Dump memory from the address in rax for the length in rdi
  {@_ == 0 or confess;
   Comment "Print out memory in hex";
 
@@ -653,7 +653,7 @@ sub PrintOutMemoryInHex                                                         
     SaveFirstFour;
     Mov rsi,rax;                                                                # Position in memory
     Lea rdi,"[rax+rdi-$size]";
-    For                                                                           # Print string in blocks
+    For                                                                         # Print string in blocks
      {Mov rax, "[rsi]";
       ReverseBytesInRax;
       PrintOutRaxInHex;
@@ -664,7 +664,7 @@ sub PrintOutMemoryInHex                                                         
   Call $sub;
  }
 
-sub allocateMemory                                                              # Allocate the amount of memory specified in rax via mmap and return the address of the allocated memeory in rax
+sub allocateMemory                                                              # Allocate the amount of memory specified in rax via mmap and return the address of the allocated memory in rax
  {@_ == 0 or confess;
   Comment "Allocate memory";
 
@@ -860,7 +860,7 @@ sub MemoryClear()                                                               
   my $saveSize = SaveFirstFour;                                                 # Generated code
   PushR zmm0;                                                                   # Pump zeros with this register
   Lea rdi, "[rax+rdi-$size]";                                                   # Address of upper limit of buffer
-  ClearRegisters zmm0;                                                          # Clear the register that will be written inmto memory
+  ClearRegisters zmm0;                                                          # Clear the register that will be written into memory
 
   For                                                                           # Clear memory
    {Vmovdqu64 "[rax]", zmm0;
@@ -870,7 +870,7 @@ sub MemoryClear()                                                               
   RestoreFirstFour;
  }
 
-sub StatSize()                                                                  # Stat a file whise name is addressed by rax to get its size in rax
+sub StatSize()                                                                  # Stat a file whose name is addressed by rax to get its size in rax
  {@_ == 0 or confess;
   Comment "Stat a file for size";
   my $S = extractCStructure "#include <sys/stat.h>";                            # Get location of size field
@@ -2616,7 +2616,7 @@ if (1) {                                                                        
   PrintOutMemory;                                                               # Print memory
   Exit;                                                                         # Return to operating system
   my $r = assemble();                                                           # Assemble and execute
-  ok index($r, readFile($0)) > -1;                                              # Output contains this file
+  ok index($r =~ s([^0x0-0x7f]) ()gsr, readFile($0) =~ s([^0x0-0x7f]) ()gsr)>-1;# Output contains this file
  }
 
 lll "Finished:", time - $start;
