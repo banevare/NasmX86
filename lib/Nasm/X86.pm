@@ -2472,7 +2472,7 @@ $ENV{PATH} = $ENV{PATH}.":/var/isde:sde";                                       
 if ($^O =~ m(bsd|linux)i)                                                       # Supported systems
  {if (confirmHasCommandLineCommand(q(nasm)) and                                 # Network assembler
       confirmHasCommandLineCommand(q(sde64)))                                   # Intel emulator
-   {plan tests => 31;
+   {plan tests => 30;
    }
   else
    {plan skip_all =>qq(Nasm or Intel 64 emulator not available);
