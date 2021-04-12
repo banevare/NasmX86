@@ -1079,8 +1079,8 @@ END
   my $cmd  = qq(nasm -f elf64 -g -l $l -o $o $c; ld -o $e $o; chmod 744 $e; $sde -ptr-check -- ./$e 2>&1);
   say STDERR qq($cmd);
   my $R    = eval {qx($cmd)};
-  say STDERR readFile($l) if $options{list};                                    # Print listing if requested
   say STDERR $R;
+  unlink $e, $o;                                                                # Delete object and executable leaving listing files
   $R                                                                            # Return execution results
  }
 
