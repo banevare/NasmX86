@@ -314,8 +314,9 @@ sub ClearRegisters(@)                                                           
   @_ == 1 or confess;
   for my $r(@registers)
    {my $size = RegisterSize $r;
-    Xor    $r, $r if $size == 8;
-    Vpxorq $r, $r if $size  > 8;
+    Xor    $r, $r     if $size == 8 and $r !~ m(\Ak);
+    Kxorq  $r, $r, $r if $size == 8 and $r =~ m(\Ak);
+    Vpxorq $r, $r     if $size  > 8;
    }
  }
 
@@ -514,10 +515,10 @@ sub PrintOutRegisterInHex($)                                                    
        }
       PopR @regs;
      };
-    if    ($r =~ m(\Ar)) {printReg qw(rax)}                                     # 64 bit register requested
-    elsif ($r =~ m(\Ax)) {printReg qw(rax rbx)}                                 # xmm*
-    elsif ($r =~ m(\Ay)) {printReg qw(rax rbx rcx rdx)}                         # ymm*
-    elsif ($r =~ m(\Az)) {printReg qw(rax rbx rcx rdx r8 r9 r10 r11)}           # zmm*
+    if    ($r =~ m(\A[kr])) {printReg qw(rax)}                                  # 64 bit register requested
+    elsif ($r =~ m(\Ax))    {printReg qw(rax rbx)}                              # xmm*
+    elsif ($r =~ m(\Ay))    {printReg qw(rax rbx rcx rdx)}                      # ymm*
+    elsif ($r =~ m(\Az))    {printReg qw(rax rbx rcx rdx r8 r9 r10 r11)}        # zmm*
 
     PrintOutNl;
    } name => "PrintOutRegister${r}InHex";                                       # One routine per register printed
@@ -658,6 +659,10 @@ sub PushR(@)                                                                    
      {Sub rsp, $size;
       Vmovdqu32 "[rsp]", $r;
      }
+    elsif ($r =~ m(\Ak))
+     {Sub rsp, $size;
+      Kmovq "[rsp]", $r;
+     }
     else
      {Push $r;
      }
@@ -670,7 +675,11 @@ sub PopR(@)                                                                     
    {my $size = RegisterSize $r;
     if    ($size > 8)
      {Vmovdqu32 $r, "[rsp]";
-      Add(rsp, $size);
+      Add rsp, $size;
+     }
+    elsif ($r =~ m(\Ak))
+     {Kmovq $r, "[rsp]";
+      Add rsp, $size;
      }
     else
      {Pop $r;
@@ -3104,11 +3113,16 @@ if (1) {                                                                        
   Kaddb k0,  k0, k0;
   Kaddb k0,  k0, k0;
   Kaddb k0,  k0, k0;
-  Kmovb eax, k0;
-  PrintOutRegisterInHex rax;
+  Kmovq rax, k0;
+  PushR k0;
+  ClearRegisters k0;
+  Kmovq k1, k0;
+  PopR  k0;
+  PrintOutRegisterInHex k0;
+  PrintOutRegisterInHex k1;
 
   Exit;                                                                         # Return to operating system
-  ok Assemble =~ m(rax:.*0008)s;
+  ok Assemble =~ m(k0: 0000 0000 0000 0008.*k1: 0000 0000 0000 0000)s;
  }
 
 lll "Finished:", time - $start;
