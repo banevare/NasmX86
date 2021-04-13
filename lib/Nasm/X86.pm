@@ -7,7 +7,7 @@
 # Register expressions via op overloading - register size and ability to add offsets, peek, pop, push clear register
 # Indent opcodes by call depth, - replace push @text with a method call
 package Nasm::X86;
-our $VERSION = "202104014";
+our $VERSION = "202104015";
 use warnings FATAL => qw(all);
 use strict;
 use Carp qw(confess cluck);
@@ -1025,7 +1025,7 @@ sub ByteString::m($)                                                            
   my $size = $byteString->size;
   my $used = $byteString->used;
   my $data = $byteString->data;
-  my $target = rdx;                                                             # Register that adddresses target of move
+  my $target = rdx;                                                             # Register that addresses target of move
   my $length = rdx;                                                             # Register used to update used field
 
   SaveFirstFour;
