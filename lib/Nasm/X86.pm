@@ -49,7 +49,8 @@ BEGIN{
   my @i0 = qw(pushfq rdtsc ret syscall);                                        # Zero operand instructions
   my @i1 = qw(call inc jge jmp jz pop push);                                    # Single operand instructions
   my @i2 =  split /\s+/, <<END;                                                 # Double operand instructions
-add and cmp or lea mov shl shr sub test Vmovdqu8 vmovdqu32 vmovdqu64 vpxorq xor
+add and cmp or lea mov shl shr sub test Vmovdqu8 vmovdqu32 vmovdqu64 vpxorq
+xchg xor
 END
   my @i3 =  split /\s+/, <<END;                                                 # Triple operand instructions
 vprolq
@@ -871,7 +872,7 @@ sub FreeMemory                                                                  
   Call $sub;
  }
 
-sub MemoryClear()                                                               # Clear memory - the address of the memory is in rax, the length in rdi
+sub ClearMemory()                                                               # Clear memory - the address of the memory is in rax, the length in rdi
  {@_ == 0 or confess;
   Comment "Clear memory";
 
@@ -887,6 +888,25 @@ sub MemoryClear()                                                               
 
   PopR zmm0;
   RestoreFirstFour;
+ }
+
+sub CopyMemory()                                                                # Copy memory, the target is addressed by rax, the length is in rdi, the source is addressed by rsi
+ {@_ == 0 or confess;
+  Comment "Copy memory";
+  my $source   = rsi;
+  my $target   = rax;
+  my $length   = rdi;
+  my $copied   = rdx;
+  my $transfer = r8;
+  SaveFirstSeven;
+  ClearRegisters $copied;
+
+  For                                                                           # Clear memory
+   {Mov "r8b", "[$source+$copied]";
+    Mov "[$target+$copied]", "r8b";
+   } $copied, $length, 1;
+
+  RestoreFirstSeven;
  }
 
 #D1 Files                                                                       # Process a file
@@ -1000,20 +1020,41 @@ sub CreateByteString()                                                          
    );
  }
 
-sub ByteString::ar($)                                                           # Append the content of rdi to the byte string addressed by rax
+sub ByteString::m($)                                                            # Append the content with length rdi addressed by rsi to the byte string addressed by rax
  {my ($byteString) = @_;                                                        # Byte string descriptor
   my $size = $byteString->size;
   my $used = $byteString->used;
   my $data = $byteString->data;
+  my $target = rdx;                                                             # Register that adddresses target of move
+  my $length = rdx;                                                             # Register used to update used field
 
   SaveFirstFour;
-  Lea rsi, $data;                                                               # Address of data field
-  Add rsi, $used;                                                               # Skip over used data
-  Mov "[rsi]", rdi;                                                             # Move data in
+  Lea $target, $data;                                                           # Address of data field
+  Add $target, $used;                                                           # Skip over used data
 
-  Mov rsi, $used;                                                               # Increment used
-  Add rsi, RegisterSize rdi;
-  Mov $used, rsi;
+  PushR rax;                                                                    # Save address of byte string
+  Mov rax, $target;                                                             # Address target
+  CopyMemory;                                                                   # Move data in
+  PopR rax;                                                                     # Restore address of byte string
+
+  Mov $length, $used;                                                           # Update used field
+  Add $length, rdi;
+  Mov $used, $length;
+
+  RestoreFirstFour;
+ }
+
+sub ByteString::copy($)                                                         # Append the byte string addressed by rdi to the byte string addressed by rax
+ {my ($byteString) = @_;                                                        # Byte string descriptor
+  my $used = $byteString->used =~ s(rax) (rdx)r;
+  my $data = $byteString->data =~ s(rax) (rdx)r;
+
+  SaveFirstFour;
+  Mov rdx, rdi;                                                                 # Address byte string to be copied
+  Mov rdi, $used;
+  Lea rsi, $data;
+  $byteString->m;                                                               # Move data
+
   RestoreFirstFour;
  }
 
@@ -1118,7 +1159,7 @@ as shown in the following examples.
 Use avx512 instructions to reorder data using 512 bit zmm registers:
 
   Start;
-  my $q = Rs my $s = join '', ('a'..'p')x4;;
+  my $q = Rs my $s = join '', ('a'..'p')x4;
   Mov rax, Ds('0'x128);
 
   Vmovdqu32 zmm0, "[$q]";
@@ -1941,7 +1982,7 @@ B<Example:>
 
 
     Start;
-    my $q = Rs my $s = join '', ('a'..'p')x4;;
+    my $q = Rs my $s = join '', ('a'..'p')x4;
     Mov rax, Ds('0'x128);
 
     Vmovdqu32 zmm0, "[$q]";
@@ -2069,7 +2110,7 @@ B<Example:>
 
     PrintOutRegisterInHex rax;
     Mov rdi, $N;
-    MemoryClear;
+    ClearMemory;
     PrintOutRegisterInHex rax;
     PrintOutMemoryInHex;
     Exit;
@@ -2116,7 +2157,7 @@ B<Example:>
     AllocateMemory;
     PrintOutRegisterInHex rax;
     Mov rdi, $N;
-    MemoryClear;
+    ClearMemory;
     PrintOutRegisterInHex rax;
     PrintOutMemoryInHex;
     Exit;
@@ -2127,7 +2168,7 @@ B<Example:>
      }
 
 
-=head2 MemoryClear()
+=head2 ClearMemory()
 
 Clear memory - the address of the memory is in rax, the length in rdi
 
@@ -2344,7 +2385,7 @@ Create a unique label
 
 27 L<LocalVariable::stack|/LocalVariable::stack> - Address a local variable on the stack
 
-28 L<MemoryClear|/MemoryClear> - Clear memory - the address of the memory is in rax, the length in rdi
+28 L<ClearMemory|/ClearMemory> - Clear memory - the address of the memory is in rax, the length in rdi
 
 29 L<OpenRead|/OpenRead> - Open a file, whose name is addressed by rax, for read and return the file descriptor in rax
 
@@ -2493,7 +2534,7 @@ if (1) {                                                                        
   ok Assemble =~ m(Hello World);
  }
 
-if (1) {                                                                        #TMov #TComment #TRs #TPrintOutNl
+if (1) {                                                                        #TMov #TComment #TRs #TPrintOutMemory
   Start;
   Comment "Print a string from memory";
   my $s = "Hello World";
@@ -2504,7 +2545,7 @@ if (1) {                                                                        
   ok Assemble =~ m(Hello World);
  }
 
-if (1) {                                                                        #TPrintOutRaxInHex #TXor
+if (1) {                                                                        #TPrintOutRaxInHex #TPrintOutNl
   Start;
   my $q = Rs('abababab');
   Mov(rax, "[$q]");
@@ -2519,7 +2560,7 @@ if (1) {                                                                        
   ok Assemble =~ m(rax: 6261 6261 6261 6261.*rax: 0000 0000 0000 0000)s;
  }
 
-if (1) {                                                                        #TPrintOutRegistersInHex #TLea
+if (1) {                                                                        #TPrintOutRegistersInHex
   Start;
   my $q = Rs('abababab');
   Mov(rax, 1);
@@ -2535,13 +2576,13 @@ if (1) {                                                                        
   ok $r =~ m(rbx: 0000 0000 0000 0002.*rcx: 0000 0000 0000 0003.*rdx: 0000 0000 0000 0004)s;
  }
 
-if (1) {                                                                        #TVmovdqu32 #TVprolq  #TDs
+if (1) {                                                                        #TDs
   Start;
   my $q = Rs('a'..'z');
   Mov rax, Ds('0'x64);                                                          # Output area
   Vmovdqu32(xmm0, "[$q]");                                                      # Load
   Vprolq   (xmm0,   xmm0, 32);                                                  # Rotate double words in quad words
-  Vmovdqu32("[rax]", xmm0);                                                      # Save
+  Vmovdqu32("[rax]", xmm0);                                                     # Save
   Mov rdi, 16;
   PrintOutMemory;
   Exit;
@@ -2561,9 +2602,9 @@ if (1) {
   ok Assemble =~ m(efghabcdmnopijklefghabcdmnopijkl)s;
  }
 
-if (1) {                                                                        #TPopR #TVmovdqu64
+if (1) {
   Start;
-  my $q = Rs my $s = join '', ('a'..'p')x4;;
+  my $q = Rs my $s = join '', ('a'..'p')x4;
   Mov rax, Ds('0'x128);
 
   Vmovdqu32 zmm0, "[$q]";
@@ -2587,7 +2628,7 @@ if (1) {                                                                        
   ok Assemble =~ m(r8: 6867 6665 6463 6261)s;
  }
 
-if (1) {                                                                        #TVmovdqu8
+if (1) {
   Start;
   my $q = Rs('a'..'p');
   Vmovdqu8 xmm0, "[$q]";
@@ -2775,7 +2816,7 @@ if (1) {                                                                        
   AllocateMemory;
   PrintOutRegisterInHex rax;
   Mov rdi, $N;
-  MemoryClear;
+  ClearMemory;
   PrintOutRegisterInHex rax;
   PrintOutMemoryInHex;
   Exit;
@@ -2819,15 +2860,27 @@ latest:;
 
 if (1) {                                                                        #TCreateByteString
   Start;                                                                        # Start the program
+  my $q = Rs my $t = 'ab';
   my $s = CreateByteString;                                                     # Create a string
-  Mov rdi, 0x68676665;                                                          # Load a string to append
-  Shl rdi, 32;
-  Or  rdi, 0x64636261;
-  $s->ar;                                                                       # Add a string held in a register
-  $s->ar;
+  Mov rsi, $q;                                                                  # Address of memory to copy
+  Mov rdi, length $t;                                                           # Length of memory  to copy
+  $s->m;                                                                        # Copy memory into byte string
+
+  Mov rdi, rax;                                                                 # Save source byte string
+  CreateByteString;                                                             # Create target byte string
+  $s->copy;                                                                     # Copy source to target
+  Xchg rdi, rax;                                                                # Swap source and target byte strings
+  $s->copy;                                                                     # Copy source to target
+  Xchg rdi, rax;                                                                # Swap source and target byte strings
+  $s->copy;                                                                     # Copy source to target
+  Xchg rdi, rax;                                                                # Swap source and target byte strings
+  $s->copy;                                                                     # Copy source to target
+  Xchg rdi, rax;                                                                # Swap source and target byte strings
+  $s->copy;                                                                     # Copy source to target
   $s->out;                                                                      # Print byte string
+
   Exit;                                                                         # Return to operating system
-  Assemble =~ m(abcdefghabcdefgh);                                              # Assemble and execute
+  Assemble =~ m(($t x 8));                                                      # Assemble and execute
  }
 
 lll "Finished:", time - $start;
