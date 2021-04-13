@@ -49,12 +49,22 @@ BEGIN{
   my @i0 = qw(pushfq rdtsc ret syscall);                                        # Zero operand instructions
   my @i1 = qw(call inc jge jmp jz pop push);                                    # Single operand instructions
   my @i2 =  split /\s+/, <<END;                                                 # Double operand instructions
-add and cmp or lea mov shl shr sub test Vmovdqu8 vmovdqu32 vmovdqu64 vpxorq
+add and cmp kmov knot  kortest ktest lea mov or shl shr sub test Vmovdqu8 vmovdqu32 vmovdqu64 vpxorq
 xchg xor
 END
   my @i3 =  split /\s+/, <<END;                                                 # Triple operand instructions
+kadd kand kandn kor kshiftl kshiftr kunpck kxnor kxor
 vprolq
 END
+
+  if (1)                                                                        # Add variants to mask instructions
+   {my @k2  = grep {m/\Ak/} @i2; @i2  = grep {!m/\Ak/} @i2;
+    my @k3  = grep {m/\Ak/} @i3; @i3  = grep {!m/\Ak/} @i3;
+    for my $s(qw(b  w d q))
+     {push @i2, $_.$s for grep {m/\Ak/} @k2;
+      push @i3, $_.$s for grep {m/\Ak/} @k3;
+     }
+   }
 
   for my $r(sort keys %r)                                                       # Create register definitions
    {eval "sub $r\{q($r)\}";
@@ -237,66 +247,58 @@ sub Rq(@)                                                                       
 
 #D1 Registers                                                                   # Operations on registers
 
+my @syscallSequence = qw(rax rdi rsi rdx r10 r8 r9);                            # The parameter list sequqnce for syscalls
+
 sub SaveFirstFour()                                                             # Save the first 4 parameter registers
- {Push rax;
-  Push rdi;
-  Push rsi;
-  Push rdx;
-  4 * &RegisterSize(rax);                                                       # Space occupied by push
+ {my $N = 4;
+  Push $_ for @syscallSequence[0..$N-1];
+  $N * &RegisterSize(rax);                                                       # Space occupied by push
  }
 
 sub RestoreFirstFour()                                                          # Restore the first 4 parameter registers
- {Pop rdx;
-  Pop rsi;
-  Pop rdi;
-  Pop rax;
+ {my $N = 4;
+  Pop $_ for reverse @syscallSequence[0..$N-1];
  }
 
 sub RestoreFirstFourExceptRax()                                                 # Restore the first 4 parameter registers except rax so it can return its value
- {Pop rdx;
-  Pop rsi;
-  Pop rdi;
-  Add rsp, 8;
+ {my $N = 4;
+  Pop $_ for reverse @syscallSequence[1..$N-1];
+  Add rsp, RegisterSize(rax);
  }
 
 sub SaveFirstSeven()                                                            # Save the first 7 parameter registers
- {Push rax;
-  Push rdi;
-  Push rsi;
-  Push rdx;
-  Push r10;
-  Push r8;
-  Push r9;
-  7 * RegisterSize(rax);                                                        # Space occupied by push
+ {my $N = 7;
+  Push $_ for @syscallSequence[0..$N-1];
+  $N * &RegisterSize(rax);                                                       # Space occupied by push
  }
 
 sub RestoreFirstSeven()                                                         # Restore the first 7 parameter registers
- {Pop r9;
-  Pop r8;
-  Pop r10;
-  Pop rdx;
-  Pop rsi;
-  Pop rdi;
-  Pop rax;
+ {my $N = 7;
+  Pop $_ for reverse @syscallSequence[0..$N-1];
  }
 
 sub RestoreFirstSevenExceptRax()                                                # Restore the first 7 parameter registers except rax which is being used to return the result
- {Pop r9;
-  Pop r8;
-  Pop r10;
-  Pop rdx;
-  Pop rsi;
-  Pop rdi;
-  Add rsp, RegisterSize(rax);                                                   # Skip rax
+ {my $N = 7;
+  Pop $_ for reverse @syscallSequence[1..$N-1];
+  Add rsp, RegisterSize(rax);
  }
 
 sub RestoreFirstSevenExceptRaxAndRdi()                                          # Restore the first 7 parameter registers except rax and rdi which are being used to return the results
- {Pop r9;
-  Pop r8;
-  Pop r10;
-  Pop rdx;
-  Pop rsi;
+ {my $N = 7;
+  Pop $_ for reverse @syscallSequence[2..$N-1];
   Add rsp, 2*RegisterSize(rax);                                                 # Skip rdi and rax
+ }
+
+sub ReorderRegisters(@)                                                         # Map the list of registers provided to the the x64 syscall sequence
+ {my (@registers) = @_;                                                         # Registers
+  Push $_ for @syscallSequence[0..$#registers];
+  Push $_ for reverse @registers;
+  Pop  $_ for @syscallSequence[0..$#registers];
+ }
+
+sub UnReorderRegisters(@)                                                       # Recover the initial values in registers that were reordered
+ {my (@registers) = @_;                                                         # Registers
+  Pop  $_ for reverse @syscallSequence[0..$#registers];
  }
 
 sub RegisterSize($)                                                             # Return the size of a register
@@ -2688,7 +2690,7 @@ $ENV{PATH} = $ENV{PATH}.":/var/isde:sde";                                       
 if ($^O =~ m(bsd|linux)i)                                                       # Supported systems
  {if (confirmHasCommandLineCommand(q(nasm)) and                                 # Network assembler
       confirmHasCommandLineCommand(q(sde64)))                                   # Intel emulator
-   {plan tests => 31;
+   {plan tests => 34;
    }
   else
    {plan skip_all =>qq(Nasm or Intel 64 emulator not available);
@@ -3048,8 +3050,6 @@ if (1) {                                                                        
   ok index($r =~ s([^0x0-0x7f]) ()gsr, readFile($0) =~ s([^0x0-0x7f]) ()gsr)>-1;# Output contains this file
  }
 
-latest:;
-
 if (1) {                                                                        #TCreateByteString
   Start;                                                                        # Start the program
   my $s = CreateByteString;                                                     # Create a string
@@ -3072,9 +3072,43 @@ if (1) {                                                                        
   $s->copy;
 
   $s->out;                                                                      # Print byte string
+  Exit;                                                                         # Return to operating system
+  my $T = "$t\n" x 8;                                                           # Expected response
+  ok Assemble =~ m($T)s;                                                        # Assemble and execute
+ }
+
+if (1) {                                                                        #TReorderRegisters #TUnReorderRegisters
+  Start;
+  Mov rax, 1;  Mov rdi, 2;  Mov rsi,  3;  Mov rdx,  4;
+  Mov r8,  8;  Mov r9,  9;  Mov r10, 10;  Mov r11, 11;
+
+  ReorderRegisters   r8,r9;                                                     # Reorder the registers fof syscall
+  PrintOutRegisterInHex rax;
+  PrintOutRegisterInHex rdi;
+
+  UnReorderRegisters r8,r9;                                                     # Unreorder the registers to recover their original values
+  PrintOutRegisterInHex rax;
+  PrintOutRegisterInHex rdi;
 
   Exit;                                                                         # Return to operating system
-  Assemble =~ m(("$t\n" x 8))s;                                                 # Assemble and execute
+  ok Assemble =~ m(rax:.*08.*rdi:.*9.*rax:.*1.*rdi:.*2.*)s;
+ }
+
+latest:;
+
+if (1) {                                                                        #TReorderRegisters #TUnReorderRegisters
+  Start;
+
+  Mov rax,1;
+  Kmovq k0,  rax;
+  Kaddb k0,  k0, k0;
+  Kaddb k0,  k0, k0;
+  Kaddb k0,  k0, k0;
+  Kmovb eax, k0;
+  PrintOutRegisterInHex rax;
+
+  Exit;                                                                         # Return to operating system
+  ok Assemble =~ m(rax:.*0008)s;
  }
 
 lll "Finished:", time - $start;
