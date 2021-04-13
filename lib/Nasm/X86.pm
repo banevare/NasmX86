@@ -7,7 +7,7 @@
 # Register expressions via op overloading - register size and ability to add offsets, peek, pop, push clear register
 # Indent opcodes by call depth, - replace push @text with a method call
 package Nasm::X86;
-our $VERSION = "202104015";
+our $VERSION = "20210417";
 use warnings FATAL => qw(all);
 use strict;
 use Carp qw(confess cluck);
@@ -1044,6 +1044,27 @@ sub ByteString::m($)                                                            
   RestoreFirstFour;
  }
 
+sub ByteString::nl($)                                                           # Append a new line to the byte string addressed by rax
+ {my ($byteString) = @_;                                                        # Byte string descriptor
+  SaveFirstFour;
+  Mov rdx, 10;                                                                  # New line
+  Push rdx;
+  Mov rdi, 1;
+  Mov rsi, rsp;
+  $byteString->m;                                                               # Move data
+  Pop rdx;
+  RestoreFirstFour;
+ }
+
+sub ByteString::q($$)                                                           # Append a quoted string == a constant to the byte string addressed by rax
+ {my ($byteString, $const) = @_;                                                # Byte string descriptor, constant
+  SaveFirstFour;
+  Mov rsi, Rs($const);                                                          # Constant
+  Mov rdi, length($const);
+  $byteString->m;                                                               # Move data
+  RestoreFirstFour;
+ }
+
 sub ByteString::copy($)                                                         # Append the byte string addressed by rdi to the byte string addressed by rax
  {my ($byteString) = @_;                                                        # Byte string descriptor
   my $used = $byteString->used =~ s(rax) (rdx)r;
@@ -1178,11 +1199,9 @@ Use avx512 instructions to reorder data using 512 bit zmm registers:
 Create a dynamic byte string, add some content to it and then print it.
 
   Start;                                                                        # Start the program
-  my $q = Rs my $t = 'ab';
   my $s = CreateByteString;                                                     # Create a string
-  Mov rsi, $q;                                                                  # Address of memory to copy
-  Mov rdi, length $t;                                                           # Length of memory  to copy
-  $s->m;                                                                        # Copy memory into byte string
+  $s->q(my $t = 'ab');                                                          # Append a constant to the byte string
+  $s->nl;                                                                       # New line
 
   Mov rdi, rax;                                                                 # Save source byte string
   CreateByteString;                                                             # Create target byte string
@@ -1192,6 +1211,8 @@ Create a dynamic byte string, add some content to it and then print it.
   $s->copy;                                                                     # Copy source to target
   Xchg rdi, rax;                                                                # Swap source and target byte strings
   $s->copy;
+
+
   Xchg rdi, rax;
   $s->copy;
   Xchg rdi, rax;
@@ -1200,7 +1221,7 @@ Create a dynamic byte string, add some content to it and then print it.
   $s->out;                                                                      # Print byte string
 
   Exit;                                                                         # Return to operating system
-  Assemble =~ m(($t x 8));                                                      # Assemble and execute
+  Assemble =~ m(("$t\n" x 8))s;                                                 # Assemble and execute
 
 
 =head2 Process management
@@ -3031,11 +3052,9 @@ latest:;
 
 if (1) {                                                                        #TCreateByteString
   Start;                                                                        # Start the program
-  my $q = Rs my $t = 'ab';
   my $s = CreateByteString;                                                     # Create a string
-  Mov rsi, $q;                                                                  # Address of memory to copy
-  Mov rdi, length $t;                                                           # Length of memory  to copy
-  $s->m;                                                                        # Copy memory into byte string
+  $s->q(my $t = 'ab');                                                          # Append a constant to the byte string
+  $s->nl;                                                                       # New line
 
   Mov rdi, rax;                                                                 # Save source byte string
   CreateByteString;                                                             # Create target byte string
@@ -3045,6 +3064,8 @@ if (1) {                                                                        
   $s->copy;                                                                     # Copy source to target
   Xchg rdi, rax;                                                                # Swap source and target byte strings
   $s->copy;
+
+
   Xchg rdi, rax;
   $s->copy;
   Xchg rdi, rax;
@@ -3053,7 +3074,7 @@ if (1) {                                                                        
   $s->out;                                                                      # Print byte string
 
   Exit;                                                                         # Return to operating system
-  Assemble =~ m(($t x 8));                                                      # Assemble and execute
+  Assemble =~ m(("$t\n" x 8))s;                                                 # Assemble and execute
  }
 
 lll "Finished:", time - $start;
