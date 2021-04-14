@@ -4,6 +4,7 @@
 # Philip R Brenan at appaapps dot com, Appa Apps Ltd Inc., 2021
 #-------------------------------------------------------------------------------
 # podDocumentation
+# Labels should be settable via $label->set
 # Register expressions via op overloading - register size and ability to add offsets, peek, pop, push clear register
 # Indent opcodes by call depth, - replace push @text with a method call
 package Nasm::X86;
@@ -47,7 +48,11 @@ BEGIN{
      %r = (%r, map {$_=>'m'}    qw(k0 k1 k2 k3 k4 k5 k6 k7));
 
   my @i0 = qw(pushfq rdtsc ret syscall);                                        # Zero operand instructions
-  my @i1 = qw(call inc jge jmp jz pop push);                                    # Single operand instructions
+  my @i1 = split /\s+/, <<END;
+call inc jmp
+ja jae jb jbe jc jcxz je jecxz jg jge jl jle jna jnae jnb jnbe jnc jne jng jnge jnl jnle jno jnp jns jnz jo jp jpe jpo jrcxz js jz
+pop push
+END
   my @i2 =  split /\s+/, <<END;                                                 # Double operand instructions
 add and cmp kmov knot  kortest ktest lea mov or shl shr sub test Vmovdqu8 vmovdqu32 vmovdqu64 vpxorq
 xchg xor
@@ -163,6 +168,7 @@ sub SetLabel($)                                                                 
   push @text, <<END;                                                            # Define bytes
   $l:
 END
+  $l                                                                            # Return label name
  }
 
 sub Ds(@)                                                                       # Layout bytes in memory and return their label
@@ -1032,6 +1038,40 @@ sub CreateByteString()                                                          
    );
  }
 
+sub ByteString::updateSpace($)                                                  #P Make sure that the byte string addressed by rax has enough space to accomodate content of length rdi
+ {my ($byteString) = @_;                                                        # Byte string descriptor
+  my $size = $byteString->size;
+  my $used = $byteString->used;
+
+  SaveFirstFour;
+  Mov rdx, $byteString->used;                                                   # Used
+  Add rdx, rdi;                                                                 # Wanted
+  Cmp rdx, $size;                                                               # Space needed versus actual size
+
+  Jle (my $l = Label);
+    Mov rsi, rax;                                                               # Old byte string
+    Mov rdi, $byteString->size;                                                 # Old byte string size
+    Mov rax, rdi;                                                               # Old byte string length
+
+    my $double = SetLabel Label;                                                # Keep doubling until we have a string area that is big enough to hold the new data
+      Shl rax, 1;                                                               # New byte string size - double the size of the old byte string
+      Cmp rax, rdx;                                                             # Big enough ?
+    Jl  $double;                                                                # Still too low
+
+    Mov rdx, rax;                                                               # New byte string size
+    AllocateMemory;                                                             # Create new byte string
+    CopyMemory;                                                                 # Copy old byte string into new byte string
+    Mov $byteString->size, rdx;                                                 # rdx can be reused now we have saved the size of the new bye string
+
+    Push rax;                                                                   # Free old byte string
+    Mov rax, rsi;                                                               # Old byte string
+    FreeMemory;
+    Pop rax;
+  SetLabel $l;                                                                  # Exit
+
+  RestoreFirstFourExceptRax;                                                    # Return new byte string
+ }
+
 sub ByteString::m($)                                                            # Append the content with length rdi addressed by rsi to the byte string addressed by rax
  {my ($byteString) = @_;                                                        # Byte string descriptor
   my $size = $byteString->size;
@@ -1040,6 +1080,7 @@ sub ByteString::m($)                                                            
   my $target = rdx;                                                             # Register that addresses target of move
   my $length = rdx;                                                             # Register used to update used field
 
+  $byteString->updateSpace;                                                     # Update space if needed
   SaveFirstFour;
   Lea $target, $data;                                                           # Address of data field
   Add $target, $used;                                                           # Skip over used data
@@ -1053,7 +1094,7 @@ sub ByteString::m($)                                                            
   Add $length, rdi;
   Mov $used, $length;
 
-  RestoreFirstFour;
+  RestoreFirstFourExceptRax;                                                    # Return the possibly expanded byte string
  }
 
 sub ByteString::q($$)                                                           # Append a quoted string == a constant to the byte string addressed by rax
@@ -1062,7 +1103,7 @@ sub ByteString::q($$)                                                           
   Mov rsi, Rs($const);                                                          # Constant
   Mov rdi, length($const);
   $byteString->m;                                                               # Move data
-  RestoreFirstFour;
+  RestoreFirstFourExceptRax;                                                    # Return the possibly expanded byte string
  }
 
 sub ByteString::char($$)                                                        # Append a character expressed as a decimal number to the byte string addressed by rax
@@ -1074,7 +1115,7 @@ sub ByteString::char($$)                                                        
   Mov rsi, rsp;
   $byteString->m;                                                               # Move data
   Pop rdx;
-  RestoreFirstFour;
+  RestoreFirstFourExceptRax;                                                    # Return the possibly expanded byte string
  }
 
 sub ByteString::nl($)                                                           # Append a new line to the byte string addressed by rax
@@ -1095,8 +1136,7 @@ sub ByteString::copy($)                                                         
   Mov rdi, $byteString->used =~ s(rax) (rdx)r;
   Lea rsi, $byteString->data =~ s(rax) (rdx)r;
   $byteString->m;                                                               # Move data
-
-  RestoreFirstFour;
+  RestoreFirstFourExceptRax;                                                    # Return the possibly expanded byte string
  }
 
 sub ByteString::clear($)                                                        # Clear the byte string addressed by rax
@@ -1118,10 +1158,12 @@ sub ByteString::read($)                                                         
   Mov rsi, rax;                                                                 # Address of content in rax, length of content in rdi
   Mov rax, rdx;                                                                 # Address of byte string
   $byteString->clear;                                                           # Remove file name in byte string
-  $byteString->m;                                                               # Move data into data
+  $byteString->m;                                                               # Move data into byte string
+  Push rax;                                                                     # We might have a new byte string by now
   Mov rax, rsi;                                                                 # File data
   FreeMemory;                                                                   # Address of allocated memory in rax, length in rdi
-  RestoreFirstFour;
+  Pop rax;                                                                      # Address byte string
+  RestoreFirstFourExceptRax;  ##RAX
  }
 
 sub ByteString::out($)                                                          # Print the specified byte string addressed by rax on sysout
@@ -1189,6 +1231,10 @@ END
   $R                                                                            # Return execution results
  }
 
+sub removeNonAsciiChars($)                                                      #P Return a copy of the specified string with all the non ascii characters removed
+ {my ($string) = @_;                                                            # String
+  $string =~ s([^0x0-0x7f]) ()gsr;                                              # Remove non ascii characters
+ }
 #d
 #-------------------------------------------------------------------------------
 # Export - eeee
@@ -3088,7 +3134,7 @@ if (1) {                                                                        
   PrintOutMemory;                                                               # Print memory
   Exit;                                                                         # Return to operating system
   my $r = Assemble;                                                             # Assemble and execute
-  ok index($r =~ s([^0x0-0x7f]) ()gsr, readFile($0) =~ s([^0x0-0x7f]) ()gsr)>-1;# Output contains this file
+  ok index(removeNonAsciiChars($r), removeNonAsciiChars(readFile $0)) >= 0;     # Output contains this file
  }
 
 if (1) {                                                                        #TCreateByteString
@@ -3160,7 +3206,7 @@ latest:;
 
 if (1) {                                                                        #TReorderRegisters #TUnReorderRegisters
   Start;
-  my $f = writeTempFile(my $t = "AAAAA");                                       # Load a string into a temp file
+  my $f = $0;                                                                   # Load a string into a temp file
 
   my $s = CreateByteString;                                                     # Create a string
   $s->q($f);                                                                    # Append a constant to the byte string
@@ -3168,8 +3214,8 @@ if (1) {                                                                        
   $s->read;
   $s->out;
   Exit;                                                                         # Return to operating system
-  ok Assemble =~ m($t);
-  unlink $f;
+  my $r = Assemble;
+  ok index(removeNonAsciiChars($r), removeNonAsciiChars(readFile $0)) >= 0;     # Output contains this file
  }
 
 lll "Finished:", time - $start;
