@@ -655,15 +655,15 @@ sub PushR(@)                                                                    
  {my (@r) = @_;                                                                 # Register
   for my $r(@r)
    {my $size = RegisterSize $r;
-    if    ($size > 8)
+    if    ($size > 8)                                                           # x|y|zmmm
      {Sub rsp, $size;
       Vmovdqu32 "[rsp]", $r;
      }
-    elsif ($r =~ m(\Ak))
+    elsif ($r =~ m(\Ak))                                                        # k as they do not repond to push
      {Sub rsp, $size;
       Kmovq "[rsp]", $r;
      }
-    else
+    else                                                                        # Normal register
      {Push $r;
      }
    }
@@ -798,7 +798,7 @@ sub LocalData::allocate8($@)                                                    
   wantarray ? @v : $v[-1];                                                      # Avoid returning the number of elements accidently
  }
 
-sub AllocateAll8OnStack($)                                                             # Create a local data descriptor consisting of the specified number of 8 byte local variables and return an array: (local data descriptor,  variable definitions...)
+sub AllocateAll8OnStack($)                                                      # Create a local data descriptor consisting of the specified number of 8 byte local variables and return an array: (local data descriptor,  variable definitions...)
  {my ($N) = @_;                                                                 # Number of variables required
   my $local = LocalData;                                                        # Create local data descriptor
   my @v;
@@ -973,7 +973,7 @@ sub ReadFile()                                                                  
   Comment "Read a file into memory";
 
   SaveFirstSeven;                                                               # Generated code
-  my ($local, $file, $addr, $size, $fdes) = AllocateAll8OnStack 4;                     # Local data
+  my ($local, $file, $addr, $size, $fdes) = AllocateAll8OnStack 4;              # Local data
 
   Mov $file, rax;                                                               # Save file name
 
@@ -997,6 +997,7 @@ sub ReadFile()                                                                  
   Mov r9,  0;                                                                   # Offset into file
   Syscall;
   Mov rdi, $size;
+  $local->free;                                                                 # Free stack frame
   RestoreFirstSevenExceptRaxAndRdi;
  }
 
@@ -1055,18 +1056,6 @@ sub ByteString::m($)                                                            
   RestoreFirstFour;
  }
 
-sub ByteString::nl($)                                                           # Append a new line to the byte string addressed by rax
- {my ($byteString) = @_;                                                        # Byte string descriptor
-  SaveFirstFour;
-  Mov rdx, 10;                                                                  # New line
-  Push rdx;
-  Mov rdi, 1;
-  Mov rsi, rsp;
-  $byteString->m;                                                               # Move data
-  Pop rdx;
-  RestoreFirstFour;
- }
-
 sub ByteString::q($$)                                                           # Append a quoted string == a constant to the byte string addressed by rax
  {my ($byteString, $const) = @_;                                                # Byte string descriptor, constant
   SaveFirstFour;
@@ -1076,27 +1065,70 @@ sub ByteString::q($$)                                                           
   RestoreFirstFour;
  }
 
+sub ByteString::char($$)                                                        # Append a character expressed as a decimal number to the byte string addressed by rax
+ {my ($byteString, $char) = @_;                                                 # Byte string descriptor, decimal number of character to be appended
+  SaveFirstFour;
+  Mov rdx, $char;                                                               # New line
+  Push rdx;
+  Mov rdi, 1;
+  Mov rsi, rsp;
+  $byteString->m;                                                               # Move data
+  Pop rdx;
+  RestoreFirstFour;
+ }
+
+sub ByteString::nl($)                                                           # Append a new line to the byte string addressed by rax
+ {my ($byteString) = @_;                                                        # Byte string descriptor
+  $byteString->char(ord("\n"));
+ }
+
+sub ByteString::z($)                                                            # Append a trailing zero to the byte string addressed by rax
+ {my ($byteString) = @_;                                                        # Byte string descriptor
+  $byteString->char(0);
+ }
+
 sub ByteString::copy($)                                                         # Append the byte string addressed by rdi to the byte string addressed by rax
  {my ($byteString) = @_;                                                        # Byte string descriptor
-  my $used = $byteString->used =~ s(rax) (rdx)r;
-  my $data = $byteString->data =~ s(rax) (rdx)r;
 
   SaveFirstFour;
   Mov rdx, rdi;                                                                 # Address byte string to be copied
-  Mov rdi, $used;
-  Lea rsi, $data;
+  Mov rdi, $byteString->used =~ s(rax) (rdx)r;
+  Lea rsi, $byteString->data =~ s(rax) (rdx)r;
   $byteString->m;                                                               # Move data
 
   RestoreFirstFour;
  }
 
+sub ByteString::clear($)                                                        # Clear the byte string addressed by rax
+ {my ($byteString) = @_;                                                        # Byte string descriptor
+
+  PushR          rdi;
+  ClearRegisters rdi;
+  Mov $byteString->used, rdi;
+  PopR           rdi;
+ }
+
+sub ByteString::read($)                                                         # Read the file named in the byte string (terminated with a zero byte) addressed by rax and place it into the byte string after clearing the byte string to remove the file name contained therein.
+ {my ($byteString) = @_;                                                        # Byte string descriptor
+
+  SaveFirstFour;
+  Mov rdx, rax;                                                                 # Save address of byte string
+  Lea rax, $byteString->data;                                                   # Address file name with rax
+  ReadFile;                                                                     # Read the file named by rax
+  Mov rsi, rax;                                                                 # Address of content in rax, length of content in rdi
+  Mov rax, rdx;                                                                 # Address of byte string
+  $byteString->clear;                                                           # Remove file name in byte string
+  $byteString->m;                                                               # Move data into data
+  Mov rax, rsi;                                                                 # File data
+  FreeMemory;                                                                   # Address of allocated memory in rax, length in rdi
+  RestoreFirstFour;
+ }
+
 sub ByteString::out($)                                                          # Print the specified byte string addressed by rax on sysout
  {my ($byteString) = @_;                                                        # Byte string descriptor
-  my $used = $byteString->used;
-  my $data = $byteString->data;
   SaveFirstFour;
-  Mov rdi, $used;                                                               # Length to print
-  Lea rax, $data;                                                               # Address of data field
+  Mov rdi, $byteString->used;                                                   # Length to print
+  Lea rax, $byteString->data;                                                   # Address of data field
   PrintOutMemory;
   RestoreFirstFour;
  }
@@ -2699,7 +2731,7 @@ $ENV{PATH} = $ENV{PATH}.":/var/isde:sde";                                       
 if ($^O =~ m(bsd|linux)i)                                                       # Supported systems
  {if (confirmHasCommandLineCommand(q(nasm)) and                                 # Network assembler
       confirmHasCommandLineCommand(q(sde64)))                                   # Intel emulator
-   {plan tests => 34;
+   {plan tests => 35;
    }
   else
    {plan skip_all =>qq(Nasm or Intel 64 emulator not available);
@@ -3081,6 +3113,8 @@ if (1) {                                                                        
   $s->copy;
 
   $s->out;                                                                      # Print byte string
+
+  $s->clear;                                                                    # Clear byte string
   Exit;                                                                         # Return to operating system
   my $T = "$t\n" x 8;                                                           # Expected response
   ok Assemble =~ m($T)s;                                                        # Assemble and execute
@@ -3103,8 +3137,6 @@ if (1) {                                                                        
   ok Assemble =~ m(rax:.*08.*rdi:.*9.*rax:.*1.*rdi:.*2.*)s;
  }
 
-latest:;
-
 if (1) {                                                                        #TReorderRegisters #TUnReorderRegisters
   Start;
 
@@ -3120,9 +3152,24 @@ if (1) {                                                                        
   PopR  k0;
   PrintOutRegisterInHex k0;
   PrintOutRegisterInHex k1;
-
   Exit;                                                                         # Return to operating system
   ok Assemble =~ m(k0: 0000 0000 0000 0008.*k1: 0000 0000 0000 0000)s;
+ }
+
+latest:;
+
+if (1) {                                                                        #TReorderRegisters #TUnReorderRegisters
+  Start;
+  my $f = writeTempFile(my $t = "AAAAA");                                       # Load a string into a temp file
+
+  my $s = CreateByteString;                                                     # Create a string
+  $s->q($f);                                                                    # Append a constant to the byte string
+  $s->z;                                                                        # New line
+  $s->read;
+  $s->out;
+  Exit;                                                                         # Return to operating system
+  ok Assemble =~ m($t);
+  unlink $f;
  }
 
 lll "Finished:", time - $start;
