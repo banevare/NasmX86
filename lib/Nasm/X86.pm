@@ -31,7 +31,9 @@ my @data;                                                                       
 my @bss;                                                                        # Block started by symbol
 my @text;                                                                       # Code
 
-my $sysout = 1;                                                                 # File descriptor for output
+my $sysin  = 0;                                                                 # File descriptor for standard input
+my $sysout = 1;                                                                 # File descriptor for standard output
+my $syserr = 2;                                                                 # File descriptor for standard error
 
 BEGIN{
   my %r = (    map {$_=>'8'}    qw(al bl cl dl r8b r9b r10b r11b r12b r13b r14b r15b sil dil spl bpl ah bh ch dh));
@@ -48,13 +50,18 @@ BEGIN{
      %r = (%r, map {$_=>'m'}    qw(k0 k1 k2 k3 k4 k5 k6 k7));
 
   my @i0 = qw(pushfq rdtsc ret syscall);                                        # Zero operand instructions
-  my @i1 = split /\s+/, <<END;
+  my @i1 = split /\s+/, <<END;                                                  # Single operand instructions
 call inc jmp
-ja jae jb jbe jc jcxz je jecxz jg jge jl jle jna jnae jnb jnbe jnc jne jng jnge jnl jnle jno jnp jns jnz jo jp jpe jpo jrcxz js jz
+ja jae jb jbe jc jcxz je jecxz jg jge jl jle jna jnae jnb jnbe jnc jne jng jnge
+jnl jnle jno jnp jns jnz jo jp jpe jpo jrcxz js jz
+seta setae setb setbe setc sete setg setge setl setle setna setnae setnb setnbe
+setnc setne setng setnge setnl setno setnp setns setnz seto setp setpe setpo
+sets setz
 pop push
 END
   my @i2 =  split /\s+/, <<END;                                                 # Double operand instructions
-add and cmp kmov knot  kortest ktest lea mov or shl shr sub test Vmovdqu8 vmovdqu32 vmovdqu64 vpxorq
+add and cmp cmova cmovae cmovb cmovbe cmovc cmove cmovg cmovge cmovl cmovle cmovna cmovnae cmovnb
+kmov knot  kortest ktest lea mov or shl shr sub test Vmovdqu8 vmovdqu32 vmovdqu64 vpxorq
 xchg xor
 END
   my @i3 =  split /\s+/, <<END;                                                 # Triple operand instructions
