@@ -62,6 +62,7 @@ END
   my @i2 =  split /\s+/, <<END;                                                 # Double operand instructions
 add and cmp cmova cmovae cmovb cmovbe cmovc cmove cmovg cmovge cmovl cmovle cmovna cmovnae cmovnb
 kmov knot  kortest ktest lea mov or shl shr sub test Vmovdqu8 vmovdqu32 vmovdqu64 vpxorq
+lzcnt
 xchg xor
 END
   my @i3 =  split /\s+/, <<END;                                                 # Triple operand instructions
@@ -2784,7 +2785,7 @@ $ENV{PATH} = $ENV{PATH}.":/var/isde:sde";                                       
 if ($^O =~ m(bsd|linux)i)                                                       # Supported systems
  {if (confirmHasCommandLineCommand(q(nasm)) and                                 # Network assembler
       confirmHasCommandLineCommand(q(sde64)))                                   # Intel emulator
-   {plan tests => 35;
+   {plan tests => 36;
    }
   else
    {plan skip_all =>qq(Nasm or Intel 64 emulator not available);
@@ -3209,8 +3210,6 @@ if (1) {                                                                        
   ok Assemble =~ m(k0: 0000 0000 0000 0008.*k1: 0000 0000 0000 0000)s;
  }
 
-latest:;
-
 if (1) {                                                                        #TReorderRegisters #TUnReorderRegisters
   Start;
   my $f = $0;                                                                   # Load a string into a temp file
@@ -3223,6 +3222,17 @@ if (1) {                                                                        
   Exit;                                                                         # Return to operating system
   my $r = Assemble;
   ok index(removeNonAsciiChars($r), removeNonAsciiChars(readFile $0)) >= 0;     # Output contains this file
+ }
+
+latest:;
+
+if (1) {                                                                        #TReorderRegisters #TUnReorderRegisters
+  Start;
+  Mov   rax, 8;                                                                  # Append a constant to the byte string
+  Lzcnt rax, rax;                                                               # New line
+  PrintOutRegisterInHex rax;
+  Exit;                                                                         # Return to operating system
+  ok Assemble =~ m(0000 003C);
  }
 
 lll "Finished:", time - $start;
