@@ -442,20 +442,21 @@ sub PrintOutString($)                                                           
   RestoreFirstFour();
  }
 
+sub hexTranslateTable                                                           # Create/address a hex translate table and return its label
+ {my $h = '0123456789ABCDEF';
+  my @t;
+  for   my $i(split //, $h)
+   {for my $j(split //, $h)
+     {push @t, "$i$j";
+     }
+   }
+   Rs @t                                                                        # Constant strings are only saved if they are unique, else a read only copy is returned.
+ }
+
 sub PrintOutRaxInHex                                                            # Write the content of register rax to stderr in hexadecimal in big endian notation
  {@_ == 0 or confess;
   Comment "Print Rax In Hex";
-
-  my $hexTranslateTable = sub
-   {my $h = '0123456789ABCDEF';
-    my @t;
-    for   my $i(split //, $h)
-     {for my $j(split //, $h)
-       {push @t, "$i$j";
-       }
-     }
-     Rs @t                                                                      # Constant strings are only saved if they are unique, else a read only copy is returned.
-   }->();
+  my $hexTranslateTable = hexTranslateTable;
 
   my $sub = S                                                                   # Address conversion routine
    {SaveFirstFour;
@@ -1134,6 +1135,34 @@ sub ByteString::nl($)                                                           
 sub ByteString::z($)                                                            # Append a trailing zero to the byte string addressed by rax
  {my ($byteString) = @_;                                                        # Byte string descriptor
   $byteString->char(0);
+ }
+
+sub ByteString::rdiInHex                                                        # Add the content of register rdi in hexadecimal in big endian notation to a byte string
+ {my ($byteString) = @_;                                                        # Byte string descriptor
+  Comment "Rdi in hex into byte string";
+
+  my $sub = S                                                                   # Address conversion routine
+   {my $hexTranslateTable = hexTranslateTable;
+    my $value =  r8;
+    my $hex   =  r9;
+    my $byte  = r10;
+    my $size  = RegisterSize rax;
+
+    SaveFirstSeven;
+    Mov $value, rdi;                                                            # Content to be printed
+    Mov rdi, 2;                                                                 # Length of a byte in hex
+    for my $i(0..7)                                                             # Each byte in rdi
+     {Mov $byte, $value;
+      Shl $byte, 8 *  $i;                                                       # Push selected byte high
+      Shr $byte, 8 * ($size - 1);                                               # Push select byte low
+      Shl $byte, 1;                                                             # Multiply by two because each entry in the translation table is two bytes long
+      Lea rsi, "[$hexTranslateTable+$byte]";
+      $byteString->m;
+     }
+    RestoreFirstSeven;
+   } name => "ByteString::rdiInHex";
+
+  Call $sub;
  }
 
 sub ByteString::copy($)                                                         # Append the byte string addressed by rdi to the byte string addressed by rax
@@ -2785,7 +2814,7 @@ $ENV{PATH} = $ENV{PATH}.":/var/isde:sde";                                       
 if ($^O =~ m(bsd|linux)i)                                                       # Supported systems
  {if (confirmHasCommandLineCommand(q(nasm)) and                                 # Network assembler
       confirmHasCommandLineCommand(q(sde64)))                                   # Intel emulator
-   {plan tests => 36;
+   {plan tests => 37;
    }
   else
    {plan skip_all =>qq(Nasm or Intel 64 emulator not available);
@@ -3191,7 +3220,7 @@ if (1) {                                                                        
   ok Assemble =~ m(rax:.*08.*rdi:.*9.*rax:.*1.*rdi:.*2.*)s;
  }
 
-if (1) {                                                                        #TReorderRegisters #TUnReorderRegisters
+if (1) {                                                                        # Mask register instructions
   Start;
 
   Mov rax,1;
@@ -3206,16 +3235,23 @@ if (1) {                                                                        
   PopR  k0;
   PrintOutRegisterInHex k0;
   PrintOutRegisterInHex k1;
-  Exit;                                                                         # Return to operating system
+  Exit;
   ok Assemble =~ m(k0: 0000 0000 0000 0008.*k1: 0000 0000 0000 0000)s;
  }
 
-if (1) {                                                                        #TReorderRegisters #TUnReorderRegisters
+if (1) {                                                                        # Count leading zeros
   Start;
-  my $f = $0;                                                                   # Load a string into a temp file
+  Mov   rax, 8;                                                                 # Append a constant to the byte string
+  Lzcnt rax, rax;                                                               # New line
+  PrintOutRegisterInHex rax;
+  Exit;                                                                         # Return to operating system
+  ok Assemble =~ m(0000 003C);
+ }
 
+if (1) {                                                                        # Print this file
+  Start;
   my $s = CreateByteString;                                                     # Create a string
-  $s->q($f);                                                                    # Append a constant to the byte string
+  $s->q($0);                                                                    # Append a constant to the byte string
   $s->z;                                                                        # New line
   $s->read;
   $s->out;
@@ -3226,13 +3262,17 @@ if (1) {                                                                        
 
 latest:;
 
-if (1) {                                                                        #TReorderRegisters #TUnReorderRegisters
+if (1) {                                                                        # Print rdi in hex into a byte string
   Start;
-  Mov   rax, 8;                                                                  # Append a constant to the byte string
-  Lzcnt rax, rax;                                                               # New line
-  PrintOutRegisterInHex rax;
+  my $s = CreateByteString;                                                     # Create a string
+  Mov rdi, 0x88776655;
+  Shl rdi, 32;
+  Or  rdi, 0x44332211;
+
+  $s->rdiInHex;                                                                 # Append a constant to the byte string
+  $s->out;
   Exit;                                                                         # Return to operating system
-  ok Assemble =~ m(0000 003C);
+  ok Assemble =~ m(8877665544332211);
  }
 
 lll "Finished:", time - $start;
