@@ -162,7 +162,7 @@ sub PopR(@);                                                                    
 sub PrintOutMemory;                                                             # Print the memory addressed by rax for a length of rdi
 sub PrintOutRegisterInHex($);                                                   # Print any register as a hex string
 sub PushR(@);
-sub Syscall();                                                                  # System call in linux 64 format per: https://filippo.io/linux-syscall-table/
+sub Syscall();                                                                  # System call in linux 64 format
 
 #D1 Data                                                                        # Layout data
 
@@ -261,12 +261,12 @@ sub Rq(@)                                                                       
 
 #D1 Registers                                                                   # Operations on registers
 
-my @syscallSequence = qw(rax rdi rsi rdx r10 r8 r9);                            # The parameter list sequqnce for syscalls
+my @syscallSequence = qw(rax rdi rsi rdx r10 r8 r9);                            # The parameter list sequence for system calls
 
 sub SaveFirstFour()                                                             # Save the first 4 parameter registers
  {my $N = 4;
   Push $_ for @syscallSequence[0..$N-1];
-  $N * &RegisterSize(rax);                                                       # Space occupied by push
+  $N * &RegisterSize(rax);                                                      # Space occupied by push
  }
 
 sub RestoreFirstFour()                                                          # Restore the first 4 parameter registers
@@ -303,7 +303,7 @@ sub RestoreFirstSevenExceptRaxAndRdi()                                          
   Add rsp, 2*RegisterSize(rax);                                                 # Skip rdi and rax
  }
 
-sub ReorderRegisters(@)                                                         # Map the list of registers provided to the the x64 syscall sequence
+sub ReorderRegisters(@)                                                         # Map the list of registers provided to the the 64 bit system call sequence
  {my (@registers) = @_;                                                         # Registers
   Push $_ for @syscallSequence[0..$#registers];
   Push $_ for reverse @registers;
@@ -698,11 +698,11 @@ sub PushR(@)                                                                    
  {my (@r) = @_;                                                                 # Register
   for my $r(@r)
    {my $size = RegisterSize $r;
-    if    ($size > 8)                                                           # x|y|zmmm
+    if    ($size > 8)                                                           # Wide registers
      {Sub rsp, $size;
       Vmovdqu32 "[rsp]", $r;
      }
-    elsif ($r =~ m(\Ak))                                                        # k as they do not repond to push
+    elsif ($r =~ m(\Ak))                                                        # Mask as they do not respond to push
      {Sub rsp, $size;
       Kmovq "[rsp]", $r;
      }
@@ -1102,7 +1102,7 @@ sub CreateByteString()                                                          
    );
  }
 
-sub ByteString::updateSpace($)                                                  #P Make sure that the byte string addressed by rax has enough space to accomodate content of length rdi
+sub ByteString::updateSpace($)                                                  #P Make sure that the byte string addressed by rax has enough space to accommodate content of length rdi
  {my ($byteString) = @_;                                                        # Byte string descriptor
   my $size = $byteString->size;
   my $used = $byteString->used;
@@ -1243,9 +1243,6 @@ sub ByteString::clear($)                                                        
 sub ByteString::write($)                                                        # Write the content in a byte string addressed by rax to a temporary file and replace the byte string content with the name of the  temporary file
  {my ($byteString) = @_;                                                        # Byte string descriptor
   my $FileNameSize = 12;                                                        # Size of the file name
-  my $S = extractMacroDefinitionsFromCHeaderFile "linux/fcntl.h";               # Constants for reading a file
-  my $AT_FDCWD      = $$S{AT_FDCWD};
-  my $AT_EMPTY_PATH = $$S{AT_EMPTY_PATH};
 
   SaveFirstSeven;
 
@@ -3376,8 +3373,6 @@ if (1) {                                                                        
   ok Assemble =~ m(8877665544332211);
  }
 
-#latest:;
-
 if (1) {                                                                        # Print rdi in hex into a byte string
   Start;
   GetPidInHex;
@@ -3386,7 +3381,7 @@ if (1) {                                                                        
   ok Assemble =~ m(rax: 00);
  }
 
-#latest:;
+latest:;
 
 if (1) {                                                                        # Write a hex string to a temporary file
   Start;
