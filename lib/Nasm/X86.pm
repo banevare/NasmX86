@@ -622,6 +622,34 @@ sub GetPid()                                                                    
   Syscall
  }
 
+sub GetPidInHex()                                                               # Get process identifier in hex as 8 zero terminated bytes in rax
+ {@_ == 0 or confess;
+  Comment "Get Pid";
+  my $hexTranslateTable = hexTranslateTable;
+
+  my $sub = S                                                                   # Address conversion routine
+   {SaveFirstFour;
+    Mov rax, 39;
+    Syscall;
+    Mov rdx, rax;                                                               # Content to be printed
+    ClearRegisters rax;                                                         # Save a trailing 00 on the stack
+    Push ax;
+    for my $i(reverse 5..7)
+     {my $s = 8*$i;
+      Mov rdi,rdx;
+      Shl rdi,$s;                                                               # Push selected byte high
+      Shr rdi,56;                                                               # Push select byte low
+      Shl rdi,1;                                                                # Multiply by two because each entry in the translation table is two bytes long
+      Mov ax, "[$hexTranslateTable+rdi]";
+      Push ax;
+     }
+    Pop rax;                                                                    # Get result from stack
+    RestoreFirstFourExceptRax;
+   } name => "GetPidInHex";
+
+  Call $sub;
+ }
+
 sub GetPPid()                                                                   # Get parent process identifier
  {@_ == 0 or confess;
   Comment "Get Parent Pid";
@@ -956,13 +984,40 @@ sub OpenRead()                                                                  
   Call $sub;
  }
 
-sub Close($)                                                                    # Close a file descriptor
- {my ($fdes) = @_;                                                              # File descriptor
-  @_ == 1 or confess;
+sub OpenWrite()                                                                 # Create the file named by the terminated string addressed by rax for write
+ {@_ == 0 or confess;
+  Comment "Open a file for write";
+  my $sub = S
+   {my $S = extractMacroDefinitionsFromCHeaderFile "fcntl.h";                   # Constants for creating a temporary file
+#   my $T = extractMacroDefinitionsFromCHeaderFile "sys/stat.h";
+    my $O_WRONLY  = $$S{O_WRONLY};
+    my $O_CREAT   = $$S{O_CREAT};
+    my $O_RDWR    = $$S{O_RDWR};
+#   my $S_IRUSR   = $$T{__S_IREAD};
+#   my $S_IWUSR   = $$T{__S_IWRITE};
+    my $write = $O_WRONLY+0 | $O_CREAT+0;
+
+    SaveFirstFour;
+    Mov rdi,16;
+    Mov rdi, rax;
+    Mov rax, 2;
+    Mov rsi, $write;
+    ClearRegisters rdx;
+    Mov rdx, 0x1c0;                                                             # u=rwx  1o=x 4o=r 8g=x 10g=w 20g=r 40u=x 80u=r 100u=r 200=T 400g=S 800u=S #0,2,1000, nothing
+    Syscall;
+
+    RestoreFirstFourExceptRax;
+   } name=> "OpenWrite";
+
+  Call $sub;
+ }
+
+sub CloseFile()                                                                 # Close the file whose descriptor is in rax
+ {@_ == 0 or confess;
   Comment "Close a file";
   SaveFirstFour;
-  Mov rdi,$fdes;
-  Mov rax,3;
+  Mov rdi, rax;
+  Mov rax, 3;
   Syscall;
   RestoreFirstFourExceptRax;
  }
@@ -1183,6 +1238,54 @@ sub ByteString::clear($)                                                        
   ClearRegisters rdi;
   Mov $byteString->used, rdi;
   PopR           rdi;
+ }
+
+sub ByteString::write($)                                                        # Write the content in a byte string addressed by rax to a temporary file and replace the byte string content with the name of the  temporary file
+ {my ($byteString) = @_;                                                        # Byte string descriptor
+  my $FileNameSize = 12;                                                        # Size of the file name
+  my $S = extractMacroDefinitionsFromCHeaderFile "linux/fcntl.h";               # Constants for reading a file
+  my $AT_FDCWD      = $$S{AT_FDCWD};
+  my $AT_EMPTY_PATH = $$S{AT_EMPTY_PATH};
+
+  SaveFirstSeven;
+
+  my $string = r8;                                                              # Byte string
+  my $file   = r9;                                                              # File descriptor
+
+  Mov $string, rax;                                                             # Save address of byte string
+
+  GetPidInHex;                                                                  # Name of file
+  Push rax;
+  if (1)
+   {my @c = split //, "atmpat";
+    while(@c)
+     {my $a = pop @c; my $b = pop @c;
+      my $x = sprintf("%x%x", ord($a), ord($b));
+      Mov rax, "0x$x";
+      Push ax;
+     }
+   }
+
+  Mov rax, rsp;                                                                 # Address file name
+  OpenWrite;                                                                    # Create a temporary file
+  Mov $file, rax;                                                               # File descriptor
+
+  Mov rax, 1;                                                                   # Write content to file
+  Mov rdi, $file;
+  Lea rsi, $byteString->data =~ s(rax) ($string)gsr;
+  Mov rdx, $byteString->used =~ s(rax) ($string)gsr;
+  Syscall;
+  Mov rax, $string;                                                             # Clear string and add file name
+  $byteString->clear;
+
+  Mov rax, $string;                                                             # Put file name in byte string
+  Mov rsi, rsp;
+  Mov rdi, 1+$FileNameSize;                                                     # File name size plus one trailing zero
+  $byteString->m;
+  Add rsp, 2+$FileNameSize;                                                     # File name size plus two trailing zeros
+  Mov rax, $file;
+  CloseFile;
+  RestoreFirstSeven;
  }
 
 sub ByteString::read($)                                                         # Read the file named in the byte string (terminated with a zero byte) addressed by rax and place it into the byte string after clearing the byte string to remove the file name contained therein.
@@ -2814,7 +2917,7 @@ $ENV{PATH} = $ENV{PATH}.":/var/isde:sde";                                       
 if ($^O =~ m(bsd|linux)i)                                                       # Supported systems
  {if (confirmHasCommandLineCommand(q(nasm)) and                                 # Network assembler
       confirmHasCommandLineCommand(q(sde64)))                                   # Intel emulator
-   {plan tests => 37;
+   {plan tests => 39;
    }
   else
    {plan skip_all =>qq(Nasm or Intel 64 emulator not available);
@@ -3081,7 +3184,7 @@ if (1) {                                                                        
   Mov rax, Rs($0);                                                              # File to stat
   OpenRead;                                                                     # Open file
   PrintOutRegisterInHex rax;
-  Close(rax);                                                                   # Close file
+  CloseFile;                                                                   # Close file
   PrintOutRegisterInHex rax;
   Exit;                                                                         # Return to operating system
 
@@ -3260,8 +3363,6 @@ if (1) {                                                                        
   ok index(removeNonAsciiChars($r), removeNonAsciiChars(readFile $0)) >= 0;     # Output contains this file
  }
 
-latest:;
-
 if (1) {                                                                        # Print rdi in hex into a byte string
   Start;
   my $s = CreateByteString;                                                     # Create a string
@@ -3273,6 +3374,31 @@ if (1) {                                                                        
   $s->out;
   Exit;                                                                         # Return to operating system
   ok Assemble =~ m(8877665544332211);
+ }
+
+#latest:;
+
+if (1) {                                                                        # Print rdi in hex into a byte string
+  Start;
+  GetPidInHex;
+  PrintOutRegisterInHex rax;
+  Exit;                                                                         # Return to operating system
+  ok Assemble =~ m(rax: 00);
+ }
+
+#latest:;
+
+if (1) {                                                                        # Write a hex string to a temporary file
+  Start;
+  my $s = CreateByteString;                                                     # Create a string
+  Mov rdi, 0x88776655;                                                          # Write into string
+  Shl rdi, 32;
+  Or  rdi, 0x44332211;
+  $s->rdiInHex;                                                                 # Append a constant to the byte string
+  $s->write;                                                                    # Write the byte string to a temporary file
+  $s->out;                                                                      # Write the name of the temporary file
+  Exit;                                                                         # Return to operating system
+  ok Assemble =~ m(tmp);
  }
 
 lll "Finished:", time - $start;
