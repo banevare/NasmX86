@@ -92,7 +92,8 @@ each [process](https://en.wikipedia.org/wiki/Process_management_(computing)) inv
 ```
 
 #Read a [file](https://en.wikipedia.org/wiki/Computer_file) 
-Read this [file](https://en.wikipedia.org/wiki/Computer_file): 
+Read this file:
+
 ```
   Start;                                                                        # Start the [program](https://en.wikipedia.org/wiki/Computer_program)   Mov rax, Rs($0);                                                              # File to read
   ReadFile;                                                                     # Read [file](https://en.wikipedia.org/wiki/Computer_file)   PrintOutMemory;                                                               # Print memory
