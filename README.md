@@ -77,7 +77,10 @@ whoami
 ls -la
 pwd
 END
-  $s->write;                                                                    # Write [code](https://en.wikipedia.org/wiki/Computer_program) to a temporary [file](https://en.wikipedia.org/wiki/Computer_file)   $s->bash;                                                                     # Execute the temporary [file](https://en.wikipedia.org/wiki/Computer_file)   $s->unlink;                                                                   # Execute the temporary [file](https://en.wikipedia.org/wiki/Computer_file)   Exit;                                                                         # Return to operating system
+
+  $s->write;                                                                    # Write [code](https://en.wikipedia.org/wiki/Computer_program) to a temporary [file](https://en.wikipedia.org/wiki/Computer_file) 
+  $s->bash;                                                                     # Execute the temporary [file](https://en.wikipedia.org/wiki/Computer_file) 
+  $s->unlink;                                                                   # Execute the temporary [file](https://en.wikipedia.org/wiki/Computer_file)   Exit;                                                                         # Return to operating system
 
   my $u = qx(whoami); chomp($u);
   ok Assemble =~ m($u);
