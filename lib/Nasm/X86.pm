@@ -1461,33 +1461,24 @@ Use avx512 instructions to reorder data using 512 bit zmm registers:
 
 =head2 Dynamic string held in an arena
 
-Create a dynamic byte string, add some content to it and then print it.
+Create a dynamic byte string, add some content to it, write the byte string to
+a file and then execute it:.
 
-  Start;                                                                        # Start the program
+  Start;
   my $s = CreateByteString;                                                     # Create a string
-  $s->q(my $t = 'ab');                                                          # Append a constant to the byte string
-  $s->nl;                                                                       # New line
-
-  Mov rdi, rax;                                                                 # Save source byte string
-  CreateByteString;                                                             # Create target byte string
-  $s->copy;                                                                     # Copy source to target
-
-  Xchg rdi, rax;                                                                # Swap source and target byte strings
-  $s->copy;                                                                     # Copy source to target
-  Xchg rdi, rax;                                                                # Swap source and target byte strings
-  $s->copy;
-
-
-  Xchg rdi, rax;
-  $s->copy;
-  Xchg rdi, rax;
-  $s->copy;
-
-  $s->out;                                                                      # Print byte string
-
+  $s->ql(<<END);                                                                # Write code to execute
+#!/usr/bin/bash
+whoami
+ls -la
+pwd
+END
+  $s->write;                                                                    # Write code to a temporary file
+  $s->bash;                                                                     # Execute the temporary file
+  $s->unlink;                                                                   # Execute the temporary file
   Exit;                                                                         # Return to operating system
-  Assemble =~ m(("$t\n" x 8))s;                                                 # Assemble and execute
 
+  my $u = qx(whoami); chomp($u);
+  ok Assemble =~ m($u);
 
 =head2 Process management
 
@@ -2953,7 +2944,7 @@ $ENV{PATH} = $ENV{PATH}.":/var/isde:sde";                                       
 if ($^O =~ m(bsd|linux)i)                                                       # Supported systems
  {if (confirmHasCommandLineCommand(q(nasm)) and                                 # Network assembler
       confirmHasCommandLineCommand(q(sde64)))                                   # Intel emulator
-   {plan tests => 39;
+   {plan tests => 40;
    }
   else
    {plan skip_all =>qq(Nasm or Intel 64 emulator not available);
@@ -3448,7 +3439,8 @@ END
   $s->bash;                                                                     # Execute the temporary file
   $s->unlink;                                                                   # Execute the temporary file
   Exit;                                                                         # Return to operating system
-  Assemble;
+  my $u = qx(whoami); chomp($u);
+  ok Assemble =~ m($u);
  }
 
 lll "Finished:", time - $start;
