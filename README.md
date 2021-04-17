@@ -34,7 +34,7 @@ in.
 
 ![Linux system calls](https://filippo.io/linux-syscall-table/)
 
-![SIMD x86 instructions](https://www.officedaytime.com/simd512e/)
+![Avx512 SIMD x86 instructions](https://www.officedaytime.com/simd512e/)
 
 
 # Avx512 instructions
