@@ -33,7 +33,7 @@ Use [Advanced Vector Extensions](https://en.wikipedia.org/wiki/AVX-512) instruct
 
 #Dynamic string held in an [arena](https://en.wikipedia.org/wiki/Region-based_memory_management) 
 Create a dynamic byte string, add some content to it, write the byte string to
-a [file](https://en.wikipedia.org/wiki/Computer_file) and then execute it:.
+a [file](https://en.wikipedia.org/wiki/Computer_file) and then execute it:
 
 ```
   Start;
