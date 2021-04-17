@@ -1170,6 +1170,15 @@ sub ByteString::q($$)                                                           
   RestoreFirstFourExceptRax;                                                    # Return the possibly expanded byte string
  }
 
+sub ByteString::ql($$)                                                          # Append a quoted string containing new line characters to the byte string addressed by rax
+ {my ($byteString, $const) = @_;                                                # Byte string descriptor, constant
+  my @l = split /\s*\n/, $const;
+  for my $l(@l)
+   {$byteString->q($l);
+    $byteString->nl;
+   }
+ }
+
 sub ByteString::char($$)                                                        # Append a character expressed as a decimal number to the byte string addressed by rax
  {my ($byteString, $char) = @_;                                                 # Byte string descriptor, decimal number of character to be appended
   SaveFirstFour;
@@ -1312,6 +1321,36 @@ sub ByteString::out($)                                                          
   RestoreFirstFour;
  }
 
+sub ByteString::bash($)                                                         # Execute the file named in the byte string addressed by rax with bash
+ {my ($byteString) = @_;                                                        # Byte string descriptor
+  SaveFirstFour;
+  Mov rdx, rax;                                                                 # Save byte string address
+  Fork;                                                                         # Fork
+
+  Test rax,rax;
+  If                                                                            # Parent
+   {WaitPid;
+   }
+  sub                                                                           # Child
+   {Mov rax, rdx;                                                               # Restore address of byte string
+    Lea rdi, $byteString->data;
+    Mov rsi, 0;
+    Mov rdx, 0;
+    Mov rax, 59;
+    Syscall;
+   };
+  RestoreFirstFour;
+ }
+
+sub ByteString::unlink($)                                                       # Unlink the file named in the byte string addressed by rax with bash
+ {my ($byteString) = @_;                                                        # Byte string descriptor
+  SaveFirstFour;
+  Lea rdi, $byteString->data;
+  Mov rax, 87;
+  Syscall;
+  RestoreFirstFour;
+ }
+
 #D1 Assemble                                                                    # Assemble generated code
 
 sub Start()                                                                     # Initialize the assembler
@@ -1364,7 +1403,7 @@ END
   say STDERR qq($cmd);
   my $R    = eval {qx($cmd)};
   say STDERR $R;
-  unlink $e, $o;                                                                # Delete object and executable leaving listing files
+# unlink $e, $o;                                                                # Delete object and executable leaving listing files
   $R                                                                            # Return execution results
  }
 
@@ -3381,8 +3420,6 @@ if (1) {                                                                        
   ok Assemble =~ m(rax: 00);
  }
 
-latest:;
-
 if (1) {                                                                        # Write a hex string to a temporary file
   Start;
   my $s = CreateByteString;                                                     # Create a string
@@ -3394,6 +3431,24 @@ if (1) {                                                                        
   $s->out;                                                                      # Write the name of the temporary file
   Exit;                                                                         # Return to operating system
   ok Assemble =~ m(tmp);
+ }
+
+latest:;
+
+if (1) {                                                                        # Execute the content of a byte string
+  Start;
+  my $s = CreateByteString;                                                     # Create a string
+  $s->ql(<<END);                                                                # Write code to execute
+#!/usr/bin/bash
+whoami
+ls -la
+pwd
+END
+  $s->write;                                                                    # Write code to a temporary file
+  $s->bash;                                                                     # Execute the temporary file
+  $s->unlink;                                                                   # Execute the temporary file
+  Exit;                                                                         # Return to operating system
+  Assemble;
  }
 
 lll "Finished:", time - $start;
