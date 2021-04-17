@@ -26,15 +26,17 @@ Please feel free to join in.
 
 # Useful links
 
+- [Avx512 SIMD x86 instructions](https://www.officedaytime.com/simd512e/)
+
+- [Linux system calls](https://filippo.io/linux-syscall-table/)
+
 - [Linux error codes](https://www-numi.fnal.gov/offline_software/srt_public_context/WebDocs/Errors/unix_system_errors.html)
 
 - [Network wide assembler](https://www.nasm.us/xdoc/2.15.05/html/nasmdoc0.html)
 
 - [Intel emulator](https://software.intel.com/content/dam/develop/external/us/en/documents/downloads/sde-external-8.63.0-2021-01-18-lin.tar.bz2)
 
-- [Linux system calls](https://filippo.io/linux-syscall-table/)
-
-- [Avx512 SIMD x86 instructions](https://www.officedaytime.com/simd512e/)
+- [Ascii table](https://www.asciitable.com/)
 
 
 # Avx512 instructions
