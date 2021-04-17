@@ -91,12 +91,14 @@ each [process](https://en.wikipedia.org/wiki/Process_management_(computing)) inv
   #   rcx: 0000 0000 0003 0C60   #6 Pid of parent
 ```
 
-# Read a [file](https://en.wikipedia.org/wiki/Computer_file) 
-Read this file:
+# Read a [file](https://en.wikipedia.org/wiki/Computer_file) and print it out
+
+Read this file and print it out:
 
 ```
   Start;                                                                        # Start the [program](https://en.wikipedia.org/wiki/Computer_program)   Mov rax, Rs($0);                                                              # File to read
-  ReadFile;                                                                     # Read [file](https://en.wikipedia.org/wiki/Computer_file)   PrintOutMemory;                                                               # Print memory
+  ReadFile;                                                                     # Read [file](https://en.wikipedia.org/wiki/Computer_file) 
+  PrintOutMemory;                                                               # Print memory
   Exit;                                                                         # Return to operating system
 
   my $r = Assemble;                                                             # Assemble and execute
