@@ -1136,6 +1136,28 @@ sub ByteString::updateSpace($)                                                  
   RestoreFirstFourExceptRax;                                                    # Return new byte string
  }
 
+sub ByteString::makeReadOnly($)                                                 # Make a byte string read only
+ {my ($byteString) = @_;                                                        # Byte string descriptor
+  SaveFirstFour;
+  Mov rdi, rax;                                                                 # Address of byte string
+  Mov rsi, $byteString->size;                                                   # Size of byte string
+  Mov rdx, 1;                                                                   # Read only access
+  Mov rax, 10;
+  Syscall;
+  RestoreFirstFour;                                                             # Return the possibly expanded byte string
+ }
+
+sub ByteString::makeWritable($)                                                 # Make a byte string writable
+ {my ($byteString) = @_;                                                        # Byte string descriptor
+  SaveFirstFour;
+  Mov rdi, rax;                                                                 # Address of byte string
+  Mov rsi, $byteString->size;                                                   # Size of byte string
+  Mov rdx, 3;                                                                   # Read only access
+  Mov rax, 10;
+  Syscall;
+  RestoreFirstFour;                                                             # Return the possibly expanded byte string
+ }
+
 sub ByteString::m($)                                                            # Append the content with length rdi addressed by rsi to the byte string addressed by rax
  {my ($byteString) = @_;                                                        # Byte string descriptor
   my $size = $byteString->size;
@@ -2944,7 +2966,7 @@ $ENV{PATH} = $ENV{PATH}.":/var/isde:sde";                                       
 if ($^O =~ m(bsd|linux)i)                                                       # Supported systems
  {if (confirmHasCommandLineCommand(q(nasm)) and                                 # Network assembler
       confirmHasCommandLineCommand(q(sde64)))                                   # Intel emulator
-   {plan tests => 40;
+   {plan tests => 42;
    }
   else
    {plan skip_all =>qq(Nasm or Intel 64 emulator not available);
@@ -2956,7 +2978,7 @@ else
 
 my $start = time;                                                               # Tests
 
-#goto latest;
+goto latest;
 
 if (1) {                                                                        #TExit #TPrintOutString #TStart #TAssemble
   Start;
@@ -3424,8 +3446,6 @@ if (1) {                                                                        
   ok Assemble =~ m(tmp);
  }
 
-latest:;
-
 if (1) {                                                                        # Execute the content of a byte string
   Start;
   my $s = CreateByteString;                                                     # Create a string
@@ -3441,6 +3461,30 @@ END
   Exit;                                                                         # Return to operating system
   my $u = qx(whoami); chomp($u);
   ok Assemble =~ m($u);
+ }
+
+latest:;
+
+if (1) {                                                                        # Make a byte string readonly
+  Start;
+  my $s = CreateByteString;                                                     # Create a byte string
+  $s->q("Hello");                                                               # Write code to byte string
+  $s->makeReadOnly;                                                             # Make byte string read only
+  $s->q(" World");                                                              # Try to write to byte string
+  Exit;                                                                         # Return to operating system
+  ok Assemble =~ m(SDE ERROR: DEREFERENCING BAD MEMORY POINTER.*mov byte ptr .rax.rdx.1., r8b);
+ }
+
+if (1) {                                                                        # Make a read only byte string writable
+  Start;
+  my $s = CreateByteString;                                                     # Create a byte string
+  $s->q("Hello");                                                               # Write code to byte string
+  $s->makeReadOnly;                                                             # Make byte string read only - tested above
+  $s->makeWritable;                                                             # Make byte string writable again
+  $s->q(" World");                                                              # Try to write to byte string
+  $s->out;
+  Exit;                                                                         # Return to operating system
+  ok Assemble =~ m(Hello World);
  }
 
 lll "Finished:", time - $start;
