@@ -2978,7 +2978,7 @@ else
 
 my $start = time;                                                               # Tests
 
-goto latest;
+#goto latest;
 
 if (1) {                                                                        #TExit #TPrintOutString #TStart #TAssemble
   Start;
@@ -3463,8 +3463,6 @@ END
   ok Assemble =~ m($u);
  }
 
-latest:;
-
 if (1) {                                                                        # Make a byte string readonly
   Start;
   my $s = CreateByteString;                                                     # Create a byte string
@@ -3474,6 +3472,8 @@ if (1) {                                                                        
   Exit;                                                                         # Return to operating system
   ok Assemble =~ m(SDE ERROR: DEREFERENCING BAD MEMORY POINTER.*mov byte ptr .rax.rdx.1., r8b);
  }
+
+latest:;
 
 if (1) {                                                                        # Make a read only byte string writable
   Start;
