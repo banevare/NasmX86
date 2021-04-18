@@ -1158,17 +1158,30 @@ sub ByteString::makeWritable($)                                                 
   RestoreFirstFour;                                                             # Return the possibly expanded byte string
  }
 
+sub ByteString::allocate($)                                                     # Allocate the amount of space indicated in rdi in the byte string addressed by rax and return its offset in rax
+ {my ($byteString) = @_;                                                        # Byte string descriptor
+  my $usedr  = rdx;                                                             # Register used to calculate how much of the byte string has been used
+  my $offset = rsi;                                                             # Register used to hold current offset
+
+  $byteString->updateSpace;                                                     # Update space if needed
+  SaveFirstFour;
+  Mov $usedr, $byteString->used;                                                # Currently used
+  Mov $offset, $usedr;                                                          # Current offset
+  Add $usedr, rdi;                                                              # Now used
+  Mov $byteString->used, $usedr;
+  Mov rax, $offset;
+  RestoreFirstFourExceptRax;                                                    # Return the possibly expanded byte string
+ }
+
 sub ByteString::m($)                                                            # Append the content with length rdi addressed by rsi to the byte string addressed by rax
  {my ($byteString) = @_;                                                        # Byte string descriptor
-  my $size = $byteString->size;
   my $used = $byteString->used;
-  my $data = $byteString->data;
   my $target = rdx;                                                             # Register that addresses target of move
   my $length = rdx;                                                             # Register used to update used field
 
   $byteString->updateSpace;                                                     # Update space if needed
   SaveFirstFour;
-  Lea $target, $data;                                                           # Address of data field
+  Lea $target, $byteString->data;                                               # Address of data field
   Add $target, $used;                                                           # Skip over used data
 
   PushR rax;                                                                    # Save address of byte string
@@ -1178,7 +1191,7 @@ sub ByteString::m($)                                                            
 
   Mov $length, $used;                                                           # Update used field
   Add $length, rdi;
-  Mov $used, $length;
+  Mov $used,   $length;
 
   RestoreFirstFourExceptRax;                                                    # Return the possibly expanded byte string
  }
@@ -2966,7 +2979,7 @@ $ENV{PATH} = $ENV{PATH}.":/var/isde:sde";                                       
 if ($^O =~ m(bsd|linux)i)                                                       # Supported systems
  {if (confirmHasCommandLineCommand(q(nasm)) and                                 # Network assembler
       confirmHasCommandLineCommand(q(sde64)))                                   # Intel emulator
-   {plan tests => 42;
+   {plan tests => 43;
    }
   else
    {plan skip_all =>qq(Nasm or Intel 64 emulator not available);
@@ -3473,18 +3486,31 @@ if (1) {                                                                        
   ok Assemble =~ m(SDE ERROR: DEREFERENCING BAD MEMORY POINTER.*mov byte ptr .rax.rdx.1., r8b);
  }
 
-latest:;
-
 if (1) {                                                                        # Make a read only byte string writable
   Start;
   my $s = CreateByteString;                                                     # Create a byte string
-  $s->q("Hello");                                                               # Write code to byte string
+  $s->q("Hello");                                                               # Write data to byte string
   $s->makeReadOnly;                                                             # Make byte string read only - tested above
   $s->makeWritable;                                                             # Make byte string writable again
   $s->q(" World");                                                              # Try to write to byte string
   $s->out;
   Exit;                                                                         # Return to operating system
   ok Assemble =~ m(Hello World);
+ }
+
+latest:;
+
+if (1) {                                                                        # Allocate some space in byte string
+  Start;
+  my $s = CreateByteString;                                                     # Create a byte string
+  Mov r8,  rax;
+  $s->ql("Hello World");                                                        # Add some data
+  Mov rdi, 28;
+  $s->allocate(8);                                                              # Allocate some space
+  Mov rax, r8;
+  PrintOutMemoryInHex;                                                          # Show allocation
+  Exit;                                                                         # Return to operating system
+  ok Assemble =~ m(0010 0000 0000 0000 2800 0000 0000 0000 4865 6C6C 6F20 576F);
  }
 
 lll "Finished:", time - $start;
