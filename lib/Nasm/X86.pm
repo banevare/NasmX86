@@ -64,6 +64,7 @@ END
 add and cmp cmova cmovae cmovb cmovbe cmovc cmove cmovg cmovge cmovl cmovle cmovna cmovnae cmovnb
 kmov knot  kortest ktest lea mov or shl shr sub test Vmovdqu8 vmovdqu32 vmovdqu64 vpxorq
 lzcnt
+tzcnt
 xchg xor
 END
   my @i3 =  split /\s+/, <<END;                                                 # Triple operand instructions
@@ -278,13 +279,19 @@ sub RestoreFirstFour()                                                          
 sub RestoreFirstFourExceptRax()                                                 # Restore the first 4 parameter registers except rax so it can return its value
  {my $N = 4;
   Pop $_ for reverse @syscallSequence[1..$N-1];
-  Add rsp, RegisterSize(rax);
+  Add rsp, 1*RegisterSize(rax);
+ }
+
+sub RestoreFirstFourExceptRaxAndRdi()                                           # Restore the first 4 parameter registers except rax  and rdi so we can return a pair of values
+ {my $N = 4;
+  Pop $_ for reverse @syscallSequence[2..$N-1];
+  Add rsp, 2*RegisterSize(rax);
  }
 
 sub SaveFirstSeven()                                                            # Save the first 7 parameter registers
  {my $N = 7;
   Push $_ for @syscallSequence[0..$N-1];
-  $N * &RegisterSize(rax);                                                       # Space occupied by push
+  $N * 1*RegisterSize(rax);                                                       # Space occupied by push
  }
 
 sub RestoreFirstSeven()                                                         # Restore the first 7 parameter registers
@@ -295,7 +302,7 @@ sub RestoreFirstSeven()                                                         
 sub RestoreFirstSevenExceptRax()                                                # Restore the first 7 parameter registers except rax which is being used to return the result
  {my $N = 7;
   Pop $_ for reverse @syscallSequence[1..$N-1];
-  Add rsp, RegisterSize(rax);
+  Add rsp, 1*RegisterSize(rax);
  }
 
 sub RestoreFirstSevenExceptRaxAndRdi()                                          # Restore the first 7 parameter registers except rax and rdi which are being used to return the results
@@ -333,6 +340,14 @@ sub ClearRegisters(@)                                                           
     Kxorq  $r, $r, $r if $size == 8 and $r =~ m(\Ak);
     Vpxorq $r, $r     if $size  > 8;
    }
+ }
+
+sub SetRegisterToMinusOne($)                                                    # Set the specified register to -1
+ {my ($register) = @_;                                                          # Register to set
+  @_ == 1 or confess;
+
+  Xor $register,$register;
+  Sub $register,1;
  }
 
 #D1 Structured Programming                                                      # Structured programming constructs
@@ -780,6 +795,7 @@ sub Structure::field($$;$)                                                      
     comment    => $comment
    );
   $structure->size += $length;                                                  # Update size of local data
+  push $structure->variables->@*, $variable;                                    # Save variable
   $variable
  }
 
@@ -1120,9 +1136,10 @@ sub CreateByteString()                                                          
   Comment "Create byte string";
   my $N = 4096;                                                                 # Initial size of string
 
-  my ($string, $size, $used, $data) = All8Structure rax, 3;                     # String base
+  my ($string, $size, $used) = All8Structure rax, 2;                            # String base
+  my $data = $string->field(0, "start of data")->addr;                          # Start of data
 
-  my $sub = S                                                                   # Create byte string
+  my $sub  = S                                                                  # Create byte string
    {SaveFirstFour;
     Mov rax, $N;
     AllocateMemory;
@@ -1217,21 +1234,22 @@ sub ByteString::makeWritable($)                                                 
   Call $sub;
  }
 
-sub ByteString::allocate($)                                                     # Allocate the amount of space indicated in rdi in the byte string addressed by rax and return its offset in rax
+sub ByteString::allocate($)                                                     # Allocate the amount of space indicated in rdi in the byte string addressed by rax and return the offset of the allocation in the arena in rdi
  {my ($byteString) = @_;                                                        # Byte string descriptor
-  my $usedr  = rdx;                                                             # Register used to calculate how much of the byte string has been used
+  my $used   = rdx;                                                             # Register used to calculate how much of the byte string has been used
   my $offset = rsi;                                                             # Register used to hold current offset
 
   my $sub = S                                                                   # Read file
    {Comment "Allocate space in a byte string";
     $byteString->updateSpace;                                                   # Update space if needed
     SaveFirstFour;
-    Mov $usedr, $byteString->used;                                              # Currently used
-    Mov $offset, $usedr;                                                        # Current offset
-    Add $usedr, rdi;                                                            # Now used
-    Mov $byteString->used, $usedr;
-    Mov rax, $offset;
-    RestoreFirstFourExceptRax;                                                  # Return the possibly expanded byte string
+    Mov $used, $byteString->used;                                               # Currently used
+    Mov $offset, $used;                                                         # Current offset
+    Add $used, rdi;                                                             # Add the requested length to get the amount now used
+    Mov $byteString->used, $used;
+    Mov rdi, $offset;
+    Add rdi, $byteString->structure->size;                                      # This is the offset from the start of the byte string - which means that it will never be less than 16
+    RestoreFirstFourExceptRaxAndRdi;                                            # Return the possibly expanded byte string
    } name=> "ByteString::allocate";
 
   Call $sub;
@@ -1245,21 +1263,21 @@ sub ByteString::m($)                                                            
 
   my $sub = S                                                                   # Read file
    {Comment "Append memory to a byte string";
-    $byteString->updateSpace;                                                     # Update space if needed
+    $byteString->updateSpace;                                                   # Update space if needed
     SaveFirstFour;
-    Lea $target, $byteString->data;                                               # Address of data field
-    Add $target, $used;                                                           # Skip over used data
+    Lea $target, $byteString->data;                                             # Address of data field
+    Add $target, $used;                                                         # Skip over used data
 
-    PushR rax;                                                                    # Save address of byte string
-    Mov rax, $target;                                                             # Address target
-    CopyMemory;                                                                   # Move data in
-    PopR rax;                                                                     # Restore address of byte string
+    PushR rax;                                                                  # Save address of byte string
+    Mov rax, $target;                                                           # Address target
+    CopyMemory;                                                                 # Move data in
+    PopR rax;                                                                   # Restore address of byte string
 
-    Mov $length, $used;                                                           # Update used field
+    Mov $length, $used;                                                         # Update used field
     Add $length, rdi;
     Mov $used,   $length;
 
-    RestoreFirstFourExceptRax;                                                    # Return the possibly expanded byte string
+    RestoreFirstFourExceptRax;                                                  # Return the possibly expanded byte string
    } name=> "ByteString::m";
 
   Call $sub;
@@ -1482,11 +1500,67 @@ sub ByteString::unlink($)                                                       
   Call $sub;
  }
 
-sub genTree($$$)                                                                # Generate a set of routines to manage a tree held in a byte string with key and data fields of specified widths.
- {my ($byteString, $keyLength, $dataLength) = @_;                               # Byte string descriptor, key length, data length
-  my ($allocate, $find, $put, $get) = (map {Label} 1..4);                       # The external routines
-  SaveFirstFour;
-  RestoreFirstFour;
+sub GenTree($$)                                                                 # Generate a set of routines to manage a tree held in a byte string with key and data fields of specified widths.  Allocate a byte string to contain the tree, return its address in xmm0=(0, tree).
+ {my ($keyLength, $dataLength) = @_;                                            # Fixed key length in bytes, fixed data length in bytes
+  @_ == 2 or confess;
+  $keyLength  =~ m(\A2|4|8\Z) or confess;
+  $dataLength =~ m(\A2|4|8\Z) or confess;
+
+  my ($structure, $up, $left, $right) = All8Structure rax, 3;                   # Tree structure addressed by a register
+  my $height = $structure->field(4, "Height of the sub tree");
+  my $count  = $structure->field(4, "Number of entries active in this node");
+
+  my $s = $structure->size;                                                     # Structure size
+  my $k = RegisterSize(zmm0) / $keyLength;                                      # Number of keys
+
+  PushR my @regs = (rax, rdi);                                                  # Allocate a byte string to contain the tree and return its address in xmm0
+  my $byteString = CreateByteString;                                            # Create a byte string to contain the tree
+  ClearRegisters rdi;                                                           # Zero
+  Push rdi;                                                                     # Format stack for xmm0
+  Push rax;
+  PopR xmm0;                                                                    # Put result in xmm0
+  PopR @regs;                                                                   # Restore stack
+
+  my $K = $k * $keyLength;
+  my $D = $k * $dataLength;
+
+  my $arenaTree = genHash("ArenaTree",                                          # A node in an arena tree
+    byteString => $byteString,
+    node       => undef,
+    isRoot     => undef,
+    find       => undef,
+    put        => undef,
+    get        => undef,
+    structure  => $structure,
+    sizeBase   => $s,
+    sizeKeys   => $K,
+    sizeData   => $D,
+    size       => $s + $K + $D,
+   );
+
+  $arenaTree->node = sub                                                        # Create a new node in the arena tree pointed to by xmm0=(*,tree) and return the offset of the new node in xmm0=(offset, tree)
+   {@_ == 0 or confess;
+    SaveFirstFour;
+    PushR xmm0;                                                                 # Parse xmm0
+    Mov rax, "[rsp]";                                                           # We want rax while keeping xmm0 on the stack
+    Mov rdi, $arenaTree->size;                                                  # Size of allocation
+    $arenaTree->byteString->allocate;
+    Mov "[rsp+8]", rdi;                                                         # Push into position on stack
+    PopR xmm0;                                                                  # Receive xmm0 with the node offset in the high quad
+    RestoreFirstFour;
+   };
+
+  $arenaTree->isRoot = sub                                                      # Set the zero flag if the tree node addressed by xmm0 is a root node.
+   {my ($arenaTree) = @_;                                                       # Arena tree
+    @_ == 1 or confess;
+    Push rdi;
+#    CleSetRegisterToMinusOne rdi;
+    Cmp rdi, $arenaTree->structure->up;
+    If {} sub {ClearRegisters rax};
+    Pop rdi;
+   };
+
+  $arenaTree                                                                    # Description of this tree
  }
 
 #D1 Assemble                                                                    # Assemble generated code
@@ -3083,7 +3157,7 @@ $ENV{PATH} = $ENV{PATH}.":/var/isde:sde";                                       
 if ($^O =~ m(bsd|linux)i)                                                       # Supported systems
  {if (confirmHasCommandLineCommand(q(nasm)) and                                 # Network assembler
       confirmHasCommandLineCommand(q(sde64)))                                   # Intel emulator
-   {plan tests => 43;
+   {plan tests => 45;
    }
   else
    {plan skip_all =>qq(Nasm or Intel 64 emulator not available);
@@ -3513,8 +3587,11 @@ if (1) {                                                                        
   Mov   rax, 8;                                                                 # Append a constant to the byte string
   Lzcnt rax, rax;                                                               # New line
   PrintOutRegisterInHex rax;
+  Mov   rax, 8;                                                                 # Append a constant to the byte string
+  Tzcnt rax, rax;                                                               # New line
+  PrintOutRegisterInHex rax;
   Exit;                                                                         # Return to operating system
-  ok Assemble =~ m(0000 003C);
+  ok Assemble =~ m(rax: 0000 0000 0000 003C.*rax: 0000 0000 0000 0003)s;
  }
 
 if (1) {                                                                        # Print this file
@@ -3602,19 +3679,40 @@ if (1) {                                                                        
   ok Assemble =~ m(Hello World);
  }
 
-latest:;
-
 if (1) {                                                                        # Allocate some space in byte string
   Start;
   my $s = CreateByteString;                                                     # Create a byte string
   Mov r8,  rax;
-  $s->ql("Hello World");                                                        # Add some data
-  Mov rdi, 28;
-  $s->allocate(8);                                                              # Allocate some space
-  Mov rax, r8;
-  PrintOutMemoryInHex;                                                          # Show allocation
+  Mov rdi, my $w = 0x20;                                                        # Space wanted
+  $s->allocate;                                                                 # Allocate space wanted
+  PrintOutRegisterInHex rdi;
+  Mov rdi, $w;                                                                  # Space wanted
+  $s->allocate;                                                                 # Allocate space wanted
+  PrintOutRegisterInHex rdi;
   Exit;                                                                         # Return to operating system
-  ok Assemble =~ m(0010 0000 0000 0000 2800 0000 0000 0000 4865 6C6C 6F20 576F);
+  my $e = sprintf("rdi: 0000 0000 0000 %04X", $s->structure->size);             # Expected results
+  my $E = sprintf("rdi: 0000 0000 0000 %04X", $s->structure->size+$w);
+  ok Assemble =~ m($e.*$E)s;
+ }
+
+if (1) {                                                                        #TSetRegisterToMinusOne
+  Start;
+  SetRegisterToMinusOne rax;
+  PrintOutRegisterInHex rax;
+  Exit;                                                                         # Return to operating system
+  ok Assemble =~ m(rax: FFFF FFFF FFFF FFFF);
+ }
+
+latest:;
+
+if (1) {                                                                        #TGenTree
+  Start;
+  my $t = GenTree(2,2);
+  Mov r9, rax;
+  $t->node->&*;
+  PrintOutRegisterInHex xmm0;
+  Exit;                                                                         # Return to operating system
+  ok Assemble =~ m(xmm0: 0000 0000 0000 0010   0000 .... .... .000);
  }
 
 lll "Finished:", time - $start,  "bytes assembled:",   $totalBytesAssembled;
