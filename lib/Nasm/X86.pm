@@ -445,6 +445,13 @@ sub S(&%)                                                                       
   $start
  }
 
+sub cxr(&@)                                                                     # Call a subroutine with a reordering of the xmm registers.
+ {my ($body, @registers) = @_;                                                  # Registers to reorder
+  ReorderXmmRegisters   @registers;
+  &$body;
+  UnReorderXmmRegisters @registers;
+ }
+
 sub Comment(@)                                                                  # Insert a comment into the assembly code
  {my (@comment) = @_;                                                           # Text of comment
   my $c = join "", @comment;
@@ -5699,26 +5706,23 @@ if (1) {                                                                        
    {$t->node->();                                                               # Node in xmm0
     Movdqa xmm2, xmm0;                                                          # Left is in xmm2
 
-    ReorderXmmRegisters my @x = (1,2);                                          # Insert left under root
-    $t->insertLeft->();
-    UnReorderXmmRegisters @x;
-    $t->dump->("Left");                                                         # Left node after insertion
+    cxr {$t->insertLeft->()} 1,2;                                               # Insert left under root
+    cxr {$t->dump->("Left")} 2;                                                 # Left node after insertion
    }
 
   if (1)                                                                        # New right node in xmm0
    {$t->node->();
     Movdqa xmm3, xmm0;                                                          # Right is in xmm3
 
-    ReorderXmmRegisters my @x = (1,3);
-    $t->insertRight->();
-    UnReorderXmmRegisters @x;
-    $t->dump->("Right");                                                        # Right node after insertion
+    cxr {$t->insertRight->()} 1,3;                                              # Insert left under root
+    cxr {$t->dump->("Right")} 3;                                                # Right node after insertion
    }
 
-  Movdqa xmm0, xmm1;
-  $t->dump->("Root");                                                           # Root node after insertions
-  $t->isRoot->();
-  If {PrintOutStringNL "root"} sub {PrintOutStringNL "NOT root"};
+  cxr
+   {$t->dump->("Root");                                                         # Root node after insertions
+    $t->isRoot->();
+    If {PrintOutStringNL "root"} sub {PrintOutStringNL "NOT root"};
+   } 1;
 
   PushR xmm0;                                                                   # Dump underlying  byte string
   PopR rdi, rax;
