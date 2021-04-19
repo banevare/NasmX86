@@ -8,7 +8,7 @@
 # Register expressions via op overloading - register size and ability to add offsets, peek, pop, push clear register
 # Indent opcodes by call depth, - replace push @text with a method call
 package Nasm::X86;
-our $VERSION = "20210417";
+our $VERSION = "20210419";
 use warnings FATAL => qw(all);
 use strict;
 use Carp qw(confess cluck);
@@ -1779,8 +1779,8 @@ Nasm::X86 - Generate Nasm assembler code
 
 =head1 Synopsis
 
-Write and execute x64 instructions from perl, using perl as a macro assembler
-as shown in the following examples.
+Write and execute x64 instructions using perl as a macro assembler as shown in
+the following examples.
 
 =head2 Avx512 instructions
 
@@ -3842,7 +3842,9 @@ if (1) {                                                                        
   Exit;                                                                         # Return to operating system
   ok Assemble =~ m(rax: FFFF FFFF FFFF FFFF);
  }
+
 # It is one of the happiest characteristics of this glorious country that official utterances are invariably regarded as unanswerable
+
 if (1) {                                                                        #TPrintOutZF #TSetZF #TClearZF
   Start;
   SetZF;
@@ -3863,33 +3865,31 @@ latest:;
 
 if (1) {                                                                        #TGenTree
   Start;
-  my $t = GenTree(2,2);                                                         # Tree
+  my $t = GenTree(2,2);                                                         # Tree description
   $t->node->&*;                                                                 # Root
+  Movdqa xmm1, xmm0;
 
-  ReorderXmmRegisters my @x = (1);                                              # Root is in xmm1
+  if (1)                                                                        # New left node
+   {$t->node->&*;                                                               # Node in xmm0
+    Movdqa xmm2, xmm0;                                                          # Left is in xmm2
 
-    if (1)                                                                      # New left node
-     {$t->node->&*;                                                             # Node in xmm0
-      Movdqa xmm2, xmm0;                                                        # Left is in xmm2
+    ReorderXmmRegisters my @x = (1,0);                                          # Insert left under root
+    $t->insertLeft->&*;
+    UnReorderXmmRegisters @x;
+    $t->dump->("Left");                                                         # Left node after insertion
+   }
 
-      ReorderXmmRegisters my @x = (1,0);                                        # Insert left under root
-      $t->insertLeft->&*;
-      UnReorderXmmRegisters @x;
-      $t->dump->("Left");                                                       # Left node after insertion
-     }
+  if (1)                                                                        # New right node in xmm0
+   {$t->node->&*;
+    Movdqa xmm3, xmm0;                                                          # Right is in xmm3
 
-    if (1)                                                                      # New right node in xmm0
-     {$t->node->&*;
-      Movdqa xmm3, xmm0;                                                        # Right is in xmm3
+    ReorderXmmRegisters my @x = (1,0);
+    $t->insertRight->&*;
+    UnReorderXmmRegisters @x;
+    $t->dump->("Right");                                                        # Right node after insertion
+   }
 
-      ReorderXmmRegisters my @x = (1,0);
-      $t->insertRight->&*;
-      UnReorderXmmRegisters @x;
-      $t->dump->("Right");                                                      # Right node after insertion
-     }
-
-  UnReorderXmmRegisters @x;                                                     # Restore root
-
+  Movdqa xmm0, xmm1;
   $t->dump->("Root");                                                           # Root node after insertions
   $t->isRoot->&*;
   If {PrintOutStringNL "root"} sub {PrintOutStringNL "NOT root"};
