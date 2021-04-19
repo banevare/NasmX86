@@ -1679,9 +1679,8 @@ sub GenTree($$)                                                                 
       PopR rdi, rax;
       PushR xmm1;                                                               # Parse xmm0
       PopR rsi, rdx;
-      Mov $arenaTree->xxxx->addr($arenaTree->addressMode), rsi;                 # XXXX
-      Xchg rdi, rsi;
-      Mov $arenaTree->up->addr($arenaTree->addressMode),   rsi;                 # Up
+      Mov $arenaTree->xxxx->addr("rax+rdi"), rsi;                               # XXXX
+      Mov $arenaTree->up  ->addr("rdx+rsi"), rdi;                               # Up
       RestoreFirstFour;
      };
 END
