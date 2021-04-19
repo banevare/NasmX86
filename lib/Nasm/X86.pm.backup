@@ -821,11 +821,9 @@ sub PeekR($)                                                                    
 
 #D3 Structures                                                                  # Declare a structure
 
-sub Structure($)                                                                # Create a structure addressed by a register
- {my ($register) = @_;                                                          # Register locating the structure
-  @_ == 1 or confess;
+sub Structure()                                                                 # Create a structure addressed by a register
+ {@_ == 0 or confess;
   my $local = genHash("Structure",
-    base      => $register,
     size      => 0,
     variables => [],
    );
@@ -845,21 +843,22 @@ sub Structure::field($$;$)                                                      
   $variable
  }
 
-sub StructureField::addr($)                                                     # Address a field in a structure
- {my ($field) = @_;                                                             # Field
-  @_ == 1 or confess;
+sub StructureField::addr($;$)                                                   # Address a field in a structure by either the default register or the named register
+ {my ($field, $register) = @_;                                                  # Field, optional address register  else rax
+  @_ <= 2 or confess;
   my $loc = $field->loc;                                                        # Offset of field in structure
-  my $reg = $field->structure->base;                                            # Register locating the structure
+  my $reg = $register || 'rax';                                                 # Register locating the structure
   "[$loc+$reg]"                                                                 # Address field
  }
 
-sub All8Structure($$)                                                           # Create a structure consisting of 8 byte fields
- {my ($base, $N) = @_;                                                          # Base register, Number of variables required
-  @_ == 2 or confess;
-  my $s = Structure $base;                                                      # Structure of specified size based on specified register
+sub All8Structure($)                                                            # Create a structure consisting of 8 byte fields
+ {my ($N) = @_;                                                                 # Number of variables required
+  @_ == 1 or confess;
+  my $s = Structure;                                                            # Structure of specified size based on specified register
   my @f;
+  my $z = RegisterSize rax;
   for(1..$N)                                                                    # Create the variables
-   {push @f, $s->field(RegisterSize rax)->addr;
+   {push @f, $s->field($z);
    }
   ($s, @f)                                                                      # Structure, fields
  }
@@ -993,7 +992,7 @@ sub AllocateMemory                                                              
   Call $sub;
  }
 
-sub FreeMemory                                                                  # Free memory via mmap. The address of the memory is in rax, the length to free is in rdi
+sub FreeMemory                                                                  # Free memory via munmap. The address of the memory is in rax, the length to free is in rdi
  {@_ == 0 or confess;
   Comment "Free memory";
 
@@ -1182,17 +1181,17 @@ sub CreateByteString()                                                          
   Comment "Create byte string";
   my $N = 4096;                                                                 # Initial size of string
 
-  my ($string, $size, $used) = All8Structure rax, 2;                            # String base
-  my $data = $string->field(0, "start of data")->addr;                          # Start of data
+  my ($string, $size, $used) = All8Structure 2;                                 # String base
+  my $data = $string->field(0, "start of data");                                # Start of data
 
   my $sub  = S                                                                  # Create byte string
    {SaveFirstFour;
     Mov rax, $N;
     AllocateMemory;
-    ClearRegisters rdi;
-    Mov $used, rdi;
+    ClearRegisters   rdi;
+    Mov $used->addr, rdi;
     Mov rdi, $N;
-    Mov $size, rdi;
+    Mov $size->addr, rdi;
 
     RestoreFirstFourExceptRax;
    } name=> "CreateByteString";
@@ -1209,30 +1208,30 @@ sub CreateByteString()                                                          
 
 sub ByteString::updateSpace($)                                                  #P Make sure that the byte string addressed by rax has enough space to accommodate content of length rdi
  {my ($byteString) = @_;                                                        # Byte string descriptor
-  my $size = $byteString->size;
-  my $used = $byteString->used;
+  my $size = $byteString->size->addr;
+  my $used = $byteString->used->addr;
 
   my $sub = S                                                                   # Read file
    {Comment "Allocate more space for a byte string";
     SaveFirstFour;
-    Mov rdx, $byteString->used;                                                 # Used
+    Mov rdx, $used;                                                             # Used
     Add rdx, rdi;                                                               # Wanted
     Cmp rdx, $size;                                                             # Space needed versus actual size
 
     Jle (my $l = Label);
       Mov rsi, rax;                                                             # Old byte string
-      Mov rdi, $byteString->size;                                               # Old byte string size
+      Mov rdi, $size;                                                           # Old byte string size
       Mov rax, rdi;                                                             # Old byte string length
 
       my $double = SetLabel Label;                                              # Keep doubling until we have a string area that is big enough to hold the new data
         Shl rax, 1;                                                             # New byte string size - double the size of the old byte string
         Cmp rax, rdx;                                                           # Big enough ?
-      Jl  $double;                                                              # Still too low
+      Jl $double;                                                               # Still too low
 
       Mov rdx, rax;                                                             # New byte string size
       AllocateMemory;                                                           # Create new byte string
       CopyMemory;                                                               # Copy old byte string into new byte string
-      Mov $byteString->size, rdx;                                               # rdx can be reused now we have saved the size of the new bye string
+      Mov $size, rdx;                                                           # rdx can be reused now we have saved the size of the new bye string
 
       Push rax;                                                                 # Free old byte string
       Mov rax, rsi;                                                             # Old byte string
@@ -1253,7 +1252,7 @@ sub ByteString::makeReadOnly($)                                                 
    {Comment "Make a byte string readable";
     SaveFirstFour;
     Mov rdi, rax;                                                               # Address of byte string
-    Mov rsi, $byteString->size;                                                 # Size of byte string
+    Mov rsi, $byteString->size->addr;                                           # Size of byte string
     Mov rdx, 1;                                                                 # Read only access
     Mov rax, 10;
     Syscall;
@@ -1270,7 +1269,7 @@ sub ByteString::makeWritable($)                                                 
    {Comment "Make a  byte string writable";
     SaveFirstFour;
     Mov rdi, rax;                                                               # Address of byte string
-    Mov rsi, $byteString->size;                                                 # Size of byte string
+    Mov rsi, $byteString->size->addr;                                           # Size of byte string
     Mov rdx, 3;                                                                 # Read only access
     Mov rax, 10;
     Syscall;
@@ -1289,10 +1288,10 @@ sub ByteString::allocate($)                                                     
    {Comment "Allocate space in a byte string";
     $byteString->updateSpace;                                                   # Update space if needed
     SaveFirstFour;
-    Mov $used, $byteString->used;                                               # Currently used
+    Mov $used, $byteString->used->addr;                                         # Currently used
     Mov $offset, $used;                                                         # Current offset
     Add $used, rdi;                                                             # Add the requested length to get the amount now used
-    Mov $byteString->used, $used;
+    Mov $byteString->used->addr, $used;
     Mov rdi, $offset;
     Add rdi, $byteString->structure->size;                                      # This is the offset from the start of the byte string - which means that it will never be less than 16
     RestoreFirstFourExceptRaxAndRdi;                                            # Return the possibly expanded byte string
@@ -1303,7 +1302,7 @@ sub ByteString::allocate($)                                                     
 
 sub ByteString::m($)                                                            # Append the content with length rdi addressed by rsi to the byte string addressed by rax
  {my ($byteString) = @_;                                                        # Byte string descriptor
-  my $used = $byteString->used;
+  my $used = $byteString->used->addr;
   my $target = rdx;                                                             # Register that addresses target of move
   my $length = rdx;                                                             # Register used to update used field
 
@@ -1311,7 +1310,7 @@ sub ByteString::m($)                                                            
    {Comment "Append memory to a byte string";
     $byteString->updateSpace;                                                   # Update space if needed
     SaveFirstFour;
-    Lea $target, $byteString->data;                                             # Address of data field
+    Lea $target, $byteString->data->addr;                                       # Address of data field
     Add $target, $used;                                                         # Skip over used data
 
     PushR rax;                                                                  # Save address of byte string
@@ -1404,8 +1403,8 @@ sub ByteString::copy($)                                                         
    {Comment "Rdi in hex into byte string";
     SaveFirstFour;
     Mov rdx, rdi;                                                               # Address byte string to be copied
-    Mov rdi, $byteString->used =~ s(rax) (rdx)r;
-    Lea rsi, $byteString->data =~ s(rax) (rdx)r;
+    Mov rdi, $byteString->used->addr(rdx);
+    Lea rsi, $byteString->data->addr(rdx);
     $byteString->m;                                                             # Move data
     RestoreFirstFourExceptRax;                                                  # Return the possibly expanded byte string
    } name => "ByteString::rdiInHex";
@@ -1418,7 +1417,7 @@ sub ByteString::clear($)                                                        
 
   PushR          rdi;
   ClearRegisters rdi;
-  Mov $byteString->used, rdi;
+  Mov $byteString->used->addr, rdi;
   PopR           rdi;
  }
 
@@ -1453,8 +1452,8 @@ sub ByteString::write($)                                                        
 
     Mov rax, 1;                                                                 # Write content to file
     Mov rdi, $file;
-    Lea rsi, $byteString->data =~ s(rax) ($string)gsr;
-    Mov rdx, $byteString->used =~ s(rax) ($string)gsr;
+    Lea rsi, $byteString->data->addr($string);
+    Mov rdx, $byteString->used->addr($string);
     Syscall;
     Mov rax, $string;                                                           # Clear string and add file name
     $byteString->clear;
@@ -1479,7 +1478,7 @@ sub ByteString::read($)                                                         
    {Comment "Read a byte string";
     SaveFirstFour;
     Mov rdx, rax;                                                               # Save address of byte string
-    Lea rax, $byteString->data;                                                 # Address file name with rax
+    Lea rax, $byteString->data->addr;                                           # Address file name with rax
     ReadFile;                                                                   # Read the file named by rax
     Mov rsi, rax;                                                               # Address of content in rax, length of content in rdi
     Mov rax, rdx;                                                               # Address of byte string
@@ -1498,8 +1497,8 @@ sub ByteString::read($)                                                         
 sub ByteString::out($)                                                          # Print the specified byte string addressed by rax on sysout
  {my ($byteString) = @_;                                                        # Byte string descriptor
   SaveFirstFour;
-  Mov rdi, $byteString->used;                                                   # Length to print
-  Lea rax, $byteString->data;                                                   # Address of data field
+  Mov rdi, $byteString->used->addr;                                             # Length to print
+  Lea rax, $byteString->data->addr;                                             # Address of data field
   PrintOutMemory;
   RestoreFirstFour;
  }
@@ -1519,7 +1518,7 @@ sub ByteString::bash($)                                                         
      }
     sub                                                                         # Child
      {Mov rax, rdx;                                                             # Restore address of byte string
-      Lea rdi, $byteString->data;
+      Lea rdi, $byteString->data->addr;
       Mov rsi, 0;
       Mov rdx, 0;
       Mov rax, 59;
@@ -1537,7 +1536,7 @@ sub ByteString::unlink($)                                                       
   my $sub = S                                                                   # Bash string
    {Comment "Unlink a file named in a byte string";
     SaveFirstFour;
-    Lea rdi, $byteString->data;
+    Lea rdi, $byteString->data->addr;
     Mov rax, 87;
     Syscall;
     RestoreFirstFour;
@@ -1555,14 +1554,14 @@ sub ByteString::dump($)                                                         
     PrintOutStringNL("Byte String");
 
     Push rax;                                                                   # Print size
-    Mov rax, $byteString->size;
+    Mov rax, $byteString->size->addr;
     PrintOutString("  Size: ");
     PrintOutRaxInHex;
     PrintOutNL;
     Pop rax;
 
     Push rax;                                                                   # Print used
-    Mov rax, $byteString->used;
+    Mov rax, $byteString->used->addr;
     PrintOutString("  Used: ");
     PrintOutRaxInHex;
     PrintOutNL;
@@ -1579,7 +1578,7 @@ sub GenTree($$)                                                                 
   $keyLength  =~ m(\A2|4|8\Z) or confess;
   $dataLength =~ m(\A2|4|8\Z) or confess;
 
-  my ($structure, $up, $left, $right) = All8Structure "rax+rdi", 3;             # Tree structure addressed by a register
+  my ($structure, $up, $left, $right) = All8Structure 3;                        # Tree structure addressed by a register
   my $height = $structure->field(4, "Height of the sub tree");
   my $count  = $structure->field(4, "Number of entries active in this node");
 
@@ -1651,7 +1650,7 @@ sub GenTree($$)                                                                 
     for my $f(qw(up left right))                                                # Fields to print
      {PrintOutString sprintf("%5s: ", $f);                                      # Field name
       PushR my @regs = (rax, rdi);
-      Mov rax, $arenaTree->{$f};
+      Mov rax, $arenaTree->{$f}->addr("rax+rdi");
       PrintOutRaxInHex;
       PopR @regs;
       PrintOutNL;
@@ -1664,8 +1663,8 @@ sub GenTree($$)                                                                 
     SaveFirstFour;
     PushR xmm0;                                                                 # Parse xmm0
     PopR rax, rdi;
-    Mov rsi, $arenaTree->up;                                                    # Load up field
-    Test rsi, rsi;                                                               # Test up field
+    Mov rsi, $arenaTree->up->addr("rax+rdi");                                   # Load up field
+    Test rsi, rsi;                                                              # Test up field
     If {SetZF} sub {ClearZF};
     RestoreFirstFour;
    };
@@ -1679,9 +1678,8 @@ sub GenTree($$)                                                                 
       PopR rdi, rax;
       PushR xmm1;                                                               # Parse xmm0
       PopR rsi, rdx;
-      Mov $arenaTree->xxxx, rsi;                                                # XXXX
-      Xchg rdi, rsi;
-      Mov $arenaTree->up,   rsi;                                                # Up
+      Mov $arenaTree->xxxx->addr("rax+rdi"), rsi;                               # XXXX
+      Mov $arenaTree->up  ->addr("rdx+rsi"), rdi;                               # Up
       RestoreFirstFour;
      };
 END
@@ -1906,6 +1904,84 @@ Set a label in the code section
 
      Parameter  Description
   1  $l         Label
+
+B<Example:>
+
+
+    Start;
+
+    Mov rax, 1;
+    Mov rdi, 1;
+    SaveFirstFour;
+    Mov rax, 2;
+    Mov rdi, 2;
+    SaveFirstSeven;
+    Mov rax, 3;
+    Mov rdi, 4;
+    PrintOutRegisterInHex rax, rdi;
+    RestoreFirstSeven;
+    PrintOutRegisterInHex rax, rdi;
+    RestoreFirstFour;
+    PrintOutRegisterInHex rax, rdi;
+
+    SaveFirstFour;
+    Mov rax, 2;
+    Mov rdi, 2;
+    SaveFirstSeven;
+    Mov rax, 3;
+    Mov rdi, 4;
+    PrintOutRegisterInHex rax, rdi;
+    RestoreFirstSevenExceptRax;
+    PrintOutRegisterInHex rax, rdi;
+    RestoreFirstFourExceptRax;
+    PrintOutRegisterInHex rax, rdi;
+
+    SaveFirstFour;
+    Mov rax, 2;
+    Mov rdi, 2;
+    SaveFirstSeven;
+    Mov rax, 3;
+    Mov rdi, 4;
+    PrintOutRegisterInHex rax, rdi;
+    RestoreFirstSevenExceptRaxAndRdi;
+    PrintOutRegisterInHex rax, rdi;
+    RestoreFirstFourExceptRaxAndRdi;
+    PrintOutRegisterInHex rax, rdi;
+
+    ReverseBytesInRax;
+    PrintOutRegisterInHex rax;
+
+    my $l = Label;
+    Jmp $l;
+
+    SetLabel $l;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+
+    Exit;
+
+    is_deeply Assemble, <<END;
+     rax: 0000 0000 0000 0003
+     rdi: 0000 0000 0000 0004
+     rax: 0000 0000 0000 0002
+     rdi: 0000 0000 0000 0002
+     rax: 0000 0000 0000 0001
+     rdi: 0000 0000 0000 0001
+     rax: 0000 0000 0000 0003
+     rdi: 0000 0000 0000 0004
+     rax: 0000 0000 0000 0003
+     rdi: 0000 0000 0000 0002
+     rax: 0000 0000 0000 0003
+     rdi: 0000 0000 0000 0001
+     rax: 0000 0000 0000 0003
+     rdi: 0000 0000 0000 0004
+     rax: 0000 0000 0000 0003
+     rdi: 0000 0000 0000 0004
+     rax: 0000 0000 0000 0003
+     rdi: 0000 0000 0000 0004
+     rax: 0300 0000 0000 0000
+  END
+
+    ok 8 == RegisterSize rax;
+
 
 =head2 Ds(@d)
 
@@ -4963,7 +5039,7 @@ else
 
 my $start = time;                                                               # Tests
 
-#goto latest;
+goto latest;
 
 if (1) {                                                                        #TExit #TPrintOutString #TStart #TAssemble
   Start;
@@ -5289,7 +5365,7 @@ if (1) {                                                                        
 
 if (1) {                                                                        #TAllocateMemory #TFreeMemory #TClearMemory
   Start;
-  my $N = 4096;
+  my $N = 4096;                                                                 # Size of the initial allocation which should be one or more pages
   my $S = RegisterSize rax;
   Mov rax, $N;
   AllocateMemory;
@@ -5618,32 +5694,32 @@ latest:;
 if (1) {                                                                        #TGenTree #TUnReorderXmmRegisters #TReorderXmmRegisters #TPrintOutStringNL
   Start;
   my $t = GenTree(2,2);                                                         # Tree description
-  $t->node->&*;                                                                 # Root
-  Movdqa xmm1, xmm0;
+  $t->node->();                                                                 # Root
+  Movdqa xmm1, xmm0;                                                            # Root is in xmm1
 
   if (1)                                                                        # New left node
-   {$t->node->&*;                                                               # Node in xmm0
+   {$t->node->();                                                               # Node in xmm0
     Movdqa xmm2, xmm0;                                                          # Left is in xmm2
 
     ReorderXmmRegisters my @x = (1,0);                                          # Insert left under root
-    $t->insertLeft->&*;
+    $t->insertLeft->();
     UnReorderXmmRegisters @x;
     $t->dump->("Left");                                                         # Left node after insertion
    }
 
   if (1)                                                                        # New right node in xmm0
-   {$t->node->&*;
+   {$t->node->();
     Movdqa xmm3, xmm0;                                                          # Right is in xmm3
 
     ReorderXmmRegisters my @x = (1,0);
-    $t->insertRight->&*;
+    $t->insertRight->();
     UnReorderXmmRegisters @x;
     $t->dump->("Right");                                                        # Right node after insertion
    }
 
   Movdqa xmm0, xmm1;
   $t->dump->("Root");                                                           # Root node after insertions
-  $t->isRoot->&*;
+  $t->isRoot->();
   If {PrintOutStringNL "root"} sub {PrintOutStringNL "NOT root"};
 
   PushR xmm0;                                                                   # Dump underlying  byte string
