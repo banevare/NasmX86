@@ -329,8 +329,8 @@ my @xmmRegisters = map {"xmm$_"} 0..31;                                         
 sub ReorderXmmRegisters(@)                                                      # Map the list of xmm registers provided to 0-31
  {my (@registers) = map {"xmm$_"} @_;                                           # Registers
   my    @r = @xmmRegisters; $#r = $#registers;
-  PushR @r, @r;
-  PopR  @registers;
+  PushR @r, @registers;
+  PopR  @r;
  }
 
 sub UnReorderXmmRegisters(@)                                                    # Recover the initial values in the xmm registers that were reordered
@@ -992,7 +992,7 @@ sub AllocateMemory                                                              
   Call $sub;
  }
 
-sub FreeMemory                                                                  # Free memory via mmap. The address of the memory is in rax, the length to free is in rdi
+sub FreeMemory                                                                  # Free memory via munmap. The address of the memory is in rax, the length to free is in rdi
  {@_ == 0 or confess;
   Comment "Free memory";
 
@@ -1597,7 +1597,6 @@ sub GenTree($$)                                                                 
   my $D = $k * $dataLength;
 
   my $arenaTree = genHash("ArenaTree",                                          # A node in an arena tree
-    addressMode => "rax+rdi",
     byteString  => $byteString,
     dump        => undef,
     node        => undef,
@@ -1651,7 +1650,7 @@ sub GenTree($$)                                                                 
     for my $f(qw(up left right))                                                # Fields to print
      {PrintOutString sprintf("%5s: ", $f);                                      # Field name
       PushR my @regs = (rax, rdi);
-      Mov rax, $arenaTree->{$f}->addr($arenaTree->addressMode);
+      Mov rax, $arenaTree->{$f}->addr("rax+rdi");
       PrintOutRaxInHex;
       PopR @regs;
       PrintOutNL;
@@ -1664,7 +1663,7 @@ sub GenTree($$)                                                                 
     SaveFirstFour;
     PushR xmm0;                                                                 # Parse xmm0
     PopR rax, rdi;
-    Mov rsi, $arenaTree->up->addr($arenaTree->addressMode);                     # Load up field
+    Mov rsi, $arenaTree->up->addr("rax+rdi");                                   # Load up field
     Test rsi, rsi;                                                              # Test up field
     If {SetZF} sub {ClearZF};
     RestoreFirstFour;
@@ -2846,36 +2845,36 @@ B<Example:>
 
     Start;
     my $t = GenTree(2,2);                                                         # Tree description
-    $t->node->&*;                                                                 # Root
-    Movdqa xmm1, xmm0;
+    $t->node->();                                                                 # Root
+    Movdqa xmm1, xmm0;                                                            # Root is in xmm1
 
     if (1)                                                                        # New left node
-     {$t->node->&*;                                                               # Node in xmm0
+     {$t->node->();                                                               # Node in xmm0
       Movdqa xmm2, xmm0;                                                          # Left is in xmm2
 
 
       ReorderXmmRegisters my @x = (1,0);                                          # Insert left under root  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-      $t->insertLeft->&*;
+      $t->insertLeft->();
       UnReorderXmmRegisters @x;
       $t->dump->("Left");                                                         # Left node after insertion
      }
 
     if (1)                                                                        # New right node in xmm0
-     {$t->node->&*;
+     {$t->node->();
       Movdqa xmm3, xmm0;                                                          # Right is in xmm3
 
 
       ReorderXmmRegisters my @x = (1,0);  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-      $t->insertRight->&*;
+      $t->insertRight->();
       UnReorderXmmRegisters @x;
       $t->dump->("Right");                                                        # Right node after insertion
      }
 
     Movdqa xmm0, xmm1;
     $t->dump->("Root");                                                           # Root node after insertions
-    $t->isRoot->&*;
+    $t->isRoot->();
     If {PrintOutStringNL "root"} sub {PrintOutStringNL "NOT root"};
 
     PushR xmm0;                                                                   # Dump underlying  byte string
@@ -2919,15 +2918,15 @@ B<Example:>
 
     Start;
     my $t = GenTree(2,2);                                                         # Tree description
-    $t->node->&*;                                                                 # Root
-    Movdqa xmm1, xmm0;
+    $t->node->();                                                                 # Root
+    Movdqa xmm1, xmm0;                                                            # Root is in xmm1
 
     if (1)                                                                        # New left node
-     {$t->node->&*;                                                               # Node in xmm0
+     {$t->node->();                                                               # Node in xmm0
       Movdqa xmm2, xmm0;                                                          # Left is in xmm2
 
       ReorderXmmRegisters my @x = (1,0);                                          # Insert left under root
-      $t->insertLeft->&*;
+      $t->insertLeft->();
 
       UnReorderXmmRegisters @x;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
@@ -2935,11 +2934,11 @@ B<Example:>
      }
 
     if (1)                                                                        # New right node in xmm0
-     {$t->node->&*;
+     {$t->node->();
       Movdqa xmm3, xmm0;                                                          # Right is in xmm3
 
       ReorderXmmRegisters my @x = (1,0);
-      $t->insertRight->&*;
+      $t->insertRight->();
 
       UnReorderXmmRegisters @x;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
@@ -2948,7 +2947,7 @@ B<Example:>
 
     Movdqa xmm0, xmm1;
     $t->dump->("Root");                                                           # Root node after insertions
-    $t->isRoot->&*;
+    $t->isRoot->();
     If {PrintOutStringNL "root"} sub {PrintOutStringNL "NOT root"};
 
     PushR xmm0;                                                                   # Dump underlying  byte string
@@ -3346,32 +3345,32 @@ B<Example:>
 
     Start;
     my $t = GenTree(2,2);                                                         # Tree description
-    $t->node->&*;                                                                 # Root
-    Movdqa xmm1, xmm0;
+    $t->node->();                                                                 # Root
+    Movdqa xmm1, xmm0;                                                            # Root is in xmm1
 
     if (1)                                                                        # New left node
-     {$t->node->&*;                                                               # Node in xmm0
+     {$t->node->();                                                               # Node in xmm0
       Movdqa xmm2, xmm0;                                                          # Left is in xmm2
 
       ReorderXmmRegisters my @x = (1,0);                                          # Insert left under root
-      $t->insertLeft->&*;
+      $t->insertLeft->();
       UnReorderXmmRegisters @x;
       $t->dump->("Left");                                                         # Left node after insertion
      }
 
     if (1)                                                                        # New right node in xmm0
-     {$t->node->&*;
+     {$t->node->();
       Movdqa xmm3, xmm0;                                                          # Right is in xmm3
 
       ReorderXmmRegisters my @x = (1,0);
-      $t->insertRight->&*;
+      $t->insertRight->();
       UnReorderXmmRegisters @x;
       $t->dump->("Right");                                                        # Right node after insertion
      }
 
     Movdqa xmm0, xmm1;
     $t->dump->("Root");                                                           # Root node after insertions
-    $t->isRoot->&*;
+    $t->isRoot->();
 
     If {PrintOutStringNL "root"} sub {PrintOutStringNL "NOT root"};  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
@@ -3997,12 +3996,10 @@ Declare variables and structures
 
 Declare a structure
 
-=head4 Structure($register)
+=head4 Structure()
 
 Create a structure addressed by a register
 
-     Parameter  Description
-  1  $register  Register locating the structure
 
 =head4 Structure::field($structure, $length, $comment)
 
@@ -4013,20 +4010,20 @@ Add a field of the specified length with an optional comment
   2  $length     Length of data
   3  $comment    Optional comment
 
-=head4 StructureField::addr($field)
+=head4 StructureField::addr($field, $register)
 
-Address a field in a structure
+Address a field in a structure by either the default register or the named register
 
      Parameter  Description
   1  $field     Field
+  2  $register  Optional address register  else rax
 
-=head4 All8Structure($base, $N)
+=head4 All8Structure($N)
 
 Create a structure consisting of 8 byte fields
 
      Parameter  Description
-  1  $base      Base register
-  2  $N         Number of variables required
+  1  $N         Number of variables required
 
 =head3 Stack Frame
 
@@ -4176,7 +4173,7 @@ B<Example:>
     ok Assemble =~ m(abcdefghijklmnop)s;
 
     Start;
-    my $N = 4096;
+    my $N = 4096;                                                                 # Size of the initial allocation which should be one or more pages
     my $S = RegisterSize rax;
     Mov rax, $N;
 
@@ -4197,7 +4194,7 @@ B<Example:>
 
 =head2 FreeMemory()
 
-Free memory via mmap. The address of the memory is in rax, the length to free is in rdi
+Free memory via munmap. The address of the memory is in rax, the length to free is in rdi
 
 
 B<Example:>
@@ -4225,7 +4222,7 @@ B<Example:>
     ok Assemble =~ m(abcdefghijklmnop)s;
 
     Start;
-    my $N = 4096;
+    my $N = 4096;                                                                 # Size of the initial allocation which should be one or more pages
     my $S = RegisterSize rax;
     Mov rax, $N;
     AllocateMemory;
@@ -4251,7 +4248,7 @@ B<Example:>
 
 
     Start;
-    my $N = 4096;
+    my $N = 4096;                                                                 # Size of the initial allocation which should be one or more pages
     my $S = RegisterSize rax;
     Mov rax, $N;
     AllocateMemory;
@@ -4596,32 +4593,32 @@ B<Example:>
 
     my $t = GenTree(2,2);                                                         # Tree description  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-    $t->node->&*;                                                                 # Root
-    Movdqa xmm1, xmm0;
+    $t->node->();                                                                 # Root
+    Movdqa xmm1, xmm0;                                                            # Root is in xmm1
 
     if (1)                                                                        # New left node
-     {$t->node->&*;                                                               # Node in xmm0
+     {$t->node->();                                                               # Node in xmm0
       Movdqa xmm2, xmm0;                                                          # Left is in xmm2
 
       ReorderXmmRegisters my @x = (1,0);                                          # Insert left under root
-      $t->insertLeft->&*;
+      $t->insertLeft->();
       UnReorderXmmRegisters @x;
       $t->dump->("Left");                                                         # Left node after insertion
      }
 
     if (1)                                                                        # New right node in xmm0
-     {$t->node->&*;
+     {$t->node->();
       Movdqa xmm3, xmm0;                                                          # Right is in xmm3
 
       ReorderXmmRegisters my @x = (1,0);
-      $t->insertRight->&*;
+      $t->insertRight->();
       UnReorderXmmRegisters @x;
       $t->dump->("Right");                                                        # Right node after insertion
      }
 
     Movdqa xmm0, xmm1;
     $t->dump->("Root");                                                           # Root node after insertions
-    $t->isRoot->&*;
+    $t->isRoot->();
     If {PrintOutStringNL "root"} sub {PrintOutStringNL "NOT root"};
 
     PushR xmm0;                                                                   # Dump underlying  byte string
@@ -4844,7 +4841,7 @@ Return a copy of the specified string with all the non ascii characters removed
 
 39 L<Fork|/Fork> - Fork
 
-40 L<FreeMemory|/FreeMemory> - Free memory via mmap.
+40 L<FreeMemory|/FreeMemory> - Free memory via munmap.
 
 41 L<GenTree|/GenTree> - Generate a set of routines to manage a tree held in a byte string with key and data fields of specified widths.
 
@@ -4966,7 +4963,7 @@ Return a copy of the specified string with all the non ascii characters removed
 
 100 L<Structure::field|/Structure::field> - Add a field of the specified length with an optional comment
 
-101 L<StructureField::addr|/StructureField::addr> - Address a field in a structure
+101 L<StructureField::addr|/StructureField::addr> - Address a field in a structure by either the default register or the named register
 
 102 L<UnReorderSyscallRegisters|/UnReorderSyscallRegisters> - Recover the initial values in registers that were reordered
 
@@ -5040,7 +5037,7 @@ else
 
 my $start = time;                                                               # Tests
 
-#goto latest;
+goto latest;
 
 if (1) {                                                                        #TExit #TPrintOutString #TStart #TAssemble
   Start;
@@ -5366,7 +5363,7 @@ if (1) {                                                                        
 
 if (1) {                                                                        #TAllocateMemory #TFreeMemory #TClearMemory
   Start;
-  my $N = 4096;
+  my $N = 4096;                                                                 # Size of the initial allocation which should be one or more pages
   my $S = RegisterSize rax;
   Mov rax, $N;
   AllocateMemory;
@@ -5695,32 +5692,32 @@ latest:;
 if (1) {                                                                        #TGenTree #TUnReorderXmmRegisters #TReorderXmmRegisters #TPrintOutStringNL
   Start;
   my $t = GenTree(2,2);                                                         # Tree description
-  $t->node->&*;                                                                 # Root
-  Movdqa xmm1, xmm0;
+  $t->node->();                                                                 # Root
+  Movdqa xmm1, xmm0;                                                            # Root is in xmm1
 
   if (1)                                                                        # New left node
-   {$t->node->&*;                                                               # Node in xmm0
+   {$t->node->();                                                               # Node in xmm0
     Movdqa xmm2, xmm0;                                                          # Left is in xmm2
 
-    ReorderXmmRegisters my @x = (1,0);                                          # Insert left under root
-    $t->insertLeft->&*;
+    ReorderXmmRegisters my @x = (1,2);                                          # Insert left under root
+    $t->insertLeft->();
     UnReorderXmmRegisters @x;
     $t->dump->("Left");                                                         # Left node after insertion
    }
 
   if (1)                                                                        # New right node in xmm0
-   {$t->node->&*;
+   {$t->node->();
     Movdqa xmm3, xmm0;                                                          # Right is in xmm3
 
-    ReorderXmmRegisters my @x = (1,0);
-    $t->insertRight->&*;
+    ReorderXmmRegisters my @x = (1,3);
+    $t->insertRight->();
     UnReorderXmmRegisters @x;
     $t->dump->("Right");                                                        # Right node after insertion
    }
 
   Movdqa xmm0, xmm1;
   $t->dump->("Root");                                                           # Root node after insertions
-  $t->isRoot->&*;
+  $t->isRoot->();
   If {PrintOutStringNL "root"} sub {PrintOutStringNL "NOT root"};
 
   PushR xmm0;                                                                   # Dump underlying  byte string
