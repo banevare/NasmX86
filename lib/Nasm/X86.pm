@@ -101,7 +101,8 @@ END
        $s .= <<END;
        sub $I()
         {\@_ == 0 or confess "No arguments allowed";
-         push \@text, qq(  $i\\n);
+         my \$s = '  ' x scalar(my \@d = caller);
+         push \@text, qq(\${s}$i\\n);
         }
 END
      }
@@ -117,7 +118,8 @@ END
        sub $I(\$)
         {my (\$target) = \@_;
          \@_ == 1 or confess "One argument required";
-         push \@text, qq(  $i \$target\\n);
+         my \$s = '  ' x scalar(my \@d = caller);
+         push \@text, qq(\${s}$i \$target\\n);
         }
 END
      }
@@ -133,7 +135,8 @@ END
        sub $I(\$\$)
         {my (\$target, \$source) = \@_;
          \@_ == 2 or confess "Two arguments required";
-         push \@text, qq(  $i \$target, \$source\\n);
+         my \$s = '  ' x scalar(my \@d = caller);
+         push \@text, qq(\${s}$i \$target, \$source\\n);
         }
 END
      }
@@ -149,7 +152,8 @@ END
        sub $I(\$\$\$)
         {my (\$target, \$source, \$bits) = \@_;
          \@_ == 3 or confess "Three arguments required";
-         push \@text, qq(  $i \$target, \$source, \$bits\\n);
+         my \$s = '  ' x scalar(my \@d = caller);
+         push \@text, qq(\${s}$i \$target, \$source, \$bits\\n);
         }
 END
      }
@@ -429,7 +433,7 @@ sub S(&%)                                                                       
   @_ >= 1 or confess;
   my $name    = $options{name};                                                 # Optional name for subroutine reuse
   my $comment = $options{comment};                                              # Optional comment
-  Comment "Subroutine " .($comment//'');
+  Comment "Subroutine " .($comment) if $comment;
 
   if ($name and my $n = $subroutines{$name}) {return $n}                        # Return the label of a pre-existing copy of the code
 
