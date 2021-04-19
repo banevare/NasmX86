@@ -50,7 +50,7 @@ BEGIN{
      %r = (%r, map {$_=>'512'}  qw(zmm0 zmm1 zmm2 zmm3 zmm4 zmm5 zmm6 zmm7 zmm8 zmm9 zmm10 zmm11 zmm12 zmm13 zmm14 zmm15 zmm16 zmm17 zmm18 zmm19 zmm20 zmm21 zmm22 zmm23 zmm24 zmm25 zmm26 zmm27 zmm28 zmm29 zmm30 zmm31));
      %r = (%r, map {$_=>'m'}    qw(k0 k1 k2 k3 k4 k5 k6 k7));
 
-  my @i0 = qw(pushfq rdtsc ret syscall);                                        # Zero operand instructions
+  my @i0 = qw(popfq pushfq rdtsc ret syscall);                                  # Zero operand instructions
   my @i1 = split /\s+/, <<END;                                                  # Single operand instructions
 call inc jmp
 ja jae jb jbe jc jcxz je jecxz jg jge jl jle jna jnae jnb jnbe jnc jne jng jnge
@@ -66,6 +66,7 @@ kmov knot  kortest ktest lea mov or shl shr sub test Vmovdqu8 vmovdqu32 vmovdqu6
 lzcnt
 tzcnt
 xchg xor
+movdqa
 END
   my @i3 =  split /\s+/, <<END;                                                 # Triple operand instructions
 kadd kand kandn kor kshiftl kshiftr kunpck kxnor kxor
@@ -162,7 +163,7 @@ sub Comment(@);                                                                 
 sub PeekR($);                                                                   # Peek at the register on top of the stack
 sub PopR(@);                                                                    # Pop a list of registers off the stack
 sub PrintOutMemory;                                                             # Print the memory addressed by rax for a length of rdi
-sub PrintOutRegisterInHex($);                                                   # Print any register as a hex string
+sub PrintOutRegisterInHex(@);                                                   # Print any register as a hex string
 sub PushR(@);
 sub Syscall();                                                                  # System call in linux 64 format
 
@@ -311,16 +312,31 @@ sub RestoreFirstSevenExceptRaxAndRdi()                                          
   Add rsp, 2*RegisterSize(rax);                                                 # Skip rdi and rax
  }
 
-sub ReorderRegisters(@)                                                         # Map the list of registers provided to the the 64 bit system call sequence
+sub ReorderSyscallRegisters(@)                                                  # Map the list of registers provided to the 64 bit system call sequence
  {my (@registers) = @_;                                                         # Registers
   Push $_ for @syscallSequence[0..$#registers];
   Push $_ for reverse @registers;
   Pop  $_ for @syscallSequence[0..$#registers];
  }
 
-sub UnReorderRegisters(@)                                                       # Recover the initial values in registers that were reordered
+sub UnReorderSyscallRegisters(@)                                                # Recover the initial values in registers that were reordered
  {my (@registers) = @_;                                                         # Registers
   Pop  $_ for reverse @syscallSequence[0..$#registers];
+ }
+
+my @xmmRegisters = map {"xmm$_"} 0..31;                                         # The xmm registers
+
+sub ReorderXmmRegisters(@)                                                      # Map the list of xmm registers provided to 0-31
+ {my (@registers) = map {"xmm$_"} @_;                                           # Registers
+  my    @r = @xmmRegisters; $#r = $#registers;
+  PushR @r, @r;
+  PopR  @registers;
+ }
+
+sub UnReorderXmmRegisters(@)                                                    # Recover the initial values in the xmm registers that were reordered
+ {my (@registers) = @_;                                                         # Registers
+  my   @r = @xmmRegisters; $#r = $#registers;
+  PopR @r;
  }
 
 sub RegisterSize($)                                                             # Return the size of a register
@@ -348,6 +364,17 @@ sub SetRegisterToMinusOne($)                                                    
 
   Xor $register,$register;
   Sub $register,1;
+ }
+
+sub SetZF()                                                                     # Set the zero flag
+ {Cmp rax, rax;
+ }
+
+sub ClearZF()                                                                   # Set the zero flag
+ {Push rax;
+  Mov rax, 1;
+  Cmp rax, 0;
+  Pop rax;
  }
 
 #D1 Structured Programming                                                      # Structured programming constructs
@@ -428,7 +455,7 @@ END
 
 #D1 Print                                                                       # Print
 
-sub PrintOutNl()                                                                # Print a new line to stdout
+sub PrintOutNL()                                                                # Print a new line to stdout
  {@_ == 0 or confess;
   my $a = Rb(10);
   Comment "Write new line";
@@ -441,7 +468,7 @@ sub PrintOutNl()                                                                
     Mov rdx, 1;
     Syscall;
     RestoreFirstFour()
-   } name => q(PrintOutNl);
+   } name => q(PrintOutNL);
 
   Call $s;
  }
@@ -461,6 +488,13 @@ sub PrintOutString($)                                                           
   Mov rdx, $l;
   Syscall;
   RestoreFirstFour();
+ }
+
+sub PrintOutStringNL($)                                                         # Print a constant string to sysout followed by new line
+ {my ($string) = @_;                                                            # String
+  @_ == 1 or confess;
+  PrintOutString  ($string);
+  PrintOutNL;
  }
 
 sub hexTranslateTable                                                           # Create/address a hex translate table and return its label
@@ -528,38 +562,40 @@ sub PrintOutRaxInReverseInHex                                                   
   PrintOutRaxInHex;
  }
 
-sub PrintOutRegisterInHex($)                                                    # Print any register as a hex string
- {my ($r) = @_;                                                                 # Name of the register to print
-  Comment "Print register $r in Hex";
-  @_ == 1 or confess;
+sub PrintOutRegisterInHex(@)                                                    # Print any register as a hex string
+ {my (@r) = @_;                                                                 # Name of the register to print
 
-  my $sub = S                                                                   # Reverse rax
-   {PrintOutString sprintf("%6s: ", $r);
+  for my $r(@r)                                                                 # Each register to print
+   {Comment "Print register $r in Hex";
 
-    my sub printReg(@)                                                          # Print the contents of a register
-     {my (@regs) = @_;                                                          # Size in bytes, work registers
-      my $s = RegisterSize $r;                                                  # Size of the register
-      PushR @regs;                                                              # Save work registers
-      PushR $r;                                                                 # Place register contents on stack
-      PopR  @regs;                                                              # Load work registers
-      for my $R(@regs)                                                          # Print work registers to print input register
-       {if ($R !~ m(\Arax))
-         {PrintOutString("  ");
-          Mov rax, $R
+    my $sub = S                                                                 # Reverse rax
+     {PrintOutString sprintf("%6s: ", $r);
+
+      my sub printReg(@)                                                        # Print the contents of a register
+       {my (@regs) = @_;                                                        # Size in bytes, work registers
+        my $s = RegisterSize $r;                                                # Size of the register
+        PushR @regs;                                                            # Save work registers
+        PushR $r;                                                               # Place register contents on stack
+        PopR  @regs;                                                            # Load work registers
+        for my $R(@regs)                                                        # Print work registers to print input register
+         {if ($R !~ m(\Arax))
+           {PrintOutString("  ");
+            Mov rax, $R
+           }
+          PrintOutRaxInHex;                                                     # Print work register
          }
-        PrintOutRaxInHex;                                                       # Print work register
-       }
-      PopR @regs;
-     };
-    if    ($r =~ m(\A[kr])) {printReg qw(rax)}                                  # 64 bit register requested
-    elsif ($r =~ m(\Ax))    {printReg qw(rax rbx)}                              # xmm*
-    elsif ($r =~ m(\Ay))    {printReg qw(rax rbx rcx rdx)}                      # ymm*
-    elsif ($r =~ m(\Az))    {printReg qw(rax rbx rcx rdx r8 r9 r10 r11)}        # zmm*
+        PopR @regs;
+       };
+      if    ($r =~ m(\A[kr])) {printReg qw(rax)}                                # 64 bit register requested
+      elsif ($r =~ m(\Ax))    {printReg qw(rax rbx)}                            # xmm*
+      elsif ($r =~ m(\Ay))    {printReg qw(rax rbx rcx rdx)}                    # ymm*
+      elsif ($r =~ m(\Az))    {printReg qw(rax rbx rcx rdx r8 r9 r10 r11)}      # zmm*
 
-    PrintOutNl;
-   } name => "PrintOutRegister${r}InHex";                                       # One routine per register printed
+      PrintOutNL;
+     } name => "PrintOutRegister${r}InHex";                                     # One routine per register printed
 
-  Call $sub;
+    Call $sub;
+   }
  }
 
 sub PrintOutRipInHex                                                            # Print the instruction pointer in hex
@@ -574,7 +610,7 @@ END
     Lea rax, "[$l]";                                                              # Current instruction pointer
     PrintOutString "rip: ";
     PrintOutRaxInHex;
-    PrintOutNl;
+    PrintOutNL;
     PopR @regs;
    } name=> "PrintOutRipInHex";
 
@@ -591,7 +627,7 @@ sub PrintOutRflagsInHex                                                         
     Pop rax;
     PrintOutString "rfl: ";
     PrintOutRaxInHex;
-    PrintOutNl;
+    PrintOutNL;
     PopR @regs;
    } name=> "PrintOutRflagsInHex";
 
@@ -618,12 +654,20 @@ sub PrintOutRegistersInHex                                                      
       PrintOutString reverse(pad(reverse($r), 3)).": ";
       Mov rax, $r;
       PrintOutRaxInHex;
-      PrintOutNl;
+      PrintOutNL;
      }
     PopR @regs;
    } name=> "PrintOutRegistersInHex";
 
   Call $sub;
+ }
+
+sub PrintOutZF                                                                  # Print the zero flag without disturbing it
+ {@_ == 0 or confess;
+
+  Pushfq;
+  If {PrintOutStringNL "ZF=0"} sub {PrintOutStringNL "ZF=1"};
+  Popfq;
  }
 
 #D1 Processes                                                                   # Create and manage processes
@@ -1500,13 +1544,40 @@ sub ByteString::unlink($)                                                       
   Call $sub;
  }
 
+sub ByteString::dump($)                                                         # Dump details of a byte string
+ {my ($byteString) = @_;                                                        # Byte string descriptor
+
+  my $sub = S                                                                   # Bash string
+   {Comment "Print details of a byte string";
+    SaveFirstFour;
+    PrintOutStringNL("Byte String");
+
+    Push rax;                                                                   # Print size
+    Mov rax, $byteString->size;
+    PrintOutString("  Size: ");
+    PrintOutRaxInHex;
+    PrintOutNL;
+    Pop rax;
+
+    Push rax;                                                                   # Print used
+    Mov rax, $byteString->used;
+    PrintOutString("  Used: ");
+    PrintOutRaxInHex;
+    PrintOutNL;
+    Pop rax;
+    RestoreFirstFour;
+   } name => "ByteString::dump";
+
+  Call $sub;
+ }
+
 sub GenTree($$)                                                                 # Generate a set of routines to manage a tree held in a byte string with key and data fields of specified widths.  Allocate a byte string to contain the tree, return its address in xmm0=(0, tree).
  {my ($keyLength, $dataLength) = @_;                                            # Fixed key length in bytes, fixed data length in bytes
   @_ == 2 or confess;
   $keyLength  =~ m(\A2|4|8\Z) or confess;
   $dataLength =~ m(\A2|4|8\Z) or confess;
 
-  my ($structure, $up, $left, $right) = All8Structure rax, 3;                   # Tree structure addressed by a register
+  my ($structure, $up, $left, $right) = All8Structure "rax+rdi", 3;             # Tree structure addressed by a register
   my $height = $structure->field(4, "Height of the sub tree");
   my $count  = $structure->field(4, "Number of entries active in this node");
 
@@ -1525,17 +1596,25 @@ sub GenTree($$)                                                                 
   my $D = $k * $dataLength;
 
   my $arenaTree = genHash("ArenaTree",                                          # A node in an arena tree
-    byteString => $byteString,
-    node       => undef,
-    isRoot     => undef,
-    find       => undef,
-    put        => undef,
-    get        => undef,
-    structure  => $structure,
-    sizeBase   => $s,
-    sizeKeys   => $K,
-    sizeData   => $D,
-    size       => $s + $K + $D,
+    byteString  => $byteString,
+    dump        => undef,
+    node        => undef,
+    disLeft     => undef,
+    disRight    => undef,
+    insertLeft  => undef,
+    insertRight => undef,
+    isRoot      => undef,
+    find        => undef,
+    put         => undef,
+    get         => undef,
+    up          => $up,
+    left        => $left,
+    right       => $right,
+    structure   => $structure,
+    sizeBase    => $s,
+    sizeKeys    => $K,
+    sizeData    => $D,
+    size        => $s + $K + $D,
    );
 
   $arenaTree->node = sub                                                        # Create a new node in the arena tree pointed to by xmm0=(*,tree) and return the offset of the new node in xmm0=(offset, tree)
@@ -1550,16 +1629,66 @@ sub GenTree($$)                                                                 
     RestoreFirstFour;
    };
 
-  $arenaTree->isRoot = sub                                                      # Set the zero flag if the tree node addressed by xmm0 is a root node.
-   {my ($arenaTree) = @_;                                                       # Arena tree
-    @_ == 1 or confess;
-    Push rdi;
-#    CleSetRegisterToMinusOne rdi;
-    Cmp rdi, $arenaTree->structure->up;
-    If {} sub {ClearRegisters rax};
-    Pop rdi;
+  $arenaTree->dump = sub                                                        # Dump a node
+   {my ($title) = @_;                                                           # Title
+    @_ <= 1 or confess;
+    my $s = $arenaTree->structure;
+    PrintOutStringNL($title) if $title;
+    PrintOutString("ArenaTreeNode at: ");
+
+    SaveFirstFour;
+    PushR xmm0;                                                                 # Parse xmm0
+    PopR  rdi, rax;                                                             # Address node
+
+    PushR my @regs = (rax, rdi);                                                # Print offset
+    Mov rax, rdi;
+    PrintOutRaxInHex;
+    PopR  @regs;
+    PrintOutNL;
+
+    for my $f(qw(up left right))                                                # Fields to print
+     {PrintOutString sprintf("%5s: ", $f);                                      # Field name
+      PushR my @regs = (rax, rdi);
+      Mov rax, $arenaTree->{$f};
+      PrintOutRaxInHex;
+      PopR @regs;
+      PrintOutNL;
+     }
+    RestoreFirstFour;
    };
 
+  $arenaTree->isRoot = sub                                                      # Clear the zero flag if the tree node addressed by xmm0 is a root node else set it.  This makes If takes the then clause if we are on a root  node.
+   {@_ == 0 or confess;
+    SaveFirstFour;
+    PushR xmm0;                                                                 # Parse xmm0
+    PopR rax, rdi;
+    Mov rsi, $arenaTree->up;                                                    # Load up field
+    Test rsi, rsi;                                                               # Test up field
+    If {SetZF} sub {ClearZF};
+    RestoreFirstFour;
+   };
+
+  for my $d(qw(left right))                                                     # Insert left or right
+   {my $s = <<'END';
+    $arenaTree->insertXXXX = sub                                                # Insert the node addressed by xmm1 left under the node addressed by xmm0
+     {@_ == 0 or confess;
+      SaveFirstFour;                                                            # A check that we are in the same tree would be a good idea here.
+      PushR xmm0;                                                               # Parse xmm0
+      PopR rdi, rax;
+      PushR xmm1;                                                               # Parse xmm0
+      PopR rsi, rdx;
+      Mov $arenaTree->xxxx, rsi;                                                # XXXX
+      Xchg rdi, rsi;
+      Mov $arenaTree->up,   rsi;                                                # Up
+      RestoreFirstFour;
+     };
+END
+    my $u = ucfirst $d;
+       $s =~ s(XXXX) ($u)gs;
+       $s =~ s(xxxx) ($d)gs;
+    eval $s;
+    confess $@ if $@;
+   }
   $arenaTree                                                                    # Description of this tree
  }
 
@@ -2051,7 +2180,7 @@ B<Example:>
 
 Print
 
-=head2 PrintOutNl()
+=head2 PrintOutNL()
 
 Write a new line
 
@@ -2065,13 +2194,13 @@ B<Example:>
     PrintOutString "rax: ";
     PrintOutRaxInHex;
 
-    PrintOutNl;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+    PrintOutNL;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     Xor rax, rax;
     PrintOutString "rax: ";
     PrintOutRaxInHex;
 
-    PrintOutNl;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+    PrintOutNL;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     Exit;
     ok Assemble =~ m(rax: 6261 6261 6261 6261.*rax: 0000 0000 0000 0000)s;
@@ -2110,13 +2239,13 @@ B<Example:>
 
     PrintOutRaxInHex;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-    PrintOutNl;
+    PrintOutNL;
     Xor rax, rax;
     PrintOutString "rax: ";
 
     PrintOutRaxInHex;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-    PrintOutNl;
+    PrintOutNL;
     Exit;
     ok Assemble =~ m(rax: 6261 6261 6261 6261.*rax: 0000 0000 0000 0000)s;
 
@@ -2646,7 +2775,7 @@ B<Example:>
     Vmovdqu8 "[rax]", xmm0;
     Mov rdi,16;
     PrintOutMemory;
-    PrintOutNl;
+    PrintOutNL;
 
     Mov rdi, $N;
     FreeMemory;
@@ -2693,7 +2822,7 @@ B<Example:>
     Vmovdqu8 "[rax]", xmm0;
     Mov rdi,16;
     PrintOutMemory;
-    PrintOutNl;
+    PrintOutNL;
 
     Mov rdi, $N;
 
@@ -3035,7 +3164,7 @@ Layout data
 
 39 L<PrintOutMemoryInHex|/PrintOutMemoryInHex> - Dump memory from the address in rax for the length in rdi
 
-40 L<PrintOutNl|/PrintOutNl> - Write a new line
+40 L<PrintOutNL|/PrintOutNL> - Write a new line
 
 41 L<PrintOutRaxInHex|/PrintOutRaxInHex> - Write the content of register rax to stderr in hexadecimal in big endian notation
 
@@ -3157,7 +3286,7 @@ $ENV{PATH} = $ENV{PATH}.":/var/isde:sde";                                       
 if ($^O =~ m(bsd|linux)i)                                                       # Supported systems
  {if (confirmHasCommandLineCommand(q(nasm)) and                                 # Network assembler
       confirmHasCommandLineCommand(q(sde64)))                                   # Intel emulator
-   {plan tests => 45;
+   {plan tests => 46;
    }
   else
    {plan skip_all =>qq(Nasm or Intel 64 emulator not available);
@@ -3189,17 +3318,17 @@ if (1) {                                                                        
   ok Assemble =~ m(Hello World);
  }
 
-if (1) {                                                                        #TPrintOutRaxInHex #TPrintOutNl
+if (1) {                                                                        #TPrintOutRaxInHex #TPrintOutNL
   Start;
   my $q = Rs('abababab');
   Mov(rax, "[$q]");
   PrintOutString "rax: ";
   PrintOutRaxInHex;
-  PrintOutNl;
+  PrintOutNL;
   Xor rax, rax;
   PrintOutString "rax: ";
   PrintOutRaxInHex;
-  PrintOutNl;
+  PrintOutNL;
   Exit;
   ok Assemble =~ m(rax: 6261 6261 6261 6261.*rax: 0000 0000 0000 0000)s;
  }
@@ -3311,7 +3440,7 @@ if (1) {                                                                        
   Vmovdqu8 "[rax]", xmm0;
   Mov rdi,16;
   PrintOutMemory;
-  PrintOutNl;
+  PrintOutNL;
 
   Mov rdi, $N;
   FreeMemory;
@@ -3444,15 +3573,26 @@ if (1) {                                                                        
   ok $r =~ m(( 0000){3} 000F)i;
  }
 
-if (1) {                                                                        #TPrintOutRaxInReverseInHex
+if (1) {                                                                        #TPrintOutRaxInReverseInHex #TPrintOutMemoryInHex
   Start;
-  Mov rax, 0x88776655;
+  Mov rax, 0x07654321;
   Shl rax, 32;
-  Or  rax, 0x44332211;
+  Or  rax, 0x07654321;
   PrintOutRaxInHex;
   PrintOutRaxInReverseInHex;
+  Push rax;
+  Mov rax, rsp;
+  Mov rdi, 8;
+  PrintOutNL;
+  PrintOutMemoryInHex;
+  Mov rax, 4096;
+  Push rax;
+  Mov rax, rsp;
+  Mov rdi, 8;
+  PrintOutNL;
+  PrintOutMemoryInHex;
   Exit;
-  ok Assemble =~ m(8877 6655 4433 2211 1122 3344 5566 7788)s;
+  ok Assemble =~ m(0765 4321 0765 4321 2143 6507 2143 6507.*0010 0000)s;
  }
 
 if (1) {                                                                        #TPushR #TPopR #TPeekR
@@ -3546,16 +3686,16 @@ if (1) {                                                                        
   ok Assemble =~ m($T)s;                                                        # Assemble and execute
  }
 
-if (1) {                                                                        #TReorderRegisters #TUnReorderRegisters
+if (1) {                                                                        #TReorderSyscallRegisters #TUnReorderSyscallRegisters
   Start;
   Mov rax, 1;  Mov rdi, 2;  Mov rsi,  3;  Mov rdx,  4;
   Mov r8,  8;  Mov r9,  9;  Mov r10, 10;  Mov r11, 11;
 
-  ReorderRegisters   r8,r9;                                                     # Reorder the registers fof syscall
+  ReorderSyscallRegisters   r8,r9;                                                     # Reorder the registers fof syscall
   PrintOutRegisterInHex rax;
   PrintOutRegisterInHex rdi;
 
-  UnReorderRegisters r8,r9;                                                     # Unreorder the registers to recover their original values
+  UnReorderSyscallRegisters r8,r9;                                                     # Unreorder the registers to recover their original values
   PrintOutRegisterInHex rax;
   PrintOutRegisterInHex rdi;
 
@@ -3702,17 +3842,88 @@ if (1) {                                                                        
   Exit;                                                                         # Return to operating system
   ok Assemble =~ m(rax: FFFF FFFF FFFF FFFF);
  }
+# It is one of the happiest characteristics of this glorious country that official utterances are invariably regarded as unanswerable
+if (1) {                                                                        #TPrintOutZF #TSetZF #TClearZF
+  Start;
+  SetZF;
+  PrintOutZF;
+  ClearZF;
+  PrintOutZF;
+  SetZF;
+  PrintOutZF;
+  SetZF;
+  PrintOutZF;
+  ClearZF;
+  PrintOutZF;
+  Exit;                                                                         # Return to operating system
+  ok Assemble =~ m(ZF=1.*ZF=0.*ZF=1.*ZF=1.*ZF=0)s;
+ }
 
 latest:;
 
 if (1) {                                                                        #TGenTree
   Start;
-  my $t = GenTree(2,2);
-  Mov r9, rax;
-  $t->node->&*;
-  PrintOutRegisterInHex xmm0;
+  my $t = GenTree(2,2);                                                         # Tree
+  $t->node->&*;                                                                 # Root
+
+  ReorderXmmRegisters my @x = (1);                                              # Root is in xmm1
+
+    if (1)                                                                      # New left node
+     {$t->node->&*;                                                             # Node in xmm0
+      Movdqa xmm2, xmm0;                                                        # Left is in xmm2
+
+      ReorderXmmRegisters my @x = (1,0);                                        # Insert left under root
+      $t->insertLeft->&*;
+      UnReorderXmmRegisters @x;
+      $t->dump->("Left");                                                       # Left node after insertion
+     }
+
+    if (1)                                                                      # New right node in xmm0
+     {$t->node->&*;
+      Movdqa xmm3, xmm0;                                                        # Right is in xmm3
+
+      ReorderXmmRegisters my @x = (1,0);
+      $t->insertRight->&*;
+      UnReorderXmmRegisters @x;
+      $t->dump->("Right");                                                      # Right node after insertion
+     }
+
+  UnReorderXmmRegisters @x;                                                     # Restore root
+
+  $t->dump->("Root");                                                           # Root node after insertions
+  $t->isRoot->&*;
+  If {PrintOutStringNL "root"} sub {PrintOutStringNL "NOT root"};
+
+  PushR xmm0;                                                                   # Dump underlying  byte string
+  PopR rdi, rax;
+  $t->byteString->dump;
+
   Exit;                                                                         # Return to operating system
-  ok Assemble =~ m(xmm0: 0000 0000 0000 0010   0000 .... .... .000);
+
+  my $r = Assemble;
+  my $e = <<END;                                                                # Test tree so produced
+Left
+ArenaTreeNode at: 0000 0000 0000 00B0
+   up: 0000 0000 0000 0010
+ left: 0000 0000 0000 0000
+right: 0000 0000 0000 0000
+Right
+ArenaTreeNode at: 0000 0000 0000 0150
+   up: 0000 0000 0000 0010
+ left: 0000 0000 0000 0000
+right: 0000 0000 0000 0000
+Root
+ArenaTreeNode at: 0000 0000 0000 0010
+   up: 0000 0000 0000 0000
+ left: 0000 0000 0000 00B0
+right: 0000 0000 0000 0150
+root
+Byte String
+  Size: 0000 0000 0000 1000
+  Used: 0000 0000 0000 01E0
+END
+
+  ok index(nws($r), nws($e)) >= 0;
  }
 
 lll "Finished:", time - $start,  "bytes assembled:",   $totalBytesAssembled;
