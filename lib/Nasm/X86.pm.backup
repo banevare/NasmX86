@@ -519,13 +519,13 @@ sub PrintOutRaxInHex                                                            
     Mov rdi, 2;                                                                 # Length of a byte in hex
     for my $i(0..7)
      {my $s = 8*$i;
-      Mov rax,rdx;
-      Shl rax,$s;                                                               # Push selected byte high
-      Shr rax,56;                                                               # Push select byte low
-      Shl rax,1;                                                                # Multiply by two because each entry in the translation table is two bytes long
+      Mov rax, rdx;
+      Shl rax, $s;                                                              # Push selected byte high
+      Shr rax, 56;                                                              # Push select byte low
+      Shl rax, 1;                                                               # Multiply by two because each entry in the translation table is two bytes long
       Lea rax, "[$hexTranslateTable+rax]";
       PrintOutMemory;
-      PrintOutString ' ' if $i % 2;
+      PrintOutString ' ' if $i % 2 and $i < 7;
      }
     RestoreFirstFour;
    } name => "PrintOutRaxInHex";
@@ -577,12 +577,14 @@ sub PrintOutRegisterInHex(@)                                                    
         PushR @regs;                                                            # Save work registers
         PushR $r;                                                               # Place register contents on stack
         PopR  @regs;                                                            # Load work registers
-        for my $R(@regs)                                                        # Print work registers to print input register
-         {if ($R !~ m(\Arax))
+        for my $i(keys @regs)                                                   # Print work registers to print input register
+         {my $R = $regs[$i];
+          if ($R !~ m(\Arax))
            {PrintOutString("  ");
             Mov rax, $R
            }
           PrintOutRaxInHex;                                                     # Print work register
+          PrintOutString(" ") unless $i == $#regs;
          }
         PopR @regs;
        };
@@ -598,7 +600,7 @@ sub PrintOutRegisterInHex(@)                                                    
    }
  }
 
-sub PrintOutRipInHex                                                            # Print the instruction pointer in hex
+sub PrintOutRipInHex                                                            #P Print the instruction pointer in hex
  {@_ == 0 or confess;
   my @regs = qw(rax);
   my $sub = S
@@ -607,7 +609,7 @@ sub PrintOutRipInHex                                                            
     push @text, <<END;
 $l:
 END
-    Lea rax, "[$l]";                                                              # Current instruction pointer
+    Lea rax, "[$l]";                                                            # Current instruction pointer
     PrintOutString "rip: ";
     PrintOutRaxInHex;
     PrintOutNL;
@@ -617,7 +619,7 @@ END
   Call $sub;
  }
 
-sub PrintOutRflagsInHex                                                         # Print the flags register in hex
+sub PrintOutRflagsInHex                                                         #P Print the flags register in hex
  {@_ == 0 or confess;
   my @regs = qw(rax);
 
@@ -2032,9 +2034,169 @@ Operations on registers
 Save the first 4 parameter registers
 
 
+B<Example:>
+
+
+    Start;
+
+    Mov rax, 1;
+    Mov rdi, 1;
+
+    SaveFirstFour;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+
+    Mov rax, 2;
+    Mov rdi, 2;
+    SaveFirstSeven;
+    Mov rax, 3;
+    Mov rdi, 4;
+    PrintOutRegisterInHex rax, rdi;
+    RestoreFirstSeven;
+    PrintOutRegisterInHex rax, rdi;
+    RestoreFirstFour;
+    PrintOutRegisterInHex rax, rdi;
+
+
+    SaveFirstFour;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+
+    Mov rax, 2;
+    Mov rdi, 2;
+    SaveFirstSeven;
+    Mov rax, 3;
+    Mov rdi, 4;
+    PrintOutRegisterInHex rax, rdi;
+    RestoreFirstSevenExceptRax;
+    PrintOutRegisterInHex rax, rdi;
+    RestoreFirstFourExceptRax;
+    PrintOutRegisterInHex rax, rdi;
+
+
+    SaveFirstFour;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+
+    Mov rax, 2;
+    Mov rdi, 2;
+    SaveFirstSeven;
+    Mov rax, 3;
+    Mov rdi, 4;
+    PrintOutRegisterInHex rax, rdi;
+    RestoreFirstSevenExceptRaxAndRdi;
+    PrintOutRegisterInHex rax, rdi;
+    RestoreFirstFourExceptRaxAndRdi;
+    PrintOutRegisterInHex rax, rdi;
+
+    ReverseBytesInRax;
+    PrintOutRegisterInHex rax;
+
+    my $l = Label;
+    Jmp $l;
+    SetLabel $l;
+    Exit;
+
+    is_deeply Assemble, <<END;
+     rax: 0000 0000 0000 0003
+     rdi: 0000 0000 0000 0004
+     rax: 0000 0000 0000 0002
+     rdi: 0000 0000 0000 0002
+     rax: 0000 0000 0000 0001
+     rdi: 0000 0000 0000 0001
+     rax: 0000 0000 0000 0003
+     rdi: 0000 0000 0000 0004
+     rax: 0000 0000 0000 0003
+     rdi: 0000 0000 0000 0002
+     rax: 0000 0000 0000 0003
+     rdi: 0000 0000 0000 0001
+     rax: 0000 0000 0000 0003
+     rdi: 0000 0000 0000 0004
+     rax: 0000 0000 0000 0003
+     rdi: 0000 0000 0000 0004
+     rax: 0000 0000 0000 0003
+     rdi: 0000 0000 0000 0004
+     rax: 0300 0000 0000 0000
+  END
+
+    ok 8 == RegisterSize rax;
+
+
 =head2 RestoreFirstFour()
 
 Restore the first 4 parameter registers
+
+
+B<Example:>
+
+
+    Start;
+
+    Mov rax, 1;
+    Mov rdi, 1;
+    SaveFirstFour;
+    Mov rax, 2;
+    Mov rdi, 2;
+    SaveFirstSeven;
+    Mov rax, 3;
+    Mov rdi, 4;
+    PrintOutRegisterInHex rax, rdi;
+    RestoreFirstSeven;
+    PrintOutRegisterInHex rax, rdi;
+
+    RestoreFirstFour;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+
+    PrintOutRegisterInHex rax, rdi;
+
+    SaveFirstFour;
+    Mov rax, 2;
+    Mov rdi, 2;
+    SaveFirstSeven;
+    Mov rax, 3;
+    Mov rdi, 4;
+    PrintOutRegisterInHex rax, rdi;
+    RestoreFirstSevenExceptRax;
+    PrintOutRegisterInHex rax, rdi;
+    RestoreFirstFourExceptRax;
+    PrintOutRegisterInHex rax, rdi;
+
+    SaveFirstFour;
+    Mov rax, 2;
+    Mov rdi, 2;
+    SaveFirstSeven;
+    Mov rax, 3;
+    Mov rdi, 4;
+    PrintOutRegisterInHex rax, rdi;
+    RestoreFirstSevenExceptRaxAndRdi;
+    PrintOutRegisterInHex rax, rdi;
+    RestoreFirstFourExceptRaxAndRdi;
+    PrintOutRegisterInHex rax, rdi;
+
+    ReverseBytesInRax;
+    PrintOutRegisterInHex rax;
+
+    my $l = Label;
+    Jmp $l;
+    SetLabel $l;
+    Exit;
+
+    is_deeply Assemble, <<END;
+     rax: 0000 0000 0000 0003
+     rdi: 0000 0000 0000 0004
+     rax: 0000 0000 0000 0002
+     rdi: 0000 0000 0000 0002
+     rax: 0000 0000 0000 0001
+     rdi: 0000 0000 0000 0001
+     rax: 0000 0000 0000 0003
+     rdi: 0000 0000 0000 0004
+     rax: 0000 0000 0000 0003
+     rdi: 0000 0000 0000 0002
+     rax: 0000 0000 0000 0003
+     rdi: 0000 0000 0000 0001
+     rax: 0000 0000 0000 0003
+     rdi: 0000 0000 0000 0004
+     rax: 0000 0000 0000 0003
+     rdi: 0000 0000 0000 0004
+     rax: 0000 0000 0000 0003
+     rdi: 0000 0000 0000 0004
+     rax: 0300 0000 0000 0000
+  END
+
+    ok 8 == RegisterSize rax;
 
 
 =head2 RestoreFirstFourExceptRax()
@@ -2042,9 +2204,165 @@ Restore the first 4 parameter registers
 Restore the first 4 parameter registers except rax so it can return its value
 
 
+B<Example:>
+
+
+    Start;
+
+    Mov rax, 1;
+    Mov rdi, 1;
+    SaveFirstFour;
+    Mov rax, 2;
+    Mov rdi, 2;
+    SaveFirstSeven;
+    Mov rax, 3;
+    Mov rdi, 4;
+    PrintOutRegisterInHex rax, rdi;
+    RestoreFirstSeven;
+    PrintOutRegisterInHex rax, rdi;
+    RestoreFirstFour;
+    PrintOutRegisterInHex rax, rdi;
+
+    SaveFirstFour;
+    Mov rax, 2;
+    Mov rdi, 2;
+    SaveFirstSeven;
+    Mov rax, 3;
+    Mov rdi, 4;
+    PrintOutRegisterInHex rax, rdi;
+    RestoreFirstSevenExceptRax;
+    PrintOutRegisterInHex rax, rdi;
+
+    RestoreFirstFourExceptRax;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+
+    PrintOutRegisterInHex rax, rdi;
+
+    SaveFirstFour;
+    Mov rax, 2;
+    Mov rdi, 2;
+    SaveFirstSeven;
+    Mov rax, 3;
+    Mov rdi, 4;
+    PrintOutRegisterInHex rax, rdi;
+    RestoreFirstSevenExceptRaxAndRdi;
+    PrintOutRegisterInHex rax, rdi;
+    RestoreFirstFourExceptRaxAndRdi;
+    PrintOutRegisterInHex rax, rdi;
+
+    ReverseBytesInRax;
+    PrintOutRegisterInHex rax;
+
+    my $l = Label;
+    Jmp $l;
+    SetLabel $l;
+    Exit;
+
+    is_deeply Assemble, <<END;
+     rax: 0000 0000 0000 0003
+     rdi: 0000 0000 0000 0004
+     rax: 0000 0000 0000 0002
+     rdi: 0000 0000 0000 0002
+     rax: 0000 0000 0000 0001
+     rdi: 0000 0000 0000 0001
+     rax: 0000 0000 0000 0003
+     rdi: 0000 0000 0000 0004
+     rax: 0000 0000 0000 0003
+     rdi: 0000 0000 0000 0002
+     rax: 0000 0000 0000 0003
+     rdi: 0000 0000 0000 0001
+     rax: 0000 0000 0000 0003
+     rdi: 0000 0000 0000 0004
+     rax: 0000 0000 0000 0003
+     rdi: 0000 0000 0000 0004
+     rax: 0000 0000 0000 0003
+     rdi: 0000 0000 0000 0004
+     rax: 0300 0000 0000 0000
+  END
+
+    ok 8 == RegisterSize rax;
+
+
 =head2 RestoreFirstFourExceptRaxAndRdi()
 
 Restore the first 4 parameter registers except rax  and rdi so we can return a pair of values
+
+
+B<Example:>
+
+
+    Start;
+
+    Mov rax, 1;
+    Mov rdi, 1;
+    SaveFirstFour;
+    Mov rax, 2;
+    Mov rdi, 2;
+    SaveFirstSeven;
+    Mov rax, 3;
+    Mov rdi, 4;
+    PrintOutRegisterInHex rax, rdi;
+    RestoreFirstSeven;
+    PrintOutRegisterInHex rax, rdi;
+    RestoreFirstFour;
+    PrintOutRegisterInHex rax, rdi;
+
+    SaveFirstFour;
+    Mov rax, 2;
+    Mov rdi, 2;
+    SaveFirstSeven;
+    Mov rax, 3;
+    Mov rdi, 4;
+    PrintOutRegisterInHex rax, rdi;
+    RestoreFirstSevenExceptRax;
+    PrintOutRegisterInHex rax, rdi;
+    RestoreFirstFourExceptRax;
+    PrintOutRegisterInHex rax, rdi;
+
+    SaveFirstFour;
+    Mov rax, 2;
+    Mov rdi, 2;
+    SaveFirstSeven;
+    Mov rax, 3;
+    Mov rdi, 4;
+    PrintOutRegisterInHex rax, rdi;
+    RestoreFirstSevenExceptRaxAndRdi;
+    PrintOutRegisterInHex rax, rdi;
+
+    RestoreFirstFourExceptRaxAndRdi;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+
+    PrintOutRegisterInHex rax, rdi;
+
+    ReverseBytesInRax;
+    PrintOutRegisterInHex rax;
+
+    my $l = Label;
+    Jmp $l;
+    SetLabel $l;
+    Exit;
+
+    is_deeply Assemble, <<END;
+     rax: 0000 0000 0000 0003
+     rdi: 0000 0000 0000 0004
+     rax: 0000 0000 0000 0002
+     rdi: 0000 0000 0000 0002
+     rax: 0000 0000 0000 0001
+     rdi: 0000 0000 0000 0001
+     rax: 0000 0000 0000 0003
+     rdi: 0000 0000 0000 0004
+     rax: 0000 0000 0000 0003
+     rdi: 0000 0000 0000 0002
+     rax: 0000 0000 0000 0003
+     rdi: 0000 0000 0000 0001
+     rax: 0000 0000 0000 0003
+     rdi: 0000 0000 0000 0004
+     rax: 0000 0000 0000 0003
+     rdi: 0000 0000 0000 0004
+     rax: 0000 0000 0000 0003
+     rdi: 0000 0000 0000 0004
+     rax: 0300 0000 0000 0000
+  END
+
+    ok 8 == RegisterSize rax;
 
 
 =head2 SaveFirstSeven()
@@ -2052,9 +2370,169 @@ Restore the first 4 parameter registers except rax  and rdi so we can return a p
 Save the first 7 parameter registers
 
 
+B<Example:>
+
+
+    Start;
+
+    Mov rax, 1;
+    Mov rdi, 1;
+    SaveFirstFour;
+    Mov rax, 2;
+    Mov rdi, 2;
+
+    SaveFirstSeven;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+
+    Mov rax, 3;
+    Mov rdi, 4;
+    PrintOutRegisterInHex rax, rdi;
+    RestoreFirstSeven;
+    PrintOutRegisterInHex rax, rdi;
+    RestoreFirstFour;
+    PrintOutRegisterInHex rax, rdi;
+
+    SaveFirstFour;
+    Mov rax, 2;
+    Mov rdi, 2;
+
+    SaveFirstSeven;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+
+    Mov rax, 3;
+    Mov rdi, 4;
+    PrintOutRegisterInHex rax, rdi;
+    RestoreFirstSevenExceptRax;
+    PrintOutRegisterInHex rax, rdi;
+    RestoreFirstFourExceptRax;
+    PrintOutRegisterInHex rax, rdi;
+
+    SaveFirstFour;
+    Mov rax, 2;
+    Mov rdi, 2;
+
+    SaveFirstSeven;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+
+    Mov rax, 3;
+    Mov rdi, 4;
+    PrintOutRegisterInHex rax, rdi;
+    RestoreFirstSevenExceptRaxAndRdi;
+    PrintOutRegisterInHex rax, rdi;
+    RestoreFirstFourExceptRaxAndRdi;
+    PrintOutRegisterInHex rax, rdi;
+
+    ReverseBytesInRax;
+    PrintOutRegisterInHex rax;
+
+    my $l = Label;
+    Jmp $l;
+    SetLabel $l;
+    Exit;
+
+    is_deeply Assemble, <<END;
+     rax: 0000 0000 0000 0003
+     rdi: 0000 0000 0000 0004
+     rax: 0000 0000 0000 0002
+     rdi: 0000 0000 0000 0002
+     rax: 0000 0000 0000 0001
+     rdi: 0000 0000 0000 0001
+     rax: 0000 0000 0000 0003
+     rdi: 0000 0000 0000 0004
+     rax: 0000 0000 0000 0003
+     rdi: 0000 0000 0000 0002
+     rax: 0000 0000 0000 0003
+     rdi: 0000 0000 0000 0001
+     rax: 0000 0000 0000 0003
+     rdi: 0000 0000 0000 0004
+     rax: 0000 0000 0000 0003
+     rdi: 0000 0000 0000 0004
+     rax: 0000 0000 0000 0003
+     rdi: 0000 0000 0000 0004
+     rax: 0300 0000 0000 0000
+  END
+
+    ok 8 == RegisterSize rax;
+
+
 =head2 RestoreFirstSeven()
 
 Restore the first 7 parameter registers
+
+
+B<Example:>
+
+
+    Start;
+
+    Mov rax, 1;
+    Mov rdi, 1;
+    SaveFirstFour;
+    Mov rax, 2;
+    Mov rdi, 2;
+    SaveFirstSeven;
+    Mov rax, 3;
+    Mov rdi, 4;
+    PrintOutRegisterInHex rax, rdi;
+
+    RestoreFirstSeven;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+
+    PrintOutRegisterInHex rax, rdi;
+    RestoreFirstFour;
+    PrintOutRegisterInHex rax, rdi;
+
+    SaveFirstFour;
+    Mov rax, 2;
+    Mov rdi, 2;
+    SaveFirstSeven;
+    Mov rax, 3;
+    Mov rdi, 4;
+    PrintOutRegisterInHex rax, rdi;
+    RestoreFirstSevenExceptRax;
+    PrintOutRegisterInHex rax, rdi;
+    RestoreFirstFourExceptRax;
+    PrintOutRegisterInHex rax, rdi;
+
+    SaveFirstFour;
+    Mov rax, 2;
+    Mov rdi, 2;
+    SaveFirstSeven;
+    Mov rax, 3;
+    Mov rdi, 4;
+    PrintOutRegisterInHex rax, rdi;
+    RestoreFirstSevenExceptRaxAndRdi;
+    PrintOutRegisterInHex rax, rdi;
+    RestoreFirstFourExceptRaxAndRdi;
+    PrintOutRegisterInHex rax, rdi;
+
+    ReverseBytesInRax;
+    PrintOutRegisterInHex rax;
+
+    my $l = Label;
+    Jmp $l;
+    SetLabel $l;
+    Exit;
+
+    is_deeply Assemble, <<END;
+     rax: 0000 0000 0000 0003
+     rdi: 0000 0000 0000 0004
+     rax: 0000 0000 0000 0002
+     rdi: 0000 0000 0000 0002
+     rax: 0000 0000 0000 0001
+     rdi: 0000 0000 0000 0001
+     rax: 0000 0000 0000 0003
+     rdi: 0000 0000 0000 0004
+     rax: 0000 0000 0000 0003
+     rdi: 0000 0000 0000 0002
+     rax: 0000 0000 0000 0003
+     rdi: 0000 0000 0000 0001
+     rax: 0000 0000 0000 0003
+     rdi: 0000 0000 0000 0004
+     rax: 0000 0000 0000 0003
+     rdi: 0000 0000 0000 0004
+     rax: 0000 0000 0000 0003
+     rdi: 0000 0000 0000 0004
+     rax: 0300 0000 0000 0000
+  END
+
+    ok 8 == RegisterSize rax;
 
 
 =head2 RestoreFirstSevenExceptRax()
@@ -2062,9 +2540,165 @@ Restore the first 7 parameter registers
 Restore the first 7 parameter registers except rax which is being used to return the result
 
 
+B<Example:>
+
+
+    Start;
+
+    Mov rax, 1;
+    Mov rdi, 1;
+    SaveFirstFour;
+    Mov rax, 2;
+    Mov rdi, 2;
+    SaveFirstSeven;
+    Mov rax, 3;
+    Mov rdi, 4;
+    PrintOutRegisterInHex rax, rdi;
+    RestoreFirstSeven;
+    PrintOutRegisterInHex rax, rdi;
+    RestoreFirstFour;
+    PrintOutRegisterInHex rax, rdi;
+
+    SaveFirstFour;
+    Mov rax, 2;
+    Mov rdi, 2;
+    SaveFirstSeven;
+    Mov rax, 3;
+    Mov rdi, 4;
+    PrintOutRegisterInHex rax, rdi;
+
+    RestoreFirstSevenExceptRax;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+
+    PrintOutRegisterInHex rax, rdi;
+    RestoreFirstFourExceptRax;
+    PrintOutRegisterInHex rax, rdi;
+
+    SaveFirstFour;
+    Mov rax, 2;
+    Mov rdi, 2;
+    SaveFirstSeven;
+    Mov rax, 3;
+    Mov rdi, 4;
+    PrintOutRegisterInHex rax, rdi;
+    RestoreFirstSevenExceptRaxAndRdi;
+    PrintOutRegisterInHex rax, rdi;
+    RestoreFirstFourExceptRaxAndRdi;
+    PrintOutRegisterInHex rax, rdi;
+
+    ReverseBytesInRax;
+    PrintOutRegisterInHex rax;
+
+    my $l = Label;
+    Jmp $l;
+    SetLabel $l;
+    Exit;
+
+    is_deeply Assemble, <<END;
+     rax: 0000 0000 0000 0003
+     rdi: 0000 0000 0000 0004
+     rax: 0000 0000 0000 0002
+     rdi: 0000 0000 0000 0002
+     rax: 0000 0000 0000 0001
+     rdi: 0000 0000 0000 0001
+     rax: 0000 0000 0000 0003
+     rdi: 0000 0000 0000 0004
+     rax: 0000 0000 0000 0003
+     rdi: 0000 0000 0000 0002
+     rax: 0000 0000 0000 0003
+     rdi: 0000 0000 0000 0001
+     rax: 0000 0000 0000 0003
+     rdi: 0000 0000 0000 0004
+     rax: 0000 0000 0000 0003
+     rdi: 0000 0000 0000 0004
+     rax: 0000 0000 0000 0003
+     rdi: 0000 0000 0000 0004
+     rax: 0300 0000 0000 0000
+  END
+
+    ok 8 == RegisterSize rax;
+
+
 =head2 RestoreFirstSevenExceptRaxAndRdi()
 
 Restore the first 7 parameter registers except rax and rdi which are being used to return the results
+
+
+B<Example:>
+
+
+    Start;
+
+    Mov rax, 1;
+    Mov rdi, 1;
+    SaveFirstFour;
+    Mov rax, 2;
+    Mov rdi, 2;
+    SaveFirstSeven;
+    Mov rax, 3;
+    Mov rdi, 4;
+    PrintOutRegisterInHex rax, rdi;
+    RestoreFirstSeven;
+    PrintOutRegisterInHex rax, rdi;
+    RestoreFirstFour;
+    PrintOutRegisterInHex rax, rdi;
+
+    SaveFirstFour;
+    Mov rax, 2;
+    Mov rdi, 2;
+    SaveFirstSeven;
+    Mov rax, 3;
+    Mov rdi, 4;
+    PrintOutRegisterInHex rax, rdi;
+    RestoreFirstSevenExceptRax;
+    PrintOutRegisterInHex rax, rdi;
+    RestoreFirstFourExceptRax;
+    PrintOutRegisterInHex rax, rdi;
+
+    SaveFirstFour;
+    Mov rax, 2;
+    Mov rdi, 2;
+    SaveFirstSeven;
+    Mov rax, 3;
+    Mov rdi, 4;
+    PrintOutRegisterInHex rax, rdi;
+
+    RestoreFirstSevenExceptRaxAndRdi;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+
+    PrintOutRegisterInHex rax, rdi;
+    RestoreFirstFourExceptRaxAndRdi;
+    PrintOutRegisterInHex rax, rdi;
+
+    ReverseBytesInRax;
+    PrintOutRegisterInHex rax;
+
+    my $l = Label;
+    Jmp $l;
+    SetLabel $l;
+    Exit;
+
+    is_deeply Assemble, <<END;
+     rax: 0000 0000 0000 0003
+     rdi: 0000 0000 0000 0004
+     rax: 0000 0000 0000 0002
+     rdi: 0000 0000 0000 0002
+     rax: 0000 0000 0000 0001
+     rdi: 0000 0000 0000 0001
+     rax: 0000 0000 0000 0003
+     rdi: 0000 0000 0000 0004
+     rax: 0000 0000 0000 0003
+     rdi: 0000 0000 0000 0002
+     rax: 0000 0000 0000 0003
+     rdi: 0000 0000 0000 0001
+     rax: 0000 0000 0000 0003
+     rdi: 0000 0000 0000 0004
+     rax: 0000 0000 0000 0003
+     rdi: 0000 0000 0000 0004
+     rax: 0000 0000 0000 0003
+     rdi: 0000 0000 0000 0004
+     rax: 0300 0000 0000 0000
+  END
+
+    ok 8 == RegisterSize rax;
 
 
 =head2 ReorderSyscallRegisters(@registers)
@@ -2082,12 +2716,12 @@ B<Example:>
     Mov r8,  8;  Mov r9,  9;  Mov r10, 10;  Mov r11, 11;
 
 
-    ReorderSyscallRegisters   r8,r9;                                                     # Reorder the registers fof syscall  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+    ReorderSyscallRegisters   r8,r9;                                              # Reorder the registers fof syscall  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutRegisterInHex rax;
     PrintOutRegisterInHex rdi;
 
-    UnReorderSyscallRegisters r8,r9;                                                     # Unreorder the registers to recover their original values
+    UnReorderSyscallRegisters r8,r9;                                              # Unreorder the registers to recover their original values
     PrintOutRegisterInHex rax;
     PrintOutRegisterInHex rdi;
 
@@ -2109,12 +2743,12 @@ B<Example:>
     Mov rax, 1;  Mov rdi, 2;  Mov rsi,  3;  Mov rdx,  4;
     Mov r8,  8;  Mov r9,  9;  Mov r10, 10;  Mov r11, 11;
 
-    ReorderSyscallRegisters   r8,r9;                                                     # Reorder the registers fof syscall
+    ReorderSyscallRegisters   r8,r9;                                              # Reorder the registers fof syscall
     PrintOutRegisterInHex rax;
     PrintOutRegisterInHex rdi;
 
 
-    UnReorderSyscallRegisters r8,r9;                                                     # Unreorder the registers to recover their original values  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+    UnReorderSyscallRegisters r8,r9;                                              # Unreorder the registers to recover their original values  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutRegisterInHex rax;
     PrintOutRegisterInHex rdi;
@@ -2173,8 +2807,7 @@ B<Example:>
 
     Exit;                                                                         # Return to operating system
 
-    my $r = Assemble;
-    my $e = <<END;                                                                # Test tree so produced
+    is_deeply Assemble, <<END;                                                    # Test tree so produced
   Left
   ArenaTreeNode at: 0000 0000 0000 00B0
      up: 0000 0000 0000 0010
@@ -2195,8 +2828,6 @@ B<Example:>
     Size: 0000 0000 0000 1000
     Used: 0000 0000 0000 01E0
   END
-
-    ok index(nws($r), nws($e)) >= 0;
 
 
 =head2 UnReorderXmmRegisters(@registers)
@@ -2249,8 +2880,7 @@ B<Example:>
 
     Exit;                                                                         # Return to operating system
 
-    my $r = Assemble;
-    my $e = <<END;                                                                # Test tree so produced
+    is_deeply Assemble, <<END;                                                    # Test tree so produced
   Left
   ArenaTreeNode at: 0000 0000 0000 00B0
      up: 0000 0000 0000 0010
@@ -2272,8 +2902,6 @@ B<Example:>
     Used: 0000 0000 0000 01E0
   END
 
-    ok index(nws($r), nws($e)) >= 0;
-
 
 =head2 RegisterSize($r)
 
@@ -2281,6 +2909,84 @@ Return the size of a register
 
      Parameter  Description
   1  $r         Register
+
+B<Example:>
+
+
+    Start;
+
+    Mov rax, 1;
+    Mov rdi, 1;
+    SaveFirstFour;
+    Mov rax, 2;
+    Mov rdi, 2;
+    SaveFirstSeven;
+    Mov rax, 3;
+    Mov rdi, 4;
+    PrintOutRegisterInHex rax, rdi;
+    RestoreFirstSeven;
+    PrintOutRegisterInHex rax, rdi;
+    RestoreFirstFour;
+    PrintOutRegisterInHex rax, rdi;
+
+    SaveFirstFour;
+    Mov rax, 2;
+    Mov rdi, 2;
+    SaveFirstSeven;
+    Mov rax, 3;
+    Mov rdi, 4;
+    PrintOutRegisterInHex rax, rdi;
+    RestoreFirstSevenExceptRax;
+    PrintOutRegisterInHex rax, rdi;
+    RestoreFirstFourExceptRax;
+    PrintOutRegisterInHex rax, rdi;
+
+    SaveFirstFour;
+    Mov rax, 2;
+    Mov rdi, 2;
+    SaveFirstSeven;
+    Mov rax, 3;
+    Mov rdi, 4;
+    PrintOutRegisterInHex rax, rdi;
+    RestoreFirstSevenExceptRaxAndRdi;
+    PrintOutRegisterInHex rax, rdi;
+    RestoreFirstFourExceptRaxAndRdi;
+    PrintOutRegisterInHex rax, rdi;
+
+    ReverseBytesInRax;
+    PrintOutRegisterInHex rax;
+
+    my $l = Label;
+    Jmp $l;
+    SetLabel $l;
+    Exit;
+
+    is_deeply Assemble, <<END;
+     rax: 0000 0000 0000 0003
+     rdi: 0000 0000 0000 0004
+     rax: 0000 0000 0000 0002
+     rdi: 0000 0000 0000 0002
+     rax: 0000 0000 0000 0001
+     rdi: 0000 0000 0000 0001
+     rax: 0000 0000 0000 0003
+     rdi: 0000 0000 0000 0004
+     rax: 0000 0000 0000 0003
+     rdi: 0000 0000 0000 0002
+     rax: 0000 0000 0000 0003
+     rdi: 0000 0000 0000 0001
+     rax: 0000 0000 0000 0003
+     rdi: 0000 0000 0000 0004
+     rax: 0000 0000 0000 0003
+     rdi: 0000 0000 0000 0004
+     rax: 0000 0000 0000 0003
+     rdi: 0000 0000 0000 0004
+     rax: 0300 0000 0000 0000
+  END
+
+
+    ok 8 == RegisterSize rax;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+
+
 
 =head2 ClearRegisters(@registers)
 
@@ -2558,6 +3264,70 @@ Print a constant string to sysout followed by new line
      Parameter  Description
   1  $string    String
 
+B<Example:>
+
+
+    Start;
+    my $t = GenTree(2,2);                                                         # Tree description
+    $t->node->&*;                                                                 # Root
+    Movdqa xmm1, xmm0;
+
+    if (1)                                                                        # New left node
+     {$t->node->&*;                                                               # Node in xmm0
+      Movdqa xmm2, xmm0;                                                          # Left is in xmm2
+
+      ReorderXmmRegisters my @x = (1,0);                                          # Insert left under root
+      $t->insertLeft->&*;
+      UnReorderXmmRegisters @x;
+      $t->dump->("Left");                                                         # Left node after insertion
+     }
+
+    if (1)                                                                        # New right node in xmm0
+     {$t->node->&*;
+      Movdqa xmm3, xmm0;                                                          # Right is in xmm3
+
+      ReorderXmmRegisters my @x = (1,0);
+      $t->insertRight->&*;
+      UnReorderXmmRegisters @x;
+      $t->dump->("Right");                                                        # Right node after insertion
+     }
+
+    Movdqa xmm0, xmm1;
+    $t->dump->("Root");                                                           # Root node after insertions
+    $t->isRoot->&*;
+
+    If {PrintOutStringNL "root"} sub {PrintOutStringNL "NOT root"};  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+
+
+    PushR xmm0;                                                                   # Dump underlying  byte string
+    PopR rdi, rax;
+    $t->byteString->dump;
+
+    Exit;                                                                         # Return to operating system
+
+    is_deeply Assemble, <<END;                                                    # Test tree so produced
+  Left
+  ArenaTreeNode at: 0000 0000 0000 00B0
+     up: 0000 0000 0000 0010
+   left: 0000 0000 0000 0000
+  right: 0000 0000 0000 0000
+  Right
+  ArenaTreeNode at: 0000 0000 0000 0150
+     up: 0000 0000 0000 0010
+   left: 0000 0000 0000 0000
+  right: 0000 0000 0000 0000
+  Root
+  ArenaTreeNode at: 0000 0000 0000 0010
+     up: 0000 0000 0000 0000
+   left: 0000 0000 0000 00B0
+  right: 0000 0000 0000 0150
+  root
+  Byte String
+    Size: 0000 0000 0000 1000
+    Used: 0000 0000 0000 01E0
+  END
+
+
 =head2 PrintOutRaxInHex()
 
 Write the content of register rax to stderr in hexadecimal in big endian notation
@@ -2589,6 +3359,84 @@ B<Example:>
 Reverse the bytes in rax
 
 
+B<Example:>
+
+
+    Start;
+
+    Mov rax, 1;
+    Mov rdi, 1;
+    SaveFirstFour;
+    Mov rax, 2;
+    Mov rdi, 2;
+    SaveFirstSeven;
+    Mov rax, 3;
+    Mov rdi, 4;
+    PrintOutRegisterInHex rax, rdi;
+    RestoreFirstSeven;
+    PrintOutRegisterInHex rax, rdi;
+    RestoreFirstFour;
+    PrintOutRegisterInHex rax, rdi;
+
+    SaveFirstFour;
+    Mov rax, 2;
+    Mov rdi, 2;
+    SaveFirstSeven;
+    Mov rax, 3;
+    Mov rdi, 4;
+    PrintOutRegisterInHex rax, rdi;
+    RestoreFirstSevenExceptRax;
+    PrintOutRegisterInHex rax, rdi;
+    RestoreFirstFourExceptRax;
+    PrintOutRegisterInHex rax, rdi;
+
+    SaveFirstFour;
+    Mov rax, 2;
+    Mov rdi, 2;
+    SaveFirstSeven;
+    Mov rax, 3;
+    Mov rdi, 4;
+    PrintOutRegisterInHex rax, rdi;
+    RestoreFirstSevenExceptRaxAndRdi;
+    PrintOutRegisterInHex rax, rdi;
+    RestoreFirstFourExceptRaxAndRdi;
+    PrintOutRegisterInHex rax, rdi;
+
+
+    ReverseBytesInRax;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+
+    PrintOutRegisterInHex rax;
+
+    my $l = Label;
+    Jmp $l;
+    SetLabel $l;
+    Exit;
+
+    is_deeply Assemble, <<END;
+     rax: 0000 0000 0000 0003
+     rdi: 0000 0000 0000 0004
+     rax: 0000 0000 0000 0002
+     rdi: 0000 0000 0000 0002
+     rax: 0000 0000 0000 0001
+     rdi: 0000 0000 0000 0001
+     rax: 0000 0000 0000 0003
+     rdi: 0000 0000 0000 0004
+     rax: 0000 0000 0000 0003
+     rdi: 0000 0000 0000 0002
+     rax: 0000 0000 0000 0003
+     rdi: 0000 0000 0000 0001
+     rax: 0000 0000 0000 0003
+     rdi: 0000 0000 0000 0004
+     rax: 0000 0000 0000 0003
+     rdi: 0000 0000 0000 0004
+     rax: 0000 0000 0000 0003
+     rdi: 0000 0000 0000 0004
+     rax: 0300 0000 0000 0000
+  END
+
+    ok 8 == RegisterSize rax;
+
+
 =head2 PrintOutRaxInReverseInHex()
 
 Write the content of register rax to stderr in hexadecimal in little endian notation
@@ -2602,22 +3450,29 @@ B<Example:>
     Shl rax, 32;
     Or  rax, 0x07654321;
     PrintOutRaxInHex;
+    PrintOutNL;
 
     PrintOutRaxInReverseInHex;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
+    PrintOutNL;
     Push rax;
     Mov rax, rsp;
     Mov rdi, 8;
-    PrintOutNL;
     PrintOutMemoryInHex;
+    PrintOutNL;
     Mov rax, 4096;
     Push rax;
     Mov rax, rsp;
     Mov rdi, 8;
-    PrintOutNL;
     PrintOutMemoryInHex;
+    PrintOutNL;
     Exit;
-    ok Assemble =~ m(0765 4321 0765 4321 2143 6507 2143 6507.*0010 0000)s;
+    is_deeply Assemble, <<END;
+  0765 4321 0765 4321
+  2143 6507 2143 6507
+  0765 4321 0765 4321
+  0010 0000 0000 0000
+  END
 
 
 =head2 PrintOutRegisterInHex(@r)
@@ -2638,16 +3493,6 @@ B<Example:>
 
     Exit;
     ok Assemble =~ m(r8: 6867 6665 6463 6261)s;
-
-
-=head2 PrintOutRipInHex()
-
-Print the instruction pointer in hex
-
-
-=head2 PrintOutRflagsInHex()
-
-Print the flags register in hex
 
 
 =head2 PrintOutRegistersInHex()
@@ -3177,24 +4022,31 @@ B<Example:>
     Shl rax, 32;
     Or  rax, 0x07654321;
     PrintOutRaxInHex;
+    PrintOutNL;
     PrintOutRaxInReverseInHex;
+    PrintOutNL;
     Push rax;
     Mov rax, rsp;
     Mov rdi, 8;
-    PrintOutNL;
 
     PrintOutMemoryInHex;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
+    PrintOutNL;
     Mov rax, 4096;
     Push rax;
     Mov rax, rsp;
     Mov rdi, 8;
-    PrintOutNL;
 
     PrintOutMemoryInHex;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
+    PrintOutNL;
     Exit;
-    ok Assemble =~ m(0765 4321 0765 4321 2143 6507 2143 6507.*0010 0000)s;
+    is_deeply Assemble, <<END;
+  0765 4321 0765 4321
+  2143 6507 2143 6507
+  0765 4321 0765 4321
+  0010 0000 0000 0000
+  END
 
 
 =head2 PrintOutMemory()
@@ -3262,7 +4114,7 @@ B<Example:>
 
     my $r = Assemble;
     if ($r =~ m((0000.*0000))s)
-     {is_deeply length($1), 10289;
+     {is_deeply length($1), 9776;
      }
 
 
@@ -3309,7 +4161,7 @@ B<Example:>
 
     my $r = Assemble;
     if ($r =~ m((0000.*0000))s)
-     {is_deeply length($1), 10289;
+     {is_deeply length($1), 9776;
      }
 
 
@@ -3337,7 +4189,7 @@ B<Example:>
 
     my $r = Assemble;
     if ($r =~ m((0000.*0000))s)
-     {is_deeply length($1), 10289;
+     {is_deeply length($1), 9776;
      }
 
 
@@ -3359,23 +4211,53 @@ B<Example:>
 
 
     Start;                                                                        # Start the program
-    Mov rax, Rs($0);                                                              # File to stat
+    Mov rax, Rs($0);                                                              # File to read
 
     OpenRead;                                                                     # Open file  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutRegisterInHex rax;
-    CloseFile;                                                                   # Close file
+    CloseFile;                                                                    # Close file
     PrintOutRegisterInHex rax;
+
+    Mov rax, Rs(my $f = "zzz.txt");                                               # File to write
+    OpenWrite;                                                                    # Open file
+    CloseFile;                                                                    # Close file
     Exit;                                                                         # Return to operating system
 
     my $r = Assemble;
     ok $r =~ m(( 0000){3} 0003)i;                                                 # Expected file number
     ok $r =~ m(( 0000){4})i;                                                      # Expected file number
+    ok -e $f;                                                                     # Created file
+    unlink $f;
 
 
 =head2 OpenWrite()
 
 Create the file named by the terminated string addressed by rax for write
+
+
+B<Example:>
+
+
+    Start;                                                                        # Start the program
+    Mov rax, Rs($0);                                                              # File to read
+    OpenRead;                                                                     # Open file
+    PrintOutRegisterInHex rax;
+    CloseFile;                                                                    # Close file
+    PrintOutRegisterInHex rax;
+
+    Mov rax, Rs(my $f = "zzz.txt");                                               # File to write
+
+    OpenWrite;                                                                    # Open file  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+
+    CloseFile;                                                                    # Close file
+    Exit;                                                                         # Return to operating system
+
+    my $r = Assemble;
+    ok $r =~ m(( 0000){3} 0003)i;                                                 # Expected file number
+    ok $r =~ m(( 0000){4})i;                                                      # Expected file number
+    ok -e $f;                                                                     # Created file
+    unlink $f;
 
 
 =head2 CloseFile()
@@ -3387,18 +4269,26 @@ B<Example:>
 
 
     Start;                                                                        # Start the program
-    Mov rax, Rs($0);                                                              # File to stat
+    Mov rax, Rs($0);                                                              # File to read
     OpenRead;                                                                     # Open file
     PrintOutRegisterInHex rax;
 
-    CloseFile;                                                                   # Close file  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+    CloseFile;                                                                    # Close file  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutRegisterInHex rax;
+
+    Mov rax, Rs(my $f = "zzz.txt");                                               # File to write
+    OpenWrite;                                                                    # Open file
+
+    CloseFile;                                                                    # Close file  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+
     Exit;                                                                         # Return to operating system
 
     my $r = Assemble;
     ok $r =~ m(( 0000){3} 0003)i;                                                 # Expected file number
     ok $r =~ m(( 0000){4})i;                                                      # Expected file number
+    ok -e $f;                                                                     # Created file
+    unlink $f;
 
 
 =head2 StatSize()
@@ -3663,8 +4553,7 @@ B<Example:>
 
     Exit;                                                                         # Return to operating system
 
-    my $r = Assemble;
-    my $e = <<END;                                                                # Test tree so produced
+    is_deeply Assemble, <<END;                                                    # Test tree so produced
   Left
   ArenaTreeNode at: 0000 0000 0000 00B0
      up: 0000 0000 0000 0010
@@ -3685,8 +4574,6 @@ B<Example:>
     Size: 0000 0000 0000 1000
     Used: 0000 0000 0000 01E0
   END
-
-    ok index(nws($r), nws($e)) >= 0;
 
 
 =head1 Assemble
@@ -3772,6 +4659,16 @@ Layout data
 =head2 hexTranslateTable()
 
 Create/address a hex translate table and return its label
+
+
+=head2 PrintOutRipInHex()
+
+Print the instruction pointer in hex
+
+
+=head2 PrintOutRflagsInHex()
+
+Print the flags register in hex
 
 
 =head2 ByteString::updateSpace($byteString)
@@ -4054,7 +4951,7 @@ $ENV{PATH} = $ENV{PATH}.":/var/isde:sde";                                       
 if ($^O =~ m(bsd|linux)i)                                                       # Supported systems
  {if (confirmHasCommandLineCommand(q(nasm)) and                                 # Network assembler
       confirmHasCommandLineCommand(q(sde64)))                                   # Intel emulator
-   {plan tests => 47;
+   {plan tests => 45;
    }
   else
    {plan skip_all =>qq(Nasm or Intel 64 emulator not available);
@@ -4066,7 +4963,7 @@ else
 
 my $start = time;                                                               # Tests
 
-goto latest;
+#goto latest;
 
 if (1) {                                                                        #TExit #TPrintOutString #TStart #TAssemble
   Start;
@@ -4353,20 +5250,27 @@ if (1) {                                                                        
   Shl rax, 32;
   Or  rax, 0x07654321;
   PrintOutRaxInHex;
+  PrintOutNL;
   PrintOutRaxInReverseInHex;
+  PrintOutNL;
   Push rax;
   Mov rax, rsp;
   Mov rdi, 8;
-  PrintOutNL;
   PrintOutMemoryInHex;
+  PrintOutNL;
   Mov rax, 4096;
   Push rax;
   Mov rax, rsp;
   Mov rdi, 8;
-  PrintOutNL;
   PrintOutMemoryInHex;
+  PrintOutNL;
   Exit;
-  ok Assemble =~ m(0765 4321 0765 4321 2143 6507 2143 6507.*0010 0000)s;
+  is_deeply Assemble, <<END;
+0765 4321 0765 4321
+2143 6507 2143 6507
+0765 4321 0765 4321
+0010 0000 0000 0000
+END
  }
 
 if (1) {                                                                        #TPushR #TPopR #TPeekR
@@ -4398,7 +5302,7 @@ if (1) {                                                                        
 
   my $r = Assemble;
   if ($r =~ m((0000.*0000))s)
-   {is_deeply length($1), 10289;
+   {is_deeply length($1), 9776;
    }
  }
 
@@ -4635,9 +5539,83 @@ if (1) {                                                                        
   ok Assemble =~ m(ZF=1.*ZF=0.*ZF=1.*ZF=1.*ZF=0)s;
  }
 
+if (1) {                                                                        #TSetLabel #TRegisterSize #TSaveFirstFour #TSaveFirstSeven #TRestoreFirstFour #TRestoreFirstSeven #TRestoreFirstFourExceptRax #TRestoreFirstSevenExceptRax #TRestoreFirstFourExceptRaxAndRdi #TRestoreFirstSevenExceptRaxAndRdi #TReverseBytesInRax
+  Start;
+
+  Mov rax, 1;
+  Mov rdi, 1;
+  SaveFirstFour;
+  Mov rax, 2;
+  Mov rdi, 2;
+  SaveFirstSeven;
+  Mov rax, 3;
+  Mov rdi, 4;
+  PrintOutRegisterInHex rax, rdi;
+  RestoreFirstSeven;
+  PrintOutRegisterInHex rax, rdi;
+  RestoreFirstFour;
+  PrintOutRegisterInHex rax, rdi;
+
+  SaveFirstFour;
+  Mov rax, 2;
+  Mov rdi, 2;
+  SaveFirstSeven;
+  Mov rax, 3;
+  Mov rdi, 4;
+  PrintOutRegisterInHex rax, rdi;
+  RestoreFirstSevenExceptRax;
+  PrintOutRegisterInHex rax, rdi;
+  RestoreFirstFourExceptRax;
+  PrintOutRegisterInHex rax, rdi;
+
+  SaveFirstFour;
+  Mov rax, 2;
+  Mov rdi, 2;
+  SaveFirstSeven;
+  Mov rax, 3;
+  Mov rdi, 4;
+  PrintOutRegisterInHex rax, rdi;
+  RestoreFirstSevenExceptRaxAndRdi;
+  PrintOutRegisterInHex rax, rdi;
+  RestoreFirstFourExceptRaxAndRdi;
+  PrintOutRegisterInHex rax, rdi;
+
+  ReverseBytesInRax;
+  PrintOutRegisterInHex rax;
+
+  my $l = Label;
+  Jmp $l;
+  SetLabel $l;
+  Exit;
+
+  is_deeply Assemble, <<END;
+   rax: 0000 0000 0000 0003
+   rdi: 0000 0000 0000 0004
+   rax: 0000 0000 0000 0002
+   rdi: 0000 0000 0000 0002
+   rax: 0000 0000 0000 0001
+   rdi: 0000 0000 0000 0001
+   rax: 0000 0000 0000 0003
+   rdi: 0000 0000 0000 0004
+   rax: 0000 0000 0000 0003
+   rdi: 0000 0000 0000 0002
+   rax: 0000 0000 0000 0003
+   rdi: 0000 0000 0000 0001
+   rax: 0000 0000 0000 0003
+   rdi: 0000 0000 0000 0004
+   rax: 0000 0000 0000 0003
+   rdi: 0000 0000 0000 0004
+   rax: 0000 0000 0000 0003
+   rdi: 0000 0000 0000 0004
+   rax: 0300 0000 0000 0000
+END
+
+  ok 8 == RegisterSize rax;
+ }
+
 latest:;
 
-if (1) {                                                                        #TGenTree #TUnReorderXmmRegisters  #TReorderXmmRegisters
+if (1) {                                                                        #TGenTree #TUnReorderXmmRegisters #TReorderXmmRegisters #TPrintOutStringNL
   Start;
   my $t = GenTree(2,2);                                                         # Tree description
   $t->node->&*;                                                                 # Root
@@ -4674,8 +5652,7 @@ if (1) {                                                                        
 
   Exit;                                                                         # Return to operating system
 
-  my $r = Assemble;
-  my $e = <<END;                                                                # Test tree so produced
+  is_deeply Assemble, <<END;                                                    # Test tree so produced
 Left
 ArenaTreeNode at: 0000 0000 0000 00B0
    up: 0000 0000 0000 0010
@@ -4696,8 +5673,6 @@ Byte String
   Size: 0000 0000 0000 1000
   Used: 0000 0000 0000 01E0
 END
-
-  ok index(nws($r), nws($e)) >= 0;
  }
 
 unlink $_ for grep {/\A\.\/atmpa/} findFiles('.');
