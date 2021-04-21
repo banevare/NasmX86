@@ -390,19 +390,21 @@ sub ClearZF()                                                                   
   Pop rax;
  }
 
-sub InsertIntoXyz($$$)                                                          # Insert the specified word, double, quad from rax or the contents of xmm0 into the specified xyz register at the specified position shifting data above it to the left.
- {my ($reg, $unit, $pos) = @_;                                                  # Register to insert into, width of insert, position of insert in units from least significant byte starting at 0
+sub InsertIntoXyz($$$;$)                                                        # Insert the specified word, double, quad from rax or the contents of xmm0 into the specified xyz register at the specified position shifting data above it to the left.
+ {my ($reg, $unit, $pos, $maskRegister) = @_;                                   # Register to insert into, width of insert, position of insert in units from least significant byte starting at 0, optional mask register whose value can be sacrificed
 
-  PushR k1, $reg;                                                               # Save mask register and register to be modified
-  Kxnorq k1,k1,k1;                                                              # Mask to all ones
-  Kshiftlq k1,k1, $pos * $unit;                                                 # Zero mask data we are going to keep in position
+  my $k = $maskRegister || k1;                                                  # Choose a mask register
+  PushR k1 unless $maskRegister;                                                # Save mask register
+  PushR $reg;                                                                   # Save register to be modified
+  Kxnorq $k, $k, $k;                                                            # Mask to all ones
+  Kshiftlq $k, $k, $pos * $unit;                                                # Zero mask data we are going to keep in position
 
   my $a = $unit == 2 ? q(ax) : $unit == 4 ? q(eax): $unit == 8 ? q(rax) : xmm0; # Source of inserted value
   my $u = $unit < 16 ? \&Mov : \&Vmovdqu8;                                      # Move instruction
   &$u("[rsp+$pos*$unit-$unit]", $a);                                            # Insert data into stack
-  Vmovdqu8 "${reg}{k1}", "[rsp-$unit]";                                         # Reload data shifted over
+  Vmovdqu8 "${reg}{$k}", "[rsp-$unit]";                                         # Reload data shifted over
   Add rsp, RegisterSize $reg;                                                   # Skip over target register on stack
-  PopR k1;                                                                      # Return K1 to its original state
+  PopR $k unless $maskRegister;                                                 # Return mask register to its original state unless it can be sacrificed
  }
 
 #D1 Structured Programming                                                      # Structured programming constructs
@@ -5781,24 +5783,24 @@ END
 
 latest:;
 
-if (1) {                                                                        #TGenTree #TUnReorderXmmRegisters #TReorderXmmRegisters #TPrintOutStringNL #TInsertIntoXyz
+if (1) {                                                                        #TInsertIntoXyz
   Start;
   my $s    = Rb 0..63;
-  Vmovdqu8 xmm0,"[$s]";                                                         # 40..01
+  Vmovdqu8 xmm0,"[$s]";                                                         # Number each byte
   Vmovdqu8 ymm1,"[$s]";
   Vmovdqu8 zmm2,"[$s]";
   Vmovdqu8 zmm3,"[$s]";
 
-  SetRegisterToMinusOne rax;
+  SetRegisterToMinusOne rax;                                                    # Insert some ones
   InsertIntoXyz(xmm0, 2, 4);
-  InsertIntoXyz(ymm1, 4, 5);
+  InsertIntoXyz(ymm1, 4, 5, k1);
   InsertIntoXyz(zmm2, 8, 6);
 
-  PrintOutRegisterInHex xmm0;
+  PrintOutRegisterInHex xmm0;                                                   # Print the insertions
   PrintOutRegisterInHex ymm1;
   PrintOutRegisterInHex zmm2;
 
-  ClearRegisters xmm0;
+  ClearRegisters xmm0;                                                          # Insert some zeroes
   InsertIntoXyz(zmm3, 16, 2);
   PrintOutRegisterInHex zmm3;
   Exit;                                                                         # Return to operating system
