@@ -392,11 +392,11 @@ sub ClearZF()                                                                   
 
 sub InsertIntoXyz($$$)                                                          # Insert the specified word, double, quad from rax or the contents of xmm0 into the specified xyz register at the specified position shifting data above it to the left.
  {my ($reg, $unit, $pos) = @_;                                                  # Register to insert into, width of insert, position of insert in units from least significant byte starting at 0
+
   PushR k1, $reg;                                                               # Save mask register and register to be modified
   Kxnorq k1,k1,k1;                                                              # Mask to all ones
-  Kshiftlq k1,k1,$ pos*$unit;                                                   # Zero mask data we are going to keep in position
+  Kshiftlq k1,k1, $pos * $unit;                                                 # Zero mask data we are going to keep in position
 
-  PushR $reg;                                                                   # Push the current register contents
   my $a = $unit == 2 ? q(ax) : $unit == 4 ? q(eax): $unit == 8 ? q(rax) : xmm0; # Source of inserted value
   my $u = $unit < 16 ? \&Mov : \&Vmovdqu8;                                      # Move instruction
   &$u("[rsp+$pos*$unit-$unit]", $a);                                            # Insert data into stack
