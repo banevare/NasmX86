@@ -476,7 +476,7 @@ sub S(&%)                                                                       
  }
 
 sub cxr(&@)                                                                     # Call a subroutine with a reordering of the xmm registers.
- {my ($body, @registers) = @_;                                                  # Registers to reorder
+ {my ($body, @registers) = @_;                                                  # Code to execute with reordered registers, registers to reorder
   ReorderXmmRegisters   @registers;
   &$body;
   UnReorderXmmRegisters @registers;
@@ -2889,30 +2889,23 @@ B<Example:>
      {$t->node->();                                                               # Node in xmm0
       Movdqa xmm2, xmm0;                                                          # Left is in xmm2
 
-
-      ReorderXmmRegisters my @x = (1,0);                                          # Insert left under root  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
-
-      $t->insertLeft->();
-      UnReorderXmmRegisters @x;
-      $t->dump->("Left");                                                         # Left node after insertion
+      cxr {$t->insertLeft->()} 1,2;                                               # Insert left under root
+      cxr {$t->dump->("Left")} 2;                                                 # Left node after insertion
      }
 
     if (1)                                                                        # New right node in xmm0
      {$t->node->();
       Movdqa xmm3, xmm0;                                                          # Right is in xmm3
 
-
-      ReorderXmmRegisters my @x = (1,0);  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
-
-      $t->insertRight->();
-      UnReorderXmmRegisters @x;
-      $t->dump->("Right");                                                        # Right node after insertion
+      cxr {$t->insertRight->()} 1,3;                                              # Insert left under root
+      cxr {$t->dump->("Right")} 3;                                                # Right node after insertion
      }
 
-    Movdqa xmm0, xmm1;
-    $t->dump->("Root");                                                           # Root node after insertions
-    $t->isRoot->();
-    If {PrintOutStringNL "root"} sub {PrintOutStringNL "NOT root"};
+    cxr
+     {$t->dump->("Root");                                                         # Root node after insertions
+      $t->isRoot->();
+      If {PrintOutStringNL "root"} sub {PrintOutStringNL "NOT root"};
+     } 1;
 
     PushR xmm0;                                                                   # Dump underlying  byte string
     PopR rdi, rax;
@@ -2962,30 +2955,23 @@ B<Example:>
      {$t->node->();                                                               # Node in xmm0
       Movdqa xmm2, xmm0;                                                          # Left is in xmm2
 
-      ReorderXmmRegisters my @x = (1,0);                                          # Insert left under root
-      $t->insertLeft->();
-
-      UnReorderXmmRegisters @x;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
-
-      $t->dump->("Left");                                                         # Left node after insertion
+      cxr {$t->insertLeft->()} 1,2;                                               # Insert left under root
+      cxr {$t->dump->("Left")} 2;                                                 # Left node after insertion
      }
 
     if (1)                                                                        # New right node in xmm0
      {$t->node->();
       Movdqa xmm3, xmm0;                                                          # Right is in xmm3
 
-      ReorderXmmRegisters my @x = (1,0);
-      $t->insertRight->();
-
-      UnReorderXmmRegisters @x;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
-
-      $t->dump->("Right");                                                        # Right node after insertion
+      cxr {$t->insertRight->()} 1,3;                                              # Insert left under root
+      cxr {$t->dump->("Right")} 3;                                                # Right node after insertion
      }
 
-    Movdqa xmm0, xmm1;
-    $t->dump->("Root");                                                           # Root node after insertions
-    $t->isRoot->();
-    If {PrintOutStringNL "root"} sub {PrintOutStringNL "NOT root"};
+    cxr
+     {$t->dump->("Root");                                                         # Root node after insertions
+      $t->isRoot->();
+      If {PrintOutStringNL "root"} sub {PrintOutStringNL "NOT root"};
+     } 1;
 
     PushR xmm0;                                                                   # Dump underlying  byte string
     PopR rdi, rax;
@@ -3206,6 +3192,55 @@ B<Example:>
     ok Assemble =~ m(ZF=1.*ZF=0.*ZF=1.*ZF=1.*ZF=0)s;
 
 
+=head2 InsertIntoXyz($reg, $unit, $pos, $maskRegister)
+
+Insert the specified word, double, quad from rax or the contents of xmm0 into the specified xyz register at the specified position shifting data above it to the left.
+
+     Parameter      Description
+  1  $reg           Register to insert into
+  2  $unit          Width of insert
+  3  $pos           Position of insert in units from least significant byte starting at 0
+  4  $maskRegister  Optional mask register whose value can be sacrificed
+
+B<Example:>
+
+
+    Start;
+    my $s    = Rb 0..63;
+    Vmovdqu8 xmm0,"[$s]";                                                         # Number each byte
+    Vmovdqu8 ymm1,"[$s]";
+    Vmovdqu8 zmm2,"[$s]";
+    Vmovdqu8 zmm3,"[$s]";
+
+    SetRegisterToMinusOne rax;                                                    # Insert some ones
+
+    InsertIntoXyz(xmm0, 2, 4);  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+
+
+    InsertIntoXyz(ymm1, 4, 5, k1);  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+
+
+    InsertIntoXyz(zmm2, 8, 6);  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+
+
+    PrintOutRegisterInHex xmm0;                                                   # Print the insertions
+    PrintOutRegisterInHex ymm1;
+    PrintOutRegisterInHex zmm2;
+
+    ClearRegisters xmm0;                                                          # Insert some zeroes
+
+    InsertIntoXyz(zmm3, 16, 2);  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+
+    PrintOutRegisterInHex zmm3;
+    Exit;                                                                         # Return to operating system
+
+    my $r = Assemble;
+    ok $r =~ m(xmm0: 0D0C 0B0A 0908 FFFF   0706 0504 0302 0100);
+    ok $r =~ m(ymm1: 1B1A 1918 1716 1514   FFFF FFFF 1312 1110   0F0E 0D0C 0B0A 0908   0706 0504 0302 0100);
+    ok $r =~ m(zmm2: 3736 3534 3332 3130   FFFF FFFF FFFF FFFF   2F2E 2D2C 2B2A 2928   2726 2524 2322 2120   1F1E 1D1C 1B1A 1918   1716 1514 1312 1110   0F0E 0D0C 0B0A 0908   0706 0504 0302 0100);
+    ok $r =~ m(zmm3: 2F2E 2D2C 2B2A 2928   2726 2524 2322 2120   0000 0000 0000 0000   0000 0000 0000 0000   1F1E 1D1C 1B1A 1918   1716 1514 1312 1110   0F0E 0D0C 0B0A 0908   0706 0504 0302 0100);
+
+
 =head1 Structured Programming
 
 Structured programming constructs
@@ -3300,6 +3335,14 @@ B<Example:>
     ok $r =~ m(0000 0000 4433 2211.*2211.*2212.*0000 0000 4433 2212)s;
 
 
+=head2 cxr($body, @registers)
+
+Call a subroutine with a reordering of the xmm registers.
+
+     Parameter   Description
+  1  $body       Code to execute with reordered registers
+  2  @registers  Registers to reorder
+
 =head2 Comment(@comment)
 
 Insert a comment into the assembly code
@@ -3389,28 +3432,25 @@ B<Example:>
      {$t->node->();                                                               # Node in xmm0
       Movdqa xmm2, xmm0;                                                          # Left is in xmm2
 
-      ReorderXmmRegisters my @x = (1,0);                                          # Insert left under root
-      $t->insertLeft->();
-      UnReorderXmmRegisters @x;
-      $t->dump->("Left");                                                         # Left node after insertion
+      cxr {$t->insertLeft->()} 1,2;                                               # Insert left under root
+      cxr {$t->dump->("Left")} 2;                                                 # Left node after insertion
      }
 
     if (1)                                                                        # New right node in xmm0
      {$t->node->();
       Movdqa xmm3, xmm0;                                                          # Right is in xmm3
 
-      ReorderXmmRegisters my @x = (1,0);
-      $t->insertRight->();
-      UnReorderXmmRegisters @x;
-      $t->dump->("Right");                                                        # Right node after insertion
+      cxr {$t->insertRight->()} 1,3;                                              # Insert left under root
+      cxr {$t->dump->("Right")} 3;                                                # Right node after insertion
      }
 
-    Movdqa xmm0, xmm1;
-    $t->dump->("Root");                                                           # Root node after insertions
-    $t->isRoot->();
+    cxr
+     {$t->dump->("Root");                                                         # Root node after insertions
+      $t->isRoot->();
 
-    If {PrintOutStringNL "root"} sub {PrintOutStringNL "NOT root"};  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+      If {PrintOutStringNL "root"} sub {PrintOutStringNL "NOT root"};  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
+     } 1;
 
     PushR xmm0;                                                                   # Dump underlying  byte string
     PopR rdi, rax;
@@ -4637,26 +4677,23 @@ B<Example:>
      {$t->node->();                                                               # Node in xmm0
       Movdqa xmm2, xmm0;                                                          # Left is in xmm2
 
-      ReorderXmmRegisters my @x = (1,0);                                          # Insert left under root
-      $t->insertLeft->();
-      UnReorderXmmRegisters @x;
-      $t->dump->("Left");                                                         # Left node after insertion
+      cxr {$t->insertLeft->()} 1,2;                                               # Insert left under root
+      cxr {$t->dump->("Left")} 2;                                                 # Left node after insertion
      }
 
     if (1)                                                                        # New right node in xmm0
      {$t->node->();
       Movdqa xmm3, xmm0;                                                          # Right is in xmm3
 
-      ReorderXmmRegisters my @x = (1,0);
-      $t->insertRight->();
-      UnReorderXmmRegisters @x;
-      $t->dump->("Right");                                                        # Right node after insertion
+      cxr {$t->insertRight->()} 1,3;                                              # Insert left under root
+      cxr {$t->dump->("Right")} 3;                                                # Right node after insertion
      }
 
-    Movdqa xmm0, xmm1;
-    $t->dump->("Root");                                                           # Root node after insertions
-    $t->isRoot->();
-    If {PrintOutStringNL "root"} sub {PrintOutStringNL "NOT root"};
+    cxr
+     {$t->dump->("Root");                                                         # Root node after insertions
+      $t->isRoot->();
+      If {PrintOutStringNL "root"} sub {PrintOutStringNL "NOT root"};
+     } 1;
 
     PushR xmm0;                                                                   # Dump underlying  byte string
     PopR rdi, rax;
@@ -4860,153 +4897,157 @@ Return a copy of the specified string with all the non ascii characters removed
 
 30 L<CreateByteString|/CreateByteString> - Create an relocatable string of bytes in an arena and returns its address in rax
 
-31 L<Db|/Db> - Layout bytes in the data segment and return their label
+31 L<cxr|/cxr> - Call a subroutine with a reordering of the xmm registers.
 
-32 L<Dbwdq|/Dbwdq> - Layout data
+32 L<Db|/Db> - Layout bytes in the data segment and return their label
 
-33 L<Dd|/Dd> - Layout double words in the data segment and return their label
+33 L<Dbwdq|/Dbwdq> - Layout data
 
-34 L<Dq|/Dq> - Layout quad words in the data segment and return their label
+34 L<Dd|/Dd> - Layout double words in the data segment and return their label
 
-35 L<Ds|/Ds> - Layout bytes in memory and return their label
+35 L<Dq|/Dq> - Layout quad words in the data segment and return their label
 
-36 L<Dw|/Dw> - Layout words in the data segment and return their label
+36 L<Ds|/Ds> - Layout bytes in memory and return their label
 
-37 L<Exit|/Exit> - Exit with the specified return code or zero if no return code supplied
+37 L<Dw|/Dw> - Layout words in the data segment and return their label
 
-38 L<For|/For> - For
+38 L<Exit|/Exit> - Exit with the specified return code or zero if no return code supplied
 
-39 L<Fork|/Fork> - Fork
+39 L<For|/For> - For
 
-40 L<FreeMemory|/FreeMemory> - Free memory via munmap.
+40 L<Fork|/Fork> - Fork
 
-41 L<GenTree|/GenTree> - Generate a set of routines to manage a tree held in a byte string with key and data fields of specified widths.
+41 L<FreeMemory|/FreeMemory> - Free memory via munmap.
 
-42 L<GetPid|/GetPid> - Get process identifier
+42 L<GenTree|/GenTree> - Generate a set of routines to manage a tree held in a byte string with key and data fields of specified widths.
 
-43 L<GetPidInHex|/GetPidInHex> - Get process identifier in hex as 8 zero terminated bytes in rax
+43 L<GetPid|/GetPid> - Get process identifier
 
-44 L<GetPPid|/GetPPid> - Get parent process identifier
+44 L<GetPidInHex|/GetPidInHex> - Get process identifier in hex as 8 zero terminated bytes in rax
 
-45 L<GetUid|/GetUid> - Get userid of current process
+45 L<GetPPid|/GetPPid> - Get parent process identifier
 
-46 L<hexTranslateTable|/hexTranslateTable> - Create/address a hex translate table and return its label
+46 L<GetUid|/GetUid> - Get userid of current process
 
-47 L<If|/If> - If
+47 L<hexTranslateTable|/hexTranslateTable> - Create/address a hex translate table and return its label
 
-48 L<Label|/Label> - Create a unique label
+48 L<If|/If> - If
 
-49 L<LocalData|/LocalData> - Map local data
+49 L<InsertIntoXyz|/InsertIntoXyz> - Insert the specified word, double, quad from rax or the contents of xmm0 into the specified xyz register at the specified position shifting data above it to the left.
 
-50 L<LocalData::allocate8|/LocalData::allocate8> - Add some 8 byte local variables and return an array of variable definitions
+50 L<Label|/Label> - Create a unique label
 
-51 L<LocalData::free|/LocalData::free> - Free a local data area on the stack
+51 L<LocalData|/LocalData> - Map local data
 
-52 L<LocalData::start|/LocalData::start> - Start a local data area on the stack
+52 L<LocalData::allocate8|/LocalData::allocate8> - Add some 8 byte local variables and return an array of variable definitions
 
-53 L<LocalData::variable|/LocalData::variable> - Add a local variable
+53 L<LocalData::free|/LocalData::free> - Free a local data area on the stack
 
-54 L<LocalVariable::stack|/LocalVariable::stack> - Address a local variable on the stack
+54 L<LocalData::start|/LocalData::start> - Start a local data area on the stack
 
-55 L<OpenRead|/OpenRead> - Open a file, whose name is addressed by rax, for read and return the file descriptor in rax
+55 L<LocalData::variable|/LocalData::variable> - Add a local variable
 
-56 L<OpenWrite|/OpenWrite> - Create the file named by the terminated string addressed by rax for write
+56 L<LocalVariable::stack|/LocalVariable::stack> - Address a local variable on the stack
 
-57 L<PeekR|/PeekR> - Peek at register on stack
+57 L<OpenRead|/OpenRead> - Open a file, whose name is addressed by rax, for read and return the file descriptor in rax
 
-58 L<PopR|/PopR> - Pop registers from the stack
+58 L<OpenWrite|/OpenWrite> - Create the file named by the terminated string addressed by rax for write
 
-59 L<PrintOutMemory|/PrintOutMemory> - Print the memory addressed by rax for a length of rdi
+59 L<PeekR|/PeekR> - Peek at register on stack
 
-60 L<PrintOutMemoryInHex|/PrintOutMemoryInHex> - Dump memory from the address in rax for the length in rdi
+60 L<PopR|/PopR> - Pop registers from the stack
 
-61 L<PrintOutNL|/PrintOutNL> - Print a new line to stdout
+61 L<PrintOutMemory|/PrintOutMemory> - Print the memory addressed by rax for a length of rdi
 
-62 L<PrintOutRaxInHex|/PrintOutRaxInHex> - Write the content of register rax to stderr in hexadecimal in big endian notation
+62 L<PrintOutMemoryInHex|/PrintOutMemoryInHex> - Dump memory from the address in rax for the length in rdi
 
-63 L<PrintOutRaxInReverseInHex|/PrintOutRaxInReverseInHex> - Write the content of register rax to stderr in hexadecimal in little endian notation
+63 L<PrintOutNL|/PrintOutNL> - Print a new line to stdout
 
-64 L<PrintOutRegisterInHex|/PrintOutRegisterInHex> - Print any register as a hex string
+64 L<PrintOutRaxInHex|/PrintOutRaxInHex> - Write the content of register rax to stderr in hexadecimal in big endian notation
 
-65 L<PrintOutRegistersInHex|/PrintOutRegistersInHex> - Print the general purpose registers in hex
+65 L<PrintOutRaxInReverseInHex|/PrintOutRaxInReverseInHex> - Write the content of register rax to stderr in hexadecimal in little endian notation
 
-66 L<PrintOutRflagsInHex|/PrintOutRflagsInHex> - Print the flags register in hex
+66 L<PrintOutRegisterInHex|/PrintOutRegisterInHex> - Print any register as a hex string
 
-67 L<PrintOutRipInHex|/PrintOutRipInHex> - Print the instruction pointer in hex
+67 L<PrintOutRegistersInHex|/PrintOutRegistersInHex> - Print the general purpose registers in hex
 
-68 L<PrintOutString|/PrintOutString> - Print a constant string to sysout.
+68 L<PrintOutRflagsInHex|/PrintOutRflagsInHex> - Print the flags register in hex
 
-69 L<PrintOutStringNL|/PrintOutStringNL> - Print a constant string to sysout followed by new line
+69 L<PrintOutRipInHex|/PrintOutRipInHex> - Print the instruction pointer in hex
 
-70 L<PrintOutZF|/PrintOutZF> - Print the zero flag without disturbing it
+70 L<PrintOutString|/PrintOutString> - Print a constant string to sysout.
 
-71 L<PushR|/PushR> - Push registers onto the stack
+71 L<PrintOutStringNL|/PrintOutStringNL> - Print a constant string to sysout followed by new line
 
-72 L<Rb|/Rb> - Layout bytes in the data segment and return their label
+72 L<PrintOutZF|/PrintOutZF> - Print the zero flag without disturbing it
 
-73 L<Rbwdq|/Rbwdq> - Layout data
+73 L<PushR|/PushR> - Push registers onto the stack
 
-74 L<Rd|/Rd> - Layout double words in the data segment and return their label
+74 L<Rb|/Rb> - Layout bytes in the data segment and return their label
 
-75 L<ReadFile|/ReadFile> - Read a file whose name is addressed by rax into memory.
+75 L<Rbwdq|/Rbwdq> - Layout data
 
-76 L<ReadTimeStampCounter|/ReadTimeStampCounter> - Read the time stamp counter and return the time in nanoseconds in rax
+76 L<Rd|/Rd> - Layout double words in the data segment and return their label
 
-77 L<RegisterSize|/RegisterSize> - Return the size of a register
+77 L<ReadFile|/ReadFile> - Read a file whose name is addressed by rax into memory.
 
-78 L<removeNonAsciiChars|/removeNonAsciiChars> - Return a copy of the specified string with all the non ascii characters removed
+78 L<ReadTimeStampCounter|/ReadTimeStampCounter> - Read the time stamp counter and return the time in nanoseconds in rax
 
-79 L<ReorderSyscallRegisters|/ReorderSyscallRegisters> - Map the list of registers provided to the 64 bit system call sequence
+79 L<RegisterSize|/RegisterSize> - Return the size of a register
 
-80 L<ReorderXmmRegisters|/ReorderXmmRegisters> - Map the list of xmm registers provided to 0-31
+80 L<removeNonAsciiChars|/removeNonAsciiChars> - Return a copy of the specified string with all the non ascii characters removed
 
-81 L<RestoreFirstFour|/RestoreFirstFour> - Restore the first 4 parameter registers
+81 L<ReorderSyscallRegisters|/ReorderSyscallRegisters> - Map the list of registers provided to the 64 bit system call sequence
 
-82 L<RestoreFirstFourExceptRax|/RestoreFirstFourExceptRax> - Restore the first 4 parameter registers except rax so it can return its value
+82 L<ReorderXmmRegisters|/ReorderXmmRegisters> - Map the list of xmm registers provided to 0-31
 
-83 L<RestoreFirstFourExceptRaxAndRdi|/RestoreFirstFourExceptRaxAndRdi> - Restore the first 4 parameter registers except rax  and rdi so we can return a pair of values
+83 L<RestoreFirstFour|/RestoreFirstFour> - Restore the first 4 parameter registers
 
-84 L<RestoreFirstSeven|/RestoreFirstSeven> - Restore the first 7 parameter registers
+84 L<RestoreFirstFourExceptRax|/RestoreFirstFourExceptRax> - Restore the first 4 parameter registers except rax so it can return its value
 
-85 L<RestoreFirstSevenExceptRax|/RestoreFirstSevenExceptRax> - Restore the first 7 parameter registers except rax which is being used to return the result
+85 L<RestoreFirstFourExceptRaxAndRdi|/RestoreFirstFourExceptRaxAndRdi> - Restore the first 4 parameter registers except rax  and rdi so we can return a pair of values
 
-86 L<RestoreFirstSevenExceptRaxAndRdi|/RestoreFirstSevenExceptRaxAndRdi> - Restore the first 7 parameter registers except rax and rdi which are being used to return the results
+86 L<RestoreFirstSeven|/RestoreFirstSeven> - Restore the first 7 parameter registers
 
-87 L<ReverseBytesInRax|/ReverseBytesInRax> - Reverse the bytes in rax
+87 L<RestoreFirstSevenExceptRax|/RestoreFirstSevenExceptRax> - Restore the first 7 parameter registers except rax which is being used to return the result
 
-88 L<Rq|/Rq> - Layout quad words in the data segment and return their label
+88 L<RestoreFirstSevenExceptRaxAndRdi|/RestoreFirstSevenExceptRaxAndRdi> - Restore the first 7 parameter registers except rax and rdi which are being used to return the results
 
-89 L<Rs|/Rs> - Layout bytes in read only memory and return their label
+89 L<ReverseBytesInRax|/ReverseBytesInRax> - Reverse the bytes in rax
 
-90 L<Rw|/Rw> - Layout words in the data segment and return their label
+90 L<Rq|/Rq> - Layout quad words in the data segment and return their label
 
-91 L<S|/S> - Create a sub with optional parameters name=> the name of the subroutine so it can be reused rather than regenerated, comment=> a comment describing the sub
+91 L<Rs|/Rs> - Layout bytes in read only memory and return their label
 
-92 L<SaveFirstFour|/SaveFirstFour> - Save the first 4 parameter registers
+92 L<Rw|/Rw> - Layout words in the data segment and return their label
 
-93 L<SaveFirstSeven|/SaveFirstSeven> - Save the first 7 parameter registers
+93 L<S|/S> - Create a sub with optional parameters name=> the name of the subroutine so it can be reused rather than regenerated, comment=> a comment describing the sub
 
-94 L<SetLabel|/SetLabel> - Set a label in the code section
+94 L<SaveFirstFour|/SaveFirstFour> - Save the first 4 parameter registers
 
-95 L<SetRegisterToMinusOne|/SetRegisterToMinusOne> - Set the specified register to -1
+95 L<SaveFirstSeven|/SaveFirstSeven> - Save the first 7 parameter registers
 
-96 L<SetZF|/SetZF> - Set the zero flag
+96 L<SetLabel|/SetLabel> - Set a label in the code section
 
-97 L<Start|/Start> - Initialize the assembler
+97 L<SetRegisterToMinusOne|/SetRegisterToMinusOne> - Set the specified register to -1
 
-98 L<StatSize|/StatSize> - Stat a file whose name is addressed by rax to get its size in rax
+98 L<SetZF|/SetZF> - Set the zero flag
 
-99 L<Structure|/Structure> - Create a structure addressed by a register
+99 L<Start|/Start> - Initialize the assembler
 
-100 L<Structure::field|/Structure::field> - Add a field of the specified length with an optional comment
+100 L<StatSize|/StatSize> - Stat a file whose name is addressed by rax to get its size in rax
 
-101 L<StructureField::addr|/StructureField::addr> - Address a field in a structure by either the default register or the named register
+101 L<Structure|/Structure> - Create a structure addressed by a register
 
-102 L<UnReorderSyscallRegisters|/UnReorderSyscallRegisters> - Recover the initial values in registers that were reordered
+102 L<Structure::field|/Structure::field> - Add a field of the specified length with an optional comment
 
-103 L<UnReorderXmmRegisters|/UnReorderXmmRegisters> - Recover the initial values in the xmm registers that were reordered
+103 L<StructureField::addr|/StructureField::addr> - Address a field in a structure by either the default register or the named register
 
-104 L<WaitPid|/WaitPid> - Wait for the pid in rax to complete
+104 L<UnReorderSyscallRegisters|/UnReorderSyscallRegisters> - Recover the initial values in registers that were reordered
+
+105 L<UnReorderXmmRegisters|/UnReorderXmmRegisters> - Recover the initial values in the xmm registers that were reordered
+
+106 L<WaitPid|/WaitPid> - Wait for the pid in rax to complete
 
 =head1 Installation
 
@@ -5062,7 +5103,7 @@ $ENV{PATH} = $ENV{PATH}.":/var/isde:sde";                                       
 if ($^O =~ m(bsd|linux)i)                                                       # Supported systems
  {if (confirmHasCommandLineCommand(q(nasm)) and                                 # Network assembler
       confirmHasCommandLineCommand(q(sde64)))                                   # Intel emulator
-   {plan tests => 49;
+   {plan tests => 51;
    }
   else
    {plan skip_all =>qq(Nasm or Intel 64 emulator not available);
@@ -5724,7 +5765,7 @@ END
   ok 8 == RegisterSize rax;
  }
 
-if (1) {                                                                        #TGenTree #TUnReorderXmmRegisters #TReorderXmmRegisters #TPrintOutStringNL
+if (1) {                                                                        #TGenTree #TUnReorderXmmRegisters #TReorderXmmRegisters #TPrintOutStringNL #Tcxr
   Start;
   my $t = GenTree(2,2);                                                         # Tree description
   $t->node->();                                                                 # Root
@@ -5779,6 +5820,21 @@ Byte String
   Size: 0000 0000 0000 1000
   Used: 0000 0000 0000 01E0
 END
+ }
+
+if (1) {                                                                        #TRb #TRd #TRq #TRw #TDb #TDd #TDq #TDw
+  Start;
+  my $s = Rb 0; Rb 1; Rw 2; Rd 3;  Rq 4;
+  my $t = Db 0; Db 1; Dw 2; Dd 3;  Dq 4;
+
+  Vmovdqu8 xmm0, "[$s]";
+  Vmovdqu8 xmm1, "[$t]";
+  PrintOutRegisterInHex xmm0;
+  PrintOutRegisterInHex xmm1;
+  Exit;
+  my $r = Assemble;
+  ok $r =~ m(xmm0: 0000 0000 0000 0004   0000 0003 0002 0100);
+  ok $r =~ m(xmm1: 0000 0000 0000 0004   0000 0003 0002 0100);
  }
 
 latest:;
