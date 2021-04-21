@@ -37,18 +37,18 @@ my $sysout = 1;                                                                 
 my $syserr = 2;                                                                 # File descriptor for standard error
 
 BEGIN{
-  my %r = (    map {$_=>'8'}    qw(al bl cl dl r8b r9b r10b r11b r12b r13b r14b r15b sil dil spl bpl ah bh ch dh));
-     %r = (%r, map {$_=>'s'}    qw(cs ds es fs gs ss));
-     %r = (%r, map {$_=>'16'}   qw(ax bx cx dx r8w r9w r10w r11w r12w r13w r14w r15w si di sp bp));
-     %r = (%r, map {$_=>'32a'}  qw(eax  ebx ecx edx esi edi esp ebp));
-     %r = (%r, map {$_=>'32b'}  qw(r8d r8l r9d r9l r10d r10l r11d r11l r12d r12l r13d r13l r14d r14l r15d r15l));
-     %r = (%r, map {$_=>'f'}    qw(st0 st1 st2 st3 st4 st5 st6 st7));
-     %r = (%r, map {$_=>'64'}   qw(rax rbx rcx rdx r8 r9 r10 r11 r12 r13 r14 r15 rsi rdi rsp rbp rip rflags));
-     %r = (%r, map {$_=>'64m'}  qw(mm0 mm1 mm2 mm3 mm4 mm5 mm6 mm7));
-     %r = (%r, map {$_=>'128'}  qw(xmm0 xmm1 xmm2 xmm3 xmm4 xmm5 xmm6 xmm7 xmm8 xmm9 xmm10 xmm11 xmm12 xmm13 xmm14 xmm15 xmm16 xmm17 xmm18 xmm19 xmm20 xmm21 xmm22 xmm23 xmm24 xmm25 xmm26 xmm27 xmm28 xmm29 xmm30 xmm31));
-     %r = (%r, map {$_=>'256'}  qw(ymm0 ymm1 ymm2 ymm3 ymm4 ymm5 ymm6 ymm7 ymm8 ymm9 ymm10 ymm11 ymm12 ymm13 ymm14 ymm15 ymm16 ymm17 ymm18 ymm19 ymm20 ymm21 ymm22 ymm23 ymm24 ymm25 ymm26 ymm27 ymm28 ymm29 ymm30 ymm31));
-     %r = (%r, map {$_=>'512'}  qw(zmm0 zmm1 zmm2 zmm3 zmm4 zmm5 zmm6 zmm7 zmm8 zmm9 zmm10 zmm11 zmm12 zmm13 zmm14 zmm15 zmm16 zmm17 zmm18 zmm19 zmm20 zmm21 zmm22 zmm23 zmm24 zmm25 zmm26 zmm27 zmm28 zmm29 zmm30 zmm31));
-     %r = (%r, map {$_=>'m'}    qw(k0 k1 k2 k3 k4 k5 k6 k7));
+  my %r = (    map {$_=>[ 8,  '8'  ]}  qw(al bl cl dl r8b r9b r10b r11b r12b r13b r14b r15b sil dil spl bpl ah bh ch dh));
+     %r = (%r, map {$_=>[16,  's'  ]}  qw(cs ds es fs gs ss));
+     %r = (%r, map {$_=>[16,  '16' ]}  qw(ax bx cx dx r8w r9w r10w r11w r12w r13w r14w r15w si di sp bp));
+     %r = (%r, map {$_=>[32,  '32a']}  qw(eax  ebx ecx edx esi edi esp ebp));
+     %r = (%r, map {$_=>[32,  '32b']}  qw(r8d r8l r9d r9l r10d r10l r11d r11l r12d r12l r13d r13l r14d r14l r15d r15l));
+     %r = (%r, map {$_=>[80,  'f'  ]}  qw(st0 st1 st2 st3 st4 st5 st6 st7));
+     %r = (%r, map {$_=>[64,  '64' ]}  qw(rax rbx rcx rdx r8 r9 r10 r11 r12 r13 r14 r15 rsi rdi rsp rbp rip rflags));
+     %r = (%r, map {$_=>[64,  '64m']}  qw(mm0 mm1 mm2 mm3 mm4 mm5 mm6 mm7));
+     %r = (%r, map {$_=>[128, '128']}  qw(xmm0 xmm1 xmm2 xmm3 xmm4 xmm5 xmm6 xmm7 xmm8 xmm9 xmm10 xmm11 xmm12 xmm13 xmm14 xmm15 xmm16 xmm17 xmm18 xmm19 xmm20 xmm21 xmm22 xmm23 xmm24 xmm25 xmm26 xmm27 xmm28 xmm29 xmm30 xmm31));
+     %r = (%r, map {$_=>[256, '256']}  qw(ymm0 ymm1 ymm2 ymm3 ymm4 ymm5 ymm6 ymm7 ymm8 ymm9 ymm10 ymm11 ymm12 ymm13 ymm14 ymm15 ymm16 ymm17 ymm18 ymm19 ymm20 ymm21 ymm22 ymm23 ymm24 ymm25 ymm26 ymm27 ymm28 ymm29 ymm30 ymm31));
+     %r = (%r, map {$_=>[512, '512']}  qw(zmm0 zmm1 zmm2 zmm3 zmm4 zmm5 zmm6 zmm7 zmm8 zmm9 zmm10 zmm11 zmm12 zmm13 zmm14 zmm15 zmm16 zmm17 zmm18 zmm19 zmm20 zmm21 zmm22 zmm23 zmm24 zmm25 zmm26 zmm27 zmm28 zmm29 zmm30 zmm31));
+     %r = (%r, map {$_=>[64,  'm'  ]}  qw(k0 k1 k2 k3 k4 k5 k6 k7));
 
   my @i0 = qw(popfq pushfq rdtsc ret syscall);                                  # Zero operand instructions
   my @i1 = split /\s+/, <<END;                                                  # Single operand instructions
@@ -62,7 +62,7 @@ pop push
 END
   my @i2 =  split /\s+/, <<END;                                                 # Double operand instructions
 add and cmp cmova cmovae cmovb cmovbe cmovc cmove cmovg cmovge cmovl cmovle cmovna cmovnae cmovnb
-kmov knot  kortest ktest lea mov or shl shr sub test Vmovdqu8 vmovdqu32 vmovdqu64 vpxorq
+kmov knot  kortest ktest lea mov or shl shr sub test Vmovdqu Vmovdqu8 vmovdqu32 vmovdqu64 vpxorq
 lzcnt
 tzcnt
 xchg xor
@@ -71,6 +71,7 @@ END
   my @i3 =  split /\s+/, <<END;                                                 # Triple operand instructions
 kadd kand kandn kor kshiftl kshiftr kunpck kxnor kxor
 vprolq
+vpinsrb vpinsrd vpinsrw vpinsrq
 END
 
   if (1)                                                                        # Add variants to mask instructions
@@ -83,15 +84,25 @@ END
    }
 
   for my $r(sort keys %r)                                                       # Create register definitions
-   {eval "sub $r\{q($r)\}";
-    confess $@ if $@;
+   {if (1)
+     {my $s = "sub $r\{q($r)\}";
+      eval $s;
+      confess "$s$@ "if $@;
+     }
+    if (1)
+     {my $b = $r{$r}[0] / 8;
+      my $s = "sub ${r}Size\{$b}";
+      eval $s;
+      confess "$s$@ "if $@;
+     }
    }
 
-  my %v = map {$_=>1} values %r;
+  my %v = map {$$_[1]=>1} values %r;
   for my $v(sort keys %v)                                                       # Types of register
-   {my @r = grep {$r{$_} eq $v} sort keys %r;
-    eval "sub registers_$v\{".dump(\@r)."}";
-    confess $@ if $@;
+   {my @r = grep {$r{$_}[1] eq $v} sort keys %r;
+    my $s = "sub registers_$v\{".dump(\@r)."}";
+    eval $s;
+    confess "$s$@" if $@;
    }
 
   if (1)                                                                        # Instructions that take zero operands
@@ -107,7 +118,7 @@ END
 END
      }
     eval $s;
-    confess $@ if $@;
+    confess "$s$@" if $@;
    }
 
   if (1)                                                                        # Instructions that take one operand
@@ -124,7 +135,7 @@ END
 END
      }
     eval $s;
-    confess $@ if $@;
+    confess "$s$@" if $@;
    }
 
   if (1)                                                                        # Instructions that take two operands
@@ -141,7 +152,7 @@ END
 END
      }
     eval $s;
-    confess $@ if $@;
+    confess "$s$@" if $@;
    }
 
   if (1)                                                                        # Instructions that take three operands
@@ -157,7 +168,7 @@ END
         }
 END
      }
-    eval $s;
+    eval "$s$@";
     confess $@ if $@;
    }
  }
@@ -345,10 +356,8 @@ sub UnReorderXmmRegisters(@)                                                    
 
 sub RegisterSize($)                                                             # Return the size of a register
  {my ($r) = @_;                                                                 # Register
-  return 16 if $r =~ m(\Ax);
-  return 32 if $r =~ m(\Ay);
-  return 64 if $r =~ m(\Az);
-  8
+
+  eval "${r}Size()";
  }
 
 sub ClearRegisters(@)                                                           # Clear registers by setting them to zero
@@ -366,8 +375,8 @@ sub SetRegisterToMinusOne($)                                                    
  {my ($register) = @_;                                                          # Register to set
   @_ == 1 or confess;
 
-  Xor $register,$register;
-  Sub $register,1;
+  Xor $register, $register;
+  Sub $register, 1;
  }
 
 sub SetZF()                                                                     # Set the zero flag
@@ -379,6 +388,21 @@ sub ClearZF()                                                                   
   Mov rax, 1;
   Cmp rax, 0;
   Pop rax;
+ }
+
+sub InsertIntoXyz($$$)                                                          # Insert the specified word, double, quad from rax or the contents of xmm0 into the specified xyz register at the specified position shifting data above it to the left.
+ {my ($reg, $unit, $pos) = @_;                                                  # Register to insert into, width of insert, position of insert in units from least significant byte starting at 0
+  PushR k1, $reg;                                                               # Save mask register and register to be modified
+  Kxnorq k1,k1,k1;                                                              # Mask to all ones
+  Kshiftlq k1,k1,$ pos*$unit;                                                   # Zero mask data we are going to keep in position
+
+  PushR $reg;                                                                   # Push the current register contents
+  my $a = $unit == 2 ? q(ax) : $unit == 4 ? q(eax): $unit == 8 ? q(rax) : xmm0; # Source of inserted value
+  my $u = $unit < 16 ? \&Mov : \&Vmovdqu8;                                      # Move instruction
+  &$u("[rsp+$pos*$unit-$unit]", $a);                                            # Insert data into stack
+  Vmovdqu8 "${reg}{k1}", "[rsp-$unit]";                                         # Reload data shifted over
+  Add rsp, RegisterSize $reg;                                                   # Skip over target register on stack
+  PopR k1;                                                                      # Return K1 to its original state
  }
 
 #D1 Structured Programming                                                      # Structured programming constructs
@@ -5036,7 +5060,7 @@ $ENV{PATH} = $ENV{PATH}.":/var/isde:sde";                                       
 if ($^O =~ m(bsd|linux)i)                                                       # Supported systems
  {if (confirmHasCommandLineCommand(q(nasm)) and                                 # Network assembler
       confirmHasCommandLineCommand(q(sde64)))                                   # Intel emulator
-   {plan tests => 45;
+   {plan tests => 49;
    }
   else
    {plan skip_all =>qq(Nasm or Intel 64 emulator not available);
@@ -5698,8 +5722,6 @@ END
   ok 8 == RegisterSize rax;
  }
 
-latest:;
-
 if (1) {                                                                        #TGenTree #TUnReorderXmmRegisters #TReorderXmmRegisters #TPrintOutStringNL
   Start;
   my $t = GenTree(2,2);                                                         # Tree description
@@ -5755,6 +5777,37 @@ Byte String
   Size: 0000 0000 0000 1000
   Used: 0000 0000 0000 01E0
 END
+ }
+
+latest:;
+
+if (1) {                                                                        #TGenTree #TUnReorderXmmRegisters #TReorderXmmRegisters #TPrintOutStringNL #TInsertIntoXyz
+  Start;
+  my $s    = Rb 0..63;
+  Vmovdqu8 xmm0,"[$s]";                                                         # 40..01
+  Vmovdqu8 ymm1,"[$s]";
+  Vmovdqu8 zmm2,"[$s]";
+  Vmovdqu8 zmm3,"[$s]";
+
+  SetRegisterToMinusOne rax;
+  InsertIntoXyz(xmm0, 2, 4);
+  InsertIntoXyz(ymm1, 4, 5);
+  InsertIntoXyz(zmm2, 8, 6);
+
+  PrintOutRegisterInHex xmm0;
+  PrintOutRegisterInHex ymm1;
+  PrintOutRegisterInHex zmm2;
+
+  ClearRegisters xmm0;
+  InsertIntoXyz(zmm3, 16, 2);
+  PrintOutRegisterInHex zmm3;
+  Exit;                                                                         # Return to operating system
+
+  my $r = Assemble;
+  ok $r =~ m(xmm0: 0D0C 0B0A 0908 FFFF   0706 0504 0302 0100);
+  ok $r =~ m(ymm1: 1B1A 1918 1716 1514   FFFF FFFF 1312 1110   0F0E 0D0C 0B0A 0908   0706 0504 0302 0100);
+  ok $r =~ m(zmm2: 3736 3534 3332 3130   FFFF FFFF FFFF FFFF   2F2E 2D2C 2B2A 2928   2726 2524 2322 2120   1F1E 1D1C 1B1A 1918   1716 1514 1312 1110   0F0E 0D0C 0B0A 0908   0706 0504 0302 0100);
+  ok $r =~ m(zmm3: 2F2E 2D2C 2B2A 2928   2726 2524 2322 2120   0000 0000 0000 0000   0000 0000 0000 0000   1F1E 1D1C 1B1A 1918   1716 1514 1312 1110   0F0E 0D0C 0B0A 0908   0706 0504 0302 0100);
  }
 
 unlink $_ for grep {/\A\.\/atmpa/} findFiles('.');
