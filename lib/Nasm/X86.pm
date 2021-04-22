@@ -54,7 +54,7 @@ BEGIN{
   my @i1 = split /\s+/, <<END;                                                  # Single operand instructions
 call inc jmp
 ja jae jb jbe jc jcxz je jecxz jg jge jl jle jna jnae jnb jnbe jnc jne jng jnge
-jnl jnle jno jnp jns jnz jo jp jpe jpo jrcxz js jz
+jnl jnle jno jnp jns jnz jo jp jpe jpo jrcxz js jz not
 seta setae setb setbe setc sete setg setge setl setle setna setnae setnb setnbe
 setnc setne setng setnge setnl setno setnp setns setnz seto setp setpe setpo
 sets setz
@@ -5813,7 +5813,7 @@ else
 
 my $start = time;                                                               # Tests
 
-#goto latest;
+goto latest;
 
 if (1) {                                                                        #TExit #TPrintOutString #TStart #TAssemble
   Start;
@@ -6520,8 +6520,6 @@ Byte String
 END
  }
 
-latest:;
-
 if (1) {                                                                        #TRb #TRd #TRq #TRw #TDb #TDd #TDq #TDw #TCopyMemory
   Start;
   my $s = Rb 0; Rb 1; Rw 2; Rd 3;  Rq 4;
@@ -6544,6 +6542,22 @@ if (1) {                                                                        
   ok $r =~ m(xmm0: 0000 0000 0000 0004   0000 0003 0002 0100);
   ok $r =~ m(xmm1: 0000 0000 0000 0004   0000 0003 0002 0100);
   ok $r =~ m(0001 0200 0300 00000400 0000 0000 0000);
+ }
+
+latest:;
+
+if (1) {                                                                        #TInsertIntoXyz
+  Start;
+  Mov rax, 0;
+  Not rax;
+  Mov cl, 30;
+  Shl rax, cl;
+  PushR rax;
+  PopR  k0;
+  PrintOutRegisterInHex k0;
+  Exit;                                                                         # Return to operating system
+
+  ok Assemble =~ m(k0: FFFF FFFF C000 0000)s;
  }
 
 if (1) {                                                                        #TInsertIntoXyz
