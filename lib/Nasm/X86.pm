@@ -5801,7 +5801,7 @@ $ENV{PATH} = $ENV{PATH}.":/var/isde:sde";                                       
 if ($^O =~ m(bsd|linux)i)                                                       # Supported systems
  {if (confirmHasCommandLineCommand(q(nasm)) and                                 # Network assembler
       confirmHasCommandLineCommand(q(sde64)))                                   # Intel emulator
-   {plan tests => 52;
+   {plan tests => 53;
    }
   else
    {plan skip_all =>qq(Nasm or Intel 64 emulator not available);
@@ -5813,7 +5813,7 @@ else
 
 my $start = time;                                                               # Tests
 
-goto latest;
+#goto latest;
 
 if (1) {                                                                        #TExit #TPrintOutString #TStart #TAssemble
   Start;
