@@ -51,23 +51,30 @@ BEGIN{
      %r = (%r, map {$_=>[64,  'm'  ]}  qw(k0 k1 k2 k3 k4 k5 k6 k7));
 
   my @i0 = qw(popfq pushfq rdtsc ret syscall);                                  # Zero operand instructions
+
   my @i1 = split /\s+/, <<END;                                                  # Single operand instructions
-bswap call inc jmp
-ja jae jb jbe jc jcxz je jecxz jg jge jl jle jna jnae jnb jnbe jnc jne jng jnge
-jnl jnle jno jnp jns jnz jo jp jpe jpo jrcxz js jz not
-seta setae setb setbe setc sete setg setge setl setle setna setnae setnb setnbe
-setnc setne setng setnge setnl setno setnp setns setnz seto setp setpe setpo
-sets setz
-pop push
+bswap call inc jmp ja jae jb jbe jc jcxz je jecxz jg jge jl jle
+jna jnae jnb jnbe jnc jne jng jnge jnl jnle jno jnp jns jnz jo jp jpe jpo jrcxz
+js jz not seta setae setb setbe setc sete setg setge setl setle setna setnae
+setnb setnbe setnc setne setng setnge setnl setno setnp setns setnz seto setp
+setpe setpo sets setz pop push
 END
+
   my @i2 =  split /\s+/, <<END;                                                 # Double operand instructions
-add and cmp cmova cmovae cmovb cmovbe cmovc cmove cmovg cmovge cmovl cmovle cmovna cmovnae cmovnb
+add and bt btc btr bts  cmp cmova cmovae cmovb cmovbe cmovc cmove cmovg cmovge
+cmovl cmovle cmovna cmovnae cmovnb
 kmov knot  kortest ktest lea mov or shl shr sub test Vmovdqu Vmovdqu8 vmovdqu32 vmovdqu64 vpxorq
 lzcnt
 tzcnt
 xchg xor
 movdqa
+Vpexpandq Vpexpandd
 END
+
+  my @i2qdwb =  split /\s+/, <<END;                                             # Double operand instructions which have qdwb versions
+vpbroadcast
+END
+
   my @i3 =  split /\s+/, <<END;                                                 # Triple operand instructions
 kadd kand kandn kor kshiftl kshiftr kunpck kxnor kxor
 vprolq
@@ -77,9 +84,15 @@ END
   if (1)                                                                        # Add variants to mask instructions
    {my @k2  = grep {m/\Ak/} @i2; @i2  = grep {!m/\Ak/} @i2;
     my @k3  = grep {m/\Ak/} @i3; @i3  = grep {!m/\Ak/} @i3;
-    for my $s(qw(b  w d q))
+    for my $s(qw(b w d q))
      {push @i2, $_.$s for grep {m/\Ak/} @k2;
       push @i3, $_.$s for grep {m/\Ak/} @k3;
+     }
+   }
+
+  if (1)                                                                        # Add qdwb versions of instructions
+   {for my $o(@i2qdwb)
+     {push @i2, $o.$_ for qw(b w d q);
      }
    }
 
@@ -6488,14 +6501,26 @@ if (1) {                                                                        
 latest:;
 
 if (1) {                                                                        #TInsertIntoXyz
-  Mov rax, -1;
-  Mov cl, 30;
-  Shl rax, cl;
+  ClearRegisters rax;
+  Bts rax, 14;
+  Not rax;
+  PrintOutRegisterInHex rax;
   PushR rax;
-  PopR  k0;
-  PrintOutRegisterInHex k0;
+  PopR  k1;
+  PrintOutRegisterInHex k1;
+  Mov rax, 1;
+  Vpbroadcastb zmm0, rax;
+  PrintOutRegisterInHex zmm0;
 
-  ok Assemble =~ m(k0: FFFF FFFF C000 0000)s;
+  Vpexpandd "zmm1{k1}", zmm0;
+  PrintOutRegisterInHex zmm1;
+
+  is_deeply Assemble, <<END;
+   rax: FFFF FFFF FFFF BFFF
+    k1: FFFF FFFF FFFF BFFF
+  zmm0: 0101 0101 0101 0101   0101 0101 0101 0101   0101 0101 0101 0101   0101 0101 0101 0101   0101 0101 0101 0101   0101 0101 0101 0101   0101 0101 0101 0101   0101 0101 0101 0101
+  zmm1: 0101 0101 0000 0000   0101 0101 0101 0101   0101 0101 0101 0101   0101 0101 0101 0101   0101 0101 0101 0101   0101 0101 0101 0101   0101 0101 0101 0101   0101 0101 0101 0101
+END
  }
 
 if (1) {                                                                        #TInsertIntoXyz
