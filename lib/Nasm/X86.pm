@@ -52,7 +52,7 @@ BEGIN{
 
   my @i0 = qw(popfq pushfq rdtsc ret syscall);                                  # Zero operand instructions
   my @i1 = split /\s+/, <<END;                                                  # Single operand instructions
-call inc jmp
+bswap call inc jmp
 ja jae jb jbe jc jcxz je jecxz jg jge jl jle jna jnae jnb jnbe jnc jne jng jnge
 jnl jnle jno jnp jns jnz jo jp jpe jpo jrcxz js jz not
 seta setae setb setbe setc sete setg setge setl setle setna setnae setnb setnbe
@@ -570,33 +570,13 @@ sub PrintOutRaxInHex                                                            
   Call $sub;
  }
 
-sub ReverseBytesInRax                                                           # Reverse the bytes in rax
- {@_ == 0 or confess;
-  Comment "Reverse bytes in rax";
-
-  my $sub = S                                                                   # Reverse rax
-   {my $size = RegisterSize rax;
-    SaveFirstFour;
-    ClearRegisters rsi;
-    for(1..$size)                                                               # Reverse each byte
-     {Mov rdi,rax;
-      Shr rdi,($_-1)*8;
-      Shl rdi,($size-1)*8;
-      Shr rdi,($_-1)*8;
-      Or  rsi,rdi;
-     }
-    Mov rax,rsi;
-    RestoreFirstFourExceptRax;
-   } name => "ReverseBytesInRax";
-
-  Call $sub;
- }
-
 sub PrintOutRaxInReverseInHex                                                   # Write the content of register rax to stderr in hexadecimal in little endian notation
  {@_ == 0 or confess;
   Comment "Print Rax In Reverse In Hex";
-  ReverseBytesInRax;
+  Push rax;
+  Bswap rax;
   PrintOutRaxInHex;
+  Pop rax;
  }
 
 sub PrintOutRegisterInHex(@)                                                    # Print any register as a hex string
@@ -798,7 +778,7 @@ sub ReadTimeStampCounter()                                                      
     Shl rdx,32;
     Or rax,rdx;
     Pop rdx;
-   } name => "ReverseBytesInRax";
+   } name => "ReadTimeStampCounter";
 
   Call $sub;
  }
@@ -979,7 +959,7 @@ sub PrintOutMemoryInHex                                                         
     Lea rdi,"[rax+rdi-$size+1]";                                                # Upper limit of printing with an 8 byte register
     For                                                                         # Print string in blocks
      {Mov rax, "[rsi]";
-      ReverseBytesInRax;
+      Bswap rax;
       PrintOutRaxInHex;
      } rsi, rdi, $size;
     RestoreFirstFour;
@@ -5804,7 +5784,7 @@ $ENV{PATH} = $ENV{PATH}.":/var/isde:sde";                                       
 if ($^O =~ m(bsd|linux)i)                                                       # Supported systems
  {if (confirmHasCommandLineCommand(q(nasm)) and                                 # Network assembler
       confirmHasCommandLineCommand(q(sde64)))                                   # Intel emulator
-   {plan tests => 53;
+   {plan tests => 54;
    }
   else
    {plan skip_all =>qq(Nasm or Intel 64 emulator not available);
@@ -6096,7 +6076,7 @@ if (1) {                                                                        
   is_deeply Assemble, <<END;
 0765 4321 0765 4321
 2143 6507 2143 6507
-0765 4321 0765 4321
+2143 6507 2143 6507
 0010 0000 0000 0000
 END
  }
@@ -6383,7 +6363,7 @@ if (1) {                                                                        
   RestoreFirstFourExceptRaxAndRdi;
   PrintOutRegisterInHex rax, rdi;
 
-  ReverseBytesInRax;
+  Bswap rax;
   PrintOutRegisterInHex rax;
 
   my $l = Label;
@@ -6494,11 +6474,21 @@ if (1) {                                                                        
   ok $r =~ m(0001 0200 0300 00000400 0000 0000 0000);
  }
 
+if (1) {                                                                        # Variable length shift
+  Mov rax, -1;
+  Mov cl, 30;
+  Shl rax, cl;
+  PushR rax;
+  PopR  k0;
+  PrintOutRegisterInHex k0;
+
+  ok Assemble =~ m(k0: FFFF FFFF C000 0000)s;
+ }
+
 latest:;
 
 if (1) {                                                                        #TInsertIntoXyz
-  Mov rax, 0;
-  Not rax;
+  Mov rax, -1;
   Mov cl, 30;
   Shl rax, cl;
   PushR rax;
