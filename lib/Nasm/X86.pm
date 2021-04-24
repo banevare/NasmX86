@@ -5835,7 +5835,6 @@ if (1) {                                                                        
  }
 
 if (1) {                                                                        #TPrintOutRaxInHex #TPrintOutNL
-  Start;
   my $q = Rs('abababab');
   Mov(rax, "[$q]");
   PrintOutString "rax: ";
@@ -5845,12 +5844,11 @@ if (1) {                                                                        
   PrintOutString "rax: ";
   PrintOutRaxInHex;
   PrintOutNL;
-  Exit;
+
   ok Assemble =~ m(rax: 6261 6261 6261 6261.*rax: 0000 0000 0000 0000)s;
  }
 
 if (1) {                                                                        #TPrintOutRegistersInHex #TRs
-  Start;
   my $q = Rs('abababab');
   Mov(rax, 1);
   Mov(rbx, 2);
@@ -5859,14 +5857,13 @@ if (1) {                                                                        
   Mov(r8,  5);
   Lea r9,  "[rax+rbx]";
   PrintOutRegistersInHex;
-  Exit;
+
   my $r = Assemble;
   ok $r =~ m( r8: 0000 0000 0000 0005.* r9: 0000 0000 0000 0003.*rax: 0000 0000 0000 0001)s;
   ok $r =~ m(rbx: 0000 0000 0000 0002.*rcx: 0000 0000 0000 0003.*rdx: 0000 0000 0000 0004)s;
  }
 
 if (1) {                                                                        #TDs
-  Start;
   my $q = Rs('a'..'z');
   Mov rax, Ds('0'x64);                                                          # Output area
   Vmovdqu32(xmm0, "[$q]");                                                      # Load
@@ -5874,12 +5871,11 @@ if (1) {                                                                        
   Vmovdqu32("[rax]", xmm0);                                                     # Save
   Mov rdi, 16;
   PrintOutMemory;
-  Exit;
+
   ok Assemble =~ m(efghabcdmnopijkl)s;
  }
 
 if (1) {
-  Start;
   my $q = Rs(('a'..'p')x2);
   Mov rax, Ds('0'x64);
   Vmovdqu32(ymm0, "[$q]");
@@ -5887,12 +5883,11 @@ if (1) {
   Vmovdqu32("[rax]", ymm0);
   Mov rdi, 32;
   PrintOutMemory;
-  Exit;
+
   ok Assemble =~ m(efghabcdmnopijklefghabcdmnopijkl)s;
  }
 
 if (1) {
-  Start;
   my $q = Rs my $s = join '', ('a'..'p')x4;
   Mov rax, Ds('0'x128);
 
@@ -5902,27 +5897,24 @@ if (1) {
 
   Mov rdi, length $s;
   PrintOutMemory;
-  Exit;
 
   ok $s       =~ m(abcdefghijklmnopabcdefghijklmnopabcdefghijklmnopabcdefghijklmnop)s;
   ok Assemble =~ m(efghabcdmnopijklefghabcdmnopijklefghabcdmnopijklefghabcdmnopijkl)s;
  }
 
 if (1) {                                                                        #TPrintOutRegisterInHex
-  Start;
   my $q = Rs(('a'..'p')x4);
   Mov r8,"[$q]";
   PrintOutRegisterInHex r8;
-  Exit;
+
   ok Assemble =~ m(r8: 6867 6665 6463 6261)s;
  }
 
 if (1) {
-  Start;
   my $q = Rs('a'..'p');
   Vmovdqu8 xmm0, "[$q]";
   PrintOutRegisterInHex xmm0;
-  Exit;
+
   ok Assemble =~ m(xmm0: 706F 6E6D 6C6B 6A69   6867 6665 6463 6261)s;
  }
 
