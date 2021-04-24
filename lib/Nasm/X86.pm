@@ -5919,25 +5919,22 @@ if (1) {
  }
 
 if (1) {
-  Start;
   my $q = Rs('a'..'p', 'A'..'P', );
   Vmovdqu8 ymm0, "[$q]";
   PrintOutRegisterInHex ymm0;
-  Exit;
+
   ok Assemble =~ m(ymm0: 504F 4E4D 4C4B 4A49   4847 4645 4443 4241   706F 6E6D 6C6B 6A69   6867 6665 6463 6261)s;
  }
 
 if (1) {
-  Start;
   my $q = Rs(('a'..'p', 'A'..'P') x 2);
   Vmovdqu8 zmm0, "[$q]";
   PrintOutRegisterInHex zmm0;
-  Exit;
+
   ok Assemble =~ m(zmm0: 504F 4E4D 4C4B 4A49   4847 4645 4443 4241   706F 6E6D 6C6B 6A69   6867 6665 6463 6261   504F 4E4D 4C4B 4A49   4847 4645 4443 4241   706F 6E6D 6C6B 6A69   6867 6665 6463 6261)s;
  }
 
 if (1) {                                                                        #TAllocateMemory #TFreeMemory
-  Start;
   my $N = 2048;
   my $q = Rs('a'..'p');
   Mov rax, $N;
@@ -5953,24 +5950,22 @@ if (1) {                                                                        
   Mov rdi, $N;
   FreeMemory;
   PrintOutRegisterInHex rax;
-  Exit;
+
   ok Assemble =~ m(abcdefghijklmnop)s;
  }
 
 if (1) {                                                                        #TReadTimeStampCounter
-  Start;
   for(1..10)
    {ReadTimeStampCounter;
     PrintOutRegisterInHex rax;
    }
-  Exit;
+
   my @s = split /\n/, Assemble;
   my @S = sort @s;
   is_deeply \@s, \@S;
  }
 
 if (1) {                                                                        #TIf
-  Start;
   Mov rax, 0;
   Test rax,rax;
   If
@@ -5985,12 +5980,11 @@ if (1) {                                                                        
    } sub
    {PrintOutRegisterInHex rdx;
    };
-  Exit;
+
   ok Assemble =~ m(rbx.*rcx)s;
  }
 
 if (1) {                                                                        #TFork #TGetPid #TGetPPid #TWaitPid
-  Start;                                                                        # Start the program
   Fork;                                                                         # Fork
 
   Test rax,rax;
@@ -6014,8 +6008,6 @@ if (1) {                                                                        
     PrintOutRegisterInHex r10;
    };
 
-  Exit;                                                                         # Return to operating system
-
   my $r = Assemble;
 
 #    r8: 0000 0000 0000 0000   #1 Return from fork as seen by child
@@ -6034,21 +6026,17 @@ if (1) {                                                                        
  }
 
 if (1) {                                                                        #TGetUid
-  Start;                                                                        # Start the program
   GetUid;                                                                       # Userid
   PrintOutRegisterInHex rax;
-  Exit;                                                                         # Return to operating system
 
   my $r = Assemble;
   ok $r =~ m(rax:( 0000){3});
  }
 
 if (1) {                                                                        #TStatSize
-  Start;                                                                        # Start the program
   Mov rax, Rs($0);                                                              # File to stat
   StatSize;                                                                     # Stat the file
   PrintOutRegisterInHex rax;
-  Exit;                                                                         # Return to operating system
 
   my $r = Assemble =~ s( ) ()gsr;
   if ($r =~ m(rax:([0-9a-f]{16}))is)                                            # Compare file size obtained with that from fileSize()
@@ -6057,7 +6045,6 @@ if (1) {                                                                        
  }
 
 if (1) {                                                                        #TOpenRead #TCloseFile #TOpenWrite
-  Start;                                                                        # Start the program
   Mov rax, Rs($0);                                                              # File to read
   OpenRead;                                                                     # Open file
   PrintOutRegisterInHex rax;
@@ -6077,18 +6064,16 @@ if (1) {                                                                        
  }
 
 if (1) {                                                                        #TFor
-  Start;                                                                        # Start the program
   For
    {PrintOutRegisterInHex rax
    } rax, 16, 1;
-  Exit;                                                                         # Return to operating system
+
   my $r = Assemble;
   ok $r =~ m(( 0000){3} 0000)i;
   ok $r =~ m(( 0000){3} 000F)i;
  }
 
 if (1) {                                                                        #TPrintOutRaxInReverseInHex #TPrintOutMemoryInHex
-  Start;
   Mov rax, 0x07654321;
   Shl rax, 32;
   Or  rax, 0x07654321;
@@ -6107,7 +6092,7 @@ if (1) {                                                                        
   Mov rdi, 8;
   PrintOutMemoryInHex;
   PrintOutNL;
-  Exit;
+
   is_deeply Assemble, <<END;
 0765 4321 0765 4321
 2143 6507 2143 6507
@@ -6117,7 +6102,6 @@ END
  }
 
 if (1) {                                                                        #TPushR #TPopR #TPeekR
-  Start;
   Mov rax, 0x11111111;
   Mov rbx, 0x22222222;
   PushR rax;
@@ -6126,12 +6110,11 @@ if (1) {                                                                        
   PopR rax;
   PrintOutRegisterInHex rax;
   PrintOutRegisterInHex rbx;
-  Exit;
+
   ok Assemble =~ m(rax: 0000 0000 1111 1111.*rbx: 0000 0000 1111 1111)s;
  }
 
 if (1) {                                                                        #TAllocateMemory #TFreeMemory #TClearMemory
-  Start;
   my $N = 4096;                                                                 # Size of the initial allocation which should be one or more pages
   my $S = RegisterSize rax;
   Mov rax, $N;
@@ -6141,7 +6124,6 @@ if (1) {                                                                        
   ClearMemory;
   PrintOutRegisterInHex rax;
   PrintOutMemoryInHex;
-  Exit;
 
   my $r = Assemble;
   if ($r =~ m((0000.*0000))s)
@@ -6150,7 +6132,6 @@ if (1) {                                                                        
  }
 
 if (1) {                                                                        #TCall #TS
-  Start;
   Mov rax, 0x44332211;
   PrintOutRegisterInHex rax;
 
@@ -6163,23 +6144,21 @@ if (1) {                                                                        
   Call $s;
 
   PrintOutRegisterInHex rax;
-  Exit;
+
   my $r = Assemble;
   ok $r =~ m(0000 0000 4433 2211.*2211.*2212.*0000 0000 4433 2212)s;
  }
 
 if (1) {                                                                        #TReadFile #TPrintMemory
-  Start;                                                                        # Start the program
   Mov rax, Rs($0);                                                              # File to read
   ReadFile;                                                                     # Read file
   PrintOutMemory;                                                               # Print memory
-  Exit;                                                                         # Return to operating system
+
   my $r = Assemble;                                                             # Assemble and execute
   ok index(removeNonAsciiChars($r), removeNonAsciiChars(readFile $0)) >= 0;     # Output contains this file
  }
 
 if (1) {                                                                        #TCreateByteString #TByteString::clear #TByteString::out #TByteString::copy #TByteString::nl
-  Start;                                                                        # Start the program
   my $s = CreateByteString;                                                     # Create a string
   $s->q(my $t = 'ab');                                                          # Append a constant to the byte string
   $s->nl;                                                                       # New line
@@ -6193,7 +6172,6 @@ if (1) {                                                                        
   Xchg rdi, rax;                                                                # Swap source and target byte strings
   $s->copy;
 
-
   Xchg rdi, rax;
   $s->copy;
   Xchg rdi, rax;
@@ -6201,13 +6179,12 @@ if (1) {                                                                        
 
   $s->out;                                                                      # Print byte string
   $s->clear;                                                                    # Clear byte string
-  Exit;                                                                         # Return to operating system
+
   my $T = "$t\n" x 8;                                                           # Expected response
   ok Assemble =~ m($T)s;                                                        # Assemble and execute
  }
 
 if (1) {                                                                        #TReorderSyscallRegisters #TUnReorderSyscallRegisters
-  Start;
   Mov rax, 1;  Mov rdi, 2;  Mov rsi,  3;  Mov rdx,  4;
   Mov r8,  8;  Mov r9,  9;  Mov r10, 10;  Mov r11, 11;
 
@@ -6219,13 +6196,10 @@ if (1) {                                                                        
   PrintOutRegisterInHex rax;
   PrintOutRegisterInHex rdi;
 
-  Exit;                                                                         # Return to operating system
   ok Assemble =~ m(rax:.*08.*rdi:.*9.*rax:.*1.*rdi:.*2.*)s;
  }
 
 if (1) {                                                                        # Mask register instructions #TClearRegisters
-  Start;
-
   Mov rax,1;
   Kmovq k0,  rax;
   Kaddb k0,  k0, k0;
@@ -6238,36 +6212,33 @@ if (1) {                                                                        
   PopR  k0;
   PrintOutRegisterInHex k0;
   PrintOutRegisterInHex k1;
-  Exit;
+
   ok Assemble =~ m(k0: 0000 0000 0000 0008.*k1: 0000 0000 0000 0000)s;
  }
 
 if (1) {                                                                        # Count leading zeros
-  Start;
   Mov   rax, 8;                                                                 # Append a constant to the byte string
   Lzcnt rax, rax;                                                               # New line
   PrintOutRegisterInHex rax;
   Mov   rax, 8;                                                                 # Append a constant to the byte string
   Tzcnt rax, rax;                                                               # New line
   PrintOutRegisterInHex rax;
-  Exit;                                                                         # Return to operating system
+
   ok Assemble =~ m(rax: 0000 0000 0000 003C.*rax: 0000 0000 0000 0003)s;
  }
 
 if (1) {                                                                        # Print this file  #TByteString::read #TByteString::z #TByteString::q
-  Start;
   my $s = CreateByteString;                                                     # Create a string
   $s->q($0);                                                                    # Append a constant to the byte string
   $s->z;                                                                        # New line
   $s->read;
   $s->out;
-  Exit;                                                                         # Return to operating system
+
   my $r = Assemble;
   ok index(removeNonAsciiChars($r), removeNonAsciiChars(readFile $0)) >= 0;     # Output contains this file
  }
 
 if (1) {                                                                        # Print rdi in hex into a byte string #TByteString::rdiInHex
-  Start;
   my $s = CreateByteString;                                                     # Create a string
   Mov rdi, 0x88776655;
   Shl rdi, 32;
@@ -6275,20 +6246,18 @@ if (1) {                                                                        
 
   $s->rdiInHex;                                                                 # Append a constant to the byte string
   $s->out;
-  Exit;                                                                         # Return to operating system
+
   ok Assemble =~ m(8877665544332211);
  }
 
 if (1) {                                                                        # Print rdi in hex into a byte string #TGetPidInHex
-  Start;
   GetPidInHex;
   PrintOutRegisterInHex rax;
-  Exit;                                                                         # Return to operating system
+
   ok Assemble =~ m(rax: 00);
  }
 
 if (1) {                                                                        # Write a hex string to a temporary file
-  Start;
   my $s = CreateByteString;                                                     # Create a string
   Mov rdi, 0x88776655;                                                          # Write into string
   Shl rdi, 32;
@@ -6296,12 +6265,11 @@ if (1) {                                                                        
   $s->rdiInHex;                                                                 # Append a constant to the byte string
   $s->write;                                                                    # Write the byte string to a temporary file
   $s->out;                                                                      # Write the name of the temporary file
-  Exit;                                                                         # Return to operating system
+
   ok Assemble =~ m(tmp);
  }
 
 if (1) {                                                                        # Execute the content of a byte string #TByteString::bash #TByteString::write #TByteString::out #TByteString::unlink #TByteString::ql
-  Start;
   my $s = CreateByteString;                                                     # Create a string
   $s->ql(<<END);                                                                # Write code to execute
 #!/usr/bin/bash
@@ -6312,35 +6280,32 @@ END
   $s->write;                                                                    # Write code to a temporary file
   $s->bash;                                                                     # Execute the temporary file
   $s->unlink;                                                                   # Execute the temporary file
-  Exit;                                                                         # Return to operating system
+
   my $u = qx(whoami); chomp($u);
   ok Assemble =~ m($u);
  }
 
 if (1) {                                                                        # Make a byte string readonly
-  Start;
   my $s = CreateByteString;                                                     # Create a byte string
   $s->q("Hello");                                                               # Write code to byte string
   $s->makeReadOnly;                                                             # Make byte string read only
   $s->q(" World");                                                              # Try to write to byte string
-  Exit;                                                                         # Return to operating system
+
   ok Assemble =~ m(SDE ERROR: DEREFERENCING BAD MEMORY POINTER.*mov byte ptr .rax.rdx.1., r8b);
  }
 
 if (1) {                                                                        # Make a read only byte string writable  #TByteString::makeReadOnly #TByteString::makeWriteable
-  Start;
   my $s = CreateByteString;                                                     # Create a byte string
   $s->q("Hello");                                                               # Write data to byte string
   $s->makeReadOnly;                                                             # Make byte string read only - tested above
   $s->makeWriteable;                                                             # Make byte string writable again
   $s->q(" World");                                                              # Try to write to byte string
   $s->out;
-  Exit;                                                                         # Return to operating system
+
   ok Assemble =~ m(Hello World);
  }
 
 if (1) {                                                                        # Allocate some space in byte string #TByteString::allocate
-  Start;
   my $s = CreateByteString;                                                     # Create a byte string
   Mov r8,  rax;
   Mov rdi, my $w = 0x20;                                                        # Space wanted
@@ -6349,7 +6314,6 @@ if (1) {                                                                        
   Mov rdi, $w;                                                                  # Space wanted
   $s->allocate;                                                                 # Allocate space wanted
   PrintOutRegisterInHex rdi;
-  Exit;                                                                         # Return to operating system
 
   my $e = sprintf("rdi: 0000 0000 0000 %04X", $s->structure->size);             # Expected results
   my $E = sprintf("rdi: 0000 0000 0000 %04X", $s->structure->size+$w);
@@ -6357,17 +6321,15 @@ if (1) {                                                                        
  }
 
 if (1) {                                                                        #TSetRegisterToMinusOne
-  Start;
   SetRegisterToMinusOne rax;
   PrintOutRegisterInHex rax;
-  Exit;                                                                         # Return to operating system
+
   ok Assemble =~ m(rax: FFFF FFFF FFFF FFFF);
  }
 
 # It is one of the happiest characteristics of this glorious country that official utterances are invariably regarded as unanswerable
 
 if (1) {                                                                        #TPrintOutZF #TSetZF #TClearZF
-  Start;
   SetZF;
   PrintOutZF;
   ClearZF;
@@ -6378,13 +6340,11 @@ if (1) {                                                                        
   PrintOutZF;
   ClearZF;
   PrintOutZF;
-  Exit;                                                                         # Return to operating system
+
   ok Assemble =~ m(ZF=1.*ZF=0.*ZF=1.*ZF=1.*ZF=0)s;
  }
 
 if (1) {                                                                        #TSetLabel #TRegisterSize #TSaveFirstFour #TSaveFirstSeven #TRestoreFirstFour #TRestoreFirstSeven #TRestoreFirstFourExceptRax #TRestoreFirstSevenExceptRax #TRestoreFirstFourExceptRaxAndRdi #TRestoreFirstSevenExceptRaxAndRdi #TReverseBytesInRax
-  Start;
-
   Mov rax, 1;
   Mov rdi, 1;
   SaveFirstFour;
@@ -6429,7 +6389,6 @@ if (1) {                                                                        
   my $l = Label;
   Jmp $l;
   SetLabel $l;
-  Exit;
 
   is_deeply Assemble, <<END;
    rax: 0000 0000 0000 0003
