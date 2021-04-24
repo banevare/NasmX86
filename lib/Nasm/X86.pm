@@ -1736,7 +1736,7 @@ sub Start()                                                                     
   $Labels = 0;
  }
 
-sub Exit(;$)                                                                    # Exit with the specified return code or zero if no return code supplied
+sub Exit(;$)                                                                    # Exit with the specified return code or zero if no return code supplied.  Assemble() automatically adds a call to Exit(0) if the last operation in the program is not a call to Exit.
  {my ($c) = @_;                                                                 # Return code
   if (@_ == 0 or $c == 0)
    {Comment "Exit code: 0";
@@ -1752,6 +1752,8 @@ sub Exit(;$)                                                                    
 
 sub Assemble(%)                                                                 # Assemble the generated code
  {my (%options) = @_;                                                           # Options
+  Exit 0 unless @data > 4 and $data[-4] !~ m(Exit Code:);                       # Exit with code 0 if no other exit has been taken
+
   my $r = join "\n", map {s/\s+\Z//sr} @rodata;
   my $d = join "\n", map {s/\s+\Z//sr} @data;
   my $b = join "\n", map {s/\s+\Z//sr} @bss;
@@ -1783,6 +1785,7 @@ END
   say STDERR $R;
   $totalBytesAssembled += fileSize $c;                                          # Estimate the size of the output programs
   unlink $e, $o;                                                                # Delete object and executable leaving listing files
+  Start;                                                                        # Clear work areas for next assembly
   $R                                                                            # Return execution results
  }
 
@@ -5816,20 +5819,18 @@ my $start = time;                                                               
 #goto latest;
 
 if (1) {                                                                        #TExit #TPrintOutString #TStart #TAssemble
-  Start;
   PrintOutString "Hello World";
-  Exit;
+
   ok Assemble =~ m(Hello World);
  }
 
 if (1) {                                                                        #TMov #TComment #TRs #TPrintOutMemory
-  Start;
   Comment "Print a string from memory";
   my $s = "Hello World";
   Mov rax, Rs($s);
   Mov rdi, length $s;
   PrintOutMemory;
-  Exit;
+
   ok Assemble =~ m(Hello World);
  }
 
@@ -6464,7 +6465,6 @@ END
  }
 
 if (1) {                                                                        #TGenTree #TUnReorderXmmRegisters #TReorderXmmRegisters #TPrintOutStringNL #Tcxr #TByteString::dump
-  Start;
   my $t = GenTree(2,2);                                                         # Tree description
   $t->node->();                                                                 # Root
   Movdqa xmm1, xmm0;                                                            # Root is in xmm1
@@ -6521,7 +6521,6 @@ END
  }
 
 if (1) {                                                                        #TRb #TRd #TRq #TRw #TDb #TDd #TDq #TDw #TCopyMemory
-  Start;
   my $s = Rb 0; Rb 1; Rw 2; Rd 3;  Rq 4;
   my $t = Db 0; Db 1; Dw 2; Dd 3;  Dq 4;
 
@@ -6537,7 +6536,7 @@ if (1) {                                                                        
   Mov rsi, $s;
   CopyMemory;
   PrintOutMemoryInHex;
-  Exit;
+
   my $r = Assemble;
   ok $r =~ m(xmm0: 0000 0000 0000 0004   0000 0003 0002 0100);
   ok $r =~ m(xmm1: 0000 0000 0000 0004   0000 0003 0002 0100);
@@ -6547,7 +6546,6 @@ if (1) {                                                                        
 latest:;
 
 if (1) {                                                                        #TInsertIntoXyz
-  Start;
   Mov rax, 0;
   Not rax;
   Mov cl, 30;
@@ -6555,13 +6553,11 @@ if (1) {                                                                        
   PushR rax;
   PopR  k0;
   PrintOutRegisterInHex k0;
-  Exit;                                                                         # Return to operating system
 
   ok Assemble =~ m(k0: FFFF FFFF C000 0000)s;
  }
 
 if (1) {                                                                        #TInsertIntoXyz
-  Start;
   my $s    = Rb 0..63;
   Vmovdqu8 xmm0,"[$s]";                                                         # Number each byte
   Vmovdqu8 ymm1,"[$s]";
@@ -6580,7 +6576,6 @@ if (1) {                                                                        
   ClearRegisters xmm0;                                                          # Insert some zeroes
   InsertIntoXyz(zmm3, 16, 2);
   PrintOutRegisterInHex zmm3;
-  Exit;                                                                         # Return to operating system
 
   my $r = Assemble;
   ok $r =~ m(xmm0: 0D0C 0B0A 0908 FFFF   0706 0504 0302 0100);
