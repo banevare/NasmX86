@@ -1847,29 +1847,46 @@ the following examples.
 
 =head2 Avx512 instructions
 
-Use avx512 instructions to reorder data using 512 bit zmm* registers:
+Use avx512 instructions to do 64 comparisons in parallel:
 
-  Start;
-  my $q = Rs my $s = join '', ('a'..'p')x4;
-  Mov rax, Ds('0'x128);
+  my $P = "2F";                                                                 # Value to test for
+  my $l = Rb 0;  Rb $_ for 1..RegisterSize zmm0;                                # 0..63
+  Vmovdqu8 zmm0, "[$l]";                                                        # Load data to test
+  PrintOutRegisterInHex zmm0;
 
-  Vmovdqu32 zmm0, "[$q]";
-  Vprolq    zmm1, zmm0, 32;
-  Vmovdqu32 "[rax]", zmm1;
+  Mov rax, "0x$P";                                                              # Broadcast the value to be tested
+  Vpbroadcastb zmm1, rax;
+  PrintOutRegisterInHex zmm1;
 
-  Mov rdi, length $s;
-  PrintOutMemory;
-  Exit;
+  for my $c(0..7)                                                               # Each possible test
+   {my $m = "k$c";
+    Vpcmpub $m, zmm1, zmm0, $c;
+    PrintOutRegisterInHex $m;
+   }
 
-  ok $s       =~ m(abcdefghijklmnopabcdefghijklmnopabcdefghijklmnopabcdefghijklmnop)s;
-  ok Assemble =~ m(efghabcdmnopijklefghabcdmnopijklefghabcdmnopijklefghabcdmnopijkl)s;
+  Kmovq rax, k0;                                                                # Count the number of trailing zeros in k0
+  Tzcnt rax, rax;
+  PrintOutRegisterInHex rax;
+
+  is_deeply Assemble, <<END;                                                    # Assemble and test
+  zmm0: 3F3E 3D3C 3B3A 3938   3736 3534 3332 3130   2F2E 2D2C 2B2A 2928   2726 2524 2322 2120   1F1E 1D1C 1B1A 1918   1716 1514 1312 1110   0F0E 0D0C 0B0A 0908   0706 0504 0302 0100
+  zmm1: 2F2F 2F2F 2F2F 2F2F   2F2F 2F2F 2F2F 2F2F   2F2F 2F2F 2F2F 2F2F   2F2F 2F2F 2F2F 2F2F   2F2F 2F2F 2F2F 2F2F   2F2F 2F2F 2F2F 2F2F   2F2F 2F2F 2F2F 2F2F   2F2F 2F2F 2F2F 2F2F
+    k0: 0000 8000 0000 0000
+    k1: FFFF 0000 0000 0000
+    k2: FFFF 8000 0000 0000
+    k3: 0000 0000 0000 0000
+    k4: FFFF 7FFF FFFF FFFF
+    k5: 0000 FFFF FFFF FFFF
+    k6: 0000 7FFF FFFF FFFF
+    k7: FFFF FFFF FFFF FFFF
+   rax: 0000 0000 0000 00$P
+END
 
 =head2 Dynamic string held in an arena
 
 Create a dynamic byte string, add some content to it, write the byte string to
 a file and then execute it:.
 
-  Start;
   my $s = CreateByteString;                                                     # Create a string
   $s->ql(<<END);                                                                # Write code to execute
 #!/usr/bin/bash
@@ -1880,7 +1897,6 @@ END
   $s->write;                                                                    # Write code to a temporary file
   $s->bash;                                                                     # Execute the temporary file
   $s->unlink;                                                                   # Execute the temporary file
-  Exit;                                                                         # Return to operating system
 
   my $u = qx(whoami); chomp($u);
   ok Assemble =~ m($u);
@@ -1890,7 +1906,6 @@ END
 Start a child process and wait for it, printing out the process identifiers of
 each process involved:
 
-  Start;                                                                        # Start the program
   Fork;                                                                         # Fork
 
   Test rax,rax;
@@ -1914,8 +1929,6 @@ each process involved:
     PrintOutRegisterInHex r10;
    };
 
-  Exit;                                                                         # Return to operating system
-
   my $r = Assemble;
 
   #    r8: 0000 0000 0000 0000   #1 Return from fork as seen by child
@@ -1929,11 +1942,9 @@ each process involved:
 
 Read this file:
 
-  Start;                                                                        # Start the program
   Mov rax, Rs($0);                                                              # File to read
   ReadFile;                                                                     # Read file
   PrintOutMemory;                                                               # Print memory
-  Exit;                                                                         # Return to operating system
 
   my $r = Assemble;                                                             # Assemble and execute
   ok index($r, readFile($0)) > -1;                                              # Output contains this file
@@ -1971,8 +1982,6 @@ Set a label in the code section
 B<Example:>
 
 
-    Start;
-
     Mov rax, 1;
     Mov rdi, 1;
     SaveFirstFour;
@@ -2011,7 +2020,7 @@ B<Example:>
     RestoreFirstFourExceptRaxAndRdi;
     PrintOutRegisterInHex rax, rdi;
 
-    ReverseBytesInRax;
+    Bswap rax;
     PrintOutRegisterInHex rax;
 
     my $l = Label;
@@ -2019,7 +2028,6 @@ B<Example:>
 
     SetLabel $l;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-    Exit;
 
     is_deeply Assemble, <<END;
      rax: 0000 0000 0000 0003
@@ -2056,7 +2064,6 @@ Layout bytes in memory and return their label
 B<Example:>
 
 
-    Start;
     my $q = Rs('a'..'z');
 
     Mov rax, Ds('0'x64);                                                          # Output area  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
@@ -2066,7 +2073,7 @@ B<Example:>
     Vmovdqu32("[rax]", xmm0);                                                     # Save
     Mov rdi, 16;
     PrintOutMemory;
-    Exit;
+
     ok Assemble =~ m(efghabcdmnopijkl)s;
 
 
@@ -2080,7 +2087,6 @@ Layout bytes in read only memory and return their label
 B<Example:>
 
 
-    Start;
     Comment "Print a string from memory";
     my $s = "Hello World";
 
@@ -2088,10 +2094,9 @@ B<Example:>
 
     Mov rdi, length $s;
     PrintOutMemory;
-    Exit;
+
     ok Assemble =~ m(Hello World);
 
-    Start;
 
     my $q = Rs('abababab');  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
@@ -2102,7 +2107,7 @@ B<Example:>
     Mov(r8,  5);
     Lea r9,  "[rax+rbx]";
     PrintOutRegistersInHex;
-    Exit;
+
     my $r = Assemble;
     ok $r =~ m( r8: 0000 0000 0000 0005.* r9: 0000 0000 0000 0003.*rax: 0000 0000 0000 0001)s;
     ok $r =~ m(rbx: 0000 0000 0000 0002.*rcx: 0000 0000 0000 0003.*rdx: 0000 0000 0000 0004)s;
@@ -2118,7 +2123,6 @@ Layout bytes in the data segment and return their label
 B<Example:>
 
 
-    Start;
     my $s = Rb 0; Rb 1; Rw 2; Rd 3;  Rq 4;
 
     my $t = Db 0; Db 1; Dw 2; Dd 3;  Dq 4;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
@@ -2136,7 +2140,7 @@ B<Example:>
     Mov rsi, $s;
     CopyMemory;
     PrintOutMemoryInHex;
-    Exit;
+
     my $r = Assemble;
     ok $r =~ m(xmm0: 0000 0000 0000 0004   0000 0003 0002 0100);
     ok $r =~ m(xmm1: 0000 0000 0000 0004   0000 0003 0002 0100);
@@ -2153,7 +2157,6 @@ Layout words in the data segment and return their label
 B<Example:>
 
 
-    Start;
     my $s = Rb 0; Rb 1; Rw 2; Rd 3;  Rq 4;
 
     my $t = Db 0; Db 1; Dw 2; Dd 3;  Dq 4;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
@@ -2171,7 +2174,7 @@ B<Example:>
     Mov rsi, $s;
     CopyMemory;
     PrintOutMemoryInHex;
-    Exit;
+
     my $r = Assemble;
     ok $r =~ m(xmm0: 0000 0000 0000 0004   0000 0003 0002 0100);
     ok $r =~ m(xmm1: 0000 0000 0000 0004   0000 0003 0002 0100);
@@ -2188,7 +2191,6 @@ Layout double words in the data segment and return their label
 B<Example:>
 
 
-    Start;
     my $s = Rb 0; Rb 1; Rw 2; Rd 3;  Rq 4;
 
     my $t = Db 0; Db 1; Dw 2; Dd 3;  Dq 4;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
@@ -2206,7 +2208,7 @@ B<Example:>
     Mov rsi, $s;
     CopyMemory;
     PrintOutMemoryInHex;
-    Exit;
+
     my $r = Assemble;
     ok $r =~ m(xmm0: 0000 0000 0000 0004   0000 0003 0002 0100);
     ok $r =~ m(xmm1: 0000 0000 0000 0004   0000 0003 0002 0100);
@@ -2223,7 +2225,6 @@ Layout quad words in the data segment and return their label
 B<Example:>
 
 
-    Start;
     my $s = Rb 0; Rb 1; Rw 2; Rd 3;  Rq 4;
 
     my $t = Db 0; Db 1; Dw 2; Dd 3;  Dq 4;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
@@ -2241,7 +2242,7 @@ B<Example:>
     Mov rsi, $s;
     CopyMemory;
     PrintOutMemoryInHex;
-    Exit;
+
     my $r = Assemble;
     ok $r =~ m(xmm0: 0000 0000 0000 0004   0000 0003 0002 0100);
     ok $r =~ m(xmm1: 0000 0000 0000 0004   0000 0003 0002 0100);
@@ -2258,7 +2259,6 @@ Layout bytes in the data segment and return their label
 B<Example:>
 
 
-    Start;
 
     my $s = Rb 0; Rb 1; Rw 2; Rd 3;  Rq 4;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
@@ -2276,7 +2276,7 @@ B<Example:>
     Mov rsi, $s;
     CopyMemory;
     PrintOutMemoryInHex;
-    Exit;
+
     my $r = Assemble;
     ok $r =~ m(xmm0: 0000 0000 0000 0004   0000 0003 0002 0100);
     ok $r =~ m(xmm1: 0000 0000 0000 0004   0000 0003 0002 0100);
@@ -2293,7 +2293,6 @@ Layout words in the data segment and return their label
 B<Example:>
 
 
-    Start;
 
     my $s = Rb 0; Rb 1; Rw 2; Rd 3;  Rq 4;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
@@ -2311,7 +2310,7 @@ B<Example:>
     Mov rsi, $s;
     CopyMemory;
     PrintOutMemoryInHex;
-    Exit;
+
     my $r = Assemble;
     ok $r =~ m(xmm0: 0000 0000 0000 0004   0000 0003 0002 0100);
     ok $r =~ m(xmm1: 0000 0000 0000 0004   0000 0003 0002 0100);
@@ -2328,7 +2327,6 @@ Layout double words in the data segment and return their label
 B<Example:>
 
 
-    Start;
 
     my $s = Rb 0; Rb 1; Rw 2; Rd 3;  Rq 4;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
@@ -2346,7 +2344,7 @@ B<Example:>
     Mov rsi, $s;
     CopyMemory;
     PrintOutMemoryInHex;
-    Exit;
+
     my $r = Assemble;
     ok $r =~ m(xmm0: 0000 0000 0000 0004   0000 0003 0002 0100);
     ok $r =~ m(xmm1: 0000 0000 0000 0004   0000 0003 0002 0100);
@@ -2363,7 +2361,6 @@ Layout quad words in the data segment and return their label
 B<Example:>
 
 
-    Start;
 
     my $s = Rb 0; Rb 1; Rw 2; Rd 3;  Rq 4;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
@@ -2381,7 +2378,7 @@ B<Example:>
     Mov rsi, $s;
     CopyMemory;
     PrintOutMemoryInHex;
-    Exit;
+
     my $r = Assemble;
     ok $r =~ m(xmm0: 0000 0000 0000 0004   0000 0003 0002 0100);
     ok $r =~ m(xmm1: 0000 0000 0000 0004   0000 0003 0002 0100);
@@ -2399,8 +2396,6 @@ Save the first 4 parameter registers
 
 B<Example:>
 
-
-    Start;
 
     Mov rax, 1;
     Mov rdi, 1;
@@ -2446,13 +2441,12 @@ B<Example:>
     RestoreFirstFourExceptRaxAndRdi;
     PrintOutRegisterInHex rax, rdi;
 
-    ReverseBytesInRax;
+    Bswap rax;
     PrintOutRegisterInHex rax;
 
     my $l = Label;
     Jmp $l;
     SetLabel $l;
-    Exit;
 
     is_deeply Assemble, <<END;
      rax: 0000 0000 0000 0003
@@ -2486,8 +2480,6 @@ Restore the first 4 parameter registers
 
 B<Example:>
 
-
-    Start;
 
     Mov rax, 1;
     Mov rdi, 1;
@@ -2529,13 +2521,12 @@ B<Example:>
     RestoreFirstFourExceptRaxAndRdi;
     PrintOutRegisterInHex rax, rdi;
 
-    ReverseBytesInRax;
+    Bswap rax;
     PrintOutRegisterInHex rax;
 
     my $l = Label;
     Jmp $l;
     SetLabel $l;
-    Exit;
 
     is_deeply Assemble, <<END;
      rax: 0000 0000 0000 0003
@@ -2569,8 +2560,6 @@ Restore the first 4 parameter registers except rax so it can return its value
 
 B<Example:>
 
-
-    Start;
 
     Mov rax, 1;
     Mov rdi, 1;
@@ -2612,13 +2601,12 @@ B<Example:>
     RestoreFirstFourExceptRaxAndRdi;
     PrintOutRegisterInHex rax, rdi;
 
-    ReverseBytesInRax;
+    Bswap rax;
     PrintOutRegisterInHex rax;
 
     my $l = Label;
     Jmp $l;
     SetLabel $l;
-    Exit;
 
     is_deeply Assemble, <<END;
      rax: 0000 0000 0000 0003
@@ -2652,8 +2640,6 @@ Restore the first 4 parameter registers except rax  and rdi so we can return a p
 
 B<Example:>
 
-
-    Start;
 
     Mov rax, 1;
     Mov rdi, 1;
@@ -2695,13 +2681,12 @@ B<Example:>
 
     PrintOutRegisterInHex rax, rdi;
 
-    ReverseBytesInRax;
+    Bswap rax;
     PrintOutRegisterInHex rax;
 
     my $l = Label;
     Jmp $l;
     SetLabel $l;
-    Exit;
 
     is_deeply Assemble, <<END;
      rax: 0000 0000 0000 0003
@@ -2735,8 +2720,6 @@ Save the first 7 parameter registers
 
 B<Example:>
 
-
-    Start;
 
     Mov rax, 1;
     Mov rdi, 1;
@@ -2782,13 +2765,12 @@ B<Example:>
     RestoreFirstFourExceptRaxAndRdi;
     PrintOutRegisterInHex rax, rdi;
 
-    ReverseBytesInRax;
+    Bswap rax;
     PrintOutRegisterInHex rax;
 
     my $l = Label;
     Jmp $l;
     SetLabel $l;
-    Exit;
 
     is_deeply Assemble, <<END;
      rax: 0000 0000 0000 0003
@@ -2822,8 +2804,6 @@ Restore the first 7 parameter registers
 
 B<Example:>
 
-
-    Start;
 
     Mov rax, 1;
     Mov rdi, 1;
@@ -2865,13 +2845,12 @@ B<Example:>
     RestoreFirstFourExceptRaxAndRdi;
     PrintOutRegisterInHex rax, rdi;
 
-    ReverseBytesInRax;
+    Bswap rax;
     PrintOutRegisterInHex rax;
 
     my $l = Label;
     Jmp $l;
     SetLabel $l;
-    Exit;
 
     is_deeply Assemble, <<END;
      rax: 0000 0000 0000 0003
@@ -2905,8 +2884,6 @@ Restore the first 7 parameter registers except rax which is being used to return
 
 B<Example:>
 
-
-    Start;
 
     Mov rax, 1;
     Mov rdi, 1;
@@ -2948,13 +2925,12 @@ B<Example:>
     RestoreFirstFourExceptRaxAndRdi;
     PrintOutRegisterInHex rax, rdi;
 
-    ReverseBytesInRax;
+    Bswap rax;
     PrintOutRegisterInHex rax;
 
     my $l = Label;
     Jmp $l;
     SetLabel $l;
-    Exit;
 
     is_deeply Assemble, <<END;
      rax: 0000 0000 0000 0003
@@ -2988,8 +2964,6 @@ Restore the first 7 parameter registers except rax and rdi which are being used 
 
 B<Example:>
 
-
-    Start;
 
     Mov rax, 1;
     Mov rdi, 1;
@@ -3031,13 +3005,12 @@ B<Example:>
     RestoreFirstFourExceptRaxAndRdi;
     PrintOutRegisterInHex rax, rdi;
 
-    ReverseBytesInRax;
+    Bswap rax;
     PrintOutRegisterInHex rax;
 
     my $l = Label;
     Jmp $l;
     SetLabel $l;
-    Exit;
 
     is_deeply Assemble, <<END;
      rax: 0000 0000 0000 0003
@@ -3074,7 +3047,6 @@ Map the list of registers provided to the 64 bit system call sequence
 B<Example:>
 
 
-    Start;
     Mov rax, 1;  Mov rdi, 2;  Mov rsi,  3;  Mov rdx,  4;
     Mov r8,  8;  Mov r9,  9;  Mov r10, 10;  Mov r11, 11;
 
@@ -3088,7 +3060,6 @@ B<Example:>
     PrintOutRegisterInHex rax;
     PrintOutRegisterInHex rdi;
 
-    Exit;                                                                         # Return to operating system
     ok Assemble =~ m(rax:.*08.*rdi:.*9.*rax:.*1.*rdi:.*2.*)s;
 
 
@@ -3102,7 +3073,6 @@ Recover the initial values in registers that were reordered
 B<Example:>
 
 
-    Start;
     Mov rax, 1;  Mov rdi, 2;  Mov rsi,  3;  Mov rdx,  4;
     Mov r8,  8;  Mov r9,  9;  Mov r10, 10;  Mov r11, 11;
 
@@ -3116,7 +3086,6 @@ B<Example:>
     PrintOutRegisterInHex rax;
     PrintOutRegisterInHex rdi;
 
-    Exit;                                                                         # Return to operating system
     ok Assemble =~ m(rax:.*08.*rdi:.*9.*rax:.*1.*rdi:.*2.*)s;
 
 
@@ -3130,7 +3099,6 @@ Map the list of xmm registers provided to 0-31
 B<Example:>
 
 
-    Start;
     my $t = GenTree(2,2);                                                         # Tree description
     $t->node->();                                                                 # Root
     Movdqa xmm1, xmm0;                                                            # Root is in xmm1
@@ -3196,7 +3164,6 @@ Recover the initial values in the xmm registers that were reordered
 B<Example:>
 
 
-    Start;
     my $t = GenTree(2,2);                                                         # Tree description
     $t->node->();                                                                 # Root
     Movdqa xmm1, xmm0;                                                            # Root is in xmm1
@@ -3262,8 +3229,6 @@ Return the size of a register
 B<Example:>
 
 
-    Start;
-
     Mov rax, 1;
     Mov rdi, 1;
     SaveFirstFour;
@@ -3302,13 +3267,12 @@ B<Example:>
     RestoreFirstFourExceptRaxAndRdi;
     PrintOutRegisterInHex rax, rdi;
 
-    ReverseBytesInRax;
+    Bswap rax;
     PrintOutRegisterInHex rax;
 
     my $l = Label;
     Jmp $l;
     SetLabel $l;
-    Exit;
 
     is_deeply Assemble, <<END;
      rax: 0000 0000 0000 0003
@@ -3347,8 +3311,6 @@ Clear registers by setting them to zero
 B<Example:>
 
 
-    Start;
-
     Mov rax,1;
     Kmovq k0,  rax;
     Kaddb k0,  k0, k0;
@@ -3363,7 +3325,7 @@ B<Example:>
     PopR  k0;
     PrintOutRegisterInHex k0;
     PrintOutRegisterInHex k1;
-    Exit;
+
     ok Assemble =~ m(k0: 0000 0000 0000 0008.*k1: 0000 0000 0000 0000)s;
 
 
@@ -3377,12 +3339,11 @@ Set the specified register to -1
 B<Example:>
 
 
-    Start;
 
     SetRegisterToMinusOne rax;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutRegisterInHex rax;
-    Exit;                                                                         # Return to operating system
+
     ok Assemble =~ m(rax: FFFF FFFF FFFF FFFF);
 
 
@@ -3394,7 +3355,6 @@ Set the zero flag
 B<Example:>
 
 
-    Start;
 
     SetZF;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
@@ -3411,7 +3371,7 @@ B<Example:>
     PrintOutZF;
     ClearZF;
     PrintOutZF;
-    Exit;                                                                         # Return to operating system
+
     ok Assemble =~ m(ZF=1.*ZF=0.*ZF=1.*ZF=1.*ZF=0)s;
 
 
@@ -3423,7 +3383,6 @@ Set the zero flag
 B<Example:>
 
 
-    Start;
     SetZF;
     PrintOutZF;
 
@@ -3438,7 +3397,7 @@ B<Example:>
     ClearZF;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutZF;
-    Exit;                                                                         # Return to operating system
+
     ok Assemble =~ m(ZF=1.*ZF=0.*ZF=1.*ZF=1.*ZF=0)s;
 
 
@@ -3455,7 +3414,27 @@ Insert the specified word, double, quad from rax or the contents of xmm0 into th
 B<Example:>
 
 
-    Start;
+    ClearRegisters rax;
+    Bts rax, 14;
+    Not rax;
+    PrintOutRegisterInHex rax;
+    PushR rax;
+    PopR  k1;
+    PrintOutRegisterInHex k1;
+    Mov rax, 1;
+    Vpbroadcastb zmm0, rax;
+    PrintOutRegisterInHex zmm0;
+
+    Vpexpandd "zmm1{k1}", zmm0;
+    PrintOutRegisterInHex zmm1;
+
+    is_deeply Assemble, <<END;
+     rax: FFFF FFFF FFFF BFFF
+      k1: FFFF FFFF FFFF BFFF
+    zmm0: 0101 0101 0101 0101   0101 0101 0101 0101   0101 0101 0101 0101   0101 0101 0101 0101   0101 0101 0101 0101   0101 0101 0101 0101   0101 0101 0101 0101   0101 0101 0101 0101
+    zmm1: 0101 0101 0000 0000   0101 0101 0101 0101   0101 0101 0101 0101   0101 0101 0101 0101   0101 0101 0101 0101   0101 0101 0101 0101   0101 0101 0101 0101   0101 0101 0101 0101
+  END
+
     my $s    = Rb 0..63;
     Vmovdqu8 xmm0,"[$s]";                                                         # Number each byte
     Vmovdqu8 ymm1,"[$s]";
@@ -3482,7 +3461,6 @@ B<Example:>
     InsertIntoXyz(zmm3, 16, 2);  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutRegisterInHex zmm3;
-    Exit;                                                                         # Return to operating system
 
     my $r = Assemble;
     ok $r =~ m(xmm0: 0D0C 0B0A 0908 FFFF   0706 0504 0302 0100);
@@ -3506,7 +3484,6 @@ If
 B<Example:>
 
 
-    Start;
     Mov rax, 0;
     Test rax,rax;
 
@@ -3525,7 +3502,7 @@ B<Example:>
      } sub
      {PrintOutRegisterInHex rdx;
      };
-    Exit;
+
     ok Assemble =~ m(rbx.*rcx)s;
 
 
@@ -3542,13 +3519,12 @@ For
 B<Example:>
 
 
-    Start;                                                                        # Start the program
 
     For  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
      {PrintOutRegisterInHex rax
      } rax, 16, 1;
-    Exit;                                                                         # Return to operating system
+
     my $r = Assemble;
     ok $r =~ m(( 0000){3} 0000)i;
     ok $r =~ m(( 0000){3} 000F)i;
@@ -3565,7 +3541,6 @@ Create a sub with optional parameters name=> the name of the subroutine so it ca
 B<Example:>
 
 
-    Start;
     Mov rax, 0x44332211;
     PrintOutRegisterInHex rax;
 
@@ -3580,7 +3555,7 @@ B<Example:>
     Call $s;
 
     PrintOutRegisterInHex rax;
-    Exit;
+
     my $r = Assemble;
     ok $r =~ m(0000 0000 4433 2211.*2211.*2212.*0000 0000 4433 2212)s;
 
@@ -3596,7 +3571,6 @@ Call a subroutine with a reordering of the xmm registers.
 B<Example:>
 
 
-    Start;
     my $t = GenTree(2,2);                                                         # Tree description
     $t->node->();                                                                 # Root
     Movdqa xmm1, xmm0;                                                            # Root is in xmm1
@@ -3672,7 +3646,6 @@ Insert a comment into the assembly code
 B<Example:>
 
 
-    Start;
 
     Comment "Print a string from memory";  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
@@ -3680,7 +3653,7 @@ B<Example:>
     Mov rax, Rs($s);
     Mov rdi, length $s;
     PrintOutMemory;
-    Exit;
+
     ok Assemble =~ m(Hello World);
 
 
@@ -3696,7 +3669,6 @@ Print a new line to stdout
 B<Example:>
 
 
-    Start;
     my $q = Rs('abababab');
     Mov(rax, "[$q]");
     PrintOutString "rax: ";
@@ -3710,7 +3682,7 @@ B<Example:>
 
     PrintOutNL;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-    Exit;
+
     ok Assemble =~ m(rax: 6261 6261 6261 6261.*rax: 0000 0000 0000 0000)s;
 
 
@@ -3724,11 +3696,10 @@ Print a constant string to sysout.
 B<Example:>
 
 
-    Start;
 
     PrintOutString "Hello World";  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-    Exit;
+
     ok Assemble =~ m(Hello World);
 
 
@@ -3742,7 +3713,6 @@ Print a constant string to sysout followed by new line
 B<Example:>
 
 
-    Start;
     my $t = GenTree(2,2);                                                         # Tree description
     $t->node->();                                                                 # Root
     Movdqa xmm1, xmm0;                                                            # Root is in xmm1
@@ -3808,7 +3778,6 @@ Write the content of register rax to stderr in hexadecimal in big endian notatio
 B<Example:>
 
 
-    Start;
     my $q = Rs('abababab');
     Mov(rax, "[$q]");
     PrintOutString "rax: ";
@@ -3822,91 +3791,8 @@ B<Example:>
     PrintOutRaxInHex;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutNL;
-    Exit;
+
     ok Assemble =~ m(rax: 6261 6261 6261 6261.*rax: 0000 0000 0000 0000)s;
-
-
-=head2 ReverseBytesInRax()
-
-Reverse the bytes in rax
-
-
-B<Example:>
-
-
-    Start;
-
-    Mov rax, 1;
-    Mov rdi, 1;
-    SaveFirstFour;
-    Mov rax, 2;
-    Mov rdi, 2;
-    SaveFirstSeven;
-    Mov rax, 3;
-    Mov rdi, 4;
-    PrintOutRegisterInHex rax, rdi;
-    RestoreFirstSeven;
-    PrintOutRegisterInHex rax, rdi;
-    RestoreFirstFour;
-    PrintOutRegisterInHex rax, rdi;
-
-    SaveFirstFour;
-    Mov rax, 2;
-    Mov rdi, 2;
-    SaveFirstSeven;
-    Mov rax, 3;
-    Mov rdi, 4;
-    PrintOutRegisterInHex rax, rdi;
-    RestoreFirstSevenExceptRax;
-    PrintOutRegisterInHex rax, rdi;
-    RestoreFirstFourExceptRax;
-    PrintOutRegisterInHex rax, rdi;
-
-    SaveFirstFour;
-    Mov rax, 2;
-    Mov rdi, 2;
-    SaveFirstSeven;
-    Mov rax, 3;
-    Mov rdi, 4;
-    PrintOutRegisterInHex rax, rdi;
-    RestoreFirstSevenExceptRaxAndRdi;
-    PrintOutRegisterInHex rax, rdi;
-    RestoreFirstFourExceptRaxAndRdi;
-    PrintOutRegisterInHex rax, rdi;
-
-
-    ReverseBytesInRax;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
-
-    PrintOutRegisterInHex rax;
-
-    my $l = Label;
-    Jmp $l;
-    SetLabel $l;
-    Exit;
-
-    is_deeply Assemble, <<END;
-     rax: 0000 0000 0000 0003
-     rdi: 0000 0000 0000 0004
-     rax: 0000 0000 0000 0002
-     rdi: 0000 0000 0000 0002
-     rax: 0000 0000 0000 0001
-     rdi: 0000 0000 0000 0001
-     rax: 0000 0000 0000 0003
-     rdi: 0000 0000 0000 0004
-     rax: 0000 0000 0000 0003
-     rdi: 0000 0000 0000 0002
-     rax: 0000 0000 0000 0003
-     rdi: 0000 0000 0000 0001
-     rax: 0000 0000 0000 0003
-     rdi: 0000 0000 0000 0004
-     rax: 0000 0000 0000 0003
-     rdi: 0000 0000 0000 0004
-     rax: 0000 0000 0000 0003
-     rdi: 0000 0000 0000 0004
-     rax: 0300 0000 0000 0000
-  END
-
-    ok 8 == RegisterSize rax;
 
 
 =head2 PrintOutRaxInReverseInHex()
@@ -3917,7 +3803,6 @@ Write the content of register rax to stderr in hexadecimal in little endian nota
 B<Example:>
 
 
-    Start;
     Mov rax, 0x07654321;
     Shl rax, 32;
     Or  rax, 0x07654321;
@@ -3938,11 +3823,11 @@ B<Example:>
     Mov rdi, 8;
     PrintOutMemoryInHex;
     PrintOutNL;
-    Exit;
+
     is_deeply Assemble, <<END;
   0765 4321 0765 4321
   2143 6507 2143 6507
-  0765 4321 0765 4321
+  2143 6507 2143 6507
   0010 0000 0000 0000
   END
 
@@ -3957,13 +3842,12 @@ Print any register as a hex string
 B<Example:>
 
 
-    Start;
     my $q = Rs(('a'..'p')x4);
     Mov r8,"[$q]";
 
     PrintOutRegisterInHex r8;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-    Exit;
+
     ok Assemble =~ m(r8: 6867 6665 6463 6261)s;
 
 
@@ -3975,7 +3859,6 @@ Print the general purpose registers in hex
 B<Example:>
 
 
-    Start;
     my $q = Rs('abababab');
     Mov(rax, 1);
     Mov(rbx, 2);
@@ -3986,7 +3869,7 @@ B<Example:>
 
     PrintOutRegistersInHex;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-    Exit;
+
     my $r = Assemble;
     ok $r =~ m( r8: 0000 0000 0000 0005.* r9: 0000 0000 0000 0003.*rax: 0000 0000 0000 0001)s;
     ok $r =~ m(rbx: 0000 0000 0000 0002.*rcx: 0000 0000 0000 0003.*rdx: 0000 0000 0000 0004)s;
@@ -4000,7 +3883,6 @@ Print the zero flag without disturbing it
 B<Example:>
 
 
-    Start;
     SetZF;
 
     PrintOutZF;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
@@ -4021,7 +3903,7 @@ B<Example:>
 
     PrintOutZF;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-    Exit;                                                                         # Return to operating system
+
     ok Assemble =~ m(ZF=1.*ZF=0.*ZF=1.*ZF=1.*ZF=0)s;
 
 
@@ -4037,7 +3919,6 @@ Fork
 B<Example:>
 
 
-    Start;                                                                        # Start the program
 
     Fork;                                                                         # Fork  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
@@ -4062,8 +3943,6 @@ B<Example:>
       Mov r10,rax;
       PrintOutRegisterInHex r10;
      };
-
-    Exit;                                                                         # Return to operating system
 
     my $r = Assemble;
 
@@ -4090,7 +3969,6 @@ Get process identifier
 B<Example:>
 
 
-    Start;                                                                        # Start the program
     Fork;                                                                         # Fork
 
     Test rax,rax;
@@ -4118,8 +3996,6 @@ B<Example:>
       PrintOutRegisterInHex r10;
      };
 
-    Exit;                                                                         # Return to operating system
-
     my $r = Assemble;
 
   #    r8: 0000 0000 0000 0000   #1 Return from fork as seen by child
@@ -4145,12 +4021,11 @@ Get process identifier in hex as 8 zero terminated bytes in rax
 B<Example:>
 
 
-    Start;
 
     GetPidInHex;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutRegisterInHex rax;
-    Exit;                                                                         # Return to operating system
+
     ok Assemble =~ m(rax: 00);
 
 
@@ -4162,7 +4037,6 @@ Get parent process identifier
 B<Example:>
 
 
-    Start;                                                                        # Start the program
     Fork;                                                                         # Fork
 
     Test rax,rax;
@@ -4187,8 +4061,6 @@ B<Example:>
       Mov r10,rax;
       PrintOutRegisterInHex r10;
      };
-
-    Exit;                                                                         # Return to operating system
 
     my $r = Assemble;
 
@@ -4215,12 +4087,10 @@ Get userid of current process
 B<Example:>
 
 
-    Start;                                                                        # Start the program
 
     GetUid;                                                                       # Userid  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutRegisterInHex rax;
-    Exit;                                                                         # Return to operating system
 
     my $r = Assemble;
     ok $r =~ m(rax:( 0000){3});
@@ -4234,7 +4104,6 @@ Wait for the pid in rax to complete
 B<Example:>
 
 
-    Start;                                                                        # Start the program
     Fork;                                                                         # Fork
 
     Test rax,rax;
@@ -4259,8 +4128,6 @@ B<Example:>
       Mov r10,rax;
       PrintOutRegisterInHex r10;
      };
-
-    Exit;                                                                         # Return to operating system
 
     my $r = Assemble;
 
@@ -4287,14 +4154,13 @@ Read the time stamp counter and return the time in nanoseconds in rax
 B<Example:>
 
 
-    Start;
     for(1..10)
 
      {ReadTimeStampCounter;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
       PrintOutRegisterInHex rax;
      }
-    Exit;
+
     my @s = split /
 /, Assemble;
     my @S = sort @s;
@@ -4319,7 +4185,6 @@ Push registers onto the stack
 B<Example:>
 
 
-    Start;
     Mov rax, 0x11111111;
     Mov rbx, 0x22222222;
 
@@ -4330,7 +4195,7 @@ B<Example:>
     PopR rax;
     PrintOutRegisterInHex rax;
     PrintOutRegisterInHex rbx;
-    Exit;
+
     ok Assemble =~ m(rax: 0000 0000 1111 1111.*rbx: 0000 0000 1111 1111)s;
 
 
@@ -4344,7 +4209,6 @@ Pop registers from the stack
 B<Example:>
 
 
-    Start;
     Mov rax, 0x11111111;
     Mov rbx, 0x22222222;
     PushR rax;
@@ -4355,7 +4219,7 @@ B<Example:>
 
     PrintOutRegisterInHex rax;
     PrintOutRegisterInHex rbx;
-    Exit;
+
     ok Assemble =~ m(rax: 0000 0000 1111 1111.*rbx: 0000 0000 1111 1111)s;
 
 
@@ -4369,7 +4233,6 @@ Peek at register on stack
 B<Example:>
 
 
-    Start;
     Mov rax, 0x11111111;
     Mov rbx, 0x22222222;
     PushR rax;
@@ -4380,7 +4243,7 @@ B<Example:>
     PopR rax;
     PrintOutRegisterInHex rax;
     PrintOutRegisterInHex rbx;
-    Exit;
+
     ok Assemble =~ m(rax: 0000 0000 1111 1111.*rbx: 0000 0000 1111 1111)s;
 
 
@@ -4487,7 +4350,6 @@ Dump memory from the address in rax for the length in rdi
 B<Example:>
 
 
-    Start;
     Mov rax, 0x07654321;
     Shl rax, 32;
     Or  rax, 0x07654321;
@@ -4510,11 +4372,11 @@ B<Example:>
     PrintOutMemoryInHex;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutNL;
-    Exit;
+
     is_deeply Assemble, <<END;
   0765 4321 0765 4321
   2143 6507 2143 6507
-  0765 4321 0765 4321
+  2143 6507 2143 6507
   0010 0000 0000 0000
   END
 
@@ -4527,7 +4389,6 @@ Print the memory addressed by rax for a length of rdi
 B<Example:>
 
 
-    Start;
     Comment "Print a string from memory";
     my $s = "Hello World";
     Mov rax, Rs($s);
@@ -4535,7 +4396,7 @@ B<Example:>
 
     PrintOutMemory;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-    Exit;
+
     ok Assemble =~ m(Hello World);
 
 
@@ -4547,7 +4408,6 @@ Allocate the amount of memory specified in rax via mmap and return the address o
 B<Example:>
 
 
-    Start;
     my $N = 2048;
     my $q = Rs('a'..'p');
     Mov rax, $N;
@@ -4565,10 +4425,9 @@ B<Example:>
     Mov rdi, $N;
     FreeMemory;
     PrintOutRegisterInHex rax;
-    Exit;
+
     ok Assemble =~ m(abcdefghijklmnop)s;
 
-    Start;
     my $N = 4096;                                                                 # Size of the initial allocation which should be one or more pages
     my $S = RegisterSize rax;
     Mov rax, $N;
@@ -4580,7 +4439,6 @@ B<Example:>
     ClearMemory;
     PrintOutRegisterInHex rax;
     PrintOutMemoryInHex;
-    Exit;
 
     my $r = Assemble;
     if ($r =~ m((0000.*0000))s)
@@ -4596,7 +4454,6 @@ Free memory via munmap. The address of the memory is in rax, the length to free 
 B<Example:>
 
 
-    Start;
     my $N = 2048;
     my $q = Rs('a'..'p');
     Mov rax, $N;
@@ -4614,10 +4471,9 @@ B<Example:>
     FreeMemory;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutRegisterInHex rax;
-    Exit;
+
     ok Assemble =~ m(abcdefghijklmnop)s;
 
-    Start;
     my $N = 4096;                                                                 # Size of the initial allocation which should be one or more pages
     my $S = RegisterSize rax;
     Mov rax, $N;
@@ -4627,7 +4483,6 @@ B<Example:>
     ClearMemory;
     PrintOutRegisterInHex rax;
     PrintOutMemoryInHex;
-    Exit;
 
     my $r = Assemble;
     if ($r =~ m((0000.*0000))s)
@@ -4643,7 +4498,6 @@ Clear memory - the address of the memory is in rax, the length in rdi
 B<Example:>
 
 
-    Start;
     my $N = 4096;                                                                 # Size of the initial allocation which should be one or more pages
     my $S = RegisterSize rax;
     Mov rax, $N;
@@ -4655,7 +4509,6 @@ B<Example:>
 
     PrintOutRegisterInHex rax;
     PrintOutMemoryInHex;
-    Exit;
 
     my $r = Assemble;
     if ($r =~ m((0000.*0000))s)
@@ -4671,7 +4524,6 @@ Copy memory, the target is addressed by rax, the length is in rdi, the source is
 B<Example:>
 
 
-    Start;
     my $s = Rb 0; Rb 1; Rw 2; Rd 3;  Rq 4;
     my $t = Db 0; Db 1; Dw 2; Dd 3;  Dq 4;
 
@@ -4689,7 +4541,7 @@ B<Example:>
     CopyMemory;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutMemoryInHex;
-    Exit;
+
     my $r = Assemble;
     ok $r =~ m(xmm0: 0000 0000 0000 0004   0000 0003 0002 0100);
     ok $r =~ m(xmm1: 0000 0000 0000 0004   0000 0003 0002 0100);
@@ -4708,7 +4560,6 @@ Open a file, whose name is addressed by rax, for read and return the file descri
 B<Example:>
 
 
-    Start;                                                                        # Start the program
     Mov rax, Rs($0);                                                              # File to read
 
     OpenRead;                                                                     # Open file  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
@@ -4737,7 +4588,6 @@ Create the file named by the terminated string addressed by rax for write
 B<Example:>
 
 
-    Start;                                                                        # Start the program
     Mov rax, Rs($0);                                                              # File to read
     OpenRead;                                                                     # Open file
     PrintOutRegisterInHex rax;
@@ -4766,7 +4616,6 @@ Close the file whose descriptor is in rax
 B<Example:>
 
 
-    Start;                                                                        # Start the program
     Mov rax, Rs($0);                                                              # File to read
     OpenRead;                                                                     # Open file
     PrintOutRegisterInHex rax;
@@ -4797,13 +4646,11 @@ Stat a file whose name is addressed by rax to get its size in rax
 B<Example:>
 
 
-    Start;                                                                        # Start the program
     Mov rax, Rs($0);                                                              # File to stat
 
     StatSize;                                                                     # Stat the file  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutRegisterInHex rax;
-    Exit;                                                                         # Return to operating system
 
     my $r = Assemble =~ s( ) ()gsr;
     if ($r =~ m(rax:([0-9a-f]{16}))is)                                            # Compare file size obtained with that from fileSize()
@@ -4819,13 +4666,12 @@ Read a file whose name is addressed by rax into memory.  The address of the mapp
 B<Example:>
 
 
-    Start;                                                                        # Start the program
     Mov rax, Rs($0);                                                              # File to read
 
     ReadFile;                                                                     # Read file  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutMemory;                                                               # Print memory
-    Exit;                                                                         # Return to operating system
+
     my $r = Assemble;                                                             # Assemble and execute
     ok index(removeNonAsciiChars($r), removeNonAsciiChars(readFile $0)) >= 0;     # Output contains this file
 
@@ -4842,7 +4688,6 @@ Create an relocatable string of bytes in an arena and returns its address in rax
 B<Example:>
 
 
-    Start;                                                                        # Start the program
 
     my $s = CreateByteString;                                                     # Create a string  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
@@ -4860,7 +4705,6 @@ B<Example:>
     Xchg rdi, rax;                                                                # Swap source and target byte strings
     $s->copy;
 
-
     Xchg rdi, rax;
     $s->copy;
     Xchg rdi, rax;
@@ -4868,7 +4712,7 @@ B<Example:>
 
     $s->out;                                                                      # Print byte string
     $s->clear;                                                                    # Clear byte string
-    Exit;                                                                         # Return to operating system
+
     my $T = "$t
 " x 8;                                                           # Expected response
     ok Assemble =~ m($T)s;                                                        # Assemble and execute
@@ -4884,14 +4728,13 @@ Make a byte string read only
 B<Example:>
 
 
-    Start;
     my $s = CreateByteString;                                                     # Create a byte string
     $s->q("Hello");                                                               # Write data to byte string
     $s->makeReadOnly;                                                             # Make byte string read only - tested above
     $s->makeWriteable;                                                             # Make byte string writable again
     $s->q(" World");                                                              # Try to write to byte string
     $s->out;
-    Exit;                                                                         # Return to operating system
+
     ok Assemble =~ m(Hello World);
 
 
@@ -4905,14 +4748,13 @@ Make a byte string writable
 B<Example:>
 
 
-    Start;
     my $s = CreateByteString;                                                     # Create a byte string
     $s->q("Hello");                                                               # Write data to byte string
     $s->makeReadOnly;                                                             # Make byte string read only - tested above
     $s->makeWriteable;                                                             # Make byte string writable again
     $s->q(" World");                                                              # Try to write to byte string
     $s->out;
-    Exit;                                                                         # Return to operating system
+
     ok Assemble =~ m(Hello World);
 
 
@@ -4926,7 +4768,6 @@ Allocate the amount of space indicated in rdi in the byte string addressed by ra
 B<Example:>
 
 
-    Start;
     my $s = CreateByteString;                                                     # Create a byte string
     Mov r8,  rax;
     Mov rdi, my $w = 0x20;                                                        # Space wanted
@@ -4935,7 +4776,6 @@ B<Example:>
     Mov rdi, $w;                                                                  # Space wanted
     $s->allocate;                                                                 # Allocate space wanted
     PrintOutRegisterInHex rdi;
-    Exit;                                                                         # Return to operating system
 
     my $e = sprintf("rdi: 0000 0000 0000 %04X", $s->structure->size);             # Expected results
     my $E = sprintf("rdi: 0000 0000 0000 %04X", $s->structure->size+$w);
@@ -4960,13 +4800,12 @@ Append a quoted string == a constant to the byte string addressed by rax
 B<Example:>
 
 
-    Start;
     my $s = CreateByteString;                                                     # Create a string
     $s->q($0);                                                                    # Append a constant to the byte string
     $s->z;                                                                        # New line
     $s->read;
     $s->out;
-    Exit;                                                                         # Return to operating system
+
     my $r = Assemble;
     ok index(removeNonAsciiChars($r), removeNonAsciiChars(readFile $0)) >= 0;     # Output contains this file
 
@@ -4982,7 +4821,6 @@ Append a quoted string containing new line characters to the byte string address
 B<Example:>
 
 
-    Start;
     my $s = CreateByteString;                                                     # Create a string
     $s->ql(<<END);                                                                # Write code to execute
   #!/usr/bin/bash
@@ -4993,7 +4831,7 @@ B<Example:>
     $s->write;                                                                    # Write code to a temporary file
     $s->bash;                                                                     # Execute the temporary file
     $s->unlink;                                                                   # Execute the temporary file
-    Exit;                                                                         # Return to operating system
+
     my $u = qx(whoami); chomp($u);
     ok Assemble =~ m($u);
 
@@ -5016,7 +4854,6 @@ Append a new line to the byte string addressed by rax
 B<Example:>
 
 
-    Start;                                                                        # Start the program
     my $s = CreateByteString;                                                     # Create a string
     $s->q(my $t = 'ab');                                                          # Append a constant to the byte string
     $s->nl;                                                                       # New line
@@ -5030,7 +4867,6 @@ B<Example:>
     Xchg rdi, rax;                                                                # Swap source and target byte strings
     $s->copy;
 
-
     Xchg rdi, rax;
     $s->copy;
     Xchg rdi, rax;
@@ -5038,7 +4874,7 @@ B<Example:>
 
     $s->out;                                                                      # Print byte string
     $s->clear;                                                                    # Clear byte string
-    Exit;                                                                         # Return to operating system
+
     my $T = "$t
 " x 8;                                                           # Expected response
     ok Assemble =~ m($T)s;                                                        # Assemble and execute
@@ -5054,13 +4890,12 @@ Append a trailing zero to the byte string addressed by rax
 B<Example:>
 
 
-    Start;
     my $s = CreateByteString;                                                     # Create a string
     $s->q($0);                                                                    # Append a constant to the byte string
     $s->z;                                                                        # New line
     $s->read;
     $s->out;
-    Exit;                                                                         # Return to operating system
+
     my $r = Assemble;
     ok index(removeNonAsciiChars($r), removeNonAsciiChars(readFile $0)) >= 0;     # Output contains this file
 
@@ -5073,7 +4908,6 @@ Add the content of register rdi in hexadecimal in big endian notation to a byte 
 B<Example:>
 
 
-    Start;
     my $s = CreateByteString;                                                     # Create a string
     Mov rdi, 0x88776655;
     Shl rdi, 32;
@@ -5081,7 +4915,7 @@ B<Example:>
 
     $s->rdiInHex;                                                                 # Append a constant to the byte string
     $s->out;
-    Exit;                                                                         # Return to operating system
+
     ok Assemble =~ m(8877665544332211);
 
 
@@ -5095,7 +4929,6 @@ Append the byte string addressed by rdi to the byte string addressed by rax
 B<Example:>
 
 
-    Start;                                                                        # Start the program
     my $s = CreateByteString;                                                     # Create a string
     $s->q(my $t = 'ab');                                                          # Append a constant to the byte string
     $s->nl;                                                                       # New line
@@ -5109,7 +4942,6 @@ B<Example:>
     Xchg rdi, rax;                                                                # Swap source and target byte strings
     $s->copy;
 
-
     Xchg rdi, rax;
     $s->copy;
     Xchg rdi, rax;
@@ -5117,7 +4949,7 @@ B<Example:>
 
     $s->out;                                                                      # Print byte string
     $s->clear;                                                                    # Clear byte string
-    Exit;                                                                         # Return to operating system
+
     my $T = "$t
 " x 8;                                                           # Expected response
     ok Assemble =~ m($T)s;                                                        # Assemble and execute
@@ -5133,7 +4965,6 @@ Clear the byte string addressed by rax
 B<Example:>
 
 
-    Start;                                                                        # Start the program
     my $s = CreateByteString;                                                     # Create a string
     $s->q(my $t = 'ab');                                                          # Append a constant to the byte string
     $s->nl;                                                                       # New line
@@ -5147,7 +4978,6 @@ B<Example:>
     Xchg rdi, rax;                                                                # Swap source and target byte strings
     $s->copy;
 
-
     Xchg rdi, rax;
     $s->copy;
     Xchg rdi, rax;
@@ -5155,7 +4985,7 @@ B<Example:>
 
     $s->out;                                                                      # Print byte string
     $s->clear;                                                                    # Clear byte string
-    Exit;                                                                         # Return to operating system
+
     my $T = "$t
 " x 8;                                                           # Expected response
     ok Assemble =~ m($T)s;                                                        # Assemble and execute
@@ -5171,7 +5001,6 @@ Write the content in a byte string addressed by rax to a temporary file and repl
 B<Example:>
 
 
-    Start;
     my $s = CreateByteString;                                                     # Create a string
     $s->ql(<<END);                                                                # Write code to execute
   #!/usr/bin/bash
@@ -5182,7 +5011,7 @@ B<Example:>
     $s->write;                                                                    # Write code to a temporary file
     $s->bash;                                                                     # Execute the temporary file
     $s->unlink;                                                                   # Execute the temporary file
-    Exit;                                                                         # Return to operating system
+
     my $u = qx(whoami); chomp($u);
     ok Assemble =~ m($u);
 
@@ -5197,13 +5026,12 @@ Read the file named in the byte string (terminated with a zero byte) addressed b
 B<Example:>
 
 
-    Start;
     my $s = CreateByteString;                                                     # Create a string
     $s->q($0);                                                                    # Append a constant to the byte string
     $s->z;                                                                        # New line
     $s->read;
     $s->out;
-    Exit;                                                                         # Return to operating system
+
     my $r = Assemble;
     ok index(removeNonAsciiChars($r), removeNonAsciiChars(readFile $0)) >= 0;     # Output contains this file
 
@@ -5218,7 +5046,6 @@ Print the specified byte string addressed by rax on sysout
 B<Example:>
 
 
-    Start;                                                                        # Start the program
     my $s = CreateByteString;                                                     # Create a string
     $s->q(my $t = 'ab');                                                          # Append a constant to the byte string
     $s->nl;                                                                       # New line
@@ -5232,7 +5059,6 @@ B<Example:>
     Xchg rdi, rax;                                                                # Swap source and target byte strings
     $s->copy;
 
-
     Xchg rdi, rax;
     $s->copy;
     Xchg rdi, rax;
@@ -5240,12 +5066,11 @@ B<Example:>
 
     $s->out;                                                                      # Print byte string
     $s->clear;                                                                    # Clear byte string
-    Exit;                                                                         # Return to operating system
+
     my $T = "$t
 " x 8;                                                           # Expected response
     ok Assemble =~ m($T)s;                                                        # Assemble and execute
 
-    Start;
     my $s = CreateByteString;                                                     # Create a string
     $s->ql(<<END);                                                                # Write code to execute
   #!/usr/bin/bash
@@ -5256,7 +5081,7 @@ B<Example:>
     $s->write;                                                                    # Write code to a temporary file
     $s->bash;                                                                     # Execute the temporary file
     $s->unlink;                                                                   # Execute the temporary file
-    Exit;                                                                         # Return to operating system
+
     my $u = qx(whoami); chomp($u);
     ok Assemble =~ m($u);
 
@@ -5271,7 +5096,6 @@ Execute the file named in the byte string addressed by rax with bash
 B<Example:>
 
 
-    Start;
     my $s = CreateByteString;                                                     # Create a string
     $s->ql(<<END);                                                                # Write code to execute
   #!/usr/bin/bash
@@ -5282,7 +5106,7 @@ B<Example:>
     $s->write;                                                                    # Write code to a temporary file
     $s->bash;                                                                     # Execute the temporary file
     $s->unlink;                                                                   # Execute the temporary file
-    Exit;                                                                         # Return to operating system
+
     my $u = qx(whoami); chomp($u);
     ok Assemble =~ m($u);
 
@@ -5297,7 +5121,6 @@ Unlink the file named in the byte string addressed by rax with bash
 B<Example:>
 
 
-    Start;
     my $s = CreateByteString;                                                     # Create a string
     $s->ql(<<END);                                                                # Write code to execute
   #!/usr/bin/bash
@@ -5308,7 +5131,7 @@ B<Example:>
     $s->write;                                                                    # Write code to a temporary file
     $s->bash;                                                                     # Execute the temporary file
     $s->unlink;                                                                   # Execute the temporary file
-    Exit;                                                                         # Return to operating system
+
     my $u = qx(whoami); chomp($u);
     ok Assemble =~ m($u);
 
@@ -5323,7 +5146,6 @@ Dump details of a byte string
 B<Example:>
 
 
-    Start;
     my $t = GenTree(2,2);                                                         # Tree description
     $t->node->();                                                                 # Root
     Movdqa xmm1, xmm0;                                                            # Root is in xmm1
@@ -5390,7 +5212,6 @@ Generate a set of routines to manage a tree held in a byte string with key and d
 B<Example:>
 
 
-    Start;
 
     my $t = GenTree(2,2);                                                         # Tree description  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
@@ -5460,17 +5281,14 @@ Initialize the assembler
 B<Example:>
 
 
-
-    Start;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
-
     PrintOutString "Hello World";
-    Exit;
+
     ok Assemble =~ m(Hello World);
 
 
 =head2 Exit($c)
 
-Exit with the specified return code or zero if no return code supplied
+Exit with the specified return code or zero if no return code supplied.  Assemble() automatically adds a call to Exit(0) if the last operation in the program is not a call to Exit.
 
      Parameter  Description
   1  $c         Return code
@@ -5478,10 +5296,7 @@ Exit with the specified return code or zero if no return code supplied
 B<Example:>
 
 
-    Start;
     PrintOutString "Hello World";
-
-    Exit;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     ok Assemble =~ m(Hello World);
 
@@ -5496,9 +5311,8 @@ Assemble the generated code
 B<Example:>
 
 
-    Start;
     PrintOutString "Hello World";
-    Exit;
+
 
     ok Assemble =~ m(Hello World);  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
@@ -5635,7 +5449,7 @@ Return a copy of the specified string with all the non ascii characters removed
 
 37 L<Dw|/Dw> - Layout words in the data segment and return their label
 
-38 L<Exit|/Exit> - Exit with the specified return code or zero if no return code supplied
+38 L<Exit|/Exit> - Exit with the specified return code or zero if no return code supplied.
 
 39 L<For|/For> - For
 
@@ -5737,41 +5551,39 @@ Return a copy of the specified string with all the non ascii characters removed
 
 88 L<RestoreFirstSevenExceptRaxAndRdi|/RestoreFirstSevenExceptRaxAndRdi> - Restore the first 7 parameter registers except rax and rdi which are being used to return the results
 
-89 L<ReverseBytesInRax|/ReverseBytesInRax> - Reverse the bytes in rax
+89 L<Rq|/Rq> - Layout quad words in the data segment and return their label
 
-90 L<Rq|/Rq> - Layout quad words in the data segment and return their label
+90 L<Rs|/Rs> - Layout bytes in read only memory and return their label
 
-91 L<Rs|/Rs> - Layout bytes in read only memory and return their label
+91 L<Rw|/Rw> - Layout words in the data segment and return their label
 
-92 L<Rw|/Rw> - Layout words in the data segment and return their label
+92 L<S|/S> - Create a sub with optional parameters name=> the name of the subroutine so it can be reused rather than regenerated, comment=> a comment describing the sub
 
-93 L<S|/S> - Create a sub with optional parameters name=> the name of the subroutine so it can be reused rather than regenerated, comment=> a comment describing the sub
+93 L<SaveFirstFour|/SaveFirstFour> - Save the first 4 parameter registers
 
-94 L<SaveFirstFour|/SaveFirstFour> - Save the first 4 parameter registers
+94 L<SaveFirstSeven|/SaveFirstSeven> - Save the first 7 parameter registers
 
-95 L<SaveFirstSeven|/SaveFirstSeven> - Save the first 7 parameter registers
+95 L<SetLabel|/SetLabel> - Set a label in the code section
 
-96 L<SetLabel|/SetLabel> - Set a label in the code section
+96 L<SetRegisterToMinusOne|/SetRegisterToMinusOne> - Set the specified register to -1
 
-97 L<SetRegisterToMinusOne|/SetRegisterToMinusOne> - Set the specified register to -1
+97 L<SetZF|/SetZF> - Set the zero flag
 
-98 L<SetZF|/SetZF> - Set the zero flag
+98 L<Start|/Start> - Initialize the assembler
 
-99 L<Start|/Start> - Initialize the assembler
+99 L<StatSize|/StatSize> - Stat a file whose name is addressed by rax to get its size in rax
 
-100 L<StatSize|/StatSize> - Stat a file whose name is addressed by rax to get its size in rax
+100 L<Structure|/Structure> - Create a structure addressed by a register
 
-101 L<Structure|/Structure> - Create a structure addressed by a register
+101 L<Structure::field|/Structure::field> - Add a field of the specified length with an optional comment
 
-102 L<Structure::field|/Structure::field> - Add a field of the specified length with an optional comment
+102 L<StructureField::addr|/StructureField::addr> - Address a field in a structure by either the default register or the named register
 
-103 L<StructureField::addr|/StructureField::addr> - Address a field in a structure by either the default register or the named register
+103 L<UnReorderSyscallRegisters|/UnReorderSyscallRegisters> - Recover the initial values in registers that were reordered
 
-104 L<UnReorderSyscallRegisters|/UnReorderSyscallRegisters> - Recover the initial values in registers that were reordered
+104 L<UnReorderXmmRegisters|/UnReorderXmmRegisters> - Recover the initial values in the xmm registers that were reordered
 
-105 L<UnReorderXmmRegisters|/UnReorderXmmRegisters> - Recover the initial values in the xmm registers that were reordered
-
-106 L<WaitPid|/WaitPid> - Wait for the pid in rax to complete
+105 L<WaitPid|/WaitPid> - Wait for the pid in rax to complete
 
 =head1 Installation
 
@@ -5827,7 +5639,7 @@ $ENV{PATH} = $ENV{PATH}.":/var/isde:sde";                                       
 if ($^O =~ m(bsd|linux)i)                                                       # Supported systems
  {if (confirmHasCommandLineCommand(q(nasm)) and                                 # Network assembler
       confirmHasCommandLineCommand(q(sde64)))                                   # Intel emulator
-   {plan tests => 54;
+   {plan tests => 55;
    }
   else
    {plan skip_all =>qq(Nasm or Intel 64 emulator not available);
@@ -5839,7 +5651,7 @@ else
 
 my $start = time;                                                               # Tests
 
-goto latest;
+#goto latest;
 
 if (1) {                                                                        #TExit #TPrintOutString #TStart #TAssemble
   PrintOutString "Hello World";
@@ -6581,31 +6393,37 @@ if (1) {                                                                        
 latest:;
 
 if (1) {
-  my $l = Rb 0;
-  Rb $_ for 1..RegisterSize zmm0;
-  Vmovdqu8 zmm0, "[$l+1]";
+  my $P = "2F";                                                                 # Value to test for
+  my $l = Rb 0;  Rb $_ for 1..RegisterSize zmm0;                                # 0..63
+  Vmovdqu8 zmm0, "[$l]";                                                        # Load data to test
   PrintOutRegisterInHex zmm0;
-  Mov rax, 0x2f;
+
+  Mov rax, "0x$P";                                                              # Broadcast the value to be tested
   Vpbroadcastb zmm1, rax;
   PrintOutRegisterInHex zmm1;
 
-  for my $c(0..7)
+  for my $c(0..7)                                                               # Each possible test
    {my $m = "k$c";
     Vpcmpub $m, zmm1, zmm0, $c;
     PrintOutRegisterInHex $m;
    }
 
-  is_deeply Assemble, <<END;
-  zmm0: 403F 3E3D 3C3B 3A39   3837 3635 3433 3231   302F 2E2D 2C2B 2A29   2827 2625 2423 2221   201F 1E1D 1C1B 1A19   1817 1615 1413 1211   100F 0E0D 0C0B 0A09   0807 0605 0403 0201
+  Kmovq rax, k0;                                                                # Count the number of trailing zeros in k0
+  Tzcnt rax, rax;
+  PrintOutRegisterInHex rax;
+
+  is_deeply Assemble, <<END;                                                    # Assemble and test
+  zmm0: 3F3E 3D3C 3B3A 3938   3736 3534 3332 3130   2F2E 2D2C 2B2A 2928   2726 2524 2322 2120   1F1E 1D1C 1B1A 1918   1716 1514 1312 1110   0F0E 0D0C 0B0A 0908   0706 0504 0302 0100
   zmm1: 2F2F 2F2F 2F2F 2F2F   2F2F 2F2F 2F2F 2F2F   2F2F 2F2F 2F2F 2F2F   2F2F 2F2F 2F2F 2F2F   2F2F 2F2F 2F2F 2F2F   2F2F 2F2F 2F2F 2F2F   2F2F 2F2F 2F2F 2F2F   2F2F 2F2F 2F2F 2F2F
-    k0: 0000 4000 0000 0000
-    k1: FFFF 8000 0000 0000
-    k2: FFFF C000 0000 0000
+    k0: 0000 8000 0000 0000
+    k1: FFFF 0000 0000 0000
+    k2: FFFF 8000 0000 0000
     k3: 0000 0000 0000 0000
-    k4: FFFF BFFF FFFF FFFF
-    k5: 0000 7FFF FFFF FFFF
-    k6: 0000 3FFF FFFF FFFF
+    k4: FFFF 7FFF FFFF FFFF
+    k5: 0000 FFFF FFFF FFFF
+    k6: 0000 7FFF FFFF FFFF
     k7: FFFF FFFF FFFF FFFF
+   rax: 0000 0000 0000 00$P
 END
  }
 
