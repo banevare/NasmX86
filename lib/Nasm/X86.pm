@@ -81,6 +81,13 @@ vprolq
 vpinsrb vpinsrd vpinsrw vpinsrq
 END
 
+  my @i4 =  split /\s+/, <<END;                                                 # Quadruple operand instructions
+END
+
+  my @i4qdwb =  split /\s+/, <<END;                                             # Triple operand instructions which have qdwb versions
+vpcmpu
+END
+
   if (1)                                                                        # Add variants to mask instructions
    {my @k2  = grep {m/\Ak/} @i2; @i2  = grep {!m/\Ak/} @i2;
     my @k3  = grep {m/\Ak/} @i3; @i3  = grep {!m/\Ak/} @i3;
@@ -93,6 +100,12 @@ END
   if (1)                                                                        # Add qdwb versions of instructions
    {for my $o(@i2qdwb)
      {push @i2, $o.$_ for qw(b w d q);
+     }
+#   for my $o(@i3qdwb)
+#    {push @i3, $o.$_ for qw(b w d q);
+#    }
+    for my $o(@i4qdwb)
+     {push @i4, $o.$_ for qw(b w d q);
      }
    }
 
@@ -178,6 +191,23 @@ END
          \@_ == 3 or confess "Three arguments required";
          my \$s = '  ' x scalar(my \@d = caller);
          push \@text, qq(\${s}$i \$target, \$source, \$bits\\n);
+        }
+END
+     }
+    eval "$s$@";
+    confess $@ if $@;
+   }
+
+  if (1)                                                                        # Instructions that take four operands
+   {my $s = '';
+    for my $i(@i4)
+      {my $I = ucfirst $i;
+       $s .= <<END;
+       sub $I(\$\$\$\$)
+        {my (\$target, \$source, \$bits, \$zero) = \@_;
+         \@_ == 4 or confess "Four arguments required";
+         my \$s = '  ' x scalar(my \@d = caller);
+         push \@text, qq(\${s}$i \$target, \$source, \$bits, \$zero\\n);
         }
 END
      }
@@ -5809,7 +5839,7 @@ else
 
 my $start = time;                                                               # Tests
 
-#goto latest;
+goto latest;
 
 if (1) {                                                                        #TExit #TPrintOutString #TStart #TAssemble
   PrintOutString "Hello World";
@@ -6498,8 +6528,6 @@ if (1) {                                                                        
   ok Assemble =~ m(k0: FFFF FFFF C000 0000)s;
  }
 
-latest:;
-
 if (1) {                                                                        #TInsertIntoXyz
   ClearRegisters rax;
   Bts rax, 14;
@@ -6548,6 +6576,37 @@ if (1) {                                                                        
   ok $r =~ m(ymm1: 1B1A 1918 1716 1514   FFFF FFFF 1312 1110   0F0E 0D0C 0B0A 0908   0706 0504 0302 0100);
   ok $r =~ m(zmm2: 3736 3534 3332 3130   FFFF FFFF FFFF FFFF   2F2E 2D2C 2B2A 2928   2726 2524 2322 2120   1F1E 1D1C 1B1A 1918   1716 1514 1312 1110   0F0E 0D0C 0B0A 0908   0706 0504 0302 0100);
   ok $r =~ m(zmm3: 2F2E 2D2C 2B2A 2928   2726 2524 2322 2120   0000 0000 0000 0000   0000 0000 0000 0000   1F1E 1D1C 1B1A 1918   1716 1514 1312 1110   0F0E 0D0C 0B0A 0908   0706 0504 0302 0100);
+ }
+
+latest:;
+
+if (1) {
+  my $l = Rb 0;
+  Rb $_ for 1..RegisterSize zmm0;
+  Vmovdqu8 zmm0, "[$l+1]";
+  PrintOutRegisterInHex zmm0;
+  Mov rax, 0x2f;
+  Vpbroadcastb zmm1, rax;
+  PrintOutRegisterInHex zmm1;
+
+  for my $c(0..7)
+   {my $m = "k$c";
+    Vpcmpub $m, zmm1, zmm0, $c;
+    PrintOutRegisterInHex $m;
+   }
+
+  is_deeply Assemble, <<END;
+  zmm0: 403F 3E3D 3C3B 3A39   3837 3635 3433 3231   302F 2E2D 2C2B 2A29   2827 2625 2423 2221   201F 1E1D 1C1B 1A19   1817 1615 1413 1211   100F 0E0D 0C0B 0A09   0807 0605 0403 0201
+  zmm1: 2F2F 2F2F 2F2F 2F2F   2F2F 2F2F 2F2F 2F2F   2F2F 2F2F 2F2F 2F2F   2F2F 2F2F 2F2F 2F2F   2F2F 2F2F 2F2F 2F2F   2F2F 2F2F 2F2F 2F2F   2F2F 2F2F 2F2F 2F2F   2F2F 2F2F 2F2F 2F2F
+    k0: 0000 4000 0000 0000
+    k1: FFFF 8000 0000 0000
+    k2: FFFF C000 0000 0000
+    k3: 0000 0000 0000 0000
+    k4: FFFF BFFF FFFF FFFF
+    k5: 0000 7FFF FFFF FFFF
+    k6: 0000 3FFF FFFF FFFF
+    k7: FFFF FFFF FFFF FFFF
+END
  }
 
 unlink $_ for grep {/\A\.\/atmpa/} findFiles('.');
