@@ -61,15 +61,16 @@ setpe setpo sets setz pop push
 END
 
   my @i2 =  split /\s+/, <<END;                                                 # Double operand instructions
-add and bt btc btr bts  cmp cmova cmovae cmovb cmovbe cmovc cmove cmovg cmovge
-cmovl cmovle cmovna cmovnae cmovnb
-kmov knot  kortest ktest lea mov or shl shr sub test Vmovdqu Vmovdqu8 vmovdqu32 vmovdqu64 vpxorq
-lzcnt
-tzcnt
-xchg xor
-movdqa
-Vpexpandq Vpexpandd
+add and bt btc btr bts
+cmova cmovae cmovb cmovbe cmovc cmove cmovg cmovge cmovl cmovle
+cmovna cmovnae cmovnb cmp
+kmov knot kortest ktest lea lzcnt mov movdqa
+or shl shr sub test tzcnt
+vcvtudq2ps vmovdqu vmovdqu32 vmovdqu64 vmovdqu8
+vpcompressd vpexpandd vpexpandq vpxorq xchg xor
+vmovd vmovq
 END
+# print STDERR join ' ', sort @i2; exit;
 
   my @i2qdwb =  split /\s+/, <<END;                                             # Double operand instructions which have qdwb versions
 vpbroadcast
@@ -77,6 +78,7 @@ END
 
   my @i3 =  split /\s+/, <<END;                                                 # Triple operand instructions
 kadd kand kandn kor kshiftl kshiftr kunpck kxnor kxor
+vdpps
 vprolq
 vpinsrb vpinsrd vpinsrw vpinsrq
 END
@@ -294,7 +296,9 @@ sub Dq(@)                                                                       
 sub Rbwdq($@)                                                                   #P Layout data
  {my ($s, @d) = @_;                                                             # Element size, data to be laid out
   my $d = join ', ', @d;                                                        # Data to be laid out
-  return $_ if $_ = $rodata{$d};                                                # Data already exists so return it
+  if (my $c = $rodata{$d})                                                      # Data already exists so return it
+   {return $c
+   }
   my $l = Label;                                                                # New data - create a label
   push @rodata, <<END;                                                          # Save in read only data
   $l: d$s $d
@@ -319,6 +323,21 @@ sub Rq(@)                                                                       
  {my (@qwords) = @_;                                                            # Quad words to layout
   Rbwdq 'q', @_;
  }
+
+sub Float32($)                                                                  # 32 bit float
+ {my ($float) = @_;                                                             # Float
+  "__float32__($float)"
+ }
+
+sub Float64($)                                                                  # 64 bit float
+ {my ($float) = @_;                                                             # Float
+  "__float64__($float)"
+ }
+
+my $Pi = "3.141592653589793238462";
+
+sub Pi32 {Rd(Float32($Pi))}                                                     # Pi as a 32 bit float
+sub Pi64 {Rq(Float64($Pi))}                                                     # Pi as a 64 bit float
 
 #D1 Registers                                                                   # Operations on registers
 
@@ -5639,7 +5658,7 @@ $ENV{PATH} = $ENV{PATH}.":/var/isde:sde";                                       
 if ($^O =~ m(bsd|linux)i)                                                       # Supported systems
  {if (confirmHasCommandLineCommand(q(nasm)) and                                 # Network assembler
       confirmHasCommandLineCommand(q(sde64)))                                   # Intel emulator
-   {plan tests => 55;
+   {plan tests => 56;
    }
   else
    {plan skip_all =>qq(Nasm or Intel 64 emulator not available);
@@ -6390,8 +6409,6 @@ if (1) {                                                                        
   ok $r =~ m(zmm3: 2F2E 2D2C 2B2A 2928   2726 2524 2322 2120   0000 0000 0000 0000   0000 0000 0000 0000   1F1E 1D1C 1B1A 1918   1716 1514 1312 1110   0F0E 0D0C 0B0A 0908   0706 0504 0302 0100);
  }
 
-latest:;
-
 if (1) {
   my $P = "2F";                                                                 # Value to test for
   my $l = Rb 0;  Rb $_ for 1..RegisterSize zmm0;                                # 0..63
@@ -6412,7 +6429,7 @@ if (1) {
   Tzcnt rax, rax;
   PrintOutRegisterInHex rax;
 
-  is_deeply Assemble, <<END;                                                    # Assemble and test
+  is_deeply [split //, Assemble], [split //, <<END];                            # Assemble and test
   zmm0: 3F3E 3D3C 3B3A 3938   3736 3534 3332 3130   2F2E 2D2C 2B2A 2928   2726 2524 2322 2120   1F1E 1D1C 1B1A 1918   1716 1514 1312 1110   0F0E 0D0C 0B0A 0908   0706 0504 0302 0100
   zmm1: 2F2F 2F2F 2F2F 2F2F   2F2F 2F2F 2F2F 2F2F   2F2F 2F2F 2F2F 2F2F   2F2F 2F2F 2F2F 2F2F   2F2F 2F2F 2F2F 2F2F   2F2F 2F2F 2F2F 2F2F   2F2F 2F2F 2F2F 2F2F   2F2F 2F2F 2F2F 2F2F
     k0: 0000 8000 0000 0000
@@ -6424,6 +6441,33 @@ if (1) {
     k6: 0000 7FFF FFFF FFFF
     k7: FFFF FFFF FFFF FFFF
    rax: 0000 0000 0000 00$P
+END
+ }
+
+latest:;
+
+if (1) {
+  my ($hash) = map {Rd(Float32 "$_.0")} qw(2 3 5 7 11 13 17 19);               # Hash function
+  Vmovdqu8 ymm0,"[$hash]";
+  PrintOutRegisterInHex ymm0;
+
+  my ($string) = map {Rb $_} 0..RegisterSize(ymm0)-1;                           # String to hash
+  Vcvtudq2ps ymm1, "[$string]";                                                 # Load data to hash
+  PrintOutRegisterInHex ymm1;
+  Vdpps ymm1,ymm0,0xF1;
+
+  my $mask = Rb(0x11);
+  Kmovb k1, "[$mask]";
+  Vpcompressd "ymm2{k1}", ymm1;
+  PrintOutRegisterInHex ymm2;
+  Vmovq rax, xmm2;
+  PrintOutRegisterInHex rax;
+
+  is_deeply Assemble, <<END;                                                    # Assemble and test
+  ymm0: 4198 0000 4188 0000   4150 0000 4130 0000   40E0 0000 40A0 0000   4040 0000 4000 0000
+  ymm1: 4E00 7C78 4DE0 D8D1   4DC0 B8B1 4DA0 9891   4D80 7870 4D40 B090   4CE0 C0A0 4C40 8040
+  ymm2: 0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   50CA C33B 4F47 B6A0
+   rax: 50CA C33B 4F47 B6A0
 END
  }
 
