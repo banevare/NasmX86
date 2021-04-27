@@ -53,7 +53,7 @@ BEGIN{
   my @i0 = qw(popfq pushfq rdtsc ret syscall);                                  # Zero operand instructions
 
   my @i1 = split /\s+/, <<END;                                                  # Single operand instructions
-bswap call inc jmp ja jae jb jbe jc jcxz je jecxz jg jge jl jle
+bswap call dec inc jmp ja jae jb jbe jc jcxz je jecxz jg jge jl jle
 jna jnae jnb jnbe jnc jne jng jnge jnl jnle jno jnp jns jnz jo jp jpe jpo jrcxz
 js jz not seta setae setb setbe setc sete setg setge setl setle setna setnae
 setnb setnbe setnc setne setng setnge setnl setno setnp setns setnz seto setp
@@ -80,6 +80,7 @@ vpbroadcast
 END
 
   my @i3 =  split /\s+/, <<END;                                                 # Triple operand instructions
+bzhi
 kadd kand kandn kor kshiftl kshiftr kunpck kxnor kxor
 vdpps
 vprolq
@@ -500,8 +501,8 @@ sub If(&;&)                                                                     
    }
  }
 
-sub For(&$$$)                                                                   # For
- {my ($body, $register, $limit, $increment) = @_;                               # Body, register, limit on loop, increment
+sub For(&$$$)                                                                   # For - iterate the body as long as register is less than limit incrementing by increment each time
+ {my ($body, $register, $limit, $increment) = @_;                               # Body, register, limit on loop, increment on each iteration
   @_ == 4 or confess;
   Comment "For $register $limit";
   my $start = Label;
@@ -520,6 +521,32 @@ sub For(&$$$)                                                                   
    }
   Jmp $start;
   SetLabel $end;
+ }
+
+sub ForIn(&$$$$)                                                                # For - iterate the body as long as register plus increment is less than than limit incrementing by increment each time
+ {my ($full, $last, $register, $limit, $increment) = @_;                        # Body for full block, body for last block , register, limit on loop, increment on each iteration
+  @_ == 5 or confess;
+  Comment "For $register $limit";
+  my $start = Label;
+  my $end   = Label;
+
+  SetLabel $start;                                                              # Start of loop
+  PushR $register;                                                              # Save the register so we can test that there is still room
+  Add   $register, $increment;                                                  # Add increment
+  Cmp   $register, $limit;                                                      # Test that we have room for increment
+  PopR  $register;                                                              # Remove increment
+  Jge   $end;
+
+  &$full;
+
+  Add $register, $increment;                                                    # Increment for real
+  Jmp $start;
+  SetLabel $end;
+
+  Sub $limit, $register;                                                        # Size of remainder
+  If                                                                            # Non remainder
+   {&$last;                                                                     # Process remainder
+   }
  }
 
 sub S(&%)                                                                       # Create a sub with optional parameters name=> the name of the subroutine so it can be reused rather than regenerated, comment=> a comment describing the sub
@@ -1289,6 +1316,7 @@ sub Cstrlen()                                                                   
 END
     Mov rax, rcx;
     Not rax;
+    Dec rax;
     PopR @regs;
    } name=> "Cstrlen";
 
@@ -5704,7 +5732,7 @@ $ENV{PATH} = $ENV{PATH}.":/var/isde:sde";                                       
 if ($^O =~ m(bsd|linux)i)                                                       # Supported systems
  {if (confirmHasCommandLineCommand(q(nasm)) and                                 # Network assembler
       confirmHasCommandLineCommand(q(sde64)))                                   # Intel emulator
-   {plan tests => 56;
+   {plan tests => 58;
    }
   else
    {plan skip_all =>qq(Nasm or Intel 64 emulator not available);
@@ -6490,12 +6518,12 @@ if (1) {
 END
  }
 
-if (1) {
+if (1) {                                                                        #TCstrlen
   my $s = Rs("abcd");
   Mov rax, $s;
   Cstrlen;
   PrintOutRegisterInHex rax;
-  ok Assemble =~ m(rax: 0000 0000 0000 0005);
+  ok Assemble =~ m(rax: 0000 0000 0000 0004);
  }
 
 latest:;
@@ -6507,28 +6535,44 @@ if (1) {                                                                        
   Mov rdi, rax;                                                                 # Save the string length
   Vpbroadcastq zmm0, rax;                                                       # Broadcast length through ymm0
   PopR rax;                                                                     # Address of string, length is in rdi
-  PrintOutMemoryNL;
-  PrintOutRegisterInHex zmm0;
+# PrintOutMemoryNL;
+# PrintOutRegisterInHex zmm0;
   Vcvtuqq2pd zmm0, zmm0;                                                        # Convert to float
-  PrintOutRegisterInHex zmm0;
-
-  Vmovdqu ymm1, "[rax]";                                                        # Load data to hash
-  PrintOutRegisterInHex ymm1;
-  Vcvtudq2pd zmm1, ymm1;                                                        # Convert to float
-  PrintOutRegisterInHex zmm1;
-
-  Vmulpd zmm0, zmm1, zmm0;                                                      # Multiply current hash by data
   Vgetmantps   zmm0, zmm0, 4;                                                   # Normalize to 1 to 2, see: https://hjlebbink.github.io/x86doc/html/VGETMANTPD.html
-  PrintOutRegisterInHex zmm0;
+#  PrintOutRegisterInHex zmm0;
 
-  Vmovdqu ymm1, "[rax+32]";                                                     # Load more data to hash
-  PrintOutRegisterInHex ymm1;
-  Vcvtudq2pd zmm1, ymm1;                                                        # Convert to float
-  PrintOutRegisterInHex zmm1;
+  Add rdi, rax;                                                                 # Upper limit of string
+  ForIn                                                                         # Hash in ymm0 sized blocks
+   {Vmovdqu ymm1, "[rax]";                                                      # Load data to hash
+#   PrintOutRegisterInHex ymm1;
+    Vcvtudq2pd zmm1, ymm1;                                                      # Convert to float
+    Vgetmantps   zmm0, zmm0, 4;                                                 # Normalize to 1 to 2, see: https://hjlebbink.github.io/x86doc/html/VGETMANTPD.html
+#   PrintOutRegisterInHex zmm1;
 
-  Vmulpd zmm0, zmm1, zmm0;                                                      # Multiply current hash by data
+    Vmulpd zmm0, zmm1, zmm0;                                                    # Multiply current hash by data
+#   Vgetmantps   zmm0, zmm0, 4;                                                 # Normalize to 1 to 2, see: https://hjlebbink.github.io/x86doc/html/VGETMANTPD.html
+#   PrintOutRegisterInHex zmm0;
+   }
+  sub                                                                           # Remainder in partial block
+   {Mov r15, -1;
+#   PrintOutRegisterInHex rdi;
+    Bzhi r15, r15, rdi;                                                         # Clear bits that we do not wish to load
+#   PrintOutRegisterInHex r15;
+    Kmovq k1, r15;                                                              # Take up mask
+#   PrintOutRegisterInHex k1;
+    Vmovdqu8 "ymm1{k1}", "[rax]";                                               # Load data to hash
+#   PrintOutRegisterInHex ymm1;
+
+    Vcvtudq2pd zmm1, ymm1;                                                      # Convert to float
+#   PrintOutRegisterInHex zmm1;
+    Vgetmantps   zmm0, zmm0, 4;                                                 # Normalize to 1 to 2, see: https://hjlebbink.github.io/x86doc/html/VGETMANTPD.html
+
+    Vmulpd zmm0, zmm1, zmm0;                                                    # Multiply current hash by data
+#   Vgetmantps   zmm0, zmm0, 4;                                                 # Normalize to 1 to 2, see: https://hjlebbink.github.io/x86doc/html/VGETMANTPD.html
+#   PrintOutRegisterInHex zmm0;
+   }, rax, rdi, RegisterSize ymm0;
+
   Vgetmantps   zmm0, zmm0, 4;                                                   # Normalize to 1 to 2, see: https://hjlebbink.github.io/x86doc/html/VGETMANTPD.html
-  PrintOutRegisterInHex zmm0;
 
   Mov r15, 0b11110000;                                                          # Top 4 to bottom 4
   Kmovq k1, r15;
@@ -6551,30 +6595,51 @@ if (1) {                                                                        
 
   my $e = Assemble keep=>'hash';                                                # Assemble
 
+  ok qx($e "")  =~ m(rax: 0000 3F80 0000 3F80);
+  ok qx($e "a") =~ m(rax: 0000 3F80 C000 45B2);
+
   if (0)                                                                        # Hash various strings
-   {my $N = RegisterSize zmm0;
-    my %r; my $count = 0;
-    for my $l(qw(a ab abc abcd), 'a a', 'a  a')
-     {for my $i(1..$N)
-       {my $t = $l x $i;
-        last if $N < length $t;
-        my $s = substr($t.(' ' x $N), 0, $N);
-        my $r = qx($e "$s");
-        say STDERR "$i  $r";
-        if ($r =~ m(^.*rax:\s*(.*)$)m)
-         {push $r{$1}->@*, $s;
-          ++$count;
+   {my %r; my %f; my $count = 0;
+    my $N = RegisterSize zmm0;
+
+    if (1)                                                                      # Fixed blocks
+     {for my $l(qw(a ab abc abcd), 'a a', 'a  a')
+       {for my $i(1..$N)
+         {my $t = $l x $i;
+          last if $N < length $t;
+          my $s = substr($t.(' ' x $N), 0, $N);
+          next if $f{$s}++;
+          my $r = qx($e "$s");
+          say STDERR "$count  $r";
+          if ($r =~ m(^.*rax:\s*(.*)$)m)
+           {push $r{$1}->@*, $s;
+            ++$count;
+           }
+         }
+       }
+     }
+
+    if (1)                                                                      # Variable blocks
+     {for my $l(qw(a ab abc abcd), '', 'a a', 'a  a')
+       {for my $i(1..$N)
+         {my $t = $l x $i;
+          next if $f{$t}++;
+          my $r = qx($e "$t");
+          say STDERR "$count  $r";
+          if ($r =~ m(^.*rax:\s*(.*)$)m)
+           {push $r{$1}->@*, $t;
+            ++$count;
+           }
          }
        }
      }
     for my $r(keys %r)
      {delete $r{$r} if $r{$r}->@* < 2;
      }
+
     say STDERR dump(\%r);
-    say STDERR "Keys: ",  scalar keys(%r);
-    say STDERR "Count: ", $count;
-    confess "Mismatch: " unless $count == keys(%r);
-    say STDERR "Count: ", $count;
+    say STDERR "Keys hashed: ", $count;
+    confess "Duplicates : ",  scalar keys(%r);
    }
  }
 
