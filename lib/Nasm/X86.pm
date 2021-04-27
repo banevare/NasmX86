@@ -71,6 +71,7 @@ vpcompressd vpcompressq vpexpandd vpexpandq vpxorq xchg xor
 vmovd vmovq
 mulpd
 pslldq psrldq
+vsqrtpd
 END
 # print STDERR join ' ', sort @i2; exit;
 
@@ -6507,7 +6508,7 @@ if (1) {                                                                        
   Vpbroadcastq zmm0, rax;                                                       # Broadcast length through ymm0
   PopR rax;                                                                     # Address of string, length is in rdi
   PrintOutMemoryNL;
-  PrintOutRegisterInHex ymm0;
+  PrintOutRegisterInHex zmm0;
   Vcvtuqq2pd zmm0, zmm0;                                                        # Convert to float
   PrintOutRegisterInHex zmm0;
 
@@ -6516,41 +6517,65 @@ if (1) {                                                                        
   Vcvtudq2pd zmm1, ymm1;                                                        # Convert to float
   PrintOutRegisterInHex zmm1;
 
-  Vmulpd zmm2, zmm1, zmm0;                                                      # Multiply
-  Vgetmantps   zmm2, zmm2, 4;                                                   # Normalize to 1 to 2, see: https://hjlebbink.github.io/x86doc/html/VGETMANTPD.html
-  PrintOutRegisterInHex zmm2;
+  Vmulpd zmm0, zmm1, zmm0;                                                      # Multiply current hash by data
+  Vgetmantps   zmm0, zmm0, 4;                                                   # Normalize to 1 to 2, see: https://hjlebbink.github.io/x86doc/html/VGETMANTPD.html
+  PrintOutRegisterInHex zmm0;
+
+  Vmovdqu ymm1, "[rax+32]";                                                     # Load more data to hash
+  PrintOutRegisterInHex ymm1;
+  Vcvtudq2pd zmm1, ymm1;                                                        # Convert to float
+  PrintOutRegisterInHex zmm1;
+
+  Vmulpd zmm0, zmm1, zmm0;                                                      # Multiply current hash by data
+  Vgetmantps   zmm0, zmm0, 4;                                                   # Normalize to 1 to 2, see: https://hjlebbink.github.io/x86doc/html/VGETMANTPD.html
+  PrintOutRegisterInHex zmm0;
 
   Mov r15, 0b11110000;                                                          # Top 4 to bottom 4
   Kmovq k1, r15;
-  Vpcompressq  "zmm1{k1}", zmm2;
-  Vaddpd       ymm2, ymm1, ymm2;                                                # Top 4 plus bottom 4
+  Vpcompressq  "zmm1{k1}", zmm0;
+  Vaddpd       ymm0, ymm0, ymm1;                                                # Top 4 plus bottom 4
 
   Mov r15, 0b1100;                                                              # Top 2 to bottom 2
   Kmovq k1, r15;
-  Vpcompressq  "ymm1{k1}", ymm2;
-  Vaddpd       xmm1, xmm1, xmm2;                                                # Top 2 plus bottom 2
+  Vpcompressq  "ymm1{k1}", ymm0;
+  Vaddpd       xmm0, xmm0, xmm1;                                                # Top 2 plus bottom 2
 
-  Pslldq       xmm1, 2;                                                         # Move centers into double words
-  Psrldq       xmm1, 4;
+  Pslldq       xmm0, 2;                                                         # Move centers into double words
+  Psrldq       xmm0, 4;
   Mov r15, 0b0101;                                                              # Centers to lower quad
   Kmovq k1, r15;
-  Vpcompressd  "xmm1{k1}", xmm1;                                                # Compress to lower quad
+  Vpcompressd  "xmm0{k1}", xmm0;                                                # Compress to lower quad
 
-  Vmovq rax, xmm1;                                                              # Result in rax
+  Vmovq rax, xmm0;                                                              # Result in rax
   PrintOutRegisterInHex rax;
 
   my $e = Assemble keep=>'hash';                                                # Assemble
 
-  my %r;
-  for my $i(1..32)                                                              # Hash various strings
-   {my $s = pad('A' x $i, 32);
-    my $r = qx($e "$s");
-    say STDERR "$i  $r";
-    if ($r =~ m(^.*rax:\s*(.*)$)m)
-     {$r{$1}++;
+  if (0)                                                                        # Hash various strings
+   {my $N = RegisterSize zmm0;
+    my %r; my $count = 0;
+    for my $l(qw(a ab abc abcd), 'a a', 'a  a')
+     {for my $i(1..$N)
+       {my $t = $l x $i;
+        last if $N < length $t;
+        my $s = substr($t.(' ' x $N), 0, $N);
+        my $r = qx($e "$s");
+        say STDERR "$i  $r";
+        if ($r =~ m(^.*rax:\s*(.*)$)m)
+         {push $r{$1}->@*, $s;
+          ++$count;
+         }
+       }
      }
+    for my $r(keys %r)
+     {delete $r{$r} if $r{$r}->@* < 2;
+     }
+    say STDERR dump(\%r);
+    say STDERR "Keys: ",  scalar keys(%r);
+    say STDERR "Count: ", $count;
+    confess "Mismatch: " unless $count == keys(%r);
+    say STDERR "Count: ", $count;
    }
-  say STDERR dump(\%r);
  }
 
 unlink $_ for grep {/\A\.\/atmpa/} findFiles('.');
