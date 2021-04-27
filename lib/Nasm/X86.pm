@@ -66,9 +66,11 @@ cmova cmovae cmovb cmovbe cmovc cmove cmovg cmovge cmovl cmovle
 cmovna cmovnae cmovnb cmp
 kmov knot kortest ktest lea lzcnt mov movdqa
 or shl shr sub test tzcnt
-vcvtudq2ps vmovdqu vmovdqu32 vmovdqu64 vmovdqu8
-vpcompressd vpexpandd vpexpandq vpxorq xchg xor
+vcvtudq2pd vcvtuqq2pd vcvtudq2ps vmovdqu vmovdqu32 vmovdqu64 vmovdqu8
+vpcompressd vpcompressq vpexpandd vpexpandq vpxorq xchg xor
 vmovd vmovq
+mulpd
+pslldq psrldq
 END
 # print STDERR join ' ', sort @i2; exit;
 
@@ -81,6 +83,9 @@ kadd kand kandn kor kshiftl kshiftr kunpck kxnor kxor
 vdpps
 vprolq
 vpinsrb vpinsrd vpinsrw vpinsrq
+vgetmantps
+vaddd
+vmulpd vaddpd
 END
 
   my @i4 =  split /\s+/, <<END;                                                 # Quadruple operand instructions
@@ -1030,6 +1035,13 @@ sub PrintOutMemoryInHex                                                         
   Call $sub;
  }
 
+sub PrintOutMemoryInHexNL                                                       # Dump memory from the address in rax for the length in rdi and then print a new line
+ {@_ == 0 or confess;
+  Comment "Print out memory in hex then new line";
+  PrintOutMemoryInHex;
+  PrintOutNL;
+ }
+
 sub PrintOutMemory                                                              # Print the memory addressed by rax for a length of rdi
  {@_ == 0 or confess;
 
@@ -1045,6 +1057,13 @@ sub PrintOutMemory                                                              
    } name => "PrintOutMemory";
 
   Call $sub;
+ }
+
+sub PrintOutMemoryNL                                                            # Print the memory addressed by rax for a length of rdi followed by a new line
+ {@_ == 0 or confess;
+  Comment "Print out memory then new line";
+  PrintOutMemory;
+  PrintOutNL;
  }
 
 sub AllocateMemory                                                              # Allocate the amount of memory specified in rax via mmap and return the address of the allocated memory in rax
@@ -1254,6 +1273,26 @@ sub ReadFile()                                                                  
  }
 
 #D1 Strings                                                                     # Operations on Strings
+
+sub Cstrlen()                                                                   # Length of the C style string addressed by rax returning the length in rax
+ {@_ == 0 or confess;
+
+  my $sub  = S                                                                  # Create byte string
+   {Comment "C strlen";
+    PushR my @regs = (rdi, rcx);
+    Mov rdi, rax;
+    Mov rcx, -1;
+    ClearRegisters rax;
+    push @text, <<END;
+    repne scasb
+END
+    Mov rax, rcx;
+    Not rax;
+    PopR @regs;
+   } name=> "Cstrlen";
+
+  Call $sub;
+ }
 
 sub CreateByteString()                                                          # Create an relocatable string of bytes in an arena and returns its address in rax
  {@_ == 0 or confess;
@@ -1796,6 +1835,7 @@ sub Assemble(%)                                                                 
  {my (%options) = @_;                                                           # Options
   Exit 0 unless @data > 4 and $data[-4] !~ m(Exit Code:);                       # Exit with code 0 if no other exit has been taken
 
+  my $k = $options{keep};                                                       # Keep the executable
   my $r = join "\n", map {s/\s+\Z//sr} @rodata;
   my $d = join "\n", map {s/\s+\Z//sr} @data;
   my $b = join "\n", map {s/\s+\Z//sr} @bss;
@@ -1817,18 +1857,23 @@ global _start, main
 END
 
   my $c    = owf(q(z.asm), $a);                                                 # Source file
-  my $e    =     q(z);                                                          # Executable file
-  my $l    =     q(z.txt);                                                      # Assembler listing
-  my $o    =     q(z.o);                                                        # Object file
+  my $e    = $k // q(z);                                                        # Executable file
+  my $l    = q(z.txt);                                                          # Assembler listing
+  my $o    = q(z.o);                                                            # Object file
 
-  my $cmd  = qq(nasm -f elf64 -g -l $l -o $o $c; ld -o $e $o; chmod 744 $e; $sde -ptr-check -- ./$e 2>&1);
+  my $cmd  = qq(nasm -f elf64 -g -l $l -o $o $c && ld -o $e $o && chmod 744 $e);
+  my $exec = qq($sde -ptr-check -- ./$e 2>&1);
+     $cmd .= qq( && $exec) unless $k;
+
   say STDERR qq($cmd);
-  my $R    = eval {qx($cmd)};
+  my $R    = qx($cmd);
   say STDERR $R;
   $totalBytesAssembled += fileSize $c;                                          # Estimate the size of the output programs
-  unlink $e, $o;                                                                # Delete object and executable leaving listing files
+  unlink $o;                                                                    # Delete files
+  unlink $e unless $k;                                                          # Delete executable unless asked to keep it
+  $totalBytesAssembled += fileSize $c;                                          # Estimate the size of the output program
   Start;                                                                        # Clear work areas for next assembly
-  $R                                                                            # Return execution results
+  $k ? $exec : $R                                                               # Return execution command or execution results
  }
 
 sub removeNonAsciiChars($)                                                      #P Return a copy of the specified string with all the non ascii characters removed
@@ -6444,31 +6489,68 @@ if (1) {
 END
  }
 
+if (1) {
+  my $s = Rs("abcd");
+  Mov rax, $s;
+  Cstrlen;
+  PrintOutRegisterInHex rax;
+  ok Assemble =~ m(rax: 0000 0000 0000 0005);
+ }
+
 latest:;
 
-if (1) {
-  my ($hash) = map {Rd(Float32 "$_.0")} qw(2 3 5 7 11 13 17 19);               # Hash function
-  Vmovdqu8 ymm0,"[$hash]";
+if (1) {                                                                        # Hash a string
+  Mov rax, "[rbp+24]";
+  PushR rax;                                                                    # Initialize hash function with length of string
+  Cstrlen;                                                                      # Length of string to hash
+  Mov rdi, rax;                                                                 # Save the string length
+  Vpbroadcastq zmm0, rax;                                                       # Broadcast length through ymm0
+  PopR rax;                                                                     # Address of string, length is in rdi
+  PrintOutMemoryNL;
   PrintOutRegisterInHex ymm0;
+  Vcvtuqq2pd zmm0, zmm0;                                                        # Convert to float
+  PrintOutRegisterInHex zmm0;
 
-  my ($string) = map {Rb $_} 0..RegisterSize(ymm0)-1;                           # String to hash
-  Vcvtudq2ps ymm1, "[$string]";                                                 # Load data to hash
+  Vmovdqu ymm1, "[rax]";                                                        # Load data to hash
   PrintOutRegisterInHex ymm1;
-  Vdpps ymm1,ymm0,0xF1;
+  Vcvtudq2pd zmm1, ymm1;                                                        # Convert to float
+  PrintOutRegisterInHex zmm1;
 
-  my $mask = Rb(0x11);
-  Kmovb k1, "[$mask]";
-  Vpcompressd "ymm2{k1}", ymm1;
-  PrintOutRegisterInHex ymm2;
-  Vmovq rax, xmm2;
+  Vmulpd zmm2, zmm1, zmm0;                                                      # Multiply
+  Vgetmantps   zmm2, zmm2, 4;                                                   # Normalize to 1 to 2, see: https://hjlebbink.github.io/x86doc/html/VGETMANTPD.html
+  PrintOutRegisterInHex zmm2;
+
+  Mov r15, 0b11110000;                                                          # Top 4 to bottom 4
+  Kmovq k1, r15;
+  Vpcompressq  "zmm1{k1}", zmm2;
+  Vaddpd       ymm2, ymm1, ymm2;                                                # Top 4 plus bottom 4
+
+  Mov r15, 0b1100;                                                              # Top 2 to bottom 2
+  Kmovq k1, r15;
+  Vpcompressq  "ymm1{k1}", ymm2;
+  Vaddpd       xmm1, xmm1, xmm2;                                                # Top 2 plus bottom 2
+
+  Pslldq       xmm1, 2;                                                         # Move centers into double words
+  Psrldq       xmm1, 4;
+  Mov r15, 0b0101;                                                              # Centers to lower quad
+  Kmovq k1, r15;
+  Vpcompressd  "xmm1{k1}", xmm1;                                                # Compress to lower quad
+
+  Vmovq rax, xmm1;                                                              # Result in rax
   PrintOutRegisterInHex rax;
 
-  is_deeply Assemble, <<END;                                                    # Assemble and test
-  ymm0: 4198 0000 4188 0000   4150 0000 4130 0000   40E0 0000 40A0 0000   4040 0000 4000 0000
-  ymm1: 4E00 7C78 4DE0 D8D1   4DC0 B8B1 4DA0 9891   4D80 7870 4D40 B090   4CE0 C0A0 4C40 8040
-  ymm2: 0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   50CA C33B 4F47 B6A0
-   rax: 50CA C33B 4F47 B6A0
-END
+  my $e = Assemble keep=>'hash';                                                # Assemble
+
+  my %r;
+  for my $i(1..32)                                                              # Hash various strings
+   {my $s = pad('A' x $i, 32);
+    my $r = qx($e "$s");
+    say STDERR "$i  $r";
+    if ($r =~ m(^.*rax:\s*(.*)$)m)
+     {$r{$1}++;
+     }
+   }
+  say STDERR dump(\%r);
  }
 
 unlink $_ for grep {/\A\.\/atmpa/} findFiles('.');
