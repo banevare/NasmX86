@@ -17,9 +17,9 @@ use Data::Table::Text qw(:all);
 use Asm::C qw(:all);
 use feature qw(say current_sub);
 
-my $debug = -e q(/home/phil/);                                                  # Developing
-my $sde   = q(/var/isde/sde64);                                                 # Intel emulator
-   $sde   = q(sde/sde64) unless $debug;
+my $develop = -e q(/home/phil/);                                                # Developing
+my $sde     = q(/var/isde/sde64);                                               # Intel emulator
+   $sde     = q(sde/sde64) unless $develop;                                     # Intel emulator on GitHub
 my $totalBytesAssembled = 0;                                                    # Estimate the size of the output programs
 
 binModeAllUtf8;
@@ -1300,23 +1300,85 @@ sub ReadFile()                                                                  
   Call $sub;
  }
 
-#D1 Strings                                                                     # Operations on Strings
+#D1 Short Strings                                                               # Operations on Short Strings
 
-sub Cstrlen()                                                                   # Length of the C style string addressed by rax returning the length in rax
+
+#D1 Hash functions                                                              # Hash functions
+
+sub Hash()                                                                      # Hash a string addressed by rax with length held in rdi and return the hash code in r15
+ {@_ == 0 or confess;
+
+  my $sub = S                                                                   # Read file
+   {Comment "Hash";
+
+    PushR my @regs = (rax, rdi, k1, zmm0, zmm1);                                # Save registers
+    Vpbroadcastq zmm0, rdi;                                                     # Broadcast length through ymm0
+    Vcvtuqq2pd   zmm0, zmm0;                                                    # Convert to lengths to float
+    Vgetmantps   zmm0, zmm0, 4;                                                 # Normalize to 1 to 2, see: https://hjlebbink.github.io/x86doc/html/VGETMANTPD.html
+
+    Add rdi, rax;                                                               # Upper limit of string
+    ForIn                                                                       # Hash in ymm0 sized blocks
+     {Vmovdqu ymm1, "[rax]";                                                    # Load data to hash
+      Vcvtudq2pd zmm1, ymm1;                                                    # Convert to float
+      Vgetmantps   zmm0, zmm0, 4;                                               # Normalize to 1 to 2, see: https://hjlebbink.github.io/x86doc/html/VGETMANTPD.html
+
+      Vmulpd zmm0, zmm1, zmm0;                                                  # Multiply current hash by data
+     }
+    sub                                                                         # Remainder in partial block
+     {Mov r15, -1;
+      Bzhi r15, r15, rdi;                                                       # Clear bits that we do not wish to load
+      Kmovq k1, r15;                                                            # Take up mask
+      Vmovdqu8 "ymm1{k1}", "[rax]";                                             # Load data to hash
+
+      Vcvtudq2pd zmm1, ymm1;                                                    # Convert to float
+      Vgetmantps   zmm0, zmm0, 4;                                               # Normalize to 1 to 2, see: https://hjlebbink.github.io/x86doc/html/VGETMANTPD.html
+
+      Vmulpd zmm0, zmm1, zmm0;                                                  # Multiply current hash by data
+     }, rax, rdi, RegisterSize ymm0;
+
+    Vgetmantps   zmm0, zmm0, 4;                                                 # Normalize to 1 to 2, see: https://hjlebbink.github.io/x86doc/html/VGETMANTPD.html
+
+    Mov r15, 0b11110000;                                                        # Top 4 to bottom 4
+    Kmovq k1, r15;
+    Vpcompressq  "zmm1{k1}", zmm0;
+    Vaddpd       ymm0, ymm0, ymm1;                                              # Top 4 plus bottom 4
+
+    Mov r15, 0b1100;                                                            # Top 2 to bottom 2
+    Kmovq k1, r15;
+    Vpcompressq  "ymm1{k1}", ymm0;
+    Vaddpd       xmm0, xmm0, xmm1;                                              # Top 2 plus bottom 2
+
+    Pslldq       xmm0, 2;                                                       # Move centers into double words
+    Psrldq       xmm0, 4;
+    Mov r15, 0b0101;                                                            # Centers to lower quad
+    Kmovq k1, r15;
+    Vpcompressd  "xmm0{k1}", xmm0;                                              # Compress to lower quad
+
+    Vmovq r15, xmm0;                                                            # Result in r15
+
+    PopR @regs;
+   } name=> "Hash";
+
+  Call $sub;
+ }
+
+#D1 Long Strings                                                                # Operations on Long Strings
+
+sub Cstrlen()                                                                   # Length of the C style string addressed by rax returning the length in r15
  {@_ == 0 or confess;
 
   my $sub  = S                                                                  # Create byte string
    {Comment "C strlen";
-    PushR my @regs = (rdi, rcx);
+    PushR my @regs = (rax, rdi, rcx);
     Mov rdi, rax;
     Mov rcx, -1;
     ClearRegisters rax;
     push @text, <<END;
     repne scasb
 END
-    Mov rax, rcx;
-    Not rax;
-    Dec rax;
+    Mov r15, rcx;
+    Not r15;
+    Dec r15;
     PopR @regs;
    } name=> "Cstrlen";
 
@@ -6522,83 +6584,26 @@ if (1) {                                                                        
   my $s = Rs("abcd");
   Mov rax, $s;
   Cstrlen;
-  PrintOutRegisterInHex rax;
-  ok Assemble =~ m(rax: 0000 0000 0000 0004);
+  PrintOutRegisterInHex r15;
+  ok Assemble =~ m(r15: 0000 0000 0000 0004);
  }
 
 latest:;
 
-if (1) {                                                                        # Hash a string
+if (1) {                                                                        # Hash a string #THash
   Mov rax, "[rbp+24]";
-  PushR rax;                                                                    # Initialize hash function with length of string
   Cstrlen;                                                                      # Length of string to hash
-  Mov rdi, rax;                                                                 # Save the string length
-  Vpbroadcastq zmm0, rax;                                                       # Broadcast length through ymm0
-  PopR rax;                                                                     # Address of string, length is in rdi
-# PrintOutMemoryNL;
-# PrintOutRegisterInHex zmm0;
-  Vcvtuqq2pd zmm0, zmm0;                                                        # Convert to float
-  Vgetmantps   zmm0, zmm0, 4;                                                   # Normalize to 1 to 2, see: https://hjlebbink.github.io/x86doc/html/VGETMANTPD.html
-#  PrintOutRegisterInHex zmm0;
+  Mov rdi, r15;
+  Hash();                                                                       # Hash string
 
-  Add rdi, rax;                                                                 # Upper limit of string
-  ForIn                                                                         # Hash in ymm0 sized blocks
-   {Vmovdqu ymm1, "[rax]";                                                      # Load data to hash
-#   PrintOutRegisterInHex ymm1;
-    Vcvtudq2pd zmm1, ymm1;                                                      # Convert to float
-    Vgetmantps   zmm0, zmm0, 4;                                                 # Normalize to 1 to 2, see: https://hjlebbink.github.io/x86doc/html/VGETMANTPD.html
-#   PrintOutRegisterInHex zmm1;
+  PrintOutRegisterInHex r15;
 
-    Vmulpd zmm0, zmm1, zmm0;                                                    # Multiply current hash by data
-#   Vgetmantps   zmm0, zmm0, 4;                                                 # Normalize to 1 to 2, see: https://hjlebbink.github.io/x86doc/html/VGETMANTPD.html
-#   PrintOutRegisterInHex zmm0;
-   }
-  sub                                                                           # Remainder in partial block
-   {Mov r15, -1;
-#   PrintOutRegisterInHex rdi;
-    Bzhi r15, r15, rdi;                                                         # Clear bits that we do not wish to load
-#   PrintOutRegisterInHex r15;
-    Kmovq k1, r15;                                                              # Take up mask
-#   PrintOutRegisterInHex k1;
-    Vmovdqu8 "ymm1{k1}", "[rax]";                                               # Load data to hash
-#   PrintOutRegisterInHex ymm1;
+  my $e = Assemble keep=>'hash';                                                # Assemble to the specified file name
 
-    Vcvtudq2pd zmm1, ymm1;                                                      # Convert to float
-#   PrintOutRegisterInHex zmm1;
-    Vgetmantps   zmm0, zmm0, 4;                                                 # Normalize to 1 to 2, see: https://hjlebbink.github.io/x86doc/html/VGETMANTPD.html
+  ok qx($e "")  =~ m(r15: 0000 3F80 0000 3F80);                                 # Test well known hashes
+  ok qx($e "a") =~ m(r15: 0000 3F80 C000 45B2);
 
-    Vmulpd zmm0, zmm1, zmm0;                                                    # Multiply current hash by data
-#   Vgetmantps   zmm0, zmm0, 4;                                                 # Normalize to 1 to 2, see: https://hjlebbink.github.io/x86doc/html/VGETMANTPD.html
-#   PrintOutRegisterInHex zmm0;
-   }, rax, rdi, RegisterSize ymm0;
-
-  Vgetmantps   zmm0, zmm0, 4;                                                   # Normalize to 1 to 2, see: https://hjlebbink.github.io/x86doc/html/VGETMANTPD.html
-
-  Mov r15, 0b11110000;                                                          # Top 4 to bottom 4
-  Kmovq k1, r15;
-  Vpcompressq  "zmm1{k1}", zmm0;
-  Vaddpd       ymm0, ymm0, ymm1;                                                # Top 4 plus bottom 4
-
-  Mov r15, 0b1100;                                                              # Top 2 to bottom 2
-  Kmovq k1, r15;
-  Vpcompressq  "ymm1{k1}", ymm0;
-  Vaddpd       xmm0, xmm0, xmm1;                                                # Top 2 plus bottom 2
-
-  Pslldq       xmm0, 2;                                                         # Move centers into double words
-  Psrldq       xmm0, 4;
-  Mov r15, 0b0101;                                                              # Centers to lower quad
-  Kmovq k1, r15;
-  Vpcompressd  "xmm0{k1}", xmm0;                                                # Compress to lower quad
-
-  Vmovq rax, xmm0;                                                              # Result in rax
-  PrintOutRegisterInHex rax;
-
-  my $e = Assemble keep=>'hash';                                                # Assemble
-
-  ok qx($e "")  =~ m(rax: 0000 3F80 0000 3F80);
-  ok qx($e "a") =~ m(rax: 0000 3F80 C000 45B2);
-
-  if (0)                                                                        # Hash various strings
+  if (0 and $develop)                                                           # Hash various strings
    {my %r; my %f; my $count = 0;
     my $N = RegisterSize zmm0;
 
@@ -6611,7 +6616,7 @@ if (1) {                                                                        
           next if $f{$s}++;
           my $r = qx($e "$s");
           say STDERR "$count  $r";
-          if ($r =~ m(^.*rax:\s*(.*)$)m)
+          if ($r =~ m(^.*r15:\s*(.*)$)m)
            {push $r{$1}->@*, $s;
             ++$count;
            }
@@ -6626,7 +6631,7 @@ if (1) {                                                                        
           next if $f{$t}++;
           my $r = qx($e "$t");
           say STDERR "$count  $r";
-          if ($r =~ m(^.*rax:\s*(.*)$)m)
+          if ($r =~ m(^.*r15:\s*(.*)$)m)
            {push $r{$1}->@*, $t;
             ++$count;
            }
