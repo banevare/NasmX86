@@ -72,6 +72,7 @@ vmovd vmovq
 mulpd
 pslldq psrldq
 vsqrtpd
+vmovdqa32 vmovdqa64
 END
 # print STDERR join ' ', sort @i2; exit;
 
@@ -90,10 +91,14 @@ vaddd
 vmulpd vaddpd
 END
 
+  my @i3qdwb =  split /\s+/, <<END;                                             # Triple operand instructions which have qdwb versions
+pinsr pextr
+END
+
   my @i4 =  split /\s+/, <<END;                                                 # Quadruple operand instructions
 END
 
-  my @i4qdwb =  split /\s+/, <<END;                                             # Triple operand instructions which have qdwb versions
+  my @i4qdwb =  split /\s+/, <<END;                                             # Quadruple operand instructions which have qdwb versions
 vpcmpu
 END
 
@@ -110,9 +115,9 @@ END
    {for my $o(@i2qdwb)
      {push @i2, $o.$_ for qw(b w d q);
      }
-#   for my $o(@i3qdwb)
-#    {push @i3, $o.$_ for qw(b w d q);
-#    }
+    for my $o(@i3qdwb)
+     {push @i3, $o.$_ for qw(b w d q);
+     }
     for my $o(@i4qdwb)
      {push @i4, $o.$_ for qw(b w d q);
      }
@@ -431,7 +436,6 @@ sub RegisterSize($)                                                             
 
 sub ClearRegisters(@)                                                           # Clear registers by setting them to zero
  {my (@registers) = @_;                                                         # Registers
-  @_ == 1 or confess;
   for my $r(@registers)
    {my $size = RegisterSize $r;
     Xor    $r, $r     if $size == 8 and $r !~ m(\Ak);
@@ -1302,6 +1306,56 @@ sub ReadFile()                                                                  
 
 #D1 Short Strings                                                               # Operations on Short Strings
 
+sub LoadShortStringFromMemoryToZmm($)                                           # Load the short string addressed by rax into the zmm register with the specified number
+ {my ($zmm) = @_;                                                               # Zmm register to load
+  @_ == 1 or confess;
+
+  my $sub = S                                                                   # Read file
+   {Comment "Load a short string from memory into zmm$zmm";
+    PushR rax;
+    Mov r15b, "[rax]";                                                          # Load first byte which is the length of the string
+    Inc r15;                                                                    # Length field
+    Mov r14, -1;                                                                # Clear bits that we do not wish to load
+    Bzhi r14, r14, r15;
+    Kmovq k1, r14;
+    Vmovdqu8 "zmm${zmm}{k1}", "[rax]";                                          # Load string
+    PopR rax;
+   } name=> "LoadShortStringFromMemoryTozmm$zmm";
+
+  Call $sub;
+ }
+
+sub LengthOfShortString($$)                                                     # Place the length of the short string held in the numbered zmm register into the specified register
+ {my ($reg, $zmm) = @_;                                                         # Register to hold length, number of zmm register containing string
+  @_ == 2 or confess;
+  Pextrb $reg, "xmm${zmm}", 0;                                                  # Length
+ }
+
+sub ConcatenateShortStrings($$)                                                 # Concatenate the right hand short string held in the numbered zmm register to the left hand short string held in the numbered zmm register
+ {my ($left, $right) = @_;                                                      # Target zmm register to load, left hand short string, right short string
+  @_ == 2 or confess;
+
+  my $sub = S                                                                   # Read file
+   {Comment "Concatenate the short string in zmm$right to the short string in zmm$left";
+    LengthOfShortString r15, $right;                                            # Right length
+    Mov   r14, -1;                                                              # Expand mask
+    Bzhi  r14, r14, r15;                                                        # Skip bits for left
+    LengthOfShortString rcx, $left;                                             # Left length
+    Inc   rcx;                                                                  # Skip length
+    Shl   r14, cl;                                                              # Skip length
+    Kmovq k7,  r14;                                                             # Unload mask
+    PushR "zmm${right}";                                                        # Stack right
+    Sub   rsp, rcx;                                                             # Position for masked read
+    Vmovdqu8 "zmm${left}{k7}", "[rsp+1]";                                       # Load right string
+    Add   rsp, rcx;                                                             # Restore stack
+    Add   rsp, RegisterSize zmm0;
+    Dec   rcx;                                                                  # Length of left
+    Add   rcx, r15;                                                             # Length of combined string = length of left plus length of right
+    Pinsrb "xmm${left}", cl, 0;                                                 # Save length in result
+   } name=> "ConcatenateShortStrings${left}and${right}";
+
+  Call $sub;
+ }
 
 #D1 Hash functions                                                              # Hash functions
 
@@ -1320,7 +1374,7 @@ sub Hash()                                                                      
     ForIn                                                                       # Hash in ymm0 sized blocks
      {Vmovdqu ymm1, "[rax]";                                                    # Load data to hash
       Vcvtudq2pd zmm1, ymm1;                                                    # Convert to float
-      Vgetmantps   zmm0, zmm0, 4;                                               # Normalize to 1 to 2, see: https://hjlebbink.github.io/x86doc/html/VGETMANTPD.html
+      Vgetmantps zmm0, zmm0, 4;                                                 # Normalize to 1 to 2, see: https://hjlebbink.github.io/x86doc/html/VGETMANTPD.html
 
       Vmulpd zmm0, zmm1, zmm0;                                                  # Multiply current hash by data
      }
@@ -5794,7 +5848,7 @@ $ENV{PATH} = $ENV{PATH}.":/var/isde:sde";                                       
 if ($^O =~ m(bsd|linux)i)                                                       # Supported systems
  {if (confirmHasCommandLineCommand(q(nasm)) and                                 # Network assembler
       confirmHasCommandLineCommand(q(sde64)))                                   # Intel emulator
-   {plan tests => 58;
+   {plan tests => 62;
    }
   else
    {plan skip_all =>qq(Nasm or Intel 64 emulator not available);
@@ -6259,7 +6313,7 @@ if (1) {                                                                        
   ok Assemble =~ m(tmp);
  }
 
-if (1) {                                                                        # Execute the content of a byte string #TByteString::bash #TByteString::write #TByteString::out #TByteString::unlink #TByteString::ql
+if (!$develop) {                                                                # Execute the content of a byte string #TByteString::bash #TByteString::write #TByteString::out #TByteString::unlink #TByteString::ql
   my $s = CreateByteString;                                                     # Create a string
   $s->ql(<<END);                                                                # Write code to execute
 #!/usr/bin/bash
@@ -6273,6 +6327,9 @@ END
 
   my $u = qx(whoami); chomp($u);
   ok Assemble =~ m($u);
+ }
+else
+ {ok 1;
  }
 
 if (1) {                                                                        # Make a byte string readonly
@@ -6588,8 +6645,6 @@ if (1) {                                                                        
   ok Assemble =~ m(r15: 0000 0000 0000 0004);
  }
 
-latest:;
-
 if (1) {                                                                        # Hash a string #THash
   Mov rax, "[rbp+24]";
   Cstrlen;                                                                      # Length of string to hash
@@ -6648,6 +6703,51 @@ if (1) {                                                                        
    }
  }
 
-unlink $_ for grep {/\A\.\/atmpa/} findFiles('.');
+latest:;
+
+if (1) {                                                                        #TLoadShortStringFromMemoryToZmm
+  my $s = Rb(3, 0x01, 0x02, 0x03);
+  my $t = Rb(7, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a);
+
+  Mov rax, $s;
+  LoadShortStringFromMemoryToZmm(0);
+  Mov rax, $t;
+  LoadShortStringFromMemoryToZmm(1);
+  ConcatenateShortStrings(0, 1);
+  PrintOutRegisterInHex xmm0;
+  PrintOutRegisterInHex xmm1;
+
+  my $r = Assemble;
+  ok $r =~ m(xmm0: 0000 0000 000A 0908   0706 0504 0302 010A);
+  ok $r =~ m(xmm1: 0000 0000 0000 0000   0A09 0807 0605 0407);
+ }
+
+if (1) {                                                                        # Concatenate empty string to itself 4 times
+  my $s = Rb(0);
+  Mov rax, $s;
+  LoadShortStringFromMemoryToZmm(0);
+  ConcatenateShortStrings(0, 0);
+  ConcatenateShortStrings(0, 0);
+  ConcatenateShortStrings(0, 0);
+  ConcatenateShortStrings(0, 0);
+  PrintOutRegisterInHex xmm0;
+
+  ok Assemble =~ m(xmm0: 0000 0000 0000 0000   0000 0000 0000 0000);
+ }
+
+if (1) {                                                                        # Concatenate string of length 1 to itself 4 times
+  my $s = Rb(1, 0x01);
+  Mov rax, $s;
+  LoadShortStringFromMemoryToZmm(0);
+  ConcatenateShortStrings(0, 0);
+  ConcatenateShortStrings(0, 0);
+  ConcatenateShortStrings(0, 0);
+  ConcatenateShortStrings(0, 0);
+  PrintOutRegisterInHex xmm0;
+
+  ok Assemble =~ m(xmm0: 0101 0101 0101 0101   0101 0101 0101 0110);
+ }
+
+unlink $_ for grep {/\A\.\/atmpa/} findFiles('.');                              # Remove temporary files
 
 lll "Finished:", time - $start,  "bytes assembled:",   $totalBytesAssembled;
