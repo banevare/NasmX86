@@ -498,13 +498,25 @@ END
    {Comment "if then else";
     my $endIf     = Label;
     my $startElse = Label;
-    Jz $startElse;
+    push @text, <<END;
+    $jump $startElse
+END
     &$then;
     Jmp $endIf;
     SetLabel $startElse;
     &$else;
     SetLabel  $endIf;
    }
+ }
+
+sub IfEq(&;&)                                                                   # If equal execute the then body else the else body
+ {my ($then, $else) = @_;                                                       # Then - required , else - optional
+  If(q(Jne), $then, $else);                                                     # Opposite code
+ }
+
+sub IfNe(&;&)                                                                   # If not equal execute the then body else the else body
+ {my ($then, $else) = @_;                                                       # Then - required , else - optional
+  If(q(Je), $then, $else);                                                      # Opposite code
  }
 
 sub IfNz(&;&)                                                                   # If not zero execute the then body else the else body
@@ -515,6 +527,21 @@ sub IfNz(&;&)                                                                   
 sub IfLt(&;&)                                                                   # If less than execute the then body else the else body
  {my ($then, $else) = @_;                                                       # Then - required , else - optional
   If(q(Jge), $then, $else);                                                     # Opposite code
+ }
+
+sub IfLe(&;&)                                                                   # If less than or equal execute the then body else the else body
+ {my ($then, $else) = @_;                                                       # Then - required , else - optional
+  If(q(Jg), $then, $else);                                                      # Opposite code
+ }
+
+sub IfGt(&;&)                                                                   # If greater than execute the then body else the else body
+ {my ($then, $else) = @_;                                                       # Then - required , else - optional
+  If(q(Jle), $then, $else);                                                     # Opposite code
+ }
+
+sub IfGe(&;&)                                                                   # If greater than or equal execute the then body else the else body
+ {my ($then, $else) = @_;                                                       # Then - required , else - optional
+  If(q(Jl), $then, $else);                                                      # Opposite code
  }
 
 sub For(&$$$)                                                                   # For - iterate the body as long as register is less than limit incrementing by increment each time
@@ -5900,7 +5927,7 @@ $ENV{PATH} = $ENV{PATH}.":/var/isde:sde";                                       
 if ($^O =~ m(bsd|linux)i)                                                       # Supported systems
  {if (confirmHasCommandLineCommand(q(nasm)) and                                 # Network assembler
       confirmHasCommandLineCommand(q(sde64)))                                   # Intel emulator
-   {plan tests => 62;
+   {plan tests => 63;
    }
   else
    {plan skip_all =>qq(Nasm or Intel 64 emulator not available);
@@ -6783,6 +6810,42 @@ if (1) {                                                                        
   PrintOutRegisterInHex xmm0;
 
   ok Assemble =~ m(xmm0: 0000 0000 0000 0000   0000 0000 0000 0000);
+ }
+
+if (1) {                                                                        #Tif #TifEq #TifNe #TifLe #TifLt #TifGe #TifGt
+  my $cmp = sub
+   {my ($a, $b) = @_;
+
+    for my $op(qw(eq ne lt le gt ge))
+     {Mov rax, $a;
+      Cmp rax, $b;
+      my $Op = ucfirst $op;
+      eval qq(If$Op {PrintOutStringNL("$a $op $b")} sub {PrintOutStringNL("$a NOT $op $b")});
+     }
+   };
+  &$cmp(1,1);
+  &$cmp(1,2);
+  &$cmp(3,2);
+  is_deeply Assemble, <<END;
+1 eq 1
+1 NOT ne 1
+1 NOT lt 1
+1 le 1
+1 NOT gt 1
+1 ge 1
+1 NOT eq 2
+1 ne 2
+1 lt 2
+1 le 2
+1 NOT gt 2
+1 NOT ge 2
+3 NOT eq 2
+3 ne 2
+3 NOT lt 2
+3 NOT le 2
+3 gt 2
+3 ge 2
+END
  }
 
 latest:;
