@@ -1860,6 +1860,7 @@ sub GenTree($$)                                                                 
   my $D = $k * $dataLength;
 
   my $arenaTree = genHash("ArenaTree",                                          # A node in an arena tree
+    allocBlock  => undef,
     byteString  => $byteString,
     dump        => undef,
     node        => undef,
@@ -1952,6 +1953,16 @@ END
     eval $s;
     confess $@ if $@;
    }
+
+  $arenaTree->allocBlock = sub                                                  # Allocate a zmm block in the underlying byte string of the tree addressed by rax and return its address in r15
+   {@_ == 0 or confess;
+    PushR my @regs = (rax, rdi);
+    Mov rdi, RegisterSize zmm0;                                                 # Size of allocation
+    $arenaTree->byteString->allocate;
+    Mov r15, rax;                                                               # Return allocation in r15
+    PopR @regs;                                                                 # Restore
+   };
+
   $arenaTree                                                                    # Description of this tree
  }
 
