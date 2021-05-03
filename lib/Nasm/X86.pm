@@ -482,13 +482,15 @@ sub InsertIntoXyz($$$;$)                                                        
 
 #D1 Structured Programming                                                      # Structured programming constructs
 
-sub If(&;&)                                                                     # If
- {my ($then, $else) = @_;                                                       # Then - required , else - optional
-  @_ >= 1 or confess;
-  if (@_ == 1)                                                                  # No else
+sub If($$;$)                                                                    # If
+ {my ($jump, $then, $else) = @_;                                                # Jump op code, Then - required , else - optional
+  @_ >= 2 && @_ <= 3 or confess;
+  if (!$else)                                                                   # No else
    {Comment "if then";
     my $end = Label;
-    Jz $end;
+    push @text, <<END;
+    $jump $end;
+END
     &$then;
     SetLabel $end;
    }
@@ -503,6 +505,16 @@ sub If(&;&)                                                                     
     &$else;
     SetLabel  $endIf;
    }
+ }
+
+sub IfNz(&;&)                                                                   # If not zero execute the then body else the else body
+ {my ($then, $else) = @_;                                                       # Then - required , else - optional
+  If(q(Jz), $then, $else);                                                      # Opposite code
+ }
+
+sub IfLt(&;&)                                                                   # If less than execute the then body else the else body
+ {my ($then, $else) = @_;                                                       # Then - required , else - optional
+  If(q(Jge), $then, $else);                                                     # Opposite code
  }
 
 sub For(&$$$)                                                                   # For - iterate the body as long as register is less than limit incrementing by increment each time
@@ -548,7 +560,7 @@ sub ForIn(&$$$$)                                                                
   SetLabel $end;
 
   Sub $limit, $register;                                                        # Size of remainder
-  If                                                                            # Non remainder
+  IfNz                                                                          # Non remainder
    {&$last;                                                                     # Process remainder
    }
  }
@@ -784,7 +796,7 @@ sub PrintOutZF                                                                  
  {@_ == 0 or confess;
 
   Pushfq;
-  If {PrintOutStringNL "ZF=0"} sub {PrintOutStringNL "ZF=1"};
+  IfNz {PrintOutStringNL "ZF=0"} sub {PrintOutStringNL "ZF=1"};
   Popfq;
  }
 
@@ -1776,7 +1788,7 @@ sub ByteString::bash($)                                                         
     Fork;                                                                       # Fork
 
     Test rax,rax;
-    If                                                                          # Parent
+    IfNz                                                                        # Parent
      {WaitPid;
      }
     sub                                                                         # Child
@@ -1860,6 +1872,16 @@ sub ByteString::putBlock($$;$)                                                  
  {my ($byteString, $zmm, $addressRegister) = @_;                                # Byte string descriptor, number of zmm register, optional address register - rax by default
   my $r = $addressRegister // q(rax);
   Vmovdqu64 "[rax]", "zmm$zmm";                                                 # Write into memory
+ }
+
+sub ByteString::allocBlade($$)                                                  # Allocate sufficient blocks to make a blade to hold a string of the specified length held in in rdi in the byteString addressed by rax and return its offset in r15
+ {my ($byteString, $length) = @_;                                               # Byte string descriptor, number of zmm register, optional address register - rax by default
+  SaveFirstFour;
+  Cmp rdi, RegisterSize(zmm0);                                                  # First byte holds the length as a byte if length is less than 64
+  IfLt
+   {
+   };
+  RestoreFirstFour;
  }
 
 #D1 Tree                                                                        # Tree operations
@@ -1957,7 +1979,7 @@ sub GenTree($$)                                                                 
     PopR rax, rdi;
     Mov rsi, $arenaTree->up->addr("rax+rdi");                                   # Load up field
     Test rsi, rsi;                                                              # Test up field
-    If {SetZF} sub {ClearZF};
+    IfNz {SetZF} sub {ClearZF};
     RestoreFirstFour;
    };
 
@@ -6042,14 +6064,14 @@ if (1) {                                                                        
 if (1) {                                                                        #TIf
   Mov rax, 0;
   Test rax,rax;
-  If
+  IfNz
    {PrintOutRegisterInHex rax;
    } sub
    {PrintOutRegisterInHex rbx;
    };
   Mov rax, 1;
   Test rax,rax;
-  If
+  IfNz
    {PrintOutRegisterInHex rcx;
    } sub
    {PrintOutRegisterInHex rdx;
@@ -6062,7 +6084,7 @@ if (1) {                                                                        
   Fork;                                                                         # Fork
 
   Test rax,rax;
-  If                                                                            # Parent
+  IfNz                                                                          # Parent
    {Mov rbx, rax;
     WaitPid;
     PrintOutRegisterInHex rax;
@@ -6516,7 +6538,7 @@ if (1) {                                                                        
   cxr
    {$t->dump->("Root");                                                         # Root node after insertions
     $t->isRoot->();
-    If {PrintOutStringNL "root"} sub {PrintOutStringNL "NOT root"};
+    IfNz {PrintOutStringNL "root"} sub {PrintOutStringNL "NOT root"};
    } 1;
 
   PushR xmm0;                                                                   # Dump underlying  byte string
