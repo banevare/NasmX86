@@ -1835,6 +1835,35 @@ sub ByteString::dump($)                                                         
   Call $sub;
  }
 
+sub ByteString::allocBlock($)                                                   # Allocate a block to hold a zmm register in the byte string addressed by rax and return its address in r15.
+ {my ($byteString) = @_;                                                        # Byte string descriptor
+
+  my $sub = S                                                                   # Bash string
+   {Comment "Allocate a zmm block in a byte string";
+    PushR my @regs = (rax, rdi);                                                # Size of block
+    Mov rdi, RegisterSize zmm0;                                                 # Size of allocation
+    $byteString->allocate;
+    Mov r15, rax;                                                               # Return allocation in r15
+    PopR @regs;                                                                 # Restore
+   } name => "ByteString::allocBlock";
+
+  Call $sub;
+ }
+
+sub ByteString::getBlock($$;$)                                                  # Get the block addressed by the address register and load it into the numbered zmm register
+ {my ($byteString, $zmm, $addressRegister) = @_;                                # Byte string descriptor, number of zmm register, optional address register - rax by default
+  my $r = $addressRegister // q(rax);
+  Vmovdqu64 "zmm$zmm", "[rax]";                                                 # Read from memory
+ }
+
+sub ByteString::putBlock($$;$)                                                  # Put the contents of the numbered zmm register into the memory addressed by rax
+ {my ($byteString, $zmm, $addressRegister) = @_;                                # Byte string descriptor, number of zmm register, optional address register - rax by default
+  my $r = $addressRegister // q(rax);
+  Vmovdqu64 "[rax]", "zmm$zmm";                                                 # Write into memory
+ }
+
+#D1 Tree                                                                        # Tree operations
+
 sub GenTree($$)                                                                 # Generate a set of routines to manage a tree held in a byte string with key and data fields of specified widths.  Allocate a byte string to contain the tree, return its address in xmm0=(0, tree).
  {my ($keyLength, $dataLength) = @_;                                            # Fixed key length in bytes, fixed data length in bytes
   @_ == 2 or confess;
@@ -1860,7 +1889,6 @@ sub GenTree($$)                                                                 
   my $D = $k * $dataLength;
 
   my $arenaTree = genHash("ArenaTree",                                          # A node in an arena tree
-    allocBlock  => undef,
     byteString  => $byteString,
     dump        => undef,
     node        => undef,
@@ -1953,15 +1981,6 @@ END
     eval $s;
     confess $@ if $@;
    }
-
-  $arenaTree->allocBlock = sub                                                  # Allocate a zmm block in the underlying byte string of the tree addressed by rax and return its address in r15
-   {@_ == 0 or confess;
-    PushR my @regs = (rax, rdi);
-    Mov rdi, RegisterSize zmm0;                                                 # Size of allocation
-    $arenaTree->byteString->allocate;
-    Mov r15, rax;                                                               # Return allocation in r15
-    PopR @regs;                                                                 # Restore
-   };
 
   $arenaTree                                                                    # Description of this tree
  }
@@ -6714,8 +6733,6 @@ if (1) {                                                                        
    }
  }
 
-latest:;
-
 if (1) {                                                                        #TLoadShortStringFromMemoryToZmm
   my $s = Rb(3, 0x01, 0x02, 0x03);
   my $t = Rb(7, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a);
@@ -6746,17 +6763,27 @@ if (1) {                                                                        
   ok Assemble =~ m(xmm0: 0000 0000 0000 0000   0000 0000 0000 0000);
  }
 
+latest:;
+
 if (1) {                                                                        # Concatenate string of length 1 to itself 4 times
-  my $s = Rb(1, 0x01);
+  my $s = Rb(4, 1..4);
   Mov rax, $s;
   LoadShortStringFromMemoryToZmm(0);
   ConcatenateShortStrings(0, 0);
   ConcatenateShortStrings(0, 0);
   ConcatenateShortStrings(0, 0);
-  ConcatenateShortStrings(0, 0);
-  PrintOutRegisterInHex xmm0;
 
-  ok Assemble =~ m(xmm0: 0101 0101 0101 0101   0101 0101 0101 0110);
+  my $b = CreateByteString;                                                     # Create a string
+  $b->allocBlock;
+  $b->putBlock(0);
+  $b->getBlock(1);
+  PrintOutRegisterInHex ymm0;
+  PrintOutRegisterInHex ymm1;
+
+  is_deeply Assemble, <<END;
+  ymm0: 0302 0104 0302 0104   0302 0104 0302 0104   0302 0104 0302 0104   0302 0104 0302 0120
+  ymm1: 0302 0104 0302 0104   0302 0104 0302 0104   0302 0104 0302 0104   0302 0104 0302 0120
+END
  }
 
 unlink $_ for grep {/\A\.\/atmpa/} findFiles('.');                              # Remove temporary files
