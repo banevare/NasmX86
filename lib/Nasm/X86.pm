@@ -1900,16 +1900,33 @@ sub ByteString::putBlock($$;$)                                                  
   my $r = $addressRegister // q(rax);
   Vmovdqu64 "[rax]", "zmm$zmm";                                                 # Write into memory
  }
-
-sub ByteString::allocBlade($$)                                                  # Allocate sufficient blocks to make a blade to hold a string of the specified length held in in rdi in the byteString addressed by rax and return its offset in r15
+=pod
+sub ByteString::allocBlade($)                                                   # Allocate a blade  in the byteString addressed by rax and return its offset in r15
  {my ($byteString, $length) = @_;                                               # Byte string descriptor, number of zmm register, optional address register - rax by default
+  my $end     = Label;                                                          # End of subroutine
+  my $b       = RegisterSize zmm0;                                              # Size of a block == size of a zmm register
+  my $sdw     = RegisterSize eax;                                               # Size of a double word
+  my $o       =  $b / $sdw;                                                     # Number of offsets in a blade
+  my $blades  =  $sdw * 8 / $b;                                                 # Blades can go to this depth with double word addressing
+
   SaveFirstFour;
-  Cmp rdi, RegisterSize(zmm0);                                                  # First byte holds the length as a byte if length is less than 64
-  IfLt
-   {
+  Cmp rdi, $bBlade1;                                                            # First byte holds the length as a byte if length is less than 64
+  IfLe                                                                          # One block will do
+   {$byteString->allocBlock;
+    J $end;
    };
+  for my $d(1..$blades)                                                         # Test for all
+  my $two = ($sZmm - $sdw) / $sdw ** 2;                                         # Double blade
+  Cmp rdi, RegisterSize(zmm0);                                                  # First byte holds the length as a byte if length is less than 64
+  IfLt                                                                          # One block will do
+   {$byteString->allocBlock;
+    J $end;
+   };
+  SetLabel $end;                                                                # End of subroutine
   RestoreFirstFour;
  }
+
+=cut
 
 #D1 Tree                                                                        # Tree operations
 
