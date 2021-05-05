@@ -452,7 +452,7 @@ sub SetRegisterToMinusOne($)                                                    
  }
 
 sub SetMaskRegister($$$)                                                        # Set the mask register to ones starting at the specified position for the specified length and zeroes elsewhere
- {my ($mask, $start, $length) = @_;                                             # Mask register to set, byte register containing start position, byte register containing end position
+ {my ($mask, $start, $length) = @_;                                             # Mask register to set, register containing start position, register containing end position
   @_ == 3 or confess;
 
   SetRegisterToMinusOne r15;
