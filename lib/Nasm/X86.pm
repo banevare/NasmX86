@@ -528,8 +528,8 @@ sub LoadTargetZmmFromSourceZmm($$$$$)                                           
   Sub rsp, $sourceOffset;                                                       # Restore stack from source
  }
 
-sub LoadTargetZmmFromMemory($$$$)                                               # Load bytes in the numbered target zmm register at a register specified offset with source bytes from memory addressed by a specified register for a specified register length.
- {my ($target, $targetOffset, $length, $source) = @_;                           # Number of zmm register to load, register containing start or 0 if from the start, register addressing memory to laod from, register containing length
+sub LoadTargetZmmFromMemory($$$$)                                               # Load bytes into the numbered target zmm register at a register specified offset with source bytes from memory addressed by a specified register for a specified register length from memory adddressed by a specified register.
+ {my ($target, $targetOffset, $length, $source) = @_;                           # Number of zmm register to load, register containing start or 0 if from the start, register containing length, register addressing memory to load from
   @_ == 4 or confess;
   Comment "Load Target Zmm from Memory";
   SetMaskRegister(k7, $targetOffset, $length);                                  # Set mask for target
@@ -7102,8 +7102,8 @@ if (1) {                                                                        
   ClearRegisters zmm4;
   Add rax, 4;
   LoadTargetZmmFromMemory 4, rdx, rsi, rax;
-  PrintOutRegisterInHex xmm4;
   Sub rax, 4;
+  PrintOutRegisterInHex xmm4;
 
   is_deeply Assemble, <<END;
   xmm0: 0F0E 0D0C 0B0A 0908   0706 0504 0302 0111
