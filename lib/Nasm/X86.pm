@@ -473,7 +473,7 @@ sub SetZF()                                                                     
  {Cmp rax, rax;
  }
 
-sub ClearZF()                                                                   # Set the zero flag
+sub ClearZF()                                                                   # Clear the zero flag
  {Push rax;
   Mov rax, 1;
   Cmp rax, 0;
@@ -490,6 +490,36 @@ sub MinimumOfTwoRegisters($$)                                                   
  {my ($first, $second) = @_;                                                    # First register, second register
   Cmp $first, $second;
   &IfLt(sub{Mov r15, $first}, sub {Mov r15, $second});
+ }
+
+sub Plus($@)                                                                    # Add the last operands and place the result in the first operand
+ {my ($target, @source) = @_;                                                   # Target register, source registers
+  @_ > 1 or confess "Nothing to add";
+  my %source = map {$_=>1} @source;                                             # Hash of sources
+  confess "Target $target in source list" if $source{$target};                  # Cannot have target on rhs as well
+
+  my $s = shift @source;
+  Mov $target, $s unless $target eq $s;                                         # Move first source to target unless they are the same register
+  Add $target, shift @source while @source;                                     # Add remaining sources
+ }
+
+sub Minus($$$)                                                                  # Subtract the third operand from the second operand and place the result in the first operand
+ {my ($target, $s1, $s2) = @_;                                                  # Target register, register to subtract from, register to subtract
+  @_ == 3 or confess;
+
+  if ($target ne $s1 and $target ne $s2)                                        # Target different from sources
+   {Sub $target, $s2;
+   }
+  elsif ($target eq $s1)                                                        # Target is to be subtracted from
+   {Sub $target, $s2;
+   }
+  elsif ($target eq $s2)                                                        # Target is amount to subtract
+   {Neg $target;
+    Add $target, $s1;
+   }
+  else                                                                          # All the same
+   {confess "Use ClearRegisters instead";
+   }
  }
 
 #D2 Zmm                                                                         # Operations on zmm registers
@@ -6097,7 +6127,7 @@ $ENV{PATH} = $ENV{PATH}.":/var/isde:sde";                                       
 if ($^O =~ m(bsd|linux)i)                                                       # Supported systems
  {if (confirmHasCommandLineCommand(q(nasm)) and                                 # Network assembler
       confirmHasCommandLineCommand(q(sde64)))                                   # Intel emulator
-   {plan tests => 66;
+   {plan tests => 67;
    }
   else
    {plan skip_all =>qq(Nasm or Intel 64 emulator not available);
@@ -7080,8 +7110,6 @@ if (1) {                                                                        
 END
  }
 
-latest:;
-
 if (1) {                                                                        #TLoadTargetZmmFromSourceZmm #TCopyZmm
   my $s = Rb(17, 1..17);
   Mov rax, $s;
@@ -7111,6 +7139,23 @@ if (1) {                                                                        
   xmm2: 0000 0000 0000 0000   0000 0908 0000 0000
   xmm3: 0F0E 0D0C 0B0A 0908   0706 0504 0302 0111
   xmm4: 0000 0000 0000 0504   0000 0000 0000 0000
+END
+ }
+
+latest:;
+
+if (1) {                                                                        #TPlus#TMinus
+  Mov r15, 2;
+  Mov r14, 3;
+  Plus(r13, r15, r14);
+  PrintOutRegisterInHex r13;
+  Mov r12, 1;
+  Minus(r13, r13, r12);
+  PrintOutRegisterInHex r13;
+
+  is_deeply Assemble, <<END;
+   r13: 0000 0000 0000 0005
+   r13: 0000 0000 0000 0004
 END
  }
 
