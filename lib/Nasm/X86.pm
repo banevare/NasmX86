@@ -553,16 +553,18 @@ sub Keep($)                                                                     
   $target                                                                       # Return register containing result
  }
 
-sub Free($)                                                                     # Free a register
- {my ($target) = @_;                                                            # Register to free
-  delete $Keep{$target};
-  for my $c(keys $RegisterContains{$target}->%*)
-   {delete $Keep{$c};
+sub Free(@)                                                                     # Free a register
+ {my (@target) = @_;                                                            # Registers to free
+  for my $target(@target)
+   {delete $Keep{$target};
+    for my $c(keys $RegisterContains{$target}->%*)
+     {delete $Keep{$c};
+     }
+    for my $c(keys $RegisterContainedBy{$target}->%*)
+     {delete $Keep{$c};
+     }
    }
-  for my $c(keys $RegisterContainedBy{$target}->%*)
-   {delete $Keep{$c};
-   }
-  $target                                                                       # Return register containing result
+  @target                                                                       # Return register containing result
  }
 
 sub Copy($$)                                                                    # Copy the source to the target register
@@ -7254,8 +7256,9 @@ if (1) {                                                                        
 
   LoadTargetZmmFromSourceZmm 1, Copy(rdi, 3), 0, Copy(rdx, 8), Copy(rsi, 2);
   PrintOutRegisterInHex xmm1;
+  Free rdi;
 
-  LoadTargetZmmFromSourceZmm 2, Copy(Free rdi, 4), 0, rdx, rsi;
+  LoadTargetZmmFromSourceZmm 2, Copy(rdi, 4), 0, rdx, rsi;
   PrintOutRegisterInHex xmm2;
 
   Copy(zmm3, zmm0);
