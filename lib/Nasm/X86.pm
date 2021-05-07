@@ -55,7 +55,7 @@ BEGIN{
   my @i1 = split /\s+/, <<END;                                                  # Single operand instructions
 bswap call dec inc jmp ja jae jb jbe jc jcxz je jecxz jg jge jl jle
 jna jnae jnb jnbe jnc jne jng jnge jnl jnle jno jnp jns jnz jo jp jpe jpo jrcxz
-js jz not seta setae setb setbe setc sete setg setge setl setle setna setnae
+js jz neg not seta setae setb setbe setc sete setg setge setl setle setna setnae
 setnb setnbe setnc setne setng setnge setnl setno setnp setns setnz seto setp
 setpe setpo sets setz pop push
 END
@@ -480,27 +480,30 @@ sub ClearZF()                                                                   
   Pop rax;
  }
 
-sub MaximumOfTwoRegisters($$)                                                   # Return in r15 the value in the second register if it is greater than the value in the first register
- {my ($first, $second) = @_;                                                    # First register, second register
+sub MaximumOfTwoRegisters($$$)                                                  # Return in the specified register the value in the second register if it is greater than the value in the first register
+ {my ($result, $first, $second) = @_;                                           # Result register, first register, second register
   Cmp $first, $second;
-  &IfGt(sub{Mov r15, $first}, sub {Mov r15, $second});
+  &IfGt(sub{Mov $result, $first}, sub {Mov $result, $second});
+  $result                                                                       # Result register
  }
 
-sub MinimumOfTwoRegisters($$)                                                   # Return in r15 the value in the second register if it is less than the value in the first register
- {my ($first, $second) = @_;                                                    # First register, second register
+sub MinimumOfTwoRegisters($$$)                                                  # Return in the specified register the value in the second register if it is less than the value in the first register
+ {my ($result, $first, $second) = @_;                                           # Result register, first register, second register
   Cmp $first, $second;
-  &IfLt(sub{Mov r15, $first}, sub {Mov r15, $second});
+  &IfLt(sub{Mov $result, $first}, sub {Mov $result, $second});
+  $result                                                                       # Result register
  }
 
 sub Plus($@)                                                                    # Add the last operands and place the result in the first operand
  {my ($target, @source) = @_;                                                   # Target register, source registers
   @_ > 1 or confess "Nothing to add";
-  my %source = map {$_=>1} @source;                                             # Hash of sources
-  confess "Target $target in source list" if $source{$target};                  # Cannot have target on rhs as well
 
   my $s = shift @source;
   Mov $target, $s unless $target eq $s;                                         # Move first source to target unless they are the same register
+  my %source = map {$_=>1} @source;                                             # Hash of sources
+  confess "Target $target in source list" if $source{$target};                  # Cannot have target on rhs as well
   Add $target, shift @source while @source;                                     # Add remaining sources
+  $target                                                                       # Return register containing result
  }
 
 sub Minus($$$)                                                                  # Subtract the third operand from the second operand and place the result in the first operand
@@ -508,7 +511,8 @@ sub Minus($$$)                                                                  
   @_ == 3 or confess;
 
   if ($target ne $s1 and $target ne $s2)                                        # Target different from sources
-   {Sub $target, $s2;
+   {Mov $target, $s1;
+    Sub $target, $s2;
    }
   elsif ($target eq $s1)                                                        # Target is to be subtracted from
    {Sub $target, $s2;
@@ -520,6 +524,7 @@ sub Minus($$$)                                                                  
   else                                                                          # All the same
    {confess "Use ClearRegisters instead";
    }
+  $target                                                                       # Return register containing result
  }
 
 #D2 Zmm                                                                         # Operations on zmm registers
@@ -558,14 +563,16 @@ sub LoadTargetZmmFromSourceZmm($$$$$)                                           
   Sub rsp, $sourceOffset;                                                       # Restore stack from source
  }
 
-sub LoadTargetZmmFromMemory($$$$)                                               # Load bytes into the numbered target zmm register at a register specified offset with source bytes from memory addressed by a specified register for a specified register length from memory adddressed by a specified register.
+sub LoadZmmFromMemory($$$$)                                                     # Load bytes into the numbered target zmm register at a register specified offset with source bytes from memory addressed by a specified register for a specified register length from memory adddressed by a specified register.
  {my ($target, $targetOffset, $length, $source) = @_;                           # Number of zmm register to load, register containing start or 0 if from the start, register containing length, register addressing memory to load from
   @_ == 4 or confess;
   Comment "Load Target Zmm from Memory";
   SetMaskRegister(k7, $targetOffset, $length);                                  # Set mask for target
   Mov r15, $source;
   Sub r15, $targetOffset;                                                       # Position memory for target
-  Vmovdqu8 "zmm${target}{k7}", "[r15]";                                         # Read from stack
+  Vmovdqu8 "zmm${target}{k7}", "[r15]";                                         # Read from memory
+  Add $targetOffset, $length;                                                   # Increment position in target
+  Add $source,       $length;                                                   # Increment position in source
  }
 
 #D1 Structured Programming                                                      # Structured programming constructs
@@ -1452,10 +1459,17 @@ sub LoadShortStringFromMemoryToZmm($)                                           
   Call $sub;
  }
 
-sub LengthOfShortString($$)                                                     # Place the length of the short string held in the numbered zmm register into the specified register
+sub GetLengthOfShortString($$)                                                  # Get the length of the short string held in the numbered zmm register into the specified register
  {my ($reg, $zmm) = @_;                                                         # Register to hold length, number of zmm register containing string
   @_ == 2 or confess;
   Pextrb $reg, "xmm$zmm", 0;                                                    # Length
+ }
+
+sub SetLengthOfShortString($$)                                                  # Set the length of the short string held in the numbered zmm register into the specified register
+ {my ($zmm, $reg) = @_;                                                         # Number of zmm register containing string, register to hold length
+  @_ == 2 or confess;
+  RegisterSize $reg == 1 or confess "Use a byte register";                      # Nasm thinks that PinsrB requires a byte register
+  Pinsrb "xmm$zmm", $reg, 0;                                                    # Set length
  }
 
 sub ConcatenateShortStrings($$)                                                 # Concatenate the right hand short string held in the numbered zmm register to the left hand short string held in the numbered zmm register
@@ -1464,10 +1478,10 @@ sub ConcatenateShortStrings($$)                                                 
 
   my $sub = S                                                                   # Read file
    {Comment "Concatenate the short string in zmm$right to the short string in zmm$left";
-    LengthOfShortString r15, $right;                                            # Right length
+    GetLengthOfShortString r15, $right;                                         # Right length
     Mov   r14, -1;                                                              # Expand mask
     Bzhi  r14, r14, r15;                                                        # Skip bits for left
-    LengthOfShortString rcx, $left;                                             # Left length
+    GetLengthOfShortString rcx, $left;                                          # Left length
     Inc   rcx;                                                                  # Skip length
     Shl   r14, cl;                                                              # Skip length
     Kmovq k7,  r14;                                                             # Unload mask
@@ -2068,7 +2082,7 @@ sub BlockString::appendShortString($$$)                                         
   my $success = Label;                                                          # Label for successful return
   SaveFirstFour;                                                                # Save
   $blockString->getBlockLength($target, rdi);                                   # Length of target
-  LengthOfShortString rsi, $source;                                             # Length of source
+  GetLengthOfShortString rsi, $source;                                             # Length of source
   Mov r15, rsi;                                                                 # Length needed = length of source plus length of target
   Add r15, rdi;
   Cmp r15, $blockString->length0;                                               # Enough length in block ?
@@ -6127,7 +6141,7 @@ $ENV{PATH} = $ENV{PATH}.":/var/isde:sde";                                       
 if ($^O =~ m(bsd|linux)i)                                                       # Supported systems
  {if (confirmHasCommandLineCommand(q(nasm)) and                                 # Network assembler
       confirmHasCommandLineCommand(q(sde64)))                                   # Intel emulator
-   {plan tests => 67;
+   {plan tests => 68;
    }
   else
    {plan skip_all =>qq(Nasm or Intel 64 emulator not available);
@@ -7099,13 +7113,26 @@ END
 if (1) {                                                                        #TMaximumOfTwoRegisters #TMinimumOfTwoRegisters
   Mov rax, 1;
   Mov rdi, 2;
-  MaximumOfTwoRegisters rax, rdi;
-  PrintOutRegisterInHex r15;
-  MinimumOfTwoRegisters rax, rdi;
-  PrintOutRegisterInHex r15;
+  PrintOutRegisterInHex MaximumOfTwoRegisters r15, rax, rdi;
+  PrintOutRegisterInHex MinimumOfTwoRegisters r14, rax, rdi;
 
   is_deeply Assemble, <<END;
    r15: 0000 0000 0000 0002
+   r14: 0000 0000 0000 0001
+END
+ }
+
+if (1) {                                                                        #TPlus#TMinus
+  Mov r15, 2;
+  Mov r14, 3;
+  Plus(r15, r15, r14);
+  PrintOutRegisterInHex r15;
+  Mov r13, 4;
+  Minus(r15, r15, r13);
+  PrintOutRegisterInHex r15;
+
+  is_deeply Assemble, <<END;
+   r15: 0000 0000 0000 0005
    r15: 0000 0000 0000 0001
 END
  }
@@ -7129,7 +7156,7 @@ if (1) {                                                                        
 
   ClearRegisters zmm4;
   Add rax, 4;
-  LoadTargetZmmFromMemory 4, rdx, rsi, rax;
+  LoadZmmFromMemory 4, rdx, rsi, rax;
   Sub rax, 4;
   PrintOutRegisterInHex xmm4;
 
@@ -7144,18 +7171,35 @@ END
 
 latest:;
 
-if (1) {                                                                        #TPlus#TMinus
-  Mov r15, 2;
-  Mov r14, 3;
-  Plus(r13, r15, r14);
-  PrintOutRegisterInHex r13;
-  Mov r12, 1;
-  Minus(r13, r13, r12);
-  PrintOutRegisterInHex r13;
+if (1) {                                                                        #TLoadTargetZmmFromSourceZmm #TCopyZmm
+  my $s = Rb(13, 1..13);
+  my $t = Rb(1..64);
+  Mov rax, $s;
+  LoadShortStringFromMemoryToZmm 0;                                             # Load a sample string
+
+  Mov rax, $t;
+  Mov rdi, 1;                                                                   # Length of move
+  GetLengthOfShortString rsi, 0;                                                # Get current length of zmm0
+  Inc rsi;
+  PrintOutRegisterInHex xmm0;
+  LoadZmmFromMemory 0, rsi, rdi, rax;
+  PrintOutRegisterInHex xmm0;
+  LoadZmmFromMemory 0, rsi, rdi, rax;
+  PrintOutRegisterInHex xmm0;
+
+  Mov r15, 56;
+  Minus rdi, r15, rsi ;
+  LoadZmmFromMemory 0, rsi, rdi, rax;
+  SetLengthOfShortString 0, sil;                                                # Set current length of zmm0
+  PrintOutRegisterInHex xmm0;
+  PrintOutRegisterInHex zmm0;
 
   is_deeply Assemble, <<END;
-   r13: 0000 0000 0000 0005
-   r13: 0000 0000 0000 0004
+  xmm0: 0000 0D0C 0B0A 0908   0706 0504 0302 010D
+  xmm0: 0001 0D0C 0B0A 0908   0706 0504 0302 010D
+  xmm0: 0201 0D0C 0B0A 0908   0706 0504 0302 010D
+  xmm0: 0201 0D0C 0B0A 0908   0706 0504 0302 0138
+  zmm0: 0000 0000 0000 0000   2A29 2827 2625 2423   2221 201F 1E1D 1C1B   1A19 1817 1615 1413   1211 100F 0E0D 0C0B   0A09 0807 0605 0403   0201 0D0C 0B0A 0908   0706 0504 0302 0138
 END
  }
 
