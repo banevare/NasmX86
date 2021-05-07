@@ -535,22 +535,24 @@ sub ClearZF()                                                                   
 
 my %Keep;                                                                       # Registers to keep
 
-sub Keep($)                                                                     # Mark a register so that it keeps its value until we free it
- {my ($target) = @_;                                                            # Register to keep
-  if (my $l = $Keep{$target})
-   {my ($line, $file) = @$l;
-    fff $line, $file, "Register $target in use";
+sub Keep(@)                                                                     # Mark free registers so that they are not updated until we Free them or complain if the register is already in use.
+ {my (@target) = @_;                                                            # Registers to keep
+  for my $target(@target)
+   {if (my $l = $Keep{$target})                                                 # Check wether the register is already in use
+     {my ($line, $file) = @$l;
+      fff $line, $file, "Register $target in use";
+     }
+    my ($p, $f, $l) = caller;
+    my $r = [$l, $f];
+    $Keep{$target} = $r;
+    for my $c(keys $RegisterContains{$target}->%*)
+     {$Keep{$c} = $r;
+     }
+    for my $c(keys $RegisterContainedBy{$target}->%*)
+     {$Keep{$c} = $r;
+     }
    }
-  my ($p, $f, $l) = caller;
-  my $r = [$l, $f];
-  $Keep{$target} = $r;
-  for my $c(keys $RegisterContains{$target}->%*)
-   {$Keep{$c} = $r;
-   }
-  for my $c(keys $RegisterContainedBy{$target}->%*)
-   {$Keep{$c} = $r;
-   }
-  $target                                                                       # Return register containing result
+  $target[0]                                                                    # Return first register
  }
 
 sub Free(@)                                                                     # Free a register
@@ -564,7 +566,7 @@ sub Free(@)                                                                     
      {delete $Keep{$c};
      }
    }
-  @target                                                                       # Return register containing result
+  $target[0]                                                                    # Return first register
  }
 
 sub Copy($$)                                                                    # Copy the source to the target register
@@ -639,11 +641,10 @@ sub Minus($$$)                                                                  
 
 #D2 Zmm                                                                         # Operations on zmm registers
 
-sub InsertIntoXyz($$$;$)                                                        # Shift and insert the specified word, double, quad from rax or the contents of xmm0 into the specified xyz register at the specified position shifting data above it to the left towards higher order bytes.
- {my ($reg, $unit, $pos, $maskRegister) = @_;                                   # Register to insert into, width of insert, position of insert in units from least significant byte starting at 0, optional mask register whose value can be sacrificed
+sub InsertIntoXyz($$$)                                                          # Shift and insert the specified word, double, quad from rax or the contents of xmm0 into the specified xyz register at the specified position shifting data above it to the left towards higher order bytes.
+ {my ($reg, $unit, $pos) = @_;                                                  # Register to insert into, width of insert, position of insert in units from least significant byte starting at 0
 
-  my $k = $maskRegister || k1;                                                  # Choose a mask register
-  PushR k1 unless $maskRegister;                                                # Save mask register
+  Keep my $k = k7;                                                              # Choose a mask register
   PushR $reg;                                                                   # Save register to be modified
   Kxnorq $k, $k, $k;                                                            # Mask to all ones
   Kshiftlq $k, $k, $pos * $unit;                                                # Zero mask data we are going to keep in position
@@ -653,7 +654,7 @@ sub InsertIntoXyz($$$;$)                                                        
   &$u("[rsp+$pos*$unit-$unit]", $a);                                            # Insert data into stack
   Vmovdqu8 "${reg}{$k}", "[rsp-$unit]";                                         # Reload data shifted over
   Add rsp, RegisterSize $reg;                                                   # Skip over target register on stack
-  PopR $k unless $maskRegister;                                                 # Return mask register to its original state unless it can be sacrificed
+  Free $k;                                                                      # Release mask register
  }
 
 sub LoadTargetZmmFromSourceZmm($$$$$)                                           # Load bytes in the numbered target zmm register at a register specified offset with source bytes from a numbered source zmm register at a specified register offset for a specified register length.
@@ -1545,7 +1546,7 @@ sub ReadFile()                                                                  
 
 #D1 Short Strings                                                               # Operations on Short Strings
 
-sub LoadShortStringFromMemoryToZmm($)                                           # Load the short string addressed by rax into the zmm register with the specified number
+sub LoadShortStringFromMemoryToZmm2($)                                           # Load the short string addressed by rax into the zmm register with the specified number
  {my ($zmm) = @_;                                                               # Zmm register to load
   @_ == 1 or confess;
 
@@ -1562,6 +1563,21 @@ sub LoadShortStringFromMemoryToZmm($)                                           
    } name=> "LoadShortStringFromMemoryTozmm$zmm";
 
   Call $sub;
+ }
+
+sub LoadShortStringFromMemoryToZmm($$)                                          # Load the short string addressed by rax into the zmm register with the specified number
+ {my ($zmm, $address) = @_;                                                     # Zmm register to load, address of string in memory
+  @_ == 2 or confess;
+
+  Comment "Load a short string from memory into zmm$zmm from $address";
+  Keep(r15, r14, k7);                                                           # Use these registers
+  Mov r15b, "[$address]";                                                       # Load first byte which is the length of the string
+  Inc r15;                                                                      # Length field
+  Mov r14, -1;                                                                  # Clear bits that we do not wish to load
+  Bzhi r14, r14, r15;
+  Kmovq k7, r14;
+  Vmovdqu8 "zmm${zmm}{k7}", "[$address]";                                       # Load string
+  Free(r15, r14, k7);
  }
 
 sub GetLengthOfShortString($$)                                                  # Get the length of the short string held in the numbered zmm register into the specified register
@@ -6260,7 +6276,7 @@ else
 
 my $start = time;                                                               # Tests
 
-# goto latest;
+#goto latest;
 
 if (1) {                                                                        #TExit #TPrintOutString #TStart #TAssemble
   PrintOutString "Hello World";
@@ -6975,6 +6991,8 @@ if (1) {                                                                        
 END
  }
 
+latest:;
+
 if (1) {                                                                        #TInsertIntoXyz
   my $s    = Rb 0..63;
   Vmovdqu8 xmm0,"[$s]";                                                         # Number each byte
@@ -6983,16 +7001,16 @@ if (1) {                                                                        
   Vmovdqu8 zmm3,"[$s]";
 
   SetRegisterToMinusOne rax;                                                    # Insert some ones
-  InsertIntoXyz(xmm0, 2, 4);
-  InsertIntoXyz(ymm1, 4, 5, k1);
-  InsertIntoXyz(zmm2, 8, 6);
+  InsertIntoXyz xmm0, 2, 4;
+  InsertIntoXyz ymm1, 4, 5;
+  InsertIntoXyz zmm2, 8, 6;
 
   PrintOutRegisterInHex xmm0;                                                   # Print the insertions
   PrintOutRegisterInHex ymm1;
   PrintOutRegisterInHex zmm2;
 
   ClearRegisters xmm0;                                                          # Insert some zeroes
-  InsertIntoXyz(zmm3, 16, 2);
+  InsertIntoXyz zmm3, 16, 2;
   PrintOutRegisterInHex zmm3;
 
   my $r = Assemble;
@@ -7107,10 +7125,8 @@ if (1) {                                                                        
   my $s = Rb(3, 0x01, 0x02, 0x03);
   my $t = Rb(7, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a);
 
-  Mov rax, $s;
-  LoadShortStringFromMemoryToZmm(0);
-  Mov rax, $t;
-  LoadShortStringFromMemoryToZmm(1);
+  LoadShortStringFromMemoryToZmm 0, $s;
+  LoadShortStringFromMemoryToZmm 1, $t;
   ConcatenateShortStrings(0, 1);
   PrintOutRegisterInHex xmm0;
   PrintOutRegisterInHex xmm1;
@@ -7122,8 +7138,7 @@ if (1) {                                                                        
 
 if (1) {                                                                        # Concatenate empty string to itself 4 times
   my $s = Rb(0);
-  Mov rax, $s;
-  LoadShortStringFromMemoryToZmm(0);
+  LoadShortStringFromMemoryToZmm 0, $s;
   ConcatenateShortStrings(0, 0);
   ConcatenateShortStrings(0, 0);
   ConcatenateShortStrings(0, 0);
@@ -7171,8 +7186,7 @@ END
 
 if (0) {                                                                        # Concatenate string of length 1 to itself 4 times
   my $s = Rb(4, 1..4);
-  Mov rax, $s;
-  LoadShortStringFromMemoryToZmm(0);
+  LoadShortStringFromMemoryToZmm 0, $s;
   ConcatenateShortStrings(0, 0);
   ConcatenateShortStrings(0, 0);
   ConcatenateShortStrings(0, 0);
@@ -7245,12 +7259,9 @@ if (1) {                                                                        
 END
  }
 
-latest:;
-
 if (1) {                                                                        #TLoadTargetZmmFromSourceZmm #TCopyZmm
   my $s = Rb(17, 1..17);
-  Copy rax, $s;
-  LoadShortStringFromMemoryToZmm 0;                                             # Load a sample string
+  LoadShortStringFromMemoryToZmm 0, $s;                                         # Load a sample string
   Keep zmm0;
   PrintOutRegisterInHex xmm0;
 
@@ -7265,7 +7276,7 @@ if (1) {                                                                        
   PrintOutRegisterInHex xmm3;
 
   ClearRegisters zmm4;
-  Add rax, 4;
+  Lea rax, "[$s+4]";
   LoadZmmFromMemory 4, rdx, rsi, rax;
   Sub rax, 4;
   PrintOutRegisterInHex xmm4;
@@ -7279,21 +7290,27 @@ if (1) {                                                                        
 END
  }
 
+latest:;
+
 if (1) {                                                                        #TLoadTargetZmmFromSourceZmm #TCopy
   my $s = Rb(13, 1..13);
   my $t = Rb(1..64);
-  Copy rax, $s;
-  LoadShortStringFromMemoryToZmm 0;                                             # Load a sample string
-  Free rax;
+  my $source = rax;                                                             # Address to load from
+  my $start  = rsi;                                                             # Start position in the zmm register
+  my $length = rdi;                                                             # Length of copy
+
+  Copy $source, $s;
+  LoadShortStringFromMemoryToZmm 0, $s;                                         # Load a sample string
+  Free $source;
 
   PrintOutRegisterInHex xmm0;
-  LoadZmmFromMemory 0, Increment(GetLengthOfShortString(rsi, 0)), Copy(rdi, 1), Copy(rax, $t);
+  LoadZmmFromMemory 0, Increment(GetLengthOfShortString($start, 0)), Copy($length, 1), Copy($source, $t);
   PrintOutRegisterInHex xmm0;
-  LoadZmmFromMemory 0, rsi, rdi, rax;
+  LoadZmmFromMemory 0, $start, $length, $source;
   PrintOutRegisterInHex xmm0;
-  Free rdi;
+  Free $length;
 
-  LoadZmmFromMemory 0, rsi, Minus(rdi, Copy(r15, 56), rsi), rax;
+  LoadZmmFromMemory 0, $start, Minus($length, Copy(r15, 56), $start), $source;
   SetLengthOfShortString 0, sil;                                                # Set current length of zmm0
   PrintOutRegisterInHex xmm0, zmm0;
 
