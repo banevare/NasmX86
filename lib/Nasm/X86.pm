@@ -36,6 +36,10 @@ my $sysin  = 0;                                                                 
 my $sysout = 1;                                                                 # File descriptor for standard output
 my $syserr = 2;                                                                 # File descriptor for standard error
 
+my %Registers;                                                                  # The names of all the registers
+my %RegisterContains;                                                           # The registers contained by a a register
+my %RegisterContainedBy;                                                        # The registers contained by a a register
+
 BEGIN{
   my %r = (    map {$_=>[ 8,  '8'  ]}  qw(al bl cl dl r8b r9b r10b r11b r12b r13b r14b r15b sil dil spl bpl ah bh ch dh));
      %r = (%r, map {$_=>[16,  's'  ]}  qw(cs ds es fs gs ss));
@@ -49,6 +53,53 @@ BEGIN{
      %r = (%r, map {$_=>[256, '256']}  qw(ymm0 ymm1 ymm2 ymm3 ymm4 ymm5 ymm6 ymm7 ymm8 ymm9 ymm10 ymm11 ymm12 ymm13 ymm14 ymm15 ymm16 ymm17 ymm18 ymm19 ymm20 ymm21 ymm22 ymm23 ymm24 ymm25 ymm26 ymm27 ymm28 ymm29 ymm30 ymm31));
      %r = (%r, map {$_=>[512, '512']}  qw(zmm0 zmm1 zmm2 zmm3 zmm4 zmm5 zmm6 zmm7 zmm8 zmm9 zmm10 zmm11 zmm12 zmm13 zmm14 zmm15 zmm16 zmm17 zmm18 zmm19 zmm20 zmm21 zmm22 zmm23 zmm24 zmm25 zmm26 zmm27 zmm28 zmm29 zmm30 zmm31));
      %r = (%r, map {$_=>[64,  'm'  ]}  qw(k0 k1 k2 k3 k4 k5 k6 k7));
+
+  %Registers = %r;                                                              # Register names
+
+  my sub registerContains($@)
+   {my ($r, @r) = @_;                                                           # Register, contents
+    while(@r)
+     {my $s = shift @r;
+      $RegisterContains{$r}{$s}++;
+      $r = $s;
+     }
+   }
+
+  for my $c(0..31)
+   {registerContains("zmm$c", "ymm$c", "xmm$c");
+   }
+
+  for my $c(qw(a b c d))
+   {registerContains("r${c}x", "e${c}x", "${c}x", "${c}l"); registerContains("${c}x", "${c}h");
+   }
+
+  for my $c(8..15)
+   {registerContains("r${c}", "r${c}l", "r${c}w", "r${c}b"); registerContains("r${c}", "r${c}d");
+   }
+
+  for my $c(qw(s b))
+   {registerContains("r${c}p", "e${c}p", "${c}p", "${c}pl");
+   }
+
+  for my $c(qw(s d))
+   {registerContains("r${c}i", "e${c}i", "${c}i", "${c}il");
+   }
+
+  for my $i(1..3)                                                               # {$a}{$b} means register a contains register b
+   {for     my $a(keys %RegisterContains)
+     {for   my $b(keys $RegisterContains{$a}->%*)
+       {for my $c(keys $RegisterContains{$b}->%*)
+         {             $RegisterContains{$a}{$c}++;
+         }
+       }
+     }
+   }
+
+  for   my $a(keys %RegisterContains)                                           # {$a}{b} means register a is contained in register b
+   {for my $b(keys $RegisterContains{$a}->%*)
+     {$RegisterContainedBy{$b}{$a}++
+     }
+   }
 
   my @i0 = qw(popfq pushfq rdtsc ret syscall);                                  # Zero operand instructions
 
@@ -480,6 +531,55 @@ sub ClearZF()                                                                   
   Pop rax;
  }
 
+#D2 Arithmetic                                                                  # Arithmetic on registers
+
+my %Keep;                                                                       # Registers to keep
+
+sub Keep($)                                                                     # Mark a register so that it keeps its value until we free it
+ {my ($target) = @_;                                                            # Register to keep
+  if (my $l = $Keep{$target})
+   {my ($line, $file) = @$l;
+    fff $line, $file, "Register $target in use";
+   }
+  my ($p, $f, $l) = caller;
+  my $r = [$l, $f];
+  $Keep{$target} = $r;
+  for my $c(keys $RegisterContains{$target}->%*)
+   {$Keep{$c} = $r;
+   }
+  for my $c(keys $RegisterContainedBy{$target}->%*)
+   {$Keep{$c} = $r;
+   }
+  $target                                                                       # Return register containing result
+ }
+
+sub Free($)                                                                     # Free a register
+ {my ($target) = @_;                                                            # Register to free
+  delete $Keep{$target};
+  for my $c(keys $RegisterContains{$target}->%*)
+   {delete $Keep{$c};
+   }
+  for my $c(keys $RegisterContainedBy{$target}->%*)
+   {delete $Keep{$c};
+   }
+  $target                                                                       # Return register containing result
+ }
+
+sub Copy($$)                                                                    # Copy the source to the target register
+ {my ($target, $source) = @_;                                                   # Target register, source expression
+  Keep $target;
+
+  $Registers{$source} and !$Keep{$source} and confess "$source not set";        # Check that the register has been initialized
+
+  if ($target =~ m(\A(x|y|z)mm\d{1,2}\Z))                                       # Copy x|y|z mm register
+   {Vmovdqu64  $target, $source;
+   }
+  else                                                                          # Normal register
+   {Mov $target, $source;
+   }
+  $target                                                                       # Return register containing result
+ }
+
 sub MaximumOfTwoRegisters($$$)                                                  # Return in the specified register the value in the second register if it is greater than the value in the first register
  {my ($result, $first, $second) = @_;                                           # Result register, first register, second register
   Cmp $first, $second;
@@ -494,10 +594,17 @@ sub MinimumOfTwoRegisters($$$)                                                  
   $result                                                                       # Result register
  }
 
+sub Increment($)                                                                # Increment the specified register
+ {my ($target) = @_;                                                            # Target register
+  @_ == 1 or confess "Nothing to increment";
+  Inc $target;                                                                  # Increment register
+  $target                                                                       # Return register containing result
+ }
+
 sub Plus($@)                                                                    # Add the last operands and place the result in the first operand
  {my ($target, @source) = @_;                                                   # Target register, source registers
   @_ > 1 or confess "Nothing to add";
-
+  Keep $target;                                                                 # Keep the target
   my $s = shift @source;
   Mov $target, $s unless $target eq $s;                                         # Move first source to target unless they are the same register
   my %source = map {$_=>1} @source;                                             # Hash of sources
@@ -509,6 +616,7 @@ sub Plus($@)                                                                    
 sub Minus($$$)                                                                  # Subtract the third operand from the second operand and place the result in the first operand
  {my ($target, $s1, $s2) = @_;                                                  # Target register, register to subtract from, register to subtract
   @_ == 3 or confess;
+  Keep $target;                                                                 # Keep the target
 
   if ($target ne $s1 and $target ne $s2)                                        # Target different from sources
    {Mov $target, $s1;
@@ -528,11 +636,6 @@ sub Minus($$$)                                                                  
  }
 
 #D2 Zmm                                                                         # Operations on zmm registers
-
-sub CopyZmm($$)                                                                 # Copy the source zmm register to a target zmm register
- {my ($target, $source) = @_;                                                   # Zmm register to copy to, Zmm register to copy from
-  Vmovdqu64  $target, $source;
- }
 
 sub InsertIntoXyz($$$;$)                                                        # Shift and insert the specified word, double, quad from rax or the contents of xmm0 into the specified xyz register at the specified position shifting data above it to the left towards higher order bytes.
  {my ($reg, $unit, $pos, $maskRegister) = @_;                                   # Register to insert into, width of insert, position of insert in units from least significant byte starting at 0, optional mask register whose value can be sacrificed
@@ -1463,6 +1566,7 @@ sub GetLengthOfShortString($$)                                                  
  {my ($reg, $zmm) = @_;                                                         # Register to hold length, number of zmm register containing string
   @_ == 2 or confess;
   Pextrb $reg, "xmm$zmm", 0;                                                    # Length
+  Keep $reg                                                                     # Result register
  }
 
 sub SetLengthOfShortString($$)                                                  # Set the length of the short string held in the numbered zmm register into the specified register
@@ -1470,6 +1574,7 @@ sub SetLengthOfShortString($$)                                                  
   @_ == 2 or confess;
   RegisterSize $reg == 1 or confess "Use a byte register";                      # Nasm thinks that PinsrB requires a byte register
   Pinsrb "xmm$zmm", $reg, 0;                                                    # Set length
+  $reg                                                                          # Input register
  }
 
 sub ConcatenateShortStrings($$)                                                 # Concatenate the right hand short string held in the numbered zmm register to the left hand short string held in the numbered zmm register
@@ -2251,7 +2356,7 @@ END
 #D1 Assemble                                                                    # Assemble generated code
 
 sub Start()                                                                     # Initialize the assembler
- {@bss = @data = @rodata = %rodata = %rodatas = %subroutines = @text = ();
+ {@bss = @data = @rodata = %rodata = %rodatas = %subroutines = @text = %Keep = ();
   $Labels = 0;
  }
 
@@ -6153,7 +6258,7 @@ else
 
 my $start = time;                                                               # Tests
 
-#goto latest;
+# goto latest;
 
 if (1) {                                                                        #TExit #TPrintOutString #TStart #TAssemble
   PrintOutString "Hello World";
@@ -7122,36 +7227,38 @@ if (1) {                                                                        
 END
  }
 
-if (1) {                                                                        #TPlus#TMinus
-  Mov r15, 2;
-  Mov r14, 3;
+if (1) {                                                                        #TPlus #TMinus #TFree
+  Copy r15, 2;
+  Copy r14, 3;
+  Free r15;
   Plus(r15, r15, r14);
   PrintOutRegisterInHex r15;
-  Mov r13, 4;
-  Minus(r15, r15, r13);
-  PrintOutRegisterInHex r15;
+  Copy r13, 4;
+  Minus(r12, r15, r13);
+  PrintOutRegisterInHex r12;
 
   is_deeply Assemble, <<END;
    r15: 0000 0000 0000 0005
-   r15: 0000 0000 0000 0001
+   r12: 0000 0000 0000 0001
 END
  }
 
+latest:;
+
 if (1) {                                                                        #TLoadTargetZmmFromSourceZmm #TCopyZmm
   my $s = Rb(17, 1..17);
-  Mov rax, $s;
+  Copy rax, $s;
   LoadShortStringFromMemoryToZmm 0;                                             # Load a sample string
+  Keep zmm0;
   PrintOutRegisterInHex xmm0;
-  Mov rdx, 8;
-  Mov rsi, 2;
-  Mov rdi, 3;
-  LoadTargetZmmFromSourceZmm 1, rdi, 0, rdx, rsi;
+
+  LoadTargetZmmFromSourceZmm 1, Copy(rdi, 3), 0, Copy(rdx, 8), Copy(rsi, 2);
   PrintOutRegisterInHex xmm1;
-  Mov rdi, 4;
-  LoadTargetZmmFromSourceZmm 2, rdi, 0, rdx, rsi;
+
+  LoadTargetZmmFromSourceZmm 2, Copy(Free rdi, 4), 0, rdx, rsi;
   PrintOutRegisterInHex xmm2;
 
-  CopyZmm(zmm3, zmm0);
+  Copy(zmm3, zmm0);
   PrintOutRegisterInHex xmm3;
 
   ClearRegisters zmm4;
@@ -7169,30 +7276,23 @@ if (1) {                                                                        
 END
  }
 
-latest:;
-
-if (1) {                                                                        #TLoadTargetZmmFromSourceZmm #TCopyZmm
+if (1) {                                                                        #TLoadTargetZmmFromSourceZmm #TCopy
   my $s = Rb(13, 1..13);
   my $t = Rb(1..64);
-  Mov rax, $s;
+  Copy rax, $s;
   LoadShortStringFromMemoryToZmm 0;                                             # Load a sample string
+  Free rax;
 
-  Mov rax, $t;
-  Mov rdi, 1;                                                                   # Length of move
-  GetLengthOfShortString rsi, 0;                                                # Get current length of zmm0
-  Inc rsi;
+  PrintOutRegisterInHex xmm0;
+  LoadZmmFromMemory 0, Increment(GetLengthOfShortString(rsi, 0)), Copy(rdi, 1), Copy(rax, $t);
   PrintOutRegisterInHex xmm0;
   LoadZmmFromMemory 0, rsi, rdi, rax;
   PrintOutRegisterInHex xmm0;
-  LoadZmmFromMemory 0, rsi, rdi, rax;
-  PrintOutRegisterInHex xmm0;
+  Free rdi;
 
-  Mov r15, 56;
-  Minus rdi, r15, rsi ;
-  LoadZmmFromMemory 0, rsi, rdi, rax;
+  LoadZmmFromMemory 0, rsi, Minus(rdi, Copy(r15, 56), rsi), rax;
   SetLengthOfShortString 0, sil;                                                # Set current length of zmm0
-  PrintOutRegisterInHex xmm0;
-  PrintOutRegisterInHex zmm0;
+  PrintOutRegisterInHex xmm0, zmm0;
 
   is_deeply Assemble, <<END;
   xmm0: 0000 0D0C 0B0A 0908   0706 0504 0302 010D
