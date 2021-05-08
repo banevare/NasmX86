@@ -37,8 +37,7 @@ my $sysout = 1;                                                                 
 my $syserr = 2;                                                                 # File descriptor for standard error
 
 my %Registers;                                                                  # The names of all the registers
-my %RegisterContains;                                                           # The registers contained by a a register
-my %RegisterContainedBy;                                                        # The registers contained by a a register
+my %RegisterContaining;                                                        # The registers contained by a a register
 
 BEGIN{
   my %r = (    map {$_=>[ 8,  '8'  ]}  qw(al bl cl dl r8b r9b r10b r11b r12b r13b r14b r15b sil dil spl bpl ah bh ch dh));
@@ -56,51 +55,18 @@ BEGIN{
 
   %Registers = %r;                                                              # Register names
 
-  my sub registerContains($@)
+  my sub registerContaining($@)
    {my ($r, @r) = @_;                                                           # Register, contents
-    while(@r)
-     {my $s = shift @r;
-      $RegisterContains{$r}{$s}++;
-      $r = $s;
-     }
+    $RegisterContaining{$r} = $r;                                               # A register contains itself
+    $RegisterContaining{$_} = $r for @r;                                        # Registers contained by a register
    }
 
-  for my $c(0..31)
-   {registerContains("zmm$c", "ymm$c", "xmm$c");
-   }
-
-  for my $c(qw(a b c d))
-   {registerContains("r${c}x", "e${c}x", "${c}x", "${c}l"); registerContains("${c}x", "${c}h");
-   }
-
-  for my $c(8..15)
-   {registerContains("r${c}", "r${c}l", "r${c}w", "r${c}b"); registerContains("r${c}", "r${c}d");
-   }
-
-  for my $c(qw(s b))
-   {registerContains("r${c}p", "e${c}p", "${c}p", "${c}pl");
-   }
-
-  for my $c(qw(s d))
-   {registerContains("r${c}i", "e${c}i", "${c}i", "${c}il");
-   }
-
-  for my $i(1..3)                                                               # {$a}{$b} means register a contains register b
-   {for     my $a(keys %RegisterContains)
-     {for   my $b(keys $RegisterContains{$a}->%*)
-       {for my $c(keys $RegisterContains{$b}->%*)
-         {             $RegisterContains{$a}{$c}++;
-         }
-       }
-     }
-   }
-
-  for   my $a(keys %RegisterContains)                                           # {$a}{b} means register a is contained in register b
-   {for my $b(keys $RegisterContains{$a}->%*)
-     {$RegisterContainedBy{$b}{$a}++
-     }
-   }
-
+  registerContaining("k$_")                                            for 0..7;
+  registerContaining("zmm$_",   "ymm$_", "xmm$_")                      for 0..31;
+  registerContaining("r${_}x", "e${_}x", "${_}x",  "${_}l",  "${_}h")  for qw(a b c d);
+  registerContaining("r${_}",  "r${_}l", "r${_}w", "r${_}b", "r${_}d") for 8..15;
+  registerContaining("r${_}p", "e${_}p", "${_}p",  "${_}pl")           for qw(s b);
+  registerContaining("r${_}i", "e${_}i", "${_}i", "${_}il")            for qw(s d);
   my @i0 = qw(popfq pushfq rdtsc ret syscall);                                  # Zero operand instructions
 
   my @i1 = split /\s+/, <<END;                                                  # Single operand instructions
@@ -283,11 +249,15 @@ END
 
 sub ClearRegisters(@);                                                          # Clear registers by setting them to zero
 sub Comment(@);                                                                 # Insert a comment into the assembly code
+sub Keep(@);                                                                    # Mark free registers so that they are not updated until we Free them or complain if the register is already in use.
+sub KeepFree(@);                                                                # Free registers so that they can be reused
 sub PeekR($);                                                                   # Peek at the register on top of the stack
 sub PopR(@);                                                                    # Pop a list of registers off the stack
+sub PopRR(@);                                                                   # Pop a list of registers off the stack without tracking
 sub PrintOutMemory;                                                             # Print the memory addressed by rax for a length of rdi
 sub PrintOutRegisterInHex(@);                                                   # Print any register as a hex string
-sub PushR(@);
+sub PushR(@);                                                                   # Push a list of registers onto the stack
+sub PushRR(@);                                                                  # Push a list of registers onto the stack without tracking
 sub Syscall();                                                                  # System call in linux 64 format
 
 #D1 Data                                                                        # Layout data
@@ -408,60 +378,60 @@ my @syscallSequence = qw(rax rdi rsi rdx r10 r8 r9);                            
 
 sub SaveFirstFour()                                                             # Save the first 4 parameter registers
  {my $N = 4;
-  Push $_ for @syscallSequence[0..$N-1];
+  PushR $_ for @syscallSequence[0..$N-1];
   $N * &RegisterSize(rax);                                                      # Space occupied by push
  }
 
 sub RestoreFirstFour()                                                          # Restore the first 4 parameter registers
  {my $N = 4;
-  Pop $_ for reverse @syscallSequence[0..$N-1];
+  PopR $_ for reverse @syscallSequence[0..$N-1];
  }
 
 sub RestoreFirstFourExceptRax()                                                 # Restore the first 4 parameter registers except rax so it can return its value
  {my $N = 4;
-  Pop $_ for reverse @syscallSequence[1..$N-1];
+  PopR $_ for reverse @syscallSequence[1..$N-1];
   Add rsp, 1*RegisterSize(rax);
  }
 
 sub RestoreFirstFourExceptRaxAndRdi()                                           # Restore the first 4 parameter registers except rax  and rdi so we can return a pair of values
  {my $N = 4;
-  Pop $_ for reverse @syscallSequence[2..$N-1];
+  PopR $_ for reverse @syscallSequence[2..$N-1];
   Add rsp, 2*RegisterSize(rax);
  }
 
 sub SaveFirstSeven()                                                            # Save the first 7 parameter registers
  {my $N = 7;
-  Push $_ for @syscallSequence[0..$N-1];
+  PushR $_ for @syscallSequence[0..$N-1];
   $N * 1*RegisterSize(rax);                                                       # Space occupied by push
  }
 
 sub RestoreFirstSeven()                                                         # Restore the first 7 parameter registers
  {my $N = 7;
-  Pop $_ for reverse @syscallSequence[0..$N-1];
+  PopR $_ for reverse @syscallSequence[0..$N-1];
  }
 
 sub RestoreFirstSevenExceptRax()                                                # Restore the first 7 parameter registers except rax which is being used to return the result
  {my $N = 7;
-  Pop $_ for reverse @syscallSequence[1..$N-1];
+  PopR $_ for reverse @syscallSequence[1..$N-1];
   Add rsp, 1*RegisterSize(rax);
  }
 
 sub RestoreFirstSevenExceptRaxAndRdi()                                          # Restore the first 7 parameter registers except rax and rdi which are being used to return the results
  {my $N = 7;
-  Pop $_ for reverse @syscallSequence[2..$N-1];
+  PopR $_ for reverse @syscallSequence[2..$N-1];
   Add rsp, 2*RegisterSize(rax);                                                 # Skip rdi and rax
  }
 
 sub ReorderSyscallRegisters(@)                                                  # Map the list of registers provided to the 64 bit system call sequence
  {my (@registers) = @_;                                                         # Registers
-  Push $_ for @syscallSequence[0..$#registers];
-  Push $_ for reverse @registers;
-  Pop  $_ for @syscallSequence[0..$#registers];
+  PushR  @syscallSequence[0..$#registers];
+  PushRR @registers;
+  PopRR  @syscallSequence[0..$#registers];
  }
 
 sub UnReorderSyscallRegisters(@)                                                # Recover the initial values in registers that were reordered
  {my (@registers) = @_;                                                         # Registers
-  Pop  $_ for reverse @syscallSequence[0..$#registers];
+  PopR  @syscallSequence[0..$#registers];
  }
 
 my @xmmRegisters = map {"xmm$_"} 0..31;                                         # The xmm registers
@@ -469,14 +439,14 @@ my @xmmRegisters = map {"xmm$_"} 0..31;                                         
 sub ReorderXmmRegisters(@)                                                      # Map the list of xmm registers provided to 0-31
  {my (@registers) = map {"xmm$_"} @_;                                           # Registers
   my    @r = @xmmRegisters; $#r = $#registers;
-  PushR @r, @registers;
-  PopR  @r;
+  PushRR @r, @registers;
+  PopRR  @r;
  }
 
 sub UnReorderXmmRegisters(@)                                                    # Recover the initial values in the xmm registers that were reordered
  {my (@registers) = @_;                                                         # Registers
   my   @r = @xmmRegisters; $#r = $#registers;
-  PopR @r;
+  PopRR @r;
  }
 
 sub RegisterSize($)                                                             # Return the size of a register
@@ -487,8 +457,9 @@ sub RegisterSize($)                                                             
 
 sub ClearRegisters(@)                                                           # Clear registers by setting them to zero
  {my (@registers) = @_;                                                         # Registers
-  for my $r(@registers)
-   {my $size = RegisterSize $r;
+  for my $r(@registers)                                                         # Each register
+   {Keep $r;                                                                    # Register must not already be in use
+    my $size = RegisterSize $r;
     Xor    $r, $r     if $size == 8 and $r !~ m(\Ak);
     Kxorq  $r, $r, $r if $size == 8 and $r =~ m(\Ak);
     Vpxorq $r, $r     if $size  > 8;
@@ -498,15 +469,15 @@ sub ClearRegisters(@)                                                           
 sub SetRegisterToMinusOne($)                                                    # Set the specified register to -1
  {my ($register) = @_;                                                          # Register to set
   @_ == 1 or confess;
-
-  Mov $register, -1;
+  &Copy($register, -1);
  }
 
 sub SetMaskRegister($$$)                                                        # Set the mask register to ones starting at the specified position for the specified length and zeroes elsewhere
  {my ($mask, $start, $length) = @_;                                             # Mask register to set, register containing start position or 0 for position 0, register containing end position
   @_ == 3 or confess;
 
-  SetRegisterToMinusOne r15;
+  Keep r15, r14;
+  Mov r15, -1;
   if ($start)                                                                   # Non zero start
    {Mov  r14, $start;
     Bzhi r15, r15, r14;
@@ -518,6 +489,7 @@ sub SetMaskRegister($$$)                                                        
    }
   Bzhi r15, r15, r14;
   Kmovq $mask, r15;
+  KeepFree r15, r14;
  }
 
 sub SetZF()                                                                     # Set the zero flag
@@ -534,37 +506,54 @@ sub ClearZF()                                                                   
 #D2 Arithmetic                                                                  # Arithmetic on registers
 
 my %Keep;                                                                       # Registers to keep
+my %KeepStack;                                                                  # Registers keep stack across PushR and PopR
 
 sub Keep(@)                                                                     # Mark free registers so that they are not updated until we Free them or complain if the register is already in use.
  {my (@target) = @_;                                                            # Registers to keep
   for my $target(@target)
-   {if (my $l = $Keep{$target})                                                 # Check wether the register is already in use
+   {my $r = $RegisterContaining{$target};                                       # Containing register
+    if (my $l = $Keep{$r})                                                      # Check whether the register is already in use
      {my ($line, $file) = @$l;
       fff $line, $file, "Register $target in use";
      }
     my ($p, $f, $l) = caller;
-    my $r = [$l, $f];
-    $Keep{$target} = $r;
-    for my $c(keys $RegisterContains{$target}->%*)
-     {$Keep{$c} = $r;
-     }
-    for my $c(keys $RegisterContainedBy{$target}->%*)
-     {$Keep{$c} = $r;
-     }
+    $Keep{$r} = [$l, $f];
    }
   $target[0]                                                                    # Return first register
  }
 
-sub Free(@)                                                                     # Free a register
+sub KeepPush(@)                                                                 # Push the current status of the specified registers and then mark them as free
+ {my (@target) = @_;                                                            # Registers to keep
+  for my $target(@target)
+   {my $r = $RegisterContaining{$target};                                       # Containing register
+    push $KeepStack{$r}->@*, $Keep{$r};                                         # Check whether the register is already in use
+   }
+  KeepFree @target;
+ }                                                                              # Mark them as free
+
+sub KeepPop(@)                                                                  # Reset the status of the specified registers to the status quo ante the last push
+ {my (@target) = @_;                                                            # Registers to keep
+  for my $target(@target)
+   {my $r = $RegisterContaining{$target};                                       # Containing register
+    if (my $s = $KeepStack{$r})                                                 # Stack for register
+     {if (@$s)                                                                  # Stack of previous statuses
+       {$Keep{$r} = pop @$s;                                                    # Reload prior status
+       }
+      else                                                                      # Stack empty
+       {confess "Cannot restore $target as stack is empty";
+       }
+     }
+    else                                                                        # Stack empty
+     {confess "Cannot restore $target as never stacked";
+     }
+   }
+ }                                                                              # Mark them as free
+
+sub KeepFree(@)                                                                 # Free registers so that they can be reused
  {my (@target) = @_;                                                            # Registers to free
   for my $target(@target)
-   {delete $Keep{$target};
-    for my $c(keys $RegisterContains{$target}->%*)
-     {delete $Keep{$c};
-     }
-    for my $c(keys $RegisterContainedBy{$target}->%*)
-     {delete $Keep{$c};
-     }
+   {my $r = $RegisterContaining{$target};                                       # Containing register
+    delete $Keep{$r};
    }
   $target[0]                                                                    # Return first register
  }
@@ -654,14 +643,14 @@ sub InsertIntoXyz($$$)                                                          
   &$u("[rsp+$pos*$unit-$unit]", $a);                                            # Insert data into stack
   Vmovdqu8 "${reg}{$k}", "[rsp-$unit]";                                         # Reload data shifted over
   Add rsp, RegisterSize $reg;                                                   # Skip over target register on stack
-  Free $k;                                                                      # Release mask register
+  KeepFree $k;                                                                  # Release mask register
  }
 
 sub LoadTargetZmmFromSourceZmm($$$$$)                                           # Load bytes in the numbered target zmm register at a register specified offset with source bytes from a numbered source zmm register at a specified register offset for a specified register length.
  {my ($target, $targetOffset, $source, $sourceOffset, $length) = @_;            # Number of zmm register to load, register containing start or 0 if from the start, numbered source zmm register, register containing length, optional offset from stack top
   @_ == 5 or confess;
   SetMaskRegister(k7, $targetOffset, $length);                                  # Set mask for target
-  PushR "zmm$source";                                                           # Stack source
+  PushRR "zmm$source";                                                          # Stack source
   Sub rsp, $targetOffset;                                                       # Position stack for target
   Add rsp, $sourceOffset;                                                       # Position stack for source
   Vmovdqu8 "zmm${target}{k7}", "[rsp]";                                         # Read from stack
@@ -931,8 +920,8 @@ sub PrintOutRegisterInHex(@)                                                    
        {my (@regs) = @_;                                                        # Size in bytes, work registers
         my $s = RegisterSize $r;                                                # Size of the register
         PushR @regs;                                                            # Save work registers
-        PushR $r;                                                               # Place register contents on stack
-        PopR  @regs;                                                            # Load work registers
+        PushRR $r;                                                              # Place register contents on stack - might be a x|y|z - without tracking
+        PopRR  @regs;                                                           # Load work registers without tracking
         for my $i(keys @regs)                                                   # Print work registers to print input register
          {my $R = $regs[$i];
           if ($R !~ m(\Arax))
@@ -942,7 +931,7 @@ sub PrintOutRegisterInHex(@)                                                    
           PrintOutRaxInHex;                                                     # Print work register
           PrintOutString(" ") unless $i == $#regs;
          }
-        PopR @regs;
+        PopR @regs;                                                             # Balance the single push of what might be a large register
        };
       if    ($r =~ m(\A[kr])) {printReg qw(rax)}                                # 64 bit register requested
       elsif ($r =~ m(\Ax))    {printReg qw(rax rbx)}                            # xmm*
@@ -1126,7 +1115,7 @@ sub ReadTimeStampCounter()                                                      
 
 #D2 Push, Pop, Peek                                                             # Generic versions of push, pop, peek
 
-sub PushR(@)                                                                    # Push registers onto the stack
+sub PushRR(@)                                                                   # Push registers onto the stack without tracking
  {my (@r) = @_;                                                                 # Register
   for my $r(@r)
    {my $size = RegisterSize $r;
@@ -1144,7 +1133,13 @@ sub PushR(@)                                                                    
    }
  }
 
-sub PopR(@)                                                                     # Pop registers from the stack
+sub PushR(@)                                                                    # Push registers onto the stack
+ {my (@r) = @_;                                                                 # Register
+  PushRR   @r;                                                                  # Push
+  KeepPush @r;                                                                  # Track
+ }
+
+sub PopRR(@)                                                                    # Pop registers from the stack without tracking
  {my (@r) = @_;                                                                 # Register
   for my $r(reverse @r)                                                         # Pop registers in reverse order
    {my $size = RegisterSize $r;
@@ -1160,6 +1155,12 @@ sub PopR(@)                                                                     
      {Pop $r;
      }
    }
+ }
+
+sub PopR(@)                                                                     # Pop registers from the stack
+ {my (@r) = @_;                                                                 # Register
+  PopRR   @r;                                                                   # Pop registers from the stack without tracking
+  KeepPop @r;                                                                   # Track
  }
 
 sub PeekR($)                                                                    # Peek at register on stack
@@ -1577,7 +1578,7 @@ sub LoadShortStringFromMemoryToZmm($$)                                          
   Bzhi r14, r14, r15;
   Kmovq k7, r14;
   Vmovdqu8 "zmm${zmm}{k7}", "[$address]";                                       # Load string
-  Free(r15, r14, k7);
+  KeepFree(r15, r14, k7);
  }
 
 sub GetLengthOfShortString($$)                                                  # Get the length of the short string held in the numbered zmm register into the specified register
@@ -2268,8 +2269,8 @@ sub GenTree($$)                                                                 
   ClearRegisters rdi;                                                           # Zero
   Push rdi;                                                                     # Format stack for xmm0
   Push rax;
-  PopR xmm0;                                                                    # Put result in xmm0
-  PopR @regs;                                                                   # Restore stack
+  PopRR xmm0;                                                                   # Put result in xmm0
+  PopRR @regs;                                                                  # Restore stack
 
   my $K = $k * $keyLength;
   my $D = $k * $dataLength;
@@ -2352,10 +2353,10 @@ sub GenTree($$)                                                                 
     $arenaTree->insertXXXX = sub                                                # Insert the node addressed by xmm1 left under the node addressed by xmm0
      {@_ == 0 or confess;
       SaveFirstFour;                                                            # A check that we are in the same tree would be a good idea here.
-      PushR xmm0;                                                               # Parse xmm0
-      PopR rdi, rax;
-      PushR xmm1;                                                               # Parse xmm0
-      PopR rsi, rdx;
+      PushRR xmm0;                                                              # Parse xmm0
+      PopRR rdi, rax;
+      PushRR xmm1;                                                              # Parse xmm0
+      PopRR rsi, rdx;
       Mov $arenaTree->xxxx->addr("rax+rdi"), rsi;                               # XXXX
       Mov $arenaTree->up  ->addr("rdx+rsi"), rdi;                               # Up
       RestoreFirstFour;
@@ -2374,7 +2375,7 @@ END
 #D1 Assemble                                                                    # Assemble generated code
 
 sub Start()                                                                     # Initialize the assembler
- {@bss = @data = @rodata = %rodata = %rodatas = %subroutines = @text = %Keep = ();
+ {@bss = @data = @rodata = %rodata = %rodatas = %subroutines = @text = %Keep = %KeepStack = ();
   $Labels = 0;
  }
 
@@ -2382,7 +2383,7 @@ sub Exit(;$)                                                                    
  {my ($c) = @_;                                                                 # Return code
   if (@_ == 0 or $c == 0)
    {Comment "Exit code: 0";
-    ClearRegisters rdi;
+    Mov rdi, 0;
    }
   elsif (@_ == 1)
    {Comment "Exit code: $c";
@@ -6648,7 +6649,7 @@ if (1) {                                                                        
   Mov rax, 1;  Mov rdi, 2;  Mov rsi,  3;  Mov rdx,  4;
   Mov r8,  8;  Mov r9,  9;  Mov r10, 10;  Mov r11, 11;
 
-  ReorderSyscallRegisters   r8,r9;                                              # Reorder the registers fof syscall
+  ReorderSyscallRegisters   r8,r9;                                              # Reorder the registers for syscall
   PrintOutRegisterInHex rax;
   PrintOutRegisterInHex rdi;
 
@@ -6878,7 +6879,7 @@ END
   ok 8 == RegisterSize rax;
  }
 
-if (1) {                                                                        #TGenTree #TUnReorderXmmRegisters #TReorderXmmRegisters #TPrintOutStringNL #Tcxr #TByteString::dump
+if (0) {                                                                        #TGenTree #TUnReorderXmmRegisters #TReorderXmmRegisters #TPrintOutStringNL #Tcxr #TByteString::dump
   my $t = GenTree(2,2);                                                         # Tree description
   $t->node->();                                                                 # Root
   Movdqa xmm1, xmm0;                                                            # Root is in xmm1
@@ -6905,8 +6906,8 @@ if (1) {                                                                        
     IfNz {PrintOutStringNL "root"} sub {PrintOutStringNL "NOT root"};
    } 1;
 
-  PushR xmm0;                                                                   # Dump underlying  byte string
-  PopR rdi, rax;
+  PushRR xmm0;                                                                  # Dump underlying  byte string
+  PopRR rdi, rax;
   $t->byteString->dump;
 
   Exit;                                                                         # Return to operating system
@@ -6932,6 +6933,9 @@ Byte String
   Size: 0000 0000 0000 1000
   Used: 0000 0000 0000 01E0
 END
+ }
+else
+ {ok 1;
  }
 
 if (1) {                                                                        #TRb #TRd #TRq #TRw #TDb #TDd #TDq #TDw #TCopyMemory
@@ -6961,8 +6965,7 @@ if (1) {                                                                        
   Mov rax, -1;
   Mov cl, 30;
   Shl rax, cl;
-  PushR rax;
-  PopR  k0;
+  Kmovq k0, rax;
   PrintOutRegisterInHex k0;
 
   ok Assemble =~ m(k0: FFFF FFFF C000 0000)s;
@@ -6973,8 +6976,7 @@ if (1) {                                                                        
   Bts rax, 14;
   Not rax;
   PrintOutRegisterInHex rax;
-  PushR rax;
-  PopR  k1;
+  Kmovq k1, rax;
   PrintOutRegisterInHex k1;
   Mov rax, 1;
   Vpbroadcastb zmm0, rax;
@@ -6990,8 +6992,6 @@ if (1) {                                                                        
   zmm1: 0101 0101 0000 0000   0101 0101 0101 0101   0101 0101 0101 0101   0101 0101 0101 0101   0101 0101 0101 0101   0101 0101 0101 0101   0101 0101 0101 0101   0101 0101 0101 0101
 END
  }
-
-latest:;
 
 if (1) {                                                                        #TInsertIntoXyz
   my $s    = Rb 0..63;
@@ -7246,7 +7246,7 @@ END
 if (1) {                                                                        #TPlus #TMinus #TFree
   Copy r15, 2;
   Copy r14, 3;
-  Free r15;
+  KeepFree r15;
   Plus(r15, r15, r14);
   PrintOutRegisterInHex r15;
   Copy r13, 4;
@@ -7264,10 +7264,9 @@ if (1) {                                                                        
   LoadShortStringFromMemoryToZmm 0, $s;                                         # Load a sample string
   Keep zmm0;
   PrintOutRegisterInHex xmm0;
-
   LoadTargetZmmFromSourceZmm 1, Copy(rdi, 3), 0, Copy(rdx, 8), Copy(rsi, 2);
   PrintOutRegisterInHex xmm1;
-  Free rdi;
+  KeepFree rdi;
 
   LoadTargetZmmFromSourceZmm 2, Copy(rdi, 4), 0, rdx, rsi;
   PrintOutRegisterInHex xmm2;
@@ -7301,16 +7300,14 @@ if (1) {                                                                        
 
   Copy $source, $s;
   LoadShortStringFromMemoryToZmm 0, $s;                                         # Load a sample string
-  Free $source;
-
+  KeepFree $source;
   PrintOutRegisterInHex xmm0;
   LoadZmmFromMemory 0, Increment(GetLengthOfShortString($start, 0)), Copy($length, 1), Copy($source, $t);
   PrintOutRegisterInHex xmm0;
   LoadZmmFromMemory 0, $start, $length, $source;
   PrintOutRegisterInHex xmm0;
-  Free $length;
-
-  LoadZmmFromMemory 0, $start, Minus($length, Copy(r15, 56), $start), $source;
+  KeepFree $length;
+  LoadZmmFromMemory 0, $start, Minus($length, Copy(r13, 56), $start), $source;
   SetLengthOfShortString 0, sil;                                                # Set current length of zmm0
   PrintOutRegisterInHex xmm0, zmm0;
 
