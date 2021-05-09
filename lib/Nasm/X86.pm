@@ -545,13 +545,13 @@ sub Variable($$$)                                                               
    );
  }
 
-sub Vb($$) {&Variable(0, @_)}
-sub Vw($$) {&Variable(1, @_)}
-sub Vd($$) {&Variable(2, @_)}
-sub Vq($$) {&Variable(3, @_)}
-sub Vx($$) {&Variable(4, @_)}
-sub Vy($$) {&Variable(5, @_)}
-sub Vz($$) {&Variable(6, @_)}
+sub Vb(*$) {&Variable(0, @_)}
+sub Vw(*$) {&Variable(1, @_)}
+sub Vd(*$) {&Variable(2, @_)}
+sub Vq(*$) {&Variable(3, @_)}
+sub Vx(*$) {&Variable(4, @_)}
+sub Vy(*$) {&Variable(5, @_)}
+sub Vz(*$) {&Variable(6, @_)}
 
 if (1)                                                                          # Define operator overloading for Variables
  {package Variable;
@@ -578,8 +578,8 @@ sub Variable::arithmetic($$$)                                                   
  {my ($op, $left, $right) = @_;                                                 # Operator, Left variable,  right variable
 
   my $l = $left ->address;
-  my $r = $right->address;
-  if ($left->size == 3 and $right->size == 3)
+  my $r = ref($right) ? $right->address : $right;                               # Right can be either a variable reference or a constant
+  if ($left->size == 3 and ! ref($right) || $right->size == 3)
    {PushRR r15;
     Mov r15, $l;
     &$op(r15, $r);
@@ -609,9 +609,8 @@ sub Variable::division($$$)                                                     
  {my ($op, $left, $right) = @_;                                                 # Operator, Left variable,  right variable
 
   my $l = $left ->address;
-  my $r = $right->address;
-
-  if ($left->size == 3 and $right->size == 3)
+  my $r = ref($right) ? $right->address : $right;                               # Right can be either a variable reference or a constant
+  if ($left->size == 3 and ! ref($right) || $right->size == 3)
    {PushRR my @regs = (rax, rdx, r15);
     Mov rax, $l;
     Mov r15, $r;
@@ -637,8 +636,8 @@ sub Variable::boolean($$$)                                                      
  {my ($sub, $left, $right) = @_;                                                # Operator, Left variable,  right variable
 
   my $l = $left ->address;
-  my $r = $right->address;
-  if ($left->size == 3 and $right->size == 3)
+  my $r = ref($right) ? $right->address : $right;                               # Right can be either a variable reference or a constant
+  if ($left->size == 3 and ! ref($right) || $right->size == 3)
    {PushRR r15;
     Mov r15, $l;
     Cmp r15, $r;
@@ -665,6 +664,16 @@ sub Variable::print($)                                                          
   PushRR my @regs = (rax, rdi);
   Mov rax, $left->label;
   Mov rdi, 8;
+  &PrintOutMemoryInHexNL();
+  PopRR @regs;
+ }
+
+sub Variable::dump($)                                                           # Dump the value of a variable on stdout
+ {my ($left) = @_;                                                              # Left variable
+  PushRR my @regs = (rax, rdi);
+  Mov rax, $left->label;
+  Mov rdi, 8;
+  &PrintOutString($left->name.": ");
   &PrintOutMemoryInHexNL();
   PopRR @regs;
  }
@@ -869,9 +878,17 @@ sub LoadZmmFromMemory($$$$)                                                     
 #D1 Structured Programming                                                      # Structured programming constructs
 
 sub If($$;$)                                                                    # If
- {my ($jump, $then, $else) = @_;                                                # Jump op code, Then - required , else - optional
+ {my ($jump, $then, $else) = @_;                                                # Jump op code of variable, then - required , else - optional
   @_ >= 2 && @_ <= 3 or confess;
-  if (!$else)                                                                   # No else
+
+  if (ref($jump))                                                               # Variable reference - non zero then then else else
+   {PushRR r15;
+    Mov r15, $jump->address;
+    Cmp r15,0;
+    PopRR r15;
+    __SUB__->(q(Jz), $then, $else);
+   }
+  elsif (!$else)                                                                # No else
    {Comment "if then";
     my $end = Label;
     push @text, <<END;
@@ -6560,7 +6577,7 @@ $ENV{PATH} = $ENV{PATH}.":/var/isde:sde";                                       
 if ($^O =~ m(bsd|linux)i)                                                       # Supported systems
  {if (confirmHasCommandLineCommand(q(nasm)) and                                 # Network assembler
       confirmHasCommandLineCommand(q(sde64)))                                   # Intel emulator
-   {plan tests => 69;
+   {plan tests => 70;
    }
   else
    {plan skip_all =>qq(Nasm or Intel 64 emulator not available);
@@ -7618,20 +7635,20 @@ END
 
 latest:;
 
-if (1) {                                                                        #TLoadTargetZmmFromSourceZmm #TCopy
-  my $a = Vq("a", 3); $a->print;
-  my $b = Vq("b", 2); $b->print;
-  my $c = $a + $b;    $c->print;
-  my $d = $c - $a;    $d->print;
-  my $e = $d == $b;   $e->print;
-  my $f = $d != $b;   $f->print;
-  my $g = $a * $b;    $g->print;
-  my $h = $g / $b;    $h->print;
-  my $i = $a % $b;    $i->print;
+if (1) {                                                                        #TVq  #TVariable::print
+  my $a = Vq(a, 3);   $a->print;
+  my $c = $a +  2;    $c->print;
+  my $d = $c -  $a;   $d->print;
+  my $e = $d == 2;    $e->print;
+  my $f = $d != 2;    $f->print;
+  my $g = $a *  2;    $g->print;
+  my $h = $g /  2;    $h->print;
+  my $i = $a %  2;    $i->print;
+
+  If($a == 3, sub{PrintOutStringNL "a == 3"});
 
   is_deeply Assemble, <<END;
 0300 0000 0000 0000
-0200 0000 0000 0000
 0500 0000 0000 0000
 0200 0000 0000 0000
 0100 0000 0000 0000
@@ -7639,6 +7656,34 @@ if (1) {                                                                        
 0600 0000 0000 0000
 0300 0000 0000 0000
 0100 0000 0000 0000
+a == 3
+END
+ }
+
+if (1) {                                                                         #TVariable::dump
+  my $a = Vq(a, 3); $a->dump;
+  my $b = Vq(b, 2); $b->dump;
+  my $c = $a +  $b; $c->print;
+  my $d = $c -  $a; $d->print;
+  my $e = $d == $b; $e->print;
+  my $f = $d != $b; $f->print;
+  my $g = $a *  $b; $g->print;
+  my $h = $g /  $b; $h->print;
+  my $i = $a %  $b; $i->print;
+
+  If($a == 3, sub{PrintOutStringNL "a == 3"});
+
+  is_deeply Assemble, <<END;
+a: 0300 0000 0000 0000
+b: 0200 0000 0000 0000
+0500 0000 0000 0000
+0200 0000 0000 0000
+0100 0000 0000 0000
+0000 0000 0000 0000
+0600 0000 0000 0000
+0300 0000 0000 0000
+0100 0000 0000 0000
+a == 3
 END
  }
 
