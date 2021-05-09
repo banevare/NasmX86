@@ -522,6 +522,17 @@ sub Keep(@)                                                                     
   $target[0]                                                                    # Return first register
  }
 
+sub KeepSet(@)                                                                  # Confirm that the specified registers are in use
+ {my (@target) = @_;                                                            # Registers to keep
+  for my $target(@target)
+   {my $r = $RegisterContaining{$target};                                       # Containing register
+    if (!$Keep{$r})                                                             # Confirm that the register is already in use
+     {confess "Register $target not in use";
+     }
+   }
+  $target[0]                                                                    # Return first register
+ }
+
 sub KeepPush(@)                                                                 # Push the current status of the specified registers and then mark them as free
  {my (@target) = @_;                                                            # Registers to keep
   for my $target(@target)
@@ -587,10 +598,29 @@ sub MinimumOfTwoRegisters($$$)                                                  
   $result                                                                       # Result register
  }
 
-sub Increment($)                                                                # Increment the specified register
- {my ($target) = @_;                                                            # Target register
-  @_ == 1 or confess "Nothing to increment";
-  Inc $target;                                                                  # Increment register
+sub Increment($;$)                                                              # Increment the specified register
+ {my ($target, $amount) = @_;                                                   # Target register, optional amount if not 1
+  @_ >= 1 && @_ <= 2 or confess "Nothing to increment";
+  KeepSet @_;
+  if (@_ == 1)
+   {Inc $target;                                                                # Increment register
+   }
+  else
+   {Add $target, $amount;                                                       # Increment register by specified amount
+   }
+  $target                                                                       # Return register containing result
+ }
+
+sub Decrement($;$)                                                              # Decrement the specified register
+ {my ($target, $amount) = @_;                                                   # Target register, optional amount if not 1
+  @_ >= 1 && @_ <= 2 or confess "Nothing to decrement";
+  KeepSet @_;
+  if (@_ == 1)
+   {Dec $target;                                                                # Increment register
+   }
+  else
+   {Sub $target, $amount;                                                       # Increment register by specified amount
+   }
   $target                                                                       # Return register containing result
  }
 
@@ -801,6 +831,13 @@ sub S(&%)                                                                       
   $subroutines{$name} = $start if $name;                                        # Cache a reference to the generated code if a name was supplied
 
   $start
+ }
+
+sub cr(&@)                                                                      # Call a subroutine with a reordering of the registers.
+ {my ($body, @registers) = @_;                                                  # Code to execute with reordered registers, registers to reorder
+  ReorderSyscallRegisters   @registers;
+  &$body;
+  UnReorderSyscallRegisters @registers;
  }
 
 sub cxr(&@)                                                                     # Call a subroutine with a reordering of the xmm registers.
@@ -2115,15 +2152,14 @@ sub ByteString::CreateBlockString($$)                                           
     offset     => $o,                                                           # Size of an offset is size of eax
     next       => $b/$o - 1,                                                    # Location of next offset in block in dwords
     prev       => $b/$o - 2,                                                    # Location of prev offset in block in dwords
-    length0    => $b - 1,                                                       # Length of an unlinked block
-    length1    => $b - 2 * $o - 1,                                              # Length of a linked block
+    length     => $b - 2 * $o - 1,                                              # Length of text in a block
    );
 
   $s->allocBlock($xmm);                                                         # Allocate a block to hold a zmm register in the byte string addressed by (byteString, ?) held in the numbered xmm register and return the offset of the block in the numbered xmm register
  }
 
 sub BlockString::allocBlock($$)                                                 # Allocate a block to hold a zmm register in the byte string addressed by (byteString, ?) held in the numbered xmm register and return the offset of the block in the numbered xmm register
- {my ($blockString, $xmm) = @_;                                                 # Block string descriptor, numbered xmm register
+ {my ($blockString, $xmm) = @_;                                                 # Block string descriptor, numbered xmm register to receive allocation
   my $byteString = $blockString->byteString;
   Comment "Allocate a zmm block in a byte string";
   PushR my @regs = (rax, rdi);                                                  # Save registers
@@ -2137,24 +2173,24 @@ sub BlockString::allocBlock($$)                                                 
 sub BlockString::getBlockLength($$$)                                            # Get the length of the block addressed by the numbered xmm register and return it in the lowest byte of the specified register
  {my ($blockString, $xmm, $return) = @_;                                        # Block string descriptor, number of xmm register addressing block, return register
   my $x = "xmm$xmm";                                                            # Result register
-  Pextrd r14, $x, 0;                                                            # Byte string
-  Pextrd r15, $x, 1;                                                            # Byte string offset
-  Mov $return, "[r15+r14]";                                                     # Block length
+  Pextrq r14, $x, 0;                                                            # Byte string
+  Pextrq r15, $x, 1;                                                            # Byte string offset
+  Copy $return, "[r15+r14]";                                                    # Block length
  }
 
 sub BlockString::setBlockLength($$$)                                            # Set the length of the block addressed by the numbered xmm register from the specified byte register
  {my ($blockString, $xmm, $length) = @_;                                        # Block string descriptor, number of xmm register addressing block, new length in a byte register
   my $x = "xmm$xmm";                                                            # Result register
-  Pextrd r14, $x, 0;                                                            # Byte string
-  Pextrd r15, $x, 1;                                                            # Byte string offset
+  Pextrq r14, $x, 0;                                                            # Byte string
+  Pextrq r15, $x, 1;                                                            # Byte string offset
   Mov "[r15+r14]", $length."b";                                                 # Block length
  }
 
 sub BlockString::getBlock($$$)                                                  # Get the block addressed by the numbered xmm register and load it into the numbered zmm register
  {my ($blockString, $zmm, $xmm) = @_;                                           # Block string descriptor, number of zmm register to contain block, number of xmm register addressing block
   my $x = "xmm$xmm";                                                            # Result register
-  Pextrd r14, $x, 0;                                                            # Byte string
-  Pextrd r15, $x, 1;                                                            # Byte string offset
+  Pextrq r14, $x, 0;                                                            # Byte string
+  Pextrq r15, $x, 1;                                                            # Byte string offset
   Vmovdqu64 "zmm$zmm", "[r15+r14]";                                             # Read from memory
  }
 
@@ -2162,8 +2198,8 @@ sub BlockString::getBlock($$$)                                                  
 sub BlockString::putBlock($$$)                                                  # Write into the byte string block addressed by the numbered xmm register from the numbered zmm register
  {my ($blockString, $zmm, $xmm) = @_;                                           # Block string descriptor, number of zmm register to contain block, number of xmm register addressing block
   my $x = "xmm$xmm";                                                            # Result register
-  Pextrd r14, $x, 0;                                                            # Byte string
-  Pextrd r15, $x, 1;                                                            # Byte string offset
+  Pextrq r14, $x, 0;                                                            # Byte string
+  Pextrq r15, $x, 1;                                                            # Byte string offset
   Vmovdqu64 "[r15+r14]", "zmm$zmm";                                             # Write to memory
  }
 
@@ -2171,26 +2207,31 @@ sub BlockString::getNextBlock($$)                                               
  {my ($blockString, $current) = @_;                                             # Block string descriptor, number of xmm register addressing current block
   my $n = $blockString->next;                                                   # Quad word of next offset
   my $p = $blockString->prev;                                                   # Quad word of prev offset
-  Pextrd r15, $current, 0;                                                      # Byte string
-  Pextrd r14, $current, 1;                                                      # Block in byte string
-  Mov    r13, "[r15+r14+$n]";                                                   # Offset of target.next
+  Keep my @regs = (r13, r14, r15);                                              # Work registers
+  Pextrq r15, $current, 0;                                                      # Byte string
+  Pextrq r14, $current, 1;                                                      # Block in byte string
+  Mov    r13, "[r15+r14+$n]";       ## Merge r13                                # Offset of target.next
   Pinsrq "xmm$current", r13, 1;                                                 # Save address of block
+  KeepFree @regs;                                                               # Free work registers
  }
 
 sub BlockString::getPrevBlock($$)                                               # Get the prev block from the block addressed by the numbered xmm register and return it in the same xmm
  {my ($blockString, $current) = @_;                                             # Block string descriptor, number of xmm register addressing current block
   my $n = $blockString->next;                                                   # Quad word of next offset
   my $p = $blockString->prev;                                                   # Quad word of prev offset
-  Pextrd r15, $current, 0;                                                      # Byte string
-  Pextrd r14, $current, 1;                                                      # Block in byte string
-  Mov    r13, "[r15+r14+$p]";                                                   # Offset of target.next
+  Keep my @regs = (r13, r14, r15);                                              # Work registers
+  Pextrq r15, $current, 0;                                                      # Byte string
+  Pextrq r14, $current, 1;                                                      # Block in byte string
+  Mov    r13, "[r15+r14+$p]";       ## Merge r13                                # Offset of target.next
   Pinsrq "xmm$current", r13, 1;                                                 # Save address of block
+  KeepFree @regs;                                                               # Free work registers
  }
 
 sub BlockString::putNext($$$)                                                   # Link a new block addressed by a numbered xmm register to an existing old block already in the list addressed by an xmm register
  {my ($blockString, $old, $new) = @_;                                           # Block string, number of xmm addressing existing old block in string, number of xmm addressing new block to be added
   my $n = $blockString->next;                                                   # Quad word of next offset
   my $p = $blockString->prev;                                                   # Quad word of prev offset
+  Keep my @regs = (r12, r13, r14, r15);                                         # Work registers
   Pextrd r15, $old, 0;                                                          # Byte string
   Pextrd r14, $old, 1;                                                          # Offset of old
   Mov    r13, "[r15+r14+$n]";                                                   # Offset of old.next
@@ -2199,9 +2240,96 @@ sub BlockString::putNext($$$)                                                   
   Mov "[r15+r12+$p]", r14;                                                      # new.prev = old
   Mov "[r15+r12+$n]", r13;                                                      # new.next = old.next
   Mov "[r15+r13+$p]", r12;                                                      # old.next.prev = new
+  KeepFree @regs;                                                               # Free work registers
+ }
+=pod
+sub BlockString::appendFromMemory($$)                                           # Append a string addressed by rax of length rdi to a block string.
+ {my ($blockString, $target) = @_;                                              # Block string, number of xmm addressing block string
+  my $success = Label;                                                          # Label for successful return
+  Keep my @regs(my $sourceAddress = rax, my $sourceLength = rdi);               # Keep parameters
+  my $lastBlockAddress = 31;                                                    # Address of last block in block string
+  my $lastBlockContent = 30;                                                    # Content of last block
+  Copy("xmm$lastBlockAddress", "xmm$target");                                   # We will update this register with the position of the current last block
+  $blockString->getPrevBlock($lastBlockAddress);                                # Last block as the chain is circular
+
+  $blockString->getBlockLength($lastBlockAddress, my $length = r15);            # Length of last block
+  Minus(my $lengthToMove = r14, Copy(r13, $byteString->length), $length);       # Bytes needed to fill last block
+  KeepFree $r13;
+
+  Cmp $lengthToMove, $sourceAvailable;                                          # Enough source to fill  the last block?
+  IfGe
+   {KeepFree $lengthToMove;
+    Copy  $lengthToMove, $sourceAvailable;                                      # Truncate move to length available
+
+    $blockString->getBlock($lastBlockContent, $lastBlockAddress);               # Load last block into zmm from memory
+    LoadZmmFromMemory($lastBlockContent, Add(r12, $length, Copy(r13, 1), $lengthToMove, $sourceAddress); # Load bytes into zmm
+    KeepFree(r12, r13);
+    $blockString->putBlock($lastBlockContent, $lastBlockAddress);               # Write block back into memory from zmm
+    J $success;                                                                 # Append completed successfully
+   }
+
+  $blockString->getBlock($lastBlockContent, $lastBlockAddress);                 # Load last block into zmm from memory
+  LoadZmmFromMemory($lastBlockContent, Add(r12, $length, Copy(r13, 1), $lengthToMove, $sourceAddress); # Load bytes into zmm
+  Decrement($sourceLength, $lengthToMove);
+  my $newBlockAddress = 29;                                                     # xmm addressing new block
+  $blockString->allocBlock($newBlock);                                          # Allocate a block to hold a zmm register in the byte string addressed by (byteString, ?) held in the numbered xmm register and return the offset of the block in the numbered xmm register
+  $blockString->putNext($lastBlockAddress, $newBlockAddress);                   # Add this blocxk to the chain
+
+ {my ($blockString, $xmm) = @_;                                                 # Block string descriptor, numbered xmm register to receive allocation
+
+
+  KeepFree(r12, r13);
+
+  $blockString->putBlock($lastBlockContent, $lastBlockAddress);               # Write block back into memory from zmm
+    J $success;                                                                 # Append completed successfully
+   }
+     }
+  $blockString->getPrevBlock($lastBlock);                                       # Last block as the chain is circular
+  GetLengthOfShortString rsi, $source;                                             # Length of source
+  Mov r15, rsi;                                                                 # Length needed = length of source plus length of target
+  Add r15, rdi;
+  Cmp r15, $blockString->length0;                                               # Enough length in block ?
+  IfLe                                                                          # Enough space in existing block
+   {$blockString->getBlock (31, $target);                                       # Load first and only block in target
+    ConcatenateShortStrings(31, $source);                                       # Concatenate source
+    $blockString->putBlock (31, $target);                                       # Save target
+    J $success;                                                                 # Success
+   };
+  Mov r15, rdi;                                                                 # Current length of target
+  Cmp r15, $blockString->length1 / 2;                                           # Lots of space in target (although not enough)so worth moving some characters from source to target
+  IfLe                                                                          # Enough space in existing block
+   {$blockString->getBlock (31, $target);                                       # Load first and only block in target
+    PushR $source;
+    Mov rax, $blockString->length1;                                             # Maximum length in linked block
+    Sub rax, rdi;                                                               # Amount to move from source into target
+    Mov r15, rdi; Inc r15;                                                      # Position in target
+    Mov r14, 1;                                                                 # Position in source
+    LoadTargetZmmFromSourceZmm 31, r15, $source, r14, rax;                      # Move data from source to target
+    Mov r15, $blockString->length1;                                             # New length of target
+    Pinsrb 31, r15, 0;                                                          # Save new length of target
+    $blockString->putBlock (31, $target);                                       # Save target block
+
+    Mov r15, 1;                                                                 # New position in source
+    Add r14, rax;                                                               # Old position in source
+    Mov r13, rsi;                                                               # Length of source
+    Sub r13, rax;                                                               # Number of bytes to move
+
+    ClearRegisters zmm30;                                                       # Restructure source here
+    LoadTargetZmmFromSourceZmm 30, r15, $source, r14, rax;                      # Move data from source to target
+    Pinsrb xmm30, r15, 0;                                                       # Save length of new source
+
+    $blockString->allocBlock(29);                                               # Allocate space for next block
+    $blockString->putBlock (30, 29);                                            # Save new source in block string
+
+    $blockString->putNext($target, 29);                                         # Write new block into memory
+    J $success;                                                                 # Success
+   };
+
+  SetLabel $success;                                                            # Success
+  KeepFree @regs;                                                               # Free work registers
  }
 
-sub BlockString::appendShortString($$$)                                         # Append a source short string from a numbered zmm into the target block string addressed by the numbered xmm register
+sub BlockString::appendShortString($$$)          ###TEST                        # Append a source short string from a numbered zmm into the target block string addressed by the numbered xmm register
  {my ($blockString, $target, $source) = @_;                                     # Block string, number of xmm addressing block string, number of zmm holding short string
   my $success = Label;                                                          # Label for successful return
   SaveFirstFour;                                                                # Save
@@ -2248,6 +2376,7 @@ sub BlockString::appendShortString($$$)                                         
 
   SetLabel $success;                                                            # Success
  }
+=cut
 
 #D1 Tree                                                                        # Tree operations
 
@@ -7302,10 +7431,13 @@ if (1) {                                                                        
   LoadShortStringFromMemoryToZmm 0, $s;                                         # Load a sample string
   KeepFree $source;
   PrintOutRegisterInHex xmm0;
+
   LoadZmmFromMemory 0, Increment(GetLengthOfShortString($start, 0)), Copy($length, 1), Copy($source, $t);
   PrintOutRegisterInHex xmm0;
+
   LoadZmmFromMemory 0, $start, $length, $source;
   PrintOutRegisterInHex xmm0;
+
   KeepFree $length;
   LoadZmmFromMemory 0, $start, Minus($length, Copy(r13, 56), $start), $source;
   SetLengthOfShortString 0, sil;                                                # Set current length of zmm0
