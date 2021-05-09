@@ -37,7 +37,7 @@ my $sysout = 1;                                                                 
 my $syserr = 2;                                                                 # File descriptor for standard error
 
 my %Registers;                                                                  # The names of all the registers
-my %RegisterContaining;                                                        # The registers contained by a a register
+my %RegisterContaining;                                                         # The largest register containing a register
 
 BEGIN{
   my %r = (    map {$_=>[ 8,  '8'  ]}  qw(al bl cl dl r8b r9b r10b r11b r12b r13b r14b r15b sil dil spl bpl ah bh ch dh));
@@ -70,7 +70,7 @@ BEGIN{
   my @i0 = qw(popfq pushfq rdtsc ret syscall);                                  # Zero operand instructions
 
   my @i1 = split /\s+/, <<END;                                                  # Single operand instructions
-bswap call dec inc jmp ja jae jb jbe jc jcxz je jecxz jg jge jl jle
+bswap call dec idiv  inc jmp ja jae jb jbe jc jcxz je jecxz jg jge jl jle
 jna jnae jnb jnbe jnc jne jng jnge jnl jnle jno jnp jns jnz jo jp jpe jpo jrcxz
 js jz neg not seta setae setb setbe setc sete setg setge setl setle setna setnae
 setnb setnbe setnc setne setng setnge setnl setno setnp setns setnz seto setp
@@ -81,6 +81,7 @@ END
 add and bt btc btr bts
 cmova cmovae cmovb cmovbe cmovc cmove cmovg cmovge cmovl cmovle
 cmovna cmovnae cmovnb cmp
+imul
 kmov knot kortest ktest lea lzcnt mov movdqa
 or shl shr sub test tzcnt
 vcvtudq2pd vcvtuqq2pd vcvtudq2ps vmovdqu vmovdqu32 vmovdqu64 vmovdqu8
@@ -503,7 +504,172 @@ sub ClearZF()                                                                   
   Pop rax;
  }
 
-#D2 Arithmetic                                                                  # Arithmetic on registers
+#D2 Variables                                                                   # Variable definitions
+
+sub Variable($$$)                                                               # Create a new variable with the specified size and name initialized via an expression
+ {my ($size, $name, $expr) = @_;                                                # Size as a power of 2, name of variable, expression initializing variable
+  $size =~ m(\A0|1|2|3|4|5|6|b|w|d|q|x|y|z\Z)i or confess "Size must be 0..6 or b|w|d|q|x|y|z";  # Check size of variable
+
+  my $label = $size =~ m(\A0|b\Z) ? Db(0) :                                     # Allocate space for variable
+              $size =~ m(\A1|w\Z) ? Dw(0) :                                     # Allocate space for variable
+              $size =~ m(\A2|d\Z) ? Dd(0) :
+              $size =~ m(\A3|q\Z) ? Dq(0) :
+              $size =~ m(\A4|x\Z) ? Dx(0,0) :
+              $size =~ m(\A5|y\Z) ? Dy(0,0,0,0) :
+              $size =~ m(\A6|z\Z) ? Dz(0,0,0,0,0,0,0,0) : undef;
+
+  my $nSize = $size =~ tr(bwdqxyz) (0123456)r;                                  # Size of variable
+
+  if (!ref($expr))                                                              # Initialize variable
+   {my $t = "[$label]";
+    if ($Registers{$expr})
+     {Mov $t, $expr;
+     }
+    else
+     {PushRR r15;
+      Mov r15, $expr;
+      Mov $t, r15b        if $nSize == 0;
+      Mov $t, r15l        if $nSize == 1;
+      Mov $t, r15d        if $nSize == 2;
+      Mov $t, r15         if $nSize == 3;
+      Pinsrq $t, r15, 0   if $nSize >  3;
+      PopRR r15;
+     }
+   }
+
+  genHash("Variable",                                                           # Variable definition
+    size  => $nSize,                                                            # Size of variable
+    name  => $name,                                                             # Name of the variable
+    expr  => $expr,                                                             # Expression that initializes the variable
+    label => $label,                                                            # Address in memory
+   );
+ }
+
+sub Vb($$) {&Variable(0, @_)}
+sub Vw($$) {&Variable(1, @_)}
+sub Vd($$) {&Variable(2, @_)}
+sub Vq($$) {&Variable(3, @_)}
+sub Vx($$) {&Variable(4, @_)}
+sub Vy($$) {&Variable(5, @_)}
+sub Vz($$) {&Variable(6, @_)}
+
+if (1)                                                                          # Define operator overloading for Variables
+ {package Variable;
+  use overload
+    '+' => \&add,
+    '-' => \&sub,
+    '*' => \&times,
+    '/' => \&divide,
+    '%' => \&mod,
+   '==' => \&eq,
+   '!=' => \&ne,
+   '>=' => \&ge,
+    '>' => \&gt,
+   '<=' => \&le,
+   '<'  => \&lt,
+ }
+
+sub Variable::address($)                                                        # Get the address of a variable
+ {my ($left) = @_;                                                              # Left variable
+  "[".$left-> label."]"
+ }
+
+sub Variable::arithmetic($$$)                                                   # Return a variable containing the result of an arithmetic operation on the left hand and right hand side variables
+ {my ($op, $left, $right) = @_;                                                 # Operator, Left variable,  right variable
+
+  my $l = $left ->address;
+  my $r = $right->address;
+  if ($left->size == 3 and $right->size == 3)
+   {PushRR r15;
+    Mov r15, $l;
+    &$op(r15, $r);
+    my $v = Vq('', r15);
+    PopRR r15;
+    return $v;
+   }
+  confess "Need more code";
+ }
+
+sub Variable::add($$)                                                           # Add the right hand variable to the left hand variable and return the result as a new variable
+ {my ($left, $right) = @_;                                                      # Left variable,  right variable
+  Variable::arithmetic(\&Add, $left, $right);
+ }
+
+sub Variable::sub($$)                                                           # Subtract the right hand variable from the left hand variable and return the result as a new variable
+ {my ($left, $right) = @_;                                                      # Left variable,  right variable
+  Variable::arithmetic(\&Sub, $left, $right);
+ }
+
+sub Variable::times($$)                                                         # Multiply the left hand variable by the right hand variable and return the result as a new variable
+ {my ($left, $right) = @_;                                                      # Left variable,  right variable
+  Variable::arithmetic(\&Imul, $left, $right);
+ }
+
+sub Variable::division($$$)                                                     # Return a variable containing the result or the remainder that occurs when the left hand side is divided by the right hand side
+ {my ($op, $left, $right) = @_;                                                 # Operator, Left variable,  right variable
+
+  my $l = $left ->address;
+  my $r = $right->address;
+
+  if ($left->size == 3 and $right->size == 3)
+   {PushRR my @regs = (rax, rdx, r15);
+    Mov rax, $l;
+    Mov r15, $r;
+    Idiv r15;
+    my $v = Vq('', $op eq "%" ? rdx : rax);
+    PopRR r15;
+    return $v;
+   }
+  confess "Need more code";
+ }
+
+sub Variable::divide($$)                                                        # Divide the left hand variable by the right hand variable and return the result as a new variable
+ {my ($left, $right) = @_;                                                      # Left variable,  right variable
+  Variable::division("/", $left, $right);
+ }
+
+sub Variable::mod($$)                                                           # Divide the left hand variable by the right hand variable and return the remainder as a new variable
+ {my ($left, $right) = @_;                                                      # Left variable,  right variable
+  Variable::division("%", $left, $right);
+ }
+
+sub Variable::boolean($$$)                                                      # Combine the left hand variable with the right hand variable via a boolean operator
+ {my ($sub, $left, $right) = @_;                                                # Operator, Left variable,  right variable
+
+  my $l = $left ->address;
+  my $r = $right->address;
+  if ($left->size == 3 and $right->size == 3)
+   {PushRR r15;
+    Mov r15, $l;
+    Cmp r15, $r;
+    &$sub(sub {Mov  r15, 1}, sub {Mov  r15, 0});
+    my $v = Vq('', r15);
+    PopRR r15;
+    return $v;
+   }
+  confess "Need more code";
+ }
+
+sub Variable::eq($$)                                                            # Check whether the left hand variable is equal to the right hand variable
+ {my ($left, $right) = @_;                                                      # Left variable,  right variable
+  Variable::boolean(\&IfEq, $left, $right);
+ }
+
+sub Variable::ne($$)                                                            # Check whether the left hand variable is not equal to the right hand variable
+ {my ($left, $right) = @_;                                                      # Left variable,  right variable
+  Variable::boolean(\&IfNe, $left, $right);
+ }
+
+sub Variable::print($)                                                          # Write the value of a variable on stdout
+ {my ($left) = @_;                                                              # Left variable
+  PushRR my @regs = (rax, rdi);
+  Mov rax, $left->label;
+  Mov rdi, 8;
+  &PrintOutMemoryInHexNL();
+  PopRR @regs;
+ }
+
+#D2 Registers                                                                   # Mapping registers to variables
 
 my %Keep;                                                                       # Registers to keep
 my %KeepStack;                                                                  # Registers keep stack across PushR and PopR
@@ -2524,7 +2690,7 @@ sub Exit(;$)                                                                    
 
 sub Assemble(%)                                                                 # Assemble the generated code
  {my (%options) = @_;                                                           # Options
-  Exit 0 unless @data > 4 and $data[-4] !~ m(Exit Code:);                       # Exit with code 0 if no other exit has been taken
+  Exit 0 unless @text > 4 and $text[-4] =~ m(Exit Code:);                       # Exit with code 0 if no other exit has been taken
 
   my $k = $options{keep};                                                       # Keep the executable
   my $r = join "\n", map {s/\s+\Z//sr} @rodata;
@@ -6394,7 +6560,7 @@ $ENV{PATH} = $ENV{PATH}.":/var/isde:sde";                                       
 if ($^O =~ m(bsd|linux)i)                                                       # Supported systems
  {if (confirmHasCommandLineCommand(q(nasm)) and                                 # Network assembler
       confirmHasCommandLineCommand(q(sde64)))                                   # Intel emulator
-   {plan tests => 68;
+   {plan tests => 69;
    }
   else
    {plan skip_all =>qq(Nasm or Intel 64 emulator not available);
@@ -7418,8 +7584,6 @@ if (1) {                                                                        
 END
  }
 
-latest:;
-
 if (1) {                                                                        #TLoadTargetZmmFromSourceZmm #TCopy
   my $s = Rb(13, 1..13);
   my $t = Rb(1..64);
@@ -7449,6 +7613,32 @@ if (1) {                                                                        
   xmm0: 0201 0D0C 0B0A 0908   0706 0504 0302 010D
   xmm0: 0201 0D0C 0B0A 0908   0706 0504 0302 0138
   zmm0: 0000 0000 0000 0000   2A29 2827 2625 2423   2221 201F 1E1D 1C1B   1A19 1817 1615 1413   1211 100F 0E0D 0C0B   0A09 0807 0605 0403   0201 0D0C 0B0A 0908   0706 0504 0302 0138
+END
+ }
+
+latest:;
+
+if (1) {                                                                        #TLoadTargetZmmFromSourceZmm #TCopy
+  my $a = Vq("a", 3); $a->print;
+  my $b = Vq("b", 2); $b->print;
+  my $c = $a + $b;    $c->print;
+  my $d = $c - $a;    $d->print;
+  my $e = $d == $b;   $e->print;
+  my $f = $d != $b;   $f->print;
+  my $g = $a * $b;    $g->print;
+  my $h = $g / $b;    $h->print;
+  my $i = $a % $b;    $i->print;
+
+  is_deeply Assemble, <<END;
+0300 0000 0000 0000
+0200 0000 0000 0000
+0500 0000 0000 0000
+0200 0000 0000 0000
+0100 0000 0000 0000
+0000 0000 0000 0000
+0600 0000 0000 0000
+0300 0000 0000 0000
+0100 0000 0000 0000
 END
  }
 
