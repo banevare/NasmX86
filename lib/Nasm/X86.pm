@@ -8,7 +8,7 @@
 # Register expressions via op overloading - register size and ability to add offsets, peek, pop, push clear register
 # Indent opcodes by call depth, - replace push @text with a method call
 package Nasm::X86;
-our $VERSION = "20210419";
+our $VERSION = "20210510";
 use warnings FATAL => qw(all);
 use strict;
 use Carp qw(confess cluck);
@@ -936,7 +936,7 @@ sub LoadTargetZmmFromSourceZmm($$$$$)                                           
   Sub rsp, $sourceOffset;                                                       # Restore stack from source
  }
 
-sub LoadZmmFromMemory($$$$)                                                     # Load bytes into the numbered target zmm register at a register specified offset with source bytes from memory addressed by a specified register for a specified register length from memory adddressed by a specified register.
+sub LoadZmmFromMemory($$$$)                                                     # Load bytes into the numbered target zmm register at a register specified offset with source bytes from memory addressed by a specified register for a specified register length from memory addressed by a specified register.
  {my ($target, $targetOffset, $length, $source) = @_;                           # Number of zmm register to load, register containing start or 0 if from the start, register containing length, register addressing memory to load from
   @_ == 4 or confess;
   Comment "Load Target Zmm from Memory";
