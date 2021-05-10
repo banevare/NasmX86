@@ -2864,6 +2864,14 @@ sub removeNonAsciiChars($)                                                      
  {my ($string) = @_;                                                            # String
   $string =~ s([^0x0-0x7f]) ()gsr;                                              # Remove non ascii characters
  }
+
+sub develop                                                                     #P Developing
+ {$develop
+ }
+
+sub totalBytesAssembled                                                         #P Total size in bytes of all files assembled during testing
+ {$totalBytesAssembled
+ }
 #d
 #-------------------------------------------------------------------------------
 # Export - eeee
@@ -7161,7 +7169,7 @@ if (1) {                                                                        
   ok Assemble =~ m(tmp);
  }
 
-if (!$develop) {                                                                # Execute the content of a byte string #TByteString::bash #TByteString::write #TByteString::out #TByteString::unlink #TByteString::ql
+if (!develop) {                                                                 # Execute the content of a byte string #TByteString::bash #TByteString::write #TByteString::out #TByteString::unlink #TByteString::ql
   my $s = CreateByteString;                                                     # Create a string
   $s->ql(<<END);                                                                # Write code to execute
 #!/usr/bin/bash
@@ -7507,7 +7515,7 @@ if (1) {                                                                        
   ok qx($e "")  =~ m(r15: 0000 3F80 0000 3F80);                                 # Test well known hashes
   ok qx($e "a") =~ m(r15: 0000 3F80 C000 45B2);
 
-  if (0 and $develop)                                                           # Hash various strings
+  if (0 and develop)                                                            # Hash various strings
    {my %r; my %f; my $count = 0;
     my $N = RegisterSize zmm0;
 
@@ -7835,4 +7843,4 @@ if (1) {                                                                        
 
 unlink $_ for grep {/\A\.\/atmpa/} findFiles('.');                              # Remove temporary files
 
-lll "Finished:", time - $start,  "bytes assembled:",   $totalBytesAssembled;
+lll "Finished:", time - $start,  "bytes assembled:",   totalBytesAssembled;
