@@ -1,4 +1,4 @@
-# Test NasmX86 2021-05-10 at 17:59:10
+# Test NasmX86 2021-05-10 at 18:00:24
 
 name: Test
 
@@ -46,3 +46,8 @@ jobs:
     - name: Test
       run: |
         perl lib/Nasm/X86.pm
+
+    - name: Prove
+      run: |
+        prove
+
