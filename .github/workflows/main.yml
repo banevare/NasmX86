@@ -1,4 +1,4 @@
-# Test NasmX86 2021-05-10 at 18:00:27
+# Test NasmX86 2021-05-10 at 18:05:02
 
 name: Test
 
@@ -49,5 +49,5 @@ jobs:
 
     - name: Prove
       run: |
-        prove
+        prove -Ilib
 
