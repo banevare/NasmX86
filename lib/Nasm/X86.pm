@@ -2808,9 +2808,46 @@ END
   my $l    = q(z.txt);                                                          # Assembler listing
   my $o    = q(z.o);                                                            # Object file
 
-  my $cmd  = qq(nasm -f elf64 -g -l $l -o $o $c && ld -o $e $o && chmod 744 $e);
-  my $exec = qq($sde -ptr-check -- ./$e 2>&1);
-     $cmd .= qq( && $exec) unless $k;
+  if (!confirmHasCommandLineCommand(q(nasm)))                                   # Check for network assembler
+   {my $L = fpf(currentDirectory, $l);
+    say STDERR <<END;
+Assember code written to the following file:
+
+$L
+
+I cannot compile this file because you do not have Nasm installed, see:
+
+https://www.nasm.us/
+END
+    return;
+   }
+
+  my $noEmulator;                                                               # Check whether we have the emulator installed or not
+  if (!$k and !confirmHasCommandLineCommand(q(sde64)))                          # Check for # Intel emulator
+   {my $E = fpf(currentDirectory, $e);
+    say STDERR <<END;
+Executable written to the following file:
+
+$E
+
+I am going to run this without using the Intel emulator. Your program will
+crash if it containes instructions not implemented on your computer.
+
+You can get the Intel emulator from:
+
+https://software.intel.com/content/dam/develop/external/us/en/documents/downloads/sde-external-8.63.0-2021-01-18-lin.tar.bz2
+
+Use Assemble(keep=>"executable file name" to avoid this message.
+END
+    $noEmulator++;
+   }
+
+  my $cmd  = qq(nasm -f elf64 -g -l $l -o $o $c && ld -o $e $o && chmod 744 $e);# Assemble
+  my $exec = $noEmulator                                                        # Execute with or without the emulator
+             ? qq(./$e 2>&1)
+             : qq($sde -ptr-check -- ./$e 2>&1);
+
+  $cmd .= qq( && $exec) unless $k;                                              # Execute automatically unless suppressed by user
 
   say STDERR qq($cmd);
   my $R    = qx($cmd);
@@ -6648,13 +6685,13 @@ Test::More->builder->output("/dev/null") if $localTest;                         
 $ENV{PATH} = $ENV{PATH}.":/var/isde:sde";                                       # Intel emulator
 
 if ($^O =~ m(bsd|linux)i)                                                       # Supported systems
- {if (confirmHasCommandLineCommand(q(nasm)) and                                 # Network assembler
-      confirmHasCommandLineCommand(q(sde64)))                                   # Intel emulator
-   {plan tests => 71;
+ {#if (confirmHasCommandLineCommand(q(nasm)) and                                 # Network assembler
+  #    confirmHasCommandLineCommand(q(sde64)))                                   # Intel emulator
+   {plan tests => 72;
    }
-  else
-   {plan skip_all =>qq(Nasm or Intel 64 emulator not available);
-   }
+  #else
+  # {plan skip_all =>qq(Nasm or Intel 64 emulator not available);
+  # }
  }
 else
  {plan skip_all =>qq(Not supported on: $^O);
@@ -7758,8 +7795,6 @@ a == 3
 END
  }
 
-latest:;
-
 if (1) {                                                                         #TVariable::dump
   Vq(limit,10)->for(sub
    {my ($i, $start, $next, $end) = @_;
@@ -7778,6 +7813,15 @@ if (1) {                                                                        
 0800 0000 0000 0000
 0900 0000 0000 0000
 END
+ }
+
+latest:;
+
+if (1) {                                                                        #T
+  Mov rax, 2;
+  PrintOutRegisterInHex rax;
+
+  ok Assemble =~ m(rax: 0000 0000 0000 0002);                                   # Test well known hashes
  }
 
 unlink $_ for grep {/\A\.\/atmpa/} findFiles('.');                              # Remove temporary files
