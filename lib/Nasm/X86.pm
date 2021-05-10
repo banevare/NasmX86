@@ -567,6 +567,9 @@ if (1)                                                                          
     '>' => \&gt,
    '<=' => \&le,
    '<'  => \&lt,
+   '++' => \&inc,
+   '--' => \&dec,
+   '""' => \&str,
  }
 
 sub Variable::address($)                                                        # Get the address of a variable
@@ -659,6 +662,26 @@ sub Variable::ne($$)                                                            
   Variable::boolean(\&IfNe, $left, $right);
  }
 
+sub Variable::ge($$)                                                            # Check whether the left hand variable is greater than or equal to the right hand variable
+ {my ($left, $right) = @_;                                                      # Left variable,  right variable
+  Variable::boolean(\&IfGe, $left, $right);
+ }
+
+sub Variable::gt($$)                                                            # Check whether the left hand variable is greater than the right hand variable
+ {my ($left, $right) = @_;                                                      # Left variable,  right variable
+  Variable::boolean(\&IfGt, $left, $right);
+ }
+
+sub Variable::le($$)                                                            # Check whether the left hand variable is less than or equal to the right hand variable
+ {my ($left, $right) = @_;                                                      # Left variable,  right variable
+  Variable::boolean(\&IfLe, $left, $right);
+ }
+
+sub Variable::lt($$)                                                            # Check whether the left hand variable is less than the right hand variable
+ {my ($left, $right) = @_;                                                      # Left variable,  right variable
+  Variable::boolean(\&IfLt, $left, $right);
+ }
+
 sub Variable::print($)                                                          # Write the value of a variable on stdout
  {my ($left) = @_;                                                              # Left variable
   PushRR my @regs = (rax, rdi);
@@ -676,6 +699,56 @@ sub Variable::dump($)                                                           
   &PrintOutString($left->name.": ");
   &PrintOutMemoryInHexNL();
   PopRR @regs;
+ }
+
+sub Variable::incDec($$)                                                        # Increment or decrement a variable
+ {my ($left, $op) = @_;                                                         # Left variable operator
+
+  my $l = $left ->address;
+  if ($left->size == 3)
+   {PushRR r15;
+    Mov r15, $l;
+    &$op(r15);
+    Mov $l, r15;
+    PopRR r15;
+    return $left;
+   }
+  confess "Need more code";
+ }
+
+sub Variable::inc($)                                                            # Increment a variable
+ {my ($left) = @_;                                                              # Variable
+  $left->Variable::incDec(\&Inc);
+ }
+
+sub Variable::dec($)                                                            # Decrement a variable
+ {my ($left) = @_;                                                              # Variable
+  $left->Variable::incDec(\&Dec);
+ }
+
+sub Variable::str($)                                                            # Name the variable
+ {my ($left) = @_;                                                              # Variable
+  $left->name;
+ }
+
+sub Variable::for(&$)                                                           # Iterate the body from 0 limit times.
+ {my ($limit, $body) = @_;                                                      # Limit, Body
+  @_ == 2 or confess;
+  Comment "Variable::For $limit";
+  my $index = Vq(q(index), 0);                                                  # The index that will be incremented
+  my $start = Label;
+  my $next  = Label;
+  my $end   = Label;
+  SetLabel $start;                                                              # Start of loop
+
+  If ($index >= $limit, sub{Jge $end});                                         # Condition
+
+  &$body($index, $start, $next, $end);                                          # Execute body
+
+  SetLabel $next;                                                               # Next iteration
+  $index++;                                                                     # Increment
+  Jmp $start;
+  SetLabel $end;
  }
 
 #D2 Registers                                                                   # Mapping registers to variables
@@ -1607,11 +1680,11 @@ sub ClearMemory()                                                               
 
   my $sub = S
    {SaveFirstFour;
-    PushR zmm0;                                                                   # Pump zeros with this register
-    Lea rdi, "[rax+rdi-$size]";                                                   # Address of upper limit of buffer
-    ClearRegisters zmm0;                                                          # Clear the register that will be written into memory
+    PushR zmm0;                                                                 # Pump zeros with this register
+    Lea rdi, "[rax+rdi-$size]";                                                 # Address of upper limit of buffer
+    ClearRegisters zmm0;                                                        # Clear the register that will be written into memory
 
-    For                                                                           # Clear memory
+    For                                                                         # Clear memory
      {Vmovdqu64 "[rax]", zmm0;
      } rax, rdi, RegisterSize zmm0;
 
@@ -6577,7 +6650,7 @@ $ENV{PATH} = $ENV{PATH}.":/var/isde:sde";                                       
 if ($^O =~ m(bsd|linux)i)                                                       # Supported systems
  {if (confirmHasCommandLineCommand(q(nasm)) and                                 # Network assembler
       confirmHasCommandLineCommand(q(sde64)))                                   # Intel emulator
-   {plan tests => 70;
+   {plan tests => 71;
    }
   else
    {plan skip_all =>qq(Nasm or Intel 64 emulator not available);
@@ -7633,8 +7706,6 @@ if (1) {                                                                        
 END
  }
 
-latest:;
-
 if (1) {                                                                        #TVq  #TVariable::print
   my $a = Vq(a, 3);   $a->print;
   my $c = $a +  2;    $c->print;
@@ -7684,6 +7755,28 @@ b: 0200 0000 0000 0000
 0300 0000 0000 0000
 0100 0000 0000 0000
 a == 3
+END
+ }
+
+latest:;
+
+if (1) {                                                                         #TVariable::dump
+  Vq(limit,10)->for(sub
+   {my ($i, $start, $next, $end) = @_;
+    $i->print;
+   });
+
+  is_deeply Assemble, <<END;
+0000 0000 0000 0000
+0100 0000 0000 0000
+0200 0000 0000 0000
+0300 0000 0000 0000
+0400 0000 0000 0000
+0500 0000 0000 0000
+0600 0000 0000 0000
+0700 0000 0000 0000
+0800 0000 0000 0000
+0900 0000 0000 0000
 END
  }
 
