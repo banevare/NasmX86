@@ -6906,7 +6906,7 @@ test unless caller;
 
 1;
 # podDocumentation
-__DATA__
+#__DATA__
 use Time::HiRes qw(time);
 use Test::More;
 
@@ -6931,7 +6931,7 @@ else
 
 my $start = time;                                                               # Tests
 
-#goto latest;
+goto latest;
 
 if (1) {                                                                        #TPrintOutString #TAssemble
   PrintOutString "Hello World";
@@ -7003,18 +7003,23 @@ if (1) {
  }
 
 if (1) {
-  my $q = Rs my $s = join '', ('a'..'p')x4;
+  my $q = Rs my $s = join '', ('a'..'p')x4;                                     # Sample string
   Mov rax, Ds('0'x128);
 
-  Vmovdqu32 zmm0, "[$q]";
-  Vprolq    zmm1, zmm0, 32;
-  Vmovdqu32 "[rax]", zmm1;
+  Vmovdqu32 zmm0, "[$q]";                                                       # Load zmm0 with sample string
+  Vprolq    zmm1, zmm0, 32;                                                     # Rotate left 32 bits in lanes
+  Vmovdqu32 "[rax]", zmm1;                                                      # Save results
 
-  Mov rdi, length $s;
-  PrintOutMemory;
+  Mov rdi, length $s;                                                           # Print results
+  PrintOutMemoryNL;
 
-  ok $s       =~ m(abcdefghijklmnopabcdefghijklmnopabcdefghijklmnopabcdefghijklmnop)s;
-  ok Assemble =~ m(efghabcdmnopijklefghabcdmnopijklefghabcdmnopijklefghabcdmnopijkl)s;
+  is_deeply "$s\n", <<END;                                                          # Initial string
+abcdefghijklmnopabcdefghijklmnopabcdefghijklmnopabcdefghijklmnop
+END
+
+  is_deeply Assemble, <<END;                                                    # Assemble and run
+efghabcdmnopijklefghabcdmnopijklefghabcdmnopijklefghabcdmnopijkl
+END
  }
 
 if (1) {                                                                        #TPrintOutRegisterInHex
