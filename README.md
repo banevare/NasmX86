@@ -54,9 +54,9 @@ Use [Advanced Vector Extensions](https://en.wikipedia.org/wiki/AVX-512) instruct
   my $q = Rs my $s = join '', ('a'..'p')x4;      # Sample string
   Mov rax, Ds('0'x128);
 
-  Vmovdqu32 zmm0, "[$q]";                        # Load zmm0 with sample string
+  Vmovdqu64 zmm0, "[$q]";                        # Load zmm0 with sample string
   Vprolq    zmm1, zmm0, 32;                      # Rotate left 32 bits in lanes
-  Vmovdqu32 "[rax]", zmm1;                       # Save results
+  Vmovdqu64 "[rax]", zmm1;                       # Save results
 
   Mov rdi, length $s;                            # Print results
   PrintOutMemoryNL;
