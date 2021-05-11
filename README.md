@@ -49,7 +49,8 @@ Use [Advanced Vector Extensions](https://en.wikipedia.org/wiki/AVX-512) instruct
 
 
 ```
-  Start;
+  use Nasm::X86 qw(:all);
+
   my $q = Rs my $s = join '', ('a'..'p')x4;
   Mov rax, Ds('0'x128);
 
@@ -59,7 +60,6 @@ Use [Advanced Vector Extensions](https://en.wikipedia.org/wiki/AVX-512) instruct
 
   Mov rdi, length $s;
   PrintOutMemory;
-  Exit;
 
   ok $s       =~ m(abcdefghijklmnopabcdefghijklmnopabcdefghijklmnopabcdefghijklmnop)s;
   ok Assemble =~ m(efghabcdmnopijklefghabcdmnopijklefghabcdmnopijklefghabcdmnopijkl)s;
@@ -72,21 +72,20 @@ Create a dynamic byte string, add some content to it, write the byte string to
 a [file](https://en.wikipedia.org/wiki/Computer_file) and then execute it:
 
 ```
-  Start;
-  my $s = CreateByteString;                                                     # Create a string
-  $s->ql(<<END);                                                                # Write [code](https://en.wikipedia.org/wiki/Computer_program) to execute
+  use Nasm::X86 qw(:all);
+
+  my $s = CreateByteString;          # Create a string
+  $s->ql(<<END);                     # Write [code](https://en.wikipedia.org/wiki/Computer_program) to execute
 #!/usr/bin/bash
 whoami
-ls -la
-pwd
+ls -lapwd
 END
 
-  $s->write;                                                                    # Write [code](https://en.wikipedia.org/wiki/Computer_program) to a temporary [file](https://en.wikipedia.org/wiki/Computer_file) 
-  $s->bash;                                                                     # Execute the temporary [file](https://en.wikipedia.org/wiki/Computer_file) 
-  $s->unlink;                                                                   # Execute the temporary [file](https://en.wikipedia.org/wiki/Computer_file)   Exit;                                                                         # Return to operating system
-
-  my $u = qx(whoami); chomp($u);
-  ok Assemble =~ m($u);
+  $s->write;                         # Write [code](https://en.wikipedia.org/wiki/Computer_program) to a temporary [file](https://en.wikipedia.org/wiki/Computer_file) 
+  $s->bash;                          # Execute the temporary [file](https://en.wikipedia.org/wiki/Computer_file) 
+  $s->unlink;                        # Unlink the temporary [file](https://en.wikipedia.org/wiki/Computer_file) 
+  my $u = qx(whoami); chomp($u);     # Check we got the expected response
+  ok Assemble =~ m($u);              # Assemble, run, [test](https://en.wikipedia.org/wiki/Software_testing) output
 ```
 
 
@@ -98,32 +97,32 @@ each [process](https://en.wikipedia.org/wiki/Process_management_(computing)) inv
 
 
   ```
-  Start;                                                                        # Start the [program](https://en.wikipedia.org/wiki/Computer_program)   Fork;                                                                         # Fork
+  use Nasm::X86 qw(:all);
+
+  Fork;                          # Fork
 
   Test rax,rax;
-  If                                                                            # Parent
+  If                             # Parent
    {Mov rbx, rax;
     WaitPid;
     PrintOutRegisterInHex rax;
     PrintOutRegisterInHex rbx;
-    GetPid;                                                                     # Pid of parent as seen in parent
+    GetPid;                      # Pid of parent as seen in parent
     Mov rcx,rax;
     PrintOutRegisterInHex rcx;
    }
-  [sub](https://perldoc.perl.org/perlsub.html)                                                                           # Child
+  [sub](https://perldoc.perl.org/perlsub.html)                            # Child
    {Mov r8,rax;
     PrintOutRegisterInHex r8;
-    GetPid;                                                                     # Child pid as seen in child
+    GetPid;                      # Child pid as seen in child
     Mov r9,rax;
     PrintOutRegisterInHex r9;
-    GetPPid;                                                                    # Parent pid as seen in child
+    GetPPid;                     # Parent pid as seen in child
     Mov r10,rax;
     PrintOutRegisterInHex r10;
    };
 
-  Exit;                                                                         # Return to operating system
-
-  my $r = Assemble;
+  my $r = Assemble;              # Assemble [test](https://en.wikipedia.org/wiki/Software_testing) and run
 
   #    r8: 0000 0000 0000 0000   #1 Return from [fork](https://en.wikipedia.org/wiki/Fork_(system_call)) as seen by child
   #    r9: 0000 0000 0003 0C63   #2 Pid of child
@@ -140,10 +139,11 @@ each [process](https://en.wikipedia.org/wiki/Process_management_(computing)) inv
 Read this file and print it out:
 
   ```
-  Start;                                                                        # Start the [program](https://en.wikipedia.org/wiki/Computer_program)   Mov rax, Rs($0);                                                              # File to read
+  use Nasm::X86 qw(:all);
+
+  Mov rax, Rs($0);                                                              # File to read
   ReadFile;                                                                     # Read [file](https://en.wikipedia.org/wiki/Computer_file) 
   PrintOutMemory;                                                               # Print memory
-  Exit;                                                                         # Return to operating system
 
   my $r = Assemble;                                                             # Assemble and execute
   ok index($r, readFile($0)) > -1;                                              # Output contains this [file](https://en.wikipedia.org/wiki/Computer_file)   ```
