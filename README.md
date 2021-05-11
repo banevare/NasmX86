@@ -51,18 +51,23 @@ Use [Advanced Vector Extensions](https://en.wikipedia.org/wiki/AVX-512) instruct
 ```
   use Nasm::X86 qw(:all);
 
-  my $q = Rs my $s = join '', ('a'..'p')x4;
+  my $q = Rs my $s = join '', ('a'..'p')x4;      # Sample string
   Mov rax, Ds('0'x128);
 
-  Vmovdqu32 zmm0, "[$q]";
-  Vprolq    zmm1, zmm0, 32;
-  Vmovdqu32 "[rax]", zmm1;
+  Vmovdqu32 zmm0, "[$q]";                        # Load zmm0 with sample string
+  Vprolq    zmm1, zmm0, 32;                      # Rotate left 32 bits in lanes
+  Vmovdqu32 "[rax]", zmm1;                       # Save results
 
-  Mov rdi, length $s;
-  PrintOutMemory;
+  Mov rdi, length $s;                            # Print results
+  PrintOutMemoryNL;
 
-  ok $s       =~ m(abcdefghijklmnopabcdefghijklmnopabcdefghijklmnopabcdefghijklmnop)s;
-  ok Assemble =~ m(efghabcdmnopijklefghabcdmnopijklefghabcdmnopijklefghabcdmnopijkl)s;
+  is_deeply "$s\n", <<END;                       # Initial string
+abcdefghijklmnopabcdefghijklmnopabcdefghijklmnopabcdefghijklmnop
+END
+
+  is_deeply Assemble, <<END;                     # Assemble and run
+efghabcdmnopijklefghabcdmnopijklefghabcdmnopijklefghabcdmnopijkl
+END
 ```
 
 
