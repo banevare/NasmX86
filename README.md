@@ -26,6 +26,8 @@ Please feel free to join in.
 
 # Useful links
 
+- [x86 instructions](https://hjlebbink.github.io/x86doc/)
+
 - [Avx512 SIMD x86 instructions](https://www.officedaytime.com/simd512e/)
 
 - [Linux system calls](https://filippo.io/linux-syscall-table/)
