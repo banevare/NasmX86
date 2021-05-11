@@ -6906,7 +6906,7 @@ test unless caller;
 
 1;
 # podDocumentation
-#__DATA__
+__DATA__
 use Time::HiRes qw(time);
 use Test::More;
 
@@ -6931,7 +6931,7 @@ else
 
 my $start = time;                                                               # Tests
 
-goto latest;
+#goto latest;
 
 if (1) {                                                                        #TPrintOutString #TAssemble
   PrintOutString "Hello World";
