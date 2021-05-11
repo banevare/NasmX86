@@ -6931,7 +6931,7 @@ else
 
 my $start = time;                                                               # Tests
 
-#goto latest;
+goto latest unless caller(0);
 
 if (1) {                                                                        #TPrintOutString #TAssemble
   PrintOutString "Hello World";
