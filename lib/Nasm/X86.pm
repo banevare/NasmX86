@@ -845,16 +845,23 @@ sub Variable::setMask($$$)                                                      
 sub Variable::setZmm($$$$)                                                      # Load bytes from the memory addressed by the source variable into the numbered zmm register at a specified offset moving the specified number of bytes
  {my ($source, $target, $offset, $length) = @_;                                 # Variable containing the address of the source, number of zmm to load, variable containing offset in zmm to move to, variable containing length of move
   @_ == 4 or confess;
-  Comment "Load Zmm from Memory";
+  Comment "Set Zmm from Memory";
   PushRR my @save = (k7, r14, r15);
-
   $offset->setMask($length, k7);                                                # Set mask for target
   $source->setReg(r15);
   Sub r15, $offset->setReg(r14);                                                # Position memory for target
-  Mov rax, r15;
-  Mov rdi, 8;
   Vmovdqu8 "zmm${target}{k7}", "[r15]";                                         # Read from memory
   PopRR @save;
+ }
+
+sub Variable::loadZmm($$)                                                       # Load bytes from the memory addressed by the source variable into the numbered zmm register.
+ {my ($source, $target) = @_;                                                   # Variable containing the address of the source, number of zmm to load
+  @_ == 2 or confess;
+  Comment "Load Zmm from Memory";
+  PushRR r15;
+  $source->setReg(r15);
+  Vmovdqu8 "zmm${target}", "[r15]";                                             # Read from memory
+  PopRR r15;
  }
 
 sub Variable::for(&$)                                                           # Iterate the body from 0 limit times.
@@ -6902,7 +6909,7 @@ $ENV{PATH} = $ENV{PATH}.":/var/isde:sde";                                       
 if ($^O =~ m(bsd|linux)i)                                                       # Supported systems
  {#if (confirmHasCommandLineCommand(q(nasm)) and                                 # Network assembler
   #    confirmHasCommandLineCommand(q(sde64)))                                   # Intel emulator
-   {plan tests => 75;
+   {plan tests => 76;
    }
   #else
   # {plan skip_all =>qq(Nasm or Intel 64 emulator not available);
@@ -8085,6 +8092,19 @@ if (1) {                                                                        
 
   is_deeply Assemble, <<END;
   zmm0: 0000 0000 0000 0000   0000 0000 0000 0000   0000 000B 0A09 0807   0605 0403 0201 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0201   0000 0000 0000 0000
+END
+ }
+
+latest:;
+
+if (1) {                                                                        #TVariable::setZmm
+  my $s = Rb(0..128);
+  my $source = Vq(Source, $s);
+  $source->loadZmm(0);
+  PrintOutRegisterInHex zmm0;
+
+  is_deeply Assemble, <<END;
+  zmm0: 3F3E 3D3C 3B3A 3938   3736 3534 3332 3130   2F2E 2D2C 2B2A 2928   2726 2524 2322 2120   1F1E 1D1C 1B1A 1918   1716 1514 1312 1110   0F0E 0D0C 0B0A 0908   0706 0504 0302 0100
 END
  }
 
