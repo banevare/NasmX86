@@ -854,13 +854,23 @@ sub Variable::setZmm($$$$)                                                      
   PopRR @save;
  }
 
-sub Variable::loadZmm($$)                                                       # Load bytes from the memory addressed by the source variable into the numbered zmm register.
- {my ($source, $target) = @_;                                                   # Variable containing the address of the source, number of zmm to load
+sub Variable::getZmm($$)                                                        # Load bytes from the memory addressed by the source variable into the numbered zmm register.
+ {my ($source, $target) = @_;                                                   # Variable containing the address of the source, number of zmm to get
   @_ == 2 or confess;
-  Comment "Load Zmm from Memory";
+  Comment "Get Zmm from Memory";
   PushRR r15;
   $source->setReg(r15);
   Vmovdqu8 "zmm${target}", "[r15]";                                             # Read from memory
+  PopRR r15;
+ }
+
+sub Variable::putZmm($$)                                                        # Write bytes into the memory addressed by the source variable from the numbered zmm register.
+ {my ($source, $target) = @_;                                                   # Variable containing the address of the source, number of zmm to put
+  @_ == 2 or confess;
+  Comment "Put Zmm from Memory";
+  PushRR r15;
+  $source->setReg(r15);
+  Vmovdqu8 "[r15]", "zmm${target}";                                             # Write into memory
   PopRR r15;
  }
 
@@ -3036,7 +3046,7 @@ Executable written to the following file:
 $E
 
 I am going to run this without using the Intel emulator. Your program will
-crash if it containes instructions not implemented on your computer.
+crash if it contains instructions not implemented on your computer.
 
 You can get the Intel emulator from:
 
@@ -8097,18 +8107,23 @@ END
 
 latest:;
 
-if (1) {                                                                        #TVariable::setZmm
+if (1) {                                                                        #TVariable::getZmm  #TVariable::setZmm
   my $s = Rb(0..128);
+  my $t = Db(map {0} 0..128);
   my $source = Vq(Source, $s);
-  $source->loadZmm(0);
+  my $target = Vq(Target, $t);
+  $source->getZmm(0);
   PrintOutRegisterInHex zmm0;
+
+  $target->putZmm(0);
+  $target->getZmm(1);
+  PrintOutRegisterInHex zmm1;
 
   is_deeply Assemble, <<END;
   zmm0: 3F3E 3D3C 3B3A 3938   3736 3534 3332 3130   2F2E 2D2C 2B2A 2928   2726 2524 2322 2120   1F1E 1D1C 1B1A 1918   1716 1514 1312 1110   0F0E 0D0C 0B0A 0908   0706 0504 0302 0100
+  zmm1: 3F3E 3D3C 3B3A 3938   3736 3534 3332 3130   2F2E 2D2C 2B2A 2928   2726 2524 2322 2120   1F1E 1D1C 1B1A 1918   1716 1514 1312 1110   0F0E 0D0C 0B0A 0908   0706 0504 0302 0100
 END
  }
-
-latest:;
 
 if (0) {                                                                        #TCreateBlockString
   my $s = Rs(0..128);
