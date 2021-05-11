@@ -846,12 +846,12 @@ sub Variable::setZmm($$$$)                                                      
  {my ($source, $target, $offset, $length) = @_;                                 # Variable containing the address of the source, number of zmm to load, variable containing offset in zmm to move to, variable containing length of move
   @_ == 4 or confess;
   Comment "Set Zmm from Memory";
-  PushRR my @save = (k7, r14, r15);
+  PushR my @save = (k7, r14, r15);
   $offset->setMask($length, k7);                                                # Set mask for target
   $source->setReg(r15);
   Sub r15, $offset->setReg(r14);                                                # Position memory for target
   Vmovdqu8 "zmm${target}{k7}", "[r15]";                                         # Read from memory
-  PopRR @save;
+  PopR @save;
  }
 
 sub Variable::getZmm($$)                                                        # Load bytes from the memory addressed by the source variable into the numbered zmm register.
@@ -2691,27 +2691,27 @@ sub BlockString::append($$$)                                                    
   $lengthLastBlock->dump;
   $spaceInLastBlock->dump;
 
-  If ($spaceInLastBlock > $length, sub                                          # Enough space in last block
+  If ($spaceInLastBlock >= $length, sub                                         # Enough space in last block
    {PrintOutStringNL "Space in block";
-    my $moveLength = $spaceInLastBlock->min($blockString->length);
+    my $moveStart = $lengthLastBlock + 1;
 
-    PushRR my @save = (zmm31, r12, r13, r14, r15);
-    $lastBlock->setReg(r15);                                                    # Address last block
-    $blockString->bsAddress->setReg(r12);                                       # Address last block
-    PrintOutRegisterInHex r12;
-    PrintOutRegisterInHex r15;
-    Vmovdqu64 zmm31, "[r12+r15]";                                               # Load last block in zmm31
-    $lengthLastBlock->setReg(r13);                                              # Length of last block
-    Inc r13;                                                                    # Offset at which we should load
-    PrintOutRegisterInHex r13;
-    $moveLength->setReg(r14);
-    $source->setReg(r15);
-    LoadZmmFromMemory(31, r13, r14, r15);                                       # Fill block
-    PrintOutRegisterInHex zmm0;
-    $lastBlock->setReg(r15);                                                    # Last block address
-    Vmovdqu64 "[r12+r15]", zmm31;                                               # Save filled last block
-    PrintOutRegisterInHex zmm31;
-    PopRR @save;
+#    PushRR my @save = (zmm31, r12, r13, r14, r15);
+#    $lastBlock->setReg(r15);                                                    # Address last block
+#    $blockString->bsAddress->setReg(r12);                                       # Address last block
+#    PrintOutRegisterInHex r12;
+#    PrintOutRegisterInHex r15;
+#    Vmovdqu64 zmm31, "[r12+r15]";                                               # Load last block in zmm31
+#    $lengthLastBlock->setReg(r13);                                              # Length of last block
+#    Inc r13;                                                                    # Offset at which we should load
+#    PrintOutRegisterInHex r13;
+#    $moveLength->setReg(r14);
+#    $source->setReg(r15);
+#    LoadZmmFromMemory(31, r13, r14, r15);                                       # Fill block
+#    PrintOutRegisterInHex zmm0;
+#    $lastBlock->setReg(r15);                                                    # Last block address
+#    Vmovdqu64 "[r12+r15]", zmm31;                                               # Save filled last block
+#    PrintOutRegisterInHex zmm31;
+#    PopRR @save;
    });
  }
 =pod
@@ -6917,13 +6917,13 @@ Test::More->builder->output("/dev/null") if $localTest;                         
 $ENV{PATH} = $ENV{PATH}.":/var/isde:sde";                                       # Intel emulator
 
 if ($^O =~ m(bsd|linux)i)                                                       # Supported systems
- {#if (confirmHasCommandLineCommand(q(nasm)) and                                 # Network assembler
-  #    confirmHasCommandLineCommand(q(sde64)))                                   # Intel emulator
+ {if (confirmHasCommandLineCommand(q(nasm)) and                                 # Network assembler
+      confirmHasCommandLineCommand(q(sde64)))                                   # Intel emulator
    {plan tests => 76;
    }
-  #else
-  # {plan skip_all =>qq(Nasm or Intel 64 emulator not available);
-  # }
+  else
+   {plan skip_all =>qq(Nasm or Intel 64 emulator not available);
+   }
  }
 else
  {plan skip_all =>qq(Not supported on: $^O);
