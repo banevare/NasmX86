@@ -3101,7 +3101,7 @@ END
    }
 
   my $emulator = exists $options{emulator} ? $options{emulator} : 1;            # Emulate by default unless told otherwise
-  if (!$k and !-e $sde)                                                         # Check for Intel emulator
+  if (!$k and $emulator and !-e $sde)                                           # Complain about the emulator if we are going to run and we have not suppressed the emulator and the emulator is not present
    {my $E = fpf(currentDirectory, $e);
     say STDERR <<END;
 Executable written to the following file:
@@ -6992,7 +6992,7 @@ else
 
 my $start = time;                                                               # Tests
 
-#goto latest unless caller(0);
+goto latest unless caller(0);
 
 if (1) {                                                                        #TPrintOutString #TAssemble
   PrintOutString "Hello World";
