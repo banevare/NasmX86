@@ -3115,7 +3115,12 @@ You can get the Intel emulator from:
 
 https://software.intel.com/content/dam/develop/external/us/en/documents/downloads/sde-external-8.63.0-2021-01-18-lin.tar.bz2
 
-Use Assemble(keep=>"executable file name" to avoid this message.
+To avoid this message, use option(1) below to produce just an executable
+without running it, or use the option(2) to run without the emulator:
+
+(1) Assemble(keep=>"executable file name")
+
+(2) Assemble(emulator=>0)
 END
     $emulator = 0;
    }
