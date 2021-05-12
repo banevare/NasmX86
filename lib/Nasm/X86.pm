@@ -4,6 +4,7 @@
 # Philip R Brenan at appaapps dot com, Appa Apps Ltd Inc., 2021
 #-------------------------------------------------------------------------------
 # podDocumentation
+# AllocateAll8OnStack - replace with variables
 # Labels should be settable via $label->set
 # Register expressions via op overloading - register size and ability to add offsets, peek, pop, push clear register
 # Indent opcodes by call depth, - replace push @text with a method call
@@ -204,6 +205,8 @@ END
        sub $I(\$\$)
         {my (\$target, \$source) = \@_;
          \@_ == 2 or confess "Two arguments required";
+         Keep(\$target)    if "$i" =~ m(\\Amov\\Z) and \$Registers{\$target};
+         KeepSet(\$source) if "$i" =~ m(\\Amov\\Z) and \$Registers{\$source};
          my \$s = '  ' x scalar(my \@d = caller);
          push \@text, qq(\${s}$i \$target, \$source\\n);
         }
@@ -250,8 +253,11 @@ END
 
 sub ClearRegisters(@);                                                          # Clear registers by setting them to zero
 sub Comment(@);                                                                 # Insert a comment into the assembly code
-sub Keep(@);                                                                    # Mark free registers so that they are not updated until we Free them or complain if the register is already in use.
 sub KeepFree(@);                                                                # Free registers so that they can be reused
+sub Keep(@);                                                                    # Mark free registers so that they are not updated until we Free them or complain if the register is already in use.
+sub KeepPop(@);                                                                 # Reset the status of the specified registers to the status quo ante the last push
+sub KeepPush(@);                                                                # Push the current status of the specified registers and then mark them as free
+sub KeepReturn(@);                                                              # Pop the specified register and mark it as in use to effect a subroutine return with this register.
 sub PeekR($);                                                                   # Peek at the register on top of the stack
 sub PopR(@);                                                                    # Pop a list of registers off the stack
 sub PopRR(@);                                                                   # Pop a list of registers off the stack without tracking
@@ -377,9 +383,11 @@ sub Pi64 {Rq(Float64($Pi))}                                                     
 
 my @syscallSequence = qw(rax rdi rsi rdx r10 r8 r9);                            # The parameter list sequence for system calls
 
-sub SaveFirstFour()                                                             # Save the first 4 parameter registers
- {my $N = 4;
+sub SaveFirstFour(@)                                                            # Save the first 4 parameter registers making any parameter registers read only
+ {my (@keep) = @_;                                                              # Registers to mark as read only
+  my $N = 4;
   PushR $_ for @syscallSequence[0..$N-1];
+  Keep @keep;                                                                   # Mark any parameters as read only
   $N * &RegisterSize(rax);                                                      # Space occupied by push
  }
 
@@ -392,12 +400,14 @@ sub RestoreFirstFourExceptRax()                                                 
  {my $N = 4;
   PopR $_ for reverse @syscallSequence[1..$N-1];
   Add rsp, 1*RegisterSize(rax);
+  KeepReturn rax;
  }
 
 sub RestoreFirstFourExceptRaxAndRdi()                                           # Restore the first 4 parameter registers except rax  and rdi so we can return a pair of values
  {my $N = 4;
   PopR $_ for reverse @syscallSequence[2..$N-1];
   Add rsp, 2*RegisterSize(rax);
+  KeepReturn rax, rdi;
  }
 
 sub SaveFirstSeven()                                                            # Save the first 7 parameter registers
@@ -415,12 +425,14 @@ sub RestoreFirstSevenExceptRax()                                                
  {my $N = 7;
   PopR $_ for reverse @syscallSequence[1..$N-1];
   Add rsp, 1*RegisterSize(rax);
+  KeepReturn rax;
  }
 
 sub RestoreFirstSevenExceptRaxAndRdi()                                          # Restore the first 7 parameter registers except rax and rdi which are being used to return the results
  {my $N = 7;
   PopR $_ for reverse @syscallSequence[2..$N-1];
   Add rsp, 2*RegisterSize(rax);                                                 # Skip rdi and rax
+  KeepReturn rax, rdi;
  }
 
 sub ReorderSyscallRegisters(@)                                                  # Map the list of registers provided to the 64 bit system call sequence
@@ -477,7 +489,7 @@ sub SetMaskRegister($$$)                                                        
  {my ($mask, $start, $length) = @_;                                             # Mask register to set, register containing start position or 0 for position 0, register containing end position
   @_ == 3 or confess;
 
-  Keep r15, r14;
+  PushR my @save = (r15, r14);
   Mov r15, -1;
   if ($start)                                                                   # Non zero start
    {Mov  r14, $start;
@@ -490,7 +502,7 @@ sub SetMaskRegister($$$)                                                        
    }
   Bzhi r15, r15, r14;
   Kmovq $mask, r15;
-  KeepFree r15, r14;
+  PopR @save;
  }
 
 sub SetZF()                                                                     # Set the zero flag
@@ -498,10 +510,10 @@ sub SetZF()                                                                     
  }
 
 sub ClearZF()                                                                   # Clear the zero flag
- {Push rax;
+ {PushR rax;
   Mov rax, 1;
   Cmp rax, 0;
-  Pop rax;
+  PopR rax;
  }
 
 #D2 Variables                                                                   # Variable definitions
@@ -526,14 +538,14 @@ sub Variable($$$)                                                               
      {Mov $t, $expr;
      }
     else
-     {PushRR r15;
+     {PushR r15;
       Mov r15, $expr;
       Mov $t, r15b        if $nSize == 0;
       Mov $t, r15l        if $nSize == 1;
       Mov $t, r15d        if $nSize == 2;
       Mov $t, r15         if $nSize == 3;
       Pinsrq $t, r15, 0   if $nSize >  3;
-      PopRR r15;
+      PopR r15;
      }
    }
 
@@ -585,11 +597,11 @@ sub Variable::arithmetic($$$$)                                                  
   my $l = $left ->address;
   my $r = ref($right) ? $right->address : $right;                               # Right can be either a variable reference or a constant
   if ($left->size == 3 and ! ref($right) || $right->size == 3)
-   {PushRR r15;
+   {PushR r15;
     Mov r15, $l;
     &$op(r15, $r);
     my $v = Vq(join(' ', '('.$left->name, $name, (ref($right) ? $right->name : '').')'), r15);
-    PopRR r15;
+    PopR r15;
     return $v;
    }
   confess "Need more code";
@@ -616,12 +628,12 @@ sub Variable::division($$$)                                                     
   my $l = $left ->address;
   my $r = ref($right) ? $right->address : $right;                               # Right can be either a variable reference or a constant
   if ($left->size == 3 and ! ref($right) || $right->size == 3)
-   {PushRR my @regs = (rax, rdx, r15);
+   {PushR my @regs = (rax, rdx, r15);
     Mov rax, $l;
     Mov r15, $r;
     Idiv r15;
     my $v = Vq(join(' ', '('.$left->name, $op, (ref($right) ? $right->name : '').')'), $op eq "%" ? rdx : rax);
-    PopRR r15;
+    PopR r15;
     return $v;
    }
   confess "Need more code";
@@ -643,12 +655,14 @@ sub Variable::boolean($$$$)                                                     
   my $l = $left ->address;
   my $r = ref($right) ? $right->address : $right;                               # Right can be either a variable reference or a constant
   if ($left->size == 3 and ! ref($right) || $right->size == 3)
-   {PushRR r15;
+   {PushR r15;
     Mov r15, $l;
     Cmp r15, $r;
-    &$sub(sub {Mov  r15, 1}, sub {Mov  r15, 0});
+    KeepFree r15;
+    &$sub(sub {Mov  r15, 1; KeepFree r15},
+          sub {Mov  r15, 0; KeepFree r15});
     my $v = Vq(join(' ', '('.$left->name, $op, (ref($right) ? $right->name : '').')'), r15);
-    PopRR r15;
+    PopR r15;
     return $v;
    }
   confess "Need more code";
@@ -686,21 +700,21 @@ sub Variable::lt($$)                                                            
 
 sub Variable::print($)                                                          # Write the value of a variable on stdout
  {my ($left) = @_;                                                              # Left variable
-  PushRR my @regs = (rax, rdi);
+  PushR my @regs = (rax, rdi);
   Mov rax, $left->label;
   Mov rdi, 8;
   &PrintOutMemoryInHexNL();
-  PopRR @regs;
+  PopR @regs;
  }
 
 sub Variable::dump($)                                                           # Dump the value of a variable on stdout
  {my ($left) = @_;                                                              # Left variable
-  PushRR my @regs = (rax, rdi);
+  PushR my @regs = (rax, rdi);
   Mov rax, $left->label;
   Mov rdi, 8;
   &PrintOutString($left->name.": ");
   &PrintOutMemoryInHexNL();
-  PopRR @regs;
+  PopR @regs;
  }
 
 sub Variable::setReg($$)                                                        # Set the named register from the content of the variable
@@ -762,25 +776,27 @@ sub Variable::str($)                                                            
 
 sub Variable::min($$)                                                           # Minimum of two variables
  {my ($left, $right) = @_;                                                      # Variable
-  PushRR my @save = (r12, r14, r15);
+  PushR my @save = (r12, r14, r15);
   $left->setReg(r14);
   $right->setReg(r15);
   Cmp r14, r15;
-  &IfLt(sub{Mov r12, r14}, sub {Mov r12, r15});
+  &IfLt(sub {Mov r12, r14; KeepFree r12},
+        sub {Mov r12, r15; KeepFree r12});
   my $r = Vq("Minimum(".$left->name.", ".$right->name.")", r12);
-  PopRR @save;
+  PopR @save;
   $r
  }
 
 sub Variable::max($$)                                                           # Maximum of two variables
  {my ($left, $right) = @_;                                                      # Variable
-  PushRR my @save = (r12, r14, r15);
+  PushR my @save = (r12, r14, r15);
   $left->setReg(r14);
   $right->setReg(r15);
   Cmp r14, r15;
-  &IfGt(sub{Mov r12, r14}, sub {Mov r12, r15});
+  &IfGt(sub {Mov r12, r14; KeepFree r12},
+        sub {Mov r12, r15; KeepFree r12});
   my $r = Vq("Maximum(".$left->name.", ".$right->name.")", r12);
-  PopRR @save;
+  PopR @save;
   $r
  }
 
@@ -824,7 +840,7 @@ sub Variable::setMask($$$)                                                      
  {my ($start, $length, $mask) = @_;                                             # Variable containing start of mask, variable containing length of mask, mask register
   @_ == 3 or confess;
 
-  PushRR my @save = (r13, r14, r15);
+  PushR my @save = (r13, r14, r15);
   Mov r15, -1;
   if ($start)                                                                   # Non zero start
    {$start->setReg(r14);
@@ -839,7 +855,7 @@ sub Variable::setMask($$$)                                                      
    }
   Bzhi r15, r15, r14;
   Kmovq $mask, r15;
-  PopRR @save;
+  PopR @save;
  }
 
 sub Variable::setZmm($$$$)                                                      # Load bytes from the memory addressed by the source variable into the numbered zmm register at a specified offset moving the specified number of bytes
@@ -858,20 +874,20 @@ sub Variable::getZmm($$)                                                        
  {my ($source, $target) = @_;                                                   # Variable containing the address of the source, number of zmm to get
   @_ == 2 or confess;
   Comment "Get Zmm from Memory";
-  PushRR r15;
+  PushR r15;
   $source->setReg(r15);
   Vmovdqu8 "zmm${target}", "[r15]";                                             # Read from memory
-  PopRR r15;
+  PopR r15;
  }
 
 sub Variable::putZmm($$)                                                        # Write bytes into the memory addressed by the source variable from the numbered zmm register.
  {my ($source, $target) = @_;                                                   # Variable containing the address of the source, number of zmm to put
   @_ == 2 or confess;
   Comment "Put Zmm from Memory";
-  PushRR r15;
+  PushR r15;
   $source->setReg(r15);
   Vmovdqu8 "[r15]", "zmm${target}";                                             # Write into memory
-  PopRR r15;
+  PopR r15;
  }
 
 sub Variable::for(&$)                                                           # Iterate the body from 0 limit times.
@@ -904,24 +920,20 @@ sub Keep(@)                                                                     
   for my $target(@target)
    {my $r = $RegisterContaining{$target};                                       # Containing register
     if (my $l = $Keep{$r})                                                      # Check whether the register is already in use
-     {my ($line, $file) = @$l;
-      fff $line, $file, "Register $target in use";
+     {say STDERR $l;
+      confess "$r reset";
      }
-    my ($p, $f, $l) = caller;
-    $Keep{$r} = [$l, $f];
+    eval {confess "$r set"};
+    $Keep{$r} = $@;
    }
   $target[0]                                                                    # Return first register
  }
 
-sub KeepSet(@)                                                                  # Confirm that the specified registers are in use
- {my (@target) = @_;                                                            # Registers to keep
-  for my $target(@target)
-   {my $r = $RegisterContaining{$target};                                       # Containing register
-    if (!$Keep{$r})                                                             # Confirm that the register is already in use
-     {confess "Register $target not in use";
-     }
-   }
-  $target[0]                                                                    # Return first register
+sub KeepSet($)                                                                  # Confirm that the specified registers are in use
+ {my ($target) = @_;                                                            # Registers to keep
+  my $r = $RegisterContaining{$target};                                         # Containing register
+  confess "No such register: $target\n" unless $r;
+  $Keep{$r}                                                                     # Confirm that the register is already in use
  }
 
 sub KeepPush(@)                                                                 # Push the current status of the specified registers and then mark them as free
@@ -951,10 +963,19 @@ sub KeepPop(@)                                                                  
    }
  }                                                                              # Mark them as free
 
+sub KeepReturn(@)                                                               # Pop the specified register and mark it as in use to effect a subroutine return with this register.
+ {my (@target) = @_;                                                            # Registers to return
+  KeepPop @target;
+  for my $target(@target)
+   {Keep $target unless KeepSet $target;                                        # Mark as use in use unless already in use at this level
+   }
+ }                                                                              # Mark them as free
+
 sub KeepFree(@)                                                                 # Free registers so that they can be reused
  {my (@target) = @_;                                                            # Registers to free
   for my $target(@target)
    {my $r = $RegisterContaining{$target};                                       # Containing register
+       $r or confess "No such register: $target";
     delete $Keep{$r};
    }
   $target[0]                                                                    # Return first register
@@ -962,12 +983,12 @@ sub KeepFree(@)                                                                 
 
 sub Copy($$)                                                                    # Copy the source to the target register
  {my ($target, $source) = @_;                                                   # Target register, source expression
-  Keep $target;
 
   $Registers{$source} and !$Keep{$source} and confess "$source not set";        # Check that the register has been initialized
 
   if ($target =~ m(\A(x|y|z)mm\d{1,2}\Z))                                       # Copy x|y|z mm register
-   {Vmovdqu64  $target, $source;
+   {Keep $target;
+    Vmovdqu64 $target, $source;
    }
   else                                                                          # Normal register
    {Mov $target, $source;
@@ -978,21 +999,23 @@ sub Copy($$)                                                                    
 sub MaximumOfTwoRegisters($$$)                                                  # Return in the specified register the value in the second register if it is greater than the value in the first register
  {my ($result, $first, $second) = @_;                                           # Result register, first register, second register
   Cmp $first, $second;
-  &IfGt(sub{Mov $result, $first}, sub {Mov $result, $second});
+  &IfGt(sub {Mov $result, $first;  KeepFree $result},
+        sub {Mov $result, $second; KeepFree $result});
   $result                                                                       # Result register
  }
 
 sub MinimumOfTwoRegisters($$$)                                                  # Return in the specified register the value in the second register if it is less than the value in the first register
  {my ($result, $first, $second) = @_;                                           # Result register, first register, second register
   Cmp $first, $second;
-  &IfLt(sub{Mov $result, $first}, sub {Mov $result, $second});
+  &IfLt(sub {Mov $result, $first;  KeepFree $result},
+        sub {Mov $result, $second; KeepFree $result});
   $result                                                                       # Result register
  }
 
 sub Increment($;$)                                                              # Increment the specified register
  {my ($target, $amount) = @_;                                                   # Target register, optional amount if not 1
   @_ >= 1 && @_ <= 2 or confess "Nothing to increment";
-  KeepSet @_;
+  KeepSet $target;
   if (@_ == 1)
    {Inc $target;                                                                # Increment register
    }
@@ -1005,7 +1028,7 @@ sub Increment($;$)                                                              
 sub Decrement($;$)                                                              # Decrement the specified register
  {my ($target, $amount) = @_;                                                   # Target register, optional amount if not 1
   @_ >= 1 && @_ <= 2 or confess "Nothing to decrement";
-  KeepSet @_;
+  KeepSet $target;
   if (@_ == 1)
    {Dec $target;                                                                # Increment register
    }
@@ -1018,7 +1041,7 @@ sub Decrement($;$)                                                              
 sub Plus($@)                                                                    # Add the last operands and place the result in the first operand
  {my ($target, @source) = @_;                                                   # Target register, source registers
   @_ > 1 or confess "Nothing to add";
-  Keep $target;                                                                 # Keep the target
+
   my $s = shift @source;
   Mov $target, $s unless $target eq $s;                                         # Move first source to target unless they are the same register
   my %source = map {$_=>1} @source;                                             # Hash of sources
@@ -1030,7 +1053,6 @@ sub Plus($@)                                                                    
 sub Minus($$$)                                                                  # Subtract the third operand from the second operand and place the result in the first operand
  {my ($target, $s1, $s2) = @_;                                                  # Target register, register to subtract from, register to subtract
   @_ == 3 or confess;
-  Keep $target;                                                                 # Keep the target
 
   if ($target ne $s1 and $target ne $s2)                                        # Target different from sources
    {Mov $target, $s1;
@@ -1084,11 +1106,13 @@ sub LoadZmmFromMemory($$$$)                                                     
   @_ == 4 or confess;
   Comment "Load Target Zmm from Memory";
   SetMaskRegister(k7, $targetOffset, $length);                                  # Set mask for target
+  PushR r15;
   Mov r15, $source;
   Sub r15, $targetOffset;                                                       # Position memory for target
   Vmovdqu8 "zmm${target}{k7}", "[r15]";                                         # Read from memory
   Add $targetOffset, $length;                                                   # Increment position in target
   Add $source,       $length;                                                   # Increment position in source
+  PopR r15;
  }
 
 #D1 Structured Programming                                                      # Structured programming constructs
@@ -1098,10 +1122,10 @@ sub If($$;$)                                                                    
   @_ >= 2 && @_ <= 3 or confess;
 
   if (ref($jump))                                                               # Variable reference - non zero then then else else
-   {PushRR r15;
+   {PushR r15;
     Mov r15, $jump->address;
     Cmp r15,0;
-    PopRR r15;
+    PopR r15;
     __SUB__->(q(Jz), $then, $else);
    }
   elsif (!$else)                                                                # No else
@@ -1315,11 +1339,14 @@ sub PrintOutRaxInHex                                                            
   my $hexTranslateTable = hexTranslateTable;
 
   my $sub = S                                                                   # Address conversion routine
-   {SaveFirstFour;
+   {SaveFirstFour rax;                                                          # Rax is a parameter
     Mov rdx, rax;                                                               # Content to be printed
     Mov rdi, 2;                                                                 # Length of a byte in hex
+    KeepFree rax;
+
     for my $i(0..7)
      {my $s = 8*$i;
+      KeepFree rax;
       Mov rax, rdx;
       Shl rax, $s;                                                              # Push selected byte high
       Shr rax, 56;                                                              # Push select byte low
@@ -1362,6 +1389,7 @@ sub PrintOutRegisterInHex(@)                                                    
          {my $R = $regs[$i];
           if ($R !~ m(\Arax))
            {PrintOutString("  ");
+            Keep $R; KeepFree rax;
             Mov rax, $R
            }
           PrintOutRaxInHex;                                                     # Print work register
@@ -1435,6 +1463,7 @@ sub PrintOutRegistersInHex                                                      
         Push rax
        }
       PrintOutString reverse(pad(reverse($r), 3)).": ";
+      Keep $r unless KeepSet $r ; KeepFree rax;
       Mov rax, $r;
       PrintOutRaxInHex;
       PrintOutNL;
@@ -1477,13 +1506,16 @@ sub GetPidInHex()                                                               
 
   my $sub = S                                                                   # Address conversion routine
    {SaveFirstFour;
-    Mov rax, 39;
+    Mov rax, 39;                                                                # Get pid
     Syscall;
     Mov rdx, rax;                                                               # Content to be printed
+    KeepFree rax;
+
     ClearRegisters rax;                                                         # Save a trailing 00 on the stack
     Push ax;
     for my $i(reverse 5..7)
      {my $s = 8*$i;
+      KeepFree rax, rdi;
       Mov rdi,rdx;
       Shl rdi,$s;                                                               # Push selected byte high
       Shr rdi,56;                                                               # Push select byte low
@@ -1756,9 +1788,10 @@ sub PrintOutMemory                                                              
 
   my $sub = S
    {Comment "Print memory";
-    SaveFirstFour;
+    SaveFirstFour rax, rdi;
     Mov rsi, rax;
     Mov rdx, rdi;
+    KeepFree rax, rdi;
     Mov rax, 1;
     Mov rdi, $sysout;
     Syscall;
@@ -1893,11 +1926,11 @@ sub OpenWrite()                                                                 
     my $write = $O_WRONLY+0 | $O_CREAT+0;
 
     SaveFirstFour;
-    Mov rdi,16;
+#   Mov rdi,16;
     Mov rdi, rax;
     Mov rax, 2;
     Mov rsi, $write;
-    ClearRegisters rdx;
+#   ClearRegisters rdx;
     Mov rdx, 0x1c0;                                                             # u=rwx  1o=x 4o=r 8g=x 10g=w 20g=r 40u=x 80u=r 100u=r 200=T 400g=S 800u=S #0,2,1000, nothing
     Syscall;
 
@@ -1931,11 +1964,13 @@ sub StatSize()                                                                  
 
   my $sub = S                                                                   # Stat file
    {Comment "Stat a file for size";
-    SaveFirstFour;
+    SaveFirstFour rax;
     Mov rdi, rax;                                                               # File name
+    KeepFree rax;
     Mov rax,4;
     Lea rsi, "[rsp-$Size]";
     Syscall;
+    KeepFree rax;
     Mov rax, "[$off+rsp-$Size]";                                                # Place size in rax
     RestoreFirstFourExceptRax;
    } name=> "StatSize";
@@ -1948,7 +1983,6 @@ sub ReadFile()                                                                  
 
   my $sub = S                                                                   # Read file
    {Comment "Read a file into memory";
-
     SaveFirstSeven;                                                             # Generated code
     my ($local, $file, $addr, $size, $fdes) = AllocateAll8OnStack 4;            # Local data
 
@@ -1956,10 +1990,12 @@ sub ReadFile()                                                                  
 
     StatSize;                                                                   # File size
     Mov $size, rax;                                                             # Save file size
+    KeepFree rax;
 
     Mov rax, $file;                                                             # File name
     OpenRead;                                                                   # Open file for read
     Mov $fdes, rax;                                                             # Save file descriptor
+    KeepFree rax;
 
     my $d  = extractMacroDefinitionsFromCHeaderFile "linux/mman.h";             # mmap constants
     my $pa = $$d{MAP_PRIVATE};
@@ -2007,14 +2043,14 @@ sub LoadShortStringFromMemoryToZmm($$)                                          
   @_ == 2 or confess;
 
   Comment "Load a short string from memory into zmm$zmm from $address";
-  Keep(r15, r14, k7);                                                           # Use these registers
+  PushR my @save = (r15, r14, k7);                                              # Use these registers
   Mov r15b, "[$address]";                                                       # Load first byte which is the length of the string
   Inc r15;                                                                      # Length field
   Mov r14, -1;                                                                  # Clear bits that we do not wish to load
   Bzhi r14, r14, r15;
   Kmovq k7, r14;
   Vmovdqu8 "zmm${zmm}{k7}", "[$address]";                                       # Load string
-  KeepFree(r15, r14, k7);
+  PopR @save;
  }
 
 sub GetLengthOfShortString($$)                                                  # Get the length of the short string held in the numbered zmm register into the specified register
@@ -2067,6 +2103,7 @@ sub Hash()                                                                      
    {Comment "Hash";
 
     PushR my @regs = (rax, rdi, k1, zmm0, zmm1);                                # Save registers
+    PushR r15;
     Vpbroadcastq zmm0, rdi;                                                     # Broadcast length through ymm0
     Vcvtuqq2pd   zmm0, zmm0;                                                    # Convert to lengths to float
     Vgetmantps   zmm0, zmm0, 4;                                                 # Normalize to 1 to 2, see: https://hjlebbink.github.io/x86doc/html/VGETMANTPD.html
@@ -2084,6 +2121,7 @@ sub Hash()                                                                      
       Bzhi r15, r15, rdi;                                                       # Clear bits that we do not wish to load
       Kmovq k1, r15;                                                            # Take up mask
       Vmovdqu8 "ymm1{k1}", "[rax]";                                             # Load data to hash
+      KeepFree r15;
 
       Vcvtudq2pd zmm1, ymm1;                                                    # Convert to float
       Vgetmantps   zmm0, zmm0, 4;                                               # Normalize to 1 to 2, see: https://hjlebbink.github.io/x86doc/html/VGETMANTPD.html
@@ -2097,17 +2135,20 @@ sub Hash()                                                                      
     Kmovq k1, r15;
     Vpcompressq  "zmm1{k1}", zmm0;
     Vaddpd       ymm0, ymm0, ymm1;                                              # Top 4 plus bottom 4
+    KeepFree r15;
 
     Mov r15, 0b1100;                                                            # Top 2 to bottom 2
     Kmovq k1, r15;
     Vpcompressq  "ymm1{k1}", ymm0;
     Vaddpd       xmm0, xmm0, xmm1;                                              # Top 2 plus bottom 2
+    KeepFree r15;
 
     Pslldq       xmm0, 2;                                                       # Move centers into double words
     Psrldq       xmm0, 4;
     Mov r15, 0b0101;                                                            # Centers to lower quad
     Kmovq k1, r15;
     Vpcompressd  "xmm0{k1}", xmm0;                                              # Compress to lower quad
+    PopR r15;
 
     Vmovq r15, xmm0;                                                            # Result in r15
 
@@ -2131,6 +2172,7 @@ sub Cstrlen()                                                                   
     push @text, <<END;
     repne scasb
 END
+    KeepFree r15;
     Mov r15, rcx;
     Not r15;
     Dec r15;
@@ -2154,6 +2196,8 @@ sub CreateByteString()                                                          
     AllocateMemory;
     ClearRegisters   rdi;
     Mov $used->addr, rdi;
+    KeepFree rdi;
+
     Mov rdi, $N;
     Mov $size->addr, rdi;
 
@@ -2181,15 +2225,18 @@ sub ByteString::updateSpace($)                                                  
     Mov rdx, $used;                                                             # Used
     Add rdx, rdi;                                                               # Wanted
     Cmp rdx, $size;                                                             # Space needed versus actual size
+    KeepFree rdx;
 
     Jle (my $l = Label);
       Mov rsi, rax;                                                             # Old byte string
+      KeepFree rax;
+
       Mov rdi, $size;                                                           # Old byte string size
       Mov rax, rdi;                                                             # Old byte string length
 
       my $double = SetLabel Label;                                              # Keep doubling until we have a string area that is big enough to hold the new data
-        Shl rax, 1;                                                             # New byte string size - double the size of the old byte string
-        Cmp rax, rdx;                                                           # Big enough ?
+      Shl rax, 1;                                                               # New byte string size - double the size of the old byte string
+      Cmp rax, rdx;                                                             # Big enough ?
       Jl $double;                                                               # Still too low
 
       Mov rdx, rax;                                                             # New byte string size
@@ -2197,10 +2244,10 @@ sub ByteString::updateSpace($)                                                  
       CopyMemory;                                                               # Copy old byte string into new byte string
       Mov $size, rdx;                                                           # rdx can be reused now we have saved the size of the new bye string
 
-      Push rax;                                                                 # Free old byte string
+      PushR rax;                                                                # Free old byte string
       Mov rax, rsi;                                                             # Old byte string
       FreeMemory;
-      Pop rax;
+      PopR rax;
     SetLabel $l;                                                                # Exit
 
     RestoreFirstFourExceptRax;                                                  # Return new byte string
@@ -2347,7 +2394,8 @@ sub ByteString::rdiInHex                                                        
     Mov $value, rdi;                                                            # Content to be printed
     Mov rdi, 2;                                                                 # Length of a byte in hex
     for my $i(0..7)                                                             # Each byte in rdi
-     {Mov $byte, $value;
+     {KeepFree $byte;
+      Mov $byte, $value;
       Shl $byte, 8 *  $i;                                                       # Push selected byte high
       Shr $byte, 8 * ($size - 1);                                               # Push select byte low
       Shl $byte, 1;                                                             # Multiply by two because each entry in the translation table is two bytes long
@@ -2405,28 +2453,36 @@ sub ByteString::write($)                                                        
       while(@c)
        {my $a = pop @c; my $b = pop @c;
         my $x = sprintf("%x%x", ord($a), ord($b));
+        KeepFree rax;
         Mov rax, "0x$x";
         Push ax;
        }
      }
 
+    KeepFree rax;
     Mov rax, rsp;                                                               # Address file name
     OpenWrite;                                                                  # Create a temporary file
     Mov $file, rax;                                                             # File descriptor
 
+    KeepFree rax;
     Mov rax, 1;                                                                 # Write content to file
     Mov rdi, $file;
     Lea rsi, $byteString->data->addr($string);
     Mov rdx, $byteString->used->addr($string);
     Syscall;
+    KeepFree rax, rdi;
+
     Mov rax, $string;                                                           # Clear string and add file name
     $byteString->clear;
+    KeepFree rax;
 
     Mov rax, $string;                                                           # Put file name in byte string
     Mov rsi, rsp;
     Mov rdi, 1+$FileNameSize;                                                   # File name size plus one trailing zero
     $byteString->m;
     Add rsp, 2+$FileNameSize;                                                   # File name size plus two trailing zeros
+    KeepFree rax;
+
     Mov rax, $file;
     CloseFile;
     RestoreFirstSeven;
@@ -2445,13 +2501,14 @@ sub ByteString::read($)                                                         
     Lea rax, $byteString->data->addr;                                           # Address file name with rax
     ReadFile;                                                                   # Read the file named by rax
     Mov rsi, rax;                                                               # Address of content in rax, length of content in rdi
+    KeepFree rax;
     Mov rax, rdx;                                                               # Address of byte string
     $byteString->clear;                                                         # Remove file name in byte string
     $byteString->m;                                                             # Move data into byte string
-    Push rax;                                                                   # We might have a new byte string by now
+    PushR rax;                                                                  # We might have a new byte string by now
     Mov rax, rsi;                                                               # File data
     FreeMemory;                                                                 # Address of allocated memory in rax, length in rdi
-    Pop rax;                                                                    # Address byte string
+    PopR rax;                                                                   # Address byte string
     RestoreFirstFourExceptRax;
    } name => "ByteString::read";
 
@@ -2983,12 +3040,14 @@ sub Exit(;$)                                                                    
  {my ($c) = @_;                                                                 # Return code
   if (@_ == 0 or $c == 0)
    {Comment "Exit code: 0";
+    KeepFree  rdi;
     Mov rdi, 0;
    }
   elsif (@_ == 1)
    {Comment "Exit code: $c";
     Mov rdi, $c;
    }
+  KeepFree rax;
   Mov rax, 60;
   Syscall;
  }
@@ -6887,8 +6946,6 @@ under the same terms as Perl itself.
 
 =cut
 
-
-
 # Tests and documentation
 
 sub test
@@ -7057,7 +7114,7 @@ if (1) {
 if (1) {                                                                        #TAllocateMemory #TFreeMemory
   my $N = 2048;
   my $q = Rs('a'..'p');
-  Mov rax, $N;
+  Mov rax, $N; KeepFree rax;
   AllocateMemory;
   PrintOutRegisterInHex rax;
 
@@ -7066,6 +7123,7 @@ if (1) {                                                                        
   Mov rdi,16;
   PrintOutMemory;
   PrintOutNL;
+  KeepFree rdi;
 
   Mov rdi, $N;
   FreeMemory;
@@ -7093,6 +7151,7 @@ if (1) {                                                                        
    } sub
    {PrintOutRegisterInHex rbx;
    };
+  KeepFree rax;
   Mov rax, 1;
   Test rax,rax;
   IfNz
@@ -7113,6 +7172,7 @@ if (1) {                                                                        
     WaitPid;
     PrintOutRegisterInHex rax;
     PrintOutRegisterInHex rbx;
+    KeepFree rax;
     GetPid;                                                                     # Pid of parent as seen in parent
     Mov rcx,rax;
     PrintOutRegisterInHex rcx;
@@ -7120,9 +7180,11 @@ if (1) {                                                                        
   sub                                                                           # Child
    {Mov r8,rax;
     PrintOutRegisterInHex r8;
+    KeepFree rax;
     GetPid;                                                                     # Child pid as seen in child
     Mov r9,rax;
     PrintOutRegisterInHex r9;
+    KeepFree rax;
     GetPPid;                                                                    # Parent pid as seen in child
     Mov r10,rax;
     PrintOutRegisterInHex r10;
@@ -7170,6 +7232,7 @@ if (1) {                                                                        
   PrintOutRegisterInHex rax;
   CloseFile;                                                                    # Close file
   PrintOutRegisterInHex rax;
+  KeepFree rax, rdi;
 
   Mov rax, Rs(my $f = "zzz.txt");                                               # File to write
   OpenWrite;                                                                    # Open file
@@ -7196,21 +7259,28 @@ if (1) {                                                                        
   Mov rax, 0x07654321;
   Shl rax, 32;
   Or  rax, 0x07654321;
+  PushR rax;
+
   PrintOutRaxInHex;
   PrintOutNL;
   PrintOutRaxInReverseInHex;
   PrintOutNL;
-  Push rax;
+  KeepFree rax;
+
   Mov rax, rsp;
   Mov rdi, 8;
   PrintOutMemoryInHex;
   PrintOutNL;
+  PopR rax;
+  KeepFree rax, rdi;
+
   Mov rax, 4096;
-  Push rax;
+  PushR rax;
   Mov rax, rsp;
   Mov rdi, 8;
   PrintOutMemoryInHex;
   PrintOutNL;
+  PopR rax;
 
   is_deeply Assemble, <<END;
 0765 4321 0765 4321
@@ -7220,17 +7290,19 @@ if (1) {                                                                        
 END
  }
 
-if (1) {                                                                        #TPushR #TPopR #TPeekR
+if (1) {                                                                        #TPushR #TPopR
   Mov rax, 0x11111111;
   Mov rbx, 0x22222222;
-  PushR rax;
+  PushR my @save = (rax, rbx);
   Mov rax, 0x33333333;
-  PeekR rbx;
-  PopR rax;
+  PopR @save;
   PrintOutRegisterInHex rax;
   PrintOutRegisterInHex rbx;
 
-  ok Assemble =~ m(rax: 0000 0000 1111 1111.*rbx: 0000 0000 1111 1111)s;
+  is_deeply Assemble,<<END;
+   rax: 0000 0000 1111 1111
+   rbx: 0000 0000 2222 2222
+END
  }
 
 if (1) {                                                                        #TAllocateMemory #TFreeMemory #TClearMemory
@@ -7339,6 +7411,8 @@ if (1) {                                                                        
   Mov   rax, 8;                                                                 # Append a constant to the byte string
   Lzcnt rax, rax;                                                               # New line
   PrintOutRegisterInHex rax;
+  KeepFree rax;
+
   Mov   rax, 8;                                                                 # Append a constant to the byte string
   Tzcnt rax, rax;                                                               # New line
   PrintOutRegisterInHex rax;
@@ -7433,6 +7507,7 @@ if (1) {                                                                        
   Mov rdi, my $w = 0x20;                                                        # Space wanted
   $s->allocate;                                                                 # Allocate space wanted
   PrintOutRegisterInHex rdi;
+  KeepFree rdi;
   Mov rdi, $w;                                                                  # Space wanted
   $s->allocate;                                                                 # Allocate space wanted
   PrintOutRegisterInHex rdi;
@@ -7636,6 +7711,8 @@ if (1) {                                                                        
   PrintOutRegisterInHex rax;
   Kmovq k1, rax;
   PrintOutRegisterInHex k1;
+  KeepFree rax;
+
   Mov rax, 1;
   Vpbroadcastb zmm0, rax;
   PrintOutRegisterInHex zmm0;
@@ -7813,6 +7890,7 @@ if (1) {                                                                        
     for my $op(qw(eq ne lt le gt ge))
      {Mov rax, $a;
       Cmp rax, $b;
+      KeepFree rax;
       my $Op = ucfirst $op;
       eval qq(If$Op {PrintOutStringNL("$a $op $b")} sub {PrintOutStringNL("$a NOT $op $b")});
      }
