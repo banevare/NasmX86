@@ -8,5 +8,5 @@ Mov rax,1;
 Mov rbx,9;
 Add rax, rbx;
 PrintOutRegisterInHex rax;
-ok Assemble =~ m/rax: 0000 0000 0000 000A/;
+ok Assemble(emulator=>0) =~ m/rax: 0000 0000 0000 000A/;
 

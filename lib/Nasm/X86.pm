@@ -18,9 +18,9 @@ use Data::Table::Text qw( confirmHasCommandLineCommand currentDirectory fff file
 use Asm::C qw(:all);
 use feature qw(say current_sub);
 
-my $develop = -e q(/home/phil/);                                                # Developing
+my $develop = -e q(/home/phil);
 my $sde     = q(/var/isde/sde64);                                               # Intel emulator
-   $sde     = q(sde/sde64) unless $develop;                                     # Intel emulator on GitHub
+   $sde     = q(sde64) unless $develop;                                     # Intel emulator on GitHub
 my $totalBytesAssembled = 0;                                                    # Estimate the size of the output programs
 
 #binModeAllUtf8;
@@ -3101,7 +3101,7 @@ END
    }
 
   my $emulator = exists $options{emulator} ? $options{emulator} : 1;            # Emulate by default unless told otherwise
-  if (!$k and $emulator and !-e $sde)                                           # Complain about the emulator if we are going to run and we have not suppressed the emulator and the emulator is not present
+  if (!$k and $emulator and (system("sde64 --help > /dev/null") >> 8) != 1)                                           # Complain about the emulator if we are going to run and we have not suppressed the emulator and the emulator is not present
    {my $E = fpf(currentDirectory, $e);
     say STDERR <<END;
 Executable written to the following file:
