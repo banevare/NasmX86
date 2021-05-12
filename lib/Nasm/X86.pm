@@ -2534,12 +2534,16 @@ sub ByteString::bash($)                                                         
     Fork;                                                                       # Fork
 
     Test rax,rax;
+
     IfNz                                                                        # Parent
      {WaitPid;
      }
     sub                                                                         # Child
-     {Mov rax, rdx;                                                             # Restore address of byte string
+     {KeepFree rax;
+      Mov rax, rdx;                                                             # Restore address of byte string
+      KeepFree rdx;
       Lea rdi, $byteString->data->addr;
+      KeepFree rax;
       Mov rsi, 0;
       Mov rdx, 0;
       Mov rax, 59;
@@ -3096,8 +3100,8 @@ END
     return;
    }
 
-  my $noEmulator;                                                               # Check whether we have the emulator installed or not
-  if (!$k and !-e $sde)                                                         # Check for # Intel emulator
+  my $emulator = exists $options{emulator} ? $options{emulator} : 1;            # Emulate by default unless told otherwise
+  if (!$k and !-e $sde)                                                         # Check for Intel emulator
    {my $E = fpf(currentDirectory, $e);
     say STDERR <<END;
 Executable written to the following file:
@@ -3113,13 +3117,13 @@ https://software.intel.com/content/dam/develop/external/us/en/documents/download
 
 Use Assemble(keep=>"executable file name" to avoid this message.
 END
-    $noEmulator++;
+    $emulator = 0;
    }
 
   my $cmd  = qq(nasm -f elf64 -g -l $l -o $o $c && ld -o $e $o && chmod 744 $e);# Assemble
-  my $exec = $noEmulator                                                        # Execute with or without the emulator
-             ? qq(./$e 2>&1)
-             : qq($sde -ptr-check -- ./$e 2>&1);
+  my $exec = $emulator                                                          # Execute with or without the emulator
+             ? qq($sde -ptr-check -- ./$e 2>&1)
+             :                    qq(./$e 2>&1);
 
   $cmd .= qq( && $exec) unless $k;                                              # Execute automatically unless suppressed by user
 
@@ -6988,7 +6992,7 @@ else
 
 my $start = time;                                                               # Tests
 
-goto latest unless caller(0);
+#goto latest unless caller(0);
 
 if (1) {                                                                        #TPrintOutString #TAssemble
   PrintOutString "Hello World";
@@ -7462,7 +7466,7 @@ if (1) {                                                                        
   ok Assemble =~ m(tmp);
  }
 
-if (!develop) {                                                                 # Execute the content of a byte string #TByteString::bash #TByteString::write #TByteString::out #TByteString::unlink #TByteString::ql
+if (1) {                                                                        # Execute the content of a byte string #TByteString::bash #TByteString::write #TByteString::out #TByteString::unlink #TByteString::ql
   my $s = CreateByteString;                                                     # Create a string
   $s->ql(<<END);                                                                # Write code to execute
 #!/usr/bin/bash
@@ -7475,10 +7479,7 @@ END
   $s->unlink;                                                                   # Execute the temporary file
 
   my $u = qx(whoami); chomp($u);
-  ok Assemble =~ m($u);
- }
-else
- {ok 1;
+  ok Assemble(emulator=>0) =~ m($u);
  }
 
 if (1) {                                                                        # Make a byte string readonly
