@@ -1137,27 +1137,73 @@ sub Variable::putZmm($$)                                                        
   PopR r15;
  }
 
-sub getDFromZmmAsVariable($$)                                                   # Get the numbered double word from the numbered zmm register and return it in a variable
- {my ($zmm, $offset) = @_;                                                      # Numbered zmm, offset in dwords
-  @_ == 2 or confess;
-  Comment "Get double word from offset in zmm $zmm";
+sub getBwdqFromZmmAsVariable($$$)                                               # Get the numbered byte|word|double word|quad word from the numbered zmm register and return it in a variable
+ {my ($size, $zmm, $offset) = @_;                                               # Size of get, Numbered zmm, offset in bytes
+  @_ == 3 or confess;
+  Comment "Get $size word from $offset in zmm $zmm";
   PushR r15;
   PushRR "zmm$zmm";                                                             # Push zmm
-  Mov r15d, "[rsp+$offset*4]";                                                   # Load register from offset
+  Mov r15b, "[rsp+$offset]" if $size =~ m(b);                                   # Load byte register from offset
+  Mov r15w, "[rsp+$offset]" if $size =~ m(w);                                   # Load word register from offset
+  Mov r15d, "[rsp+$offset]" if $size =~ m(d);                                   # Load double word register from offset
+  Mov r15,  "[rsp+$offset]" if $size =~ m(q);                                   # Load register from offset
   Add rsp, RegisterSize "zmm$zmm";                                              # Pop zmm
-  my $v = Vq("Double word at offset $offset*4 in zmm$zmm", r15);                # Create variable
+  my $v = Vq("$size at offset $offset in zmm$zmm", r15);                        # Create variable
   PopR r15;
   $v                                                                            # Return variable
  }
 
-sub Variable::putDIntoZmm($$)                                                   # Place the value of the content variable at the numbered dword in the numbered zmm register
- {my ($content, $zmm, $offset) = @_;                                            # Variable with content, numbered zmm, offset in dwords
-  @_ == 3 or confess;
-  Comment "Put double word into offset in zmm $zmm";
+sub getBFromZmmAsVariable($$)                                                   # Get the byte from the numbered zmm register and return it in a variable
+ {my ($zmm, $offset) = @_;                                                      # Numbered zmm, offset in bytes
+  getBwdqFromZmmAsVariable('b', $zmm, $offset)                                  # Get the numbered byte|word|double word|quad word from the numbered zmm register and return it in a variable
+ }
+
+sub getWFromZmmAsVariable($$)                                                   # Get the word from the numbered zmm register and return it in a variable
+ {my ($zmm, $offset) = @_;                                                      # Numbered zmm, offset in bytes
+  getBwdqFromZmmAsVariable('w', $zmm, $offset)                                  # Get the numbered byte|word|double word|quad word from the numbered zmm register and return it in a variable
+ }
+
+sub getDFromZmmAsVariable($$)                                                   # Get the double word from the numbered zmm register and return it in a variable
+ {my ($zmm, $offset) = @_;                                                      # Numbered zmm, offset in bytes
+  getBwdqFromZmmAsVariable('d', $zmm, $offset)                                  # Get the numbered byte|word|double word|quad word from the numbered zmm register and return it in a variable
+ }
+
+sub getQFromZmmAsVariable($$)                                                   # Get the quad word from the numbered zmm register and return it in a variable
+ {my ($zmm, $offset) = @_;                                                      # Size of get, Numbered zmm, offset in bytes
+  getBwdqFromZmmAsVariable('q', $zmm, $offset)                                  # Get the numbered byte|word|double word|quad word from the numbered zmm register and return it in a variable
+ }
+
+sub Variable::putBwdqIntoZmm($$)                                                # Place the value of the content variable at the byte|word|double word|quad word in the numbered zmm register
+ {my ($content, $size, $zmm, $offset) = @_;                                     # Variable with content, size of put, numbered zmm, offset in bytes
+  @_ == 4 or confess;
+  Comment "Put $size at $offset in zmm $zmm";
   PushR my @save=(r15, "zmm$zmm");                                              # Push zmm
   $content->setReg(r15);
-  Mov   "[rsp+$offset*4]", r15d;                                                # Write register
+  Mov   "[rsp+$offset]", r15b if $size =~ m(b);                                 # Write byte register
+  Mov   "[rsp+$offset]", r15w if $size =~ m(w);                                 # Write word register
+  Mov   "[rsp+$offset]", r15d if $size =~ m(d);                                 # Write double word register
+  Mov   "[rsp+$offset]", r15  if $size =~ m(q);                                 # Write register
   PopR @save;
+ }
+
+sub Variable::putBIntoZmm($$)                                                   # Place the value of the content variable at the byte in the numbered zmm register
+ {my ($content, $zmm, $offset) = @_;                                            # Variable with content, numbered zmm, offset in bytes
+  $content->putBwdqIntoZmm('b', $zmm, $offset)                                  # Place the value of the content variable at the word in the numbered zmm register
+ }
+
+sub Variable::putWIntoZmm($$)                                                   # Place the value of the content variable at the word in the numbered zmm register
+ {my ($content, $zmm, $offset) = @_;                                            # Variable with content, numbered zmm, offset in bytes
+  $content->putBwdqIntoZmm('w', $zmm, $offset)                                  # Place the value of the content variable at the byte|word|double word|quad word in the numbered zmm register
+ }
+
+sub Variable::putDIntoZmm($$)                                                   # Place the value of the content variable at the double word in the numbered zmm register
+ {my ($content, $zmm, $offset) = @_;                                            # Variable with content, numbered zmm, offset in bytes
+  $content->putBwdqIntoZmm('d', $zmm, $offset)                                  # Place the value of the content variable at the byte|word|double word|quad word in the numbered zmm register
+ }
+
+sub Variable::putQIntoZmm($$)                                                   # Place the value of the content variable at the quad word in the numbered zmm register
+ {my ($content, $zmm, $offset) = @_;                                            # Variable with content, numbered zmm, offset in bytes
+  $content->putBwdqIntoZmm('q', $zmm, $offset)                                  # Place the value of the content variable at the byte|word|double word|quad word in the numbered zmm register
  }
 
 sub Variable::for(&$)                                                           # Iterate the body from 0 limit times.
@@ -8710,7 +8756,7 @@ else
 
 my $start = time;                                                               # Tests
 
-#goto latest unless caller(0);
+goto latest unless caller(0);
 
 if (1) {                                                                        #TPrintOutString #TAssemble
   PrintOutString "Hello World";
@@ -9928,15 +9974,24 @@ END
 latest:;
 
 if (1) {                                                                        #TgetDFromZmmAsVariable #TVariable::putDIntoZmm
-  my $c = Vq("Content", 0x44332211);
-     $c->putDIntoZmm(0, 4);
+  my $s = Rb(0..8);
+  my $c = Vq("Content",   "[$s]");
+     $c->putBIntoZmm(0,  4);
+     $c->putWIntoZmm(0,  6);
+     $c->putDIntoZmm(0, 10);
+     $c->putQIntoZmm(0, 16);
   PrintOutRegisterInHex zmm0;
-  my $C = getDFromZmmAsVariable(0, 4);
-     $C->dump;
+  getBFromZmmAsVariable(0, 12)->dump;
+  getWFromZmmAsVariable(0, 12)->dump;
+  getDFromZmmAsVariable(0, 12)->dump;
+  getQFromZmmAsVariable(0, 12)->dump;
 
-  is_deeply Assemble, <<END;
-  zmm0: 0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 4433 2211   0000 0000 0000 0000   0000 0000 0000 0000
-Double word at offset 4*4 in zmm0: 0000 0000 4433 2211
+  eq_or_diff Assemble, <<END;
+  zmm0: 0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0706 0504 0302 0100   0000 0302 0100 0000   0100 0000 0000 0000
+b at offset 12 in zmm0: 0000 0000 0000 0002
+w at offset 12 in zmm0: 0000 0000 0000 0302
+d at offset 12 in zmm0: 0000 0000 0000 0302
+q at offset 12 in zmm0: 0302 0100 0000 0302
 END
  }
 
