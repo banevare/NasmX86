@@ -1,7 +1,7 @@
 use strict;
 use warnings;
 use Nasm::X86 qw(:all);
-use Test::More tests => 4;
+use Test::More tests => 1;
 
 Mov rcx,0;
 Or rcx,1; #rcx does not seem to behave as expected when running without the emulator
