@@ -1,4 +1,4 @@
-# Test NasmX86 2021-05-13 at 06:03:19
+# Test NasmX86 2021-05-13 at 06:05:24
 
 name: Test
 
@@ -23,6 +23,10 @@ jobs:
     - name: Install Asm::C
       run: |
         sudo cpan install -T Asm::C
+
+    - name: Install Test::Most
+      run: |
+        sudo cpan install -T Test::Most
 
     - name: Install Nasm
       run: |
