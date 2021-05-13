@@ -1,4 +1,4 @@
-# Tino 2021/05/13
+# Tino 2021/05/13 v3
 use strict;
 use warnings;
 use Nasm::X86 qw(:all);
@@ -27,6 +27,6 @@ efghabcdmnopijklefghabcdmnopijklefghabcdmnopijklefghabcdmnopijkl
 END
 
 test_macro;
-my $r = eval {Assemble(emulator => 0)};                                                 # Outcome depends on which  machine we run on at GitHub, some have avx some do not!
+my $r = eval {Assemble(emulator => 0)};                                         # Outcome depends on which  machine we run on at GitHub, some have avx some do not!
 ok $r =~ m(efghabcdmnopijklefghabcdmnopijklefghabcdmnopijklefghabcdmnopijkl) ||
    $r =~ m(Illegal instruction);
