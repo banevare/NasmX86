@@ -29,4 +29,4 @@ test_macro;
 my $r = eval {Assemble(emulator => 0)};                                                 # Outcome depends on which  machine we run on at GitHub, some have avx some do not!
 
 ok $r =~ m(efghabcdmnopijklefghabcdmnopijklefghabcdmnopijklefghabcdmnopijkl) ||
-   $@ =~ m(got: 'Illegal instruction (core dumped));
+   $@ =~ m(Illegal instruction);
