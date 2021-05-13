@@ -28,7 +28,5 @@ END
 
 test_macro;
 my $r = eval {Assemble(emulator => 0)};                                                 # Outcome depends on which  machine we run on at GitHub, some have avx some do not!
-say STDERR "AAAA ", dump([$@, $r]);
-
 ok $r =~ m(efghabcdmnopijklefghabcdmnopijklefghabcdmnopijklefghabcdmnopijkl) ||
-   $@ =~ m(Illegal instruction);
+   $r =~ m(Illegal instruction);
