@@ -1,8 +1,7 @@
-# Tino 2021/05/12
 use strict;
 use warnings;
-use Nasm::X86 qw(:all);
 use Test::More tests => 1;
+use Nasm::X86 qw(:all);
 
 Mov rax,1;
 Mov rbx,9;

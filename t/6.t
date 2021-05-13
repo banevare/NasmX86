@@ -1,7 +1,7 @@
 use strict;
 use warnings;
-use Nasm::X86 qw(:all);
 use Test::More tests => 5;
+use Nasm::X86 qw(:all);
 
 my $oa = Vq 'vara', 10;
 my $ob = Vq 'varb', 20;

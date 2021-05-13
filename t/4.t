@@ -1,7 +1,7 @@
 use strict;
 use warnings;
-use Nasm::X86 qw(:all);
 use Test::More tests => 4;
+use Nasm::X86 qw(:all);
 
 Mov rax,0b0001;
 Mov rbx,0b0010;
