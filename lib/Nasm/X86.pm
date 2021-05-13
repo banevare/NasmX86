@@ -34,11 +34,11 @@ my %Registers;                                                                  
 my %RegisterContaining;                                                         # The largest register containing a register
 
 BEGIN{
-  my %r = (    map {$_=>[ 8,  '8'  ]}  qw(al bl cl dl r8b r9b r10b r11b r12b r13b r14b r15b sil dil spl bpl ah bh ch dh));
+  my %r = (    map {$_=>[ 8,  '8'  ]}  qw(al bl cl dl r8b r9b r10b r11b r12b r13b r14b r15b r8l r9l r10l r11l r12l r13l r14l r15l sil dil spl bpl ah bh ch dh));
      %r = (%r, map {$_=>[16,  's'  ]}  qw(cs ds es fs gs ss));
      %r = (%r, map {$_=>[16,  '16' ]}  qw(ax bx cx dx r8w r9w r10w r11w r12w r13w r14w r15w si di sp bp));
      %r = (%r, map {$_=>[32,  '32a']}  qw(eax  ebx ecx edx esi edi esp ebp));
-     %r = (%r, map {$_=>[32,  '32b']}  qw(r8d r8l r9d r9l r10d r10l r11d r11l r12d r12l r13d r13l r14d r14l r15d r15l));
+     %r = (%r, map {$_=>[32,  '32b']}  qw(r8d r9d r10d r11d r12d r13d r14d r15d));
      %r = (%r, map {$_=>[80,  'f'  ]}  qw(st0 st1 st2 st3 st4 st5 st6 st7));
      %r = (%r, map {$_=>[64,  '64' ]}  qw(rax rbx rcx rdx r8 r9 r10 r11 r12 r13 r14 r15 rsi rdi rsp rbp rip rflags));
      %r = (%r, map {$_=>[64,  '64m']}  qw(mm0 mm1 mm2 mm3 mm4 mm5 mm6 mm7));
@@ -744,7 +744,7 @@ sub Variable($$$)                                                               
      {PushR r15;
       Mov r15, $expr;
       Mov $t, r15b        if $nSize == 0;
-      Mov $t, r15l        if $nSize == 1;
+      Mov $t, r15w        if $nSize == 1;
       Mov $t, r15d        if $nSize == 2;
       Mov $t, r15         if $nSize == 3;
       Pinsrq $t, r15, 0   if $nSize >  3;
@@ -1106,14 +1106,15 @@ sub Variable::setMask($$$)                                                      
  }
 
 sub Variable::setZmm($$$$)                                                      # Load bytes from the memory addressed by specified source variable into the numbered zmm register at the offset in the specified offset moving the number of bytes in the specified variable
- {my ($source, $target, $offset, $length) = @_;                                 # Variable containing the address of the source, number of zmm to load, variable containing offset in zmm to move to, variable containing length of move
+ {my ($source, $zmm, $offset, $length) = @_;                                    # Variable containing the address of the source, number of zmm to load, variable containing offset in zmm to move to, variable containing length of move
   @_ == 4 or confess;
-  Comment "Set Zmm from Memory";
+  ref($offset) && ref($length) or confess "Missing variable";                   # Need variables of offset and length
+  Comment "Set Zmm $zmm from Memory";
   PushR my @save = (k7, r14, r15);
   $offset->setMask($length, k7);                                                # Set mask for target
   $source->setReg(r15);
   Sub r15, $offset->setReg(r14);                                                # Position memory for target
-  Vmovdqu8 "zmm${target}{k7}", "[r15]";                                         # Read from memory
+  Vmovdqu8 "zmm${zmm}{k7}", "[r15]";                                            # Read from memory
   PopR @save;
  }
 
@@ -1344,6 +1345,21 @@ sub ForIn(&$$$$)                                                                
   IfNz                                                                          # Non remainder
    {&$last;                                                                     # Process remainder
    }
+ }
+
+sub ForEver(&)                                                                  # Iterate for ever
+ {my ($body) = @_;                                                              # Body to iterate
+  @_ == 1 or confess;
+  Comment "ForEver";
+  my $start = Label;                                                            # Start label
+  my $end   = Label;                                                            # End label
+
+  SetLabel $start;                                                              # Start of loop
+
+  &$body($start, $end);                                                         # End of loop
+
+  Jmp $start;                                                                   # Restart loop
+  SetLabel $end;                                                                # End of loop
  }
 
 sub S(&%)                                                                       # Create a sub with optional parameters name=> the name of the subroutine so it can be reused rather than regenerated, comment=> a comment describing the sub
@@ -2719,10 +2735,12 @@ sub ByteString::CreateBlockString($)                                            
 
   my $s = genHash(q(BlockString),                                               # Block string definition
     byteString => $byteString,                                                  # Bytes string definition
-    size       => $b,                                                           # Size of a block == size of a zmm register
+    size       => $b,                                                           # Size of a block == size of a zmm
     offset     => $o,                                                           # Size of an offset is size of eax
-    next       => $b - 1 * $o,                                                  # Location of next offset in block in dwords
-    prev       => $b - 2 * $o,                                                  # Location of prev offset in block in dwords
+    links      => $b - 2 * $o,                                                  # Location of links in bytes in zmm
+    next       => $b - 1 * $o,                                                  # Location of next offset in block in bytes
+    prev       => $b - 2 * $o,                                                  # Location of prev offset in block in bytes
+    zero       => Vq("Start of empty block", 0),                                # Variable containing zero == the start position for an empty block
     length     => Vq("Maximum block length",             $b - 2 * $o - 1),      # Variable containing maximum length in a block
     bsAddress  => Vq("Byte string backing block string", rax),                  # Variable addressing backing byte string
     address    => undef,                                                        # Variable addressing first block in string
@@ -2745,7 +2763,7 @@ sub BlockString::allocBlock($)                                                  
 
   my $n = $blockString->next;                                                   # Quad word of next offset
   my $p = $blockString->prev;                                                   # Quad word of prev offset
-  Mov "[rax+rdi+$n]", edi;                                                    # Initialize circular list
+  Mov "[rax+rdi+$n]", edi;                                                      # Initialize circular list
   Mov "[rax+rdi+$p]", edi;
 
   Mov r15, 0;   #### Test only
@@ -2757,41 +2775,37 @@ sub BlockString::allocBlock($)                                                  
   $block;                                                                       # Variable containing address of allocation
  }
 
-sub BlockString::getBlockLength($$)                                             # Get the length of the block at the specified offset and return it as a new variable
- {my ($blockString, $block) = @_;                                               # Block string descriptor, variable containing offset of block whose length we want
-  PushR my @save = (r13, r14, r15);                                             # Result register
-  $blockString->bsAddress->setReg(r14);                                         # Byte string
-  $block->setReg(r15);                                                          # Offset in byte string to block
-  Mov r13b, "[r15+r14]";                                                        # Block length
-  my $r = Vq("Length of block", r13);                                           # Block length variable
-  PopR @save;                                                                   # Length of block is a byte
-  $r                                                                            # Result variable
- }
+#sub BlockString::getBlockLength($$)                                             # Get the length of the block at the specified offset and return it as a new variable
+# {my ($blockString, $block) = @_;                                               # Block string descriptor, variable containing offset of block whose length we want
+#  PushR my @save = (r13, r14, r15);                                             # Result register
+#  $blockString->bsAddress->setReg(r14);                                         # Byte string
+#  $block->setReg(r15);                                                          # Offset in byte string to block
+#  Mov r13b, "[r15+r14]";                                                        # Block length
+#  my $r = Vq("Length of block", r13);                                           # Block length variable
+#  PopR @save;                                                                   # Length of block is a byte
+#  $r                                                                            # Result variable
+# }
 
 sub BlockString::getBlockLengthInZmm($$)                                        # Get the block length of the numbered zmm and return it in a variable
  {my ($blockString, $zmm) = @_;                                                 # Block string descriptor, number of zmm register
-  PushR my @save = (r15);                                                       # Save work register
-  Vpextrb r15, "xmm$zmm", 0;                                                    # Block length
-  my $v = Vq('Block length', r15);                                              # Block length in variable
-  PopR @save;
-  $v
+  getBFromZmmAsVariable $zmm, 0;                                                # Block length
  }
 
-sub BlockString::setBlockLength($$$)                                            # Set the length of the specified block to the specified length
- {my ($blockString, $block, $length) = @_;                                      # Block string descriptor, number of xmm register addressing block, new length in a byte register
-  PushR my @save = (r13, r14, r15);                                             # Result register
-  $blockString->bsAddress->setReg(r15);                                         # Byte string
-  $block->setReg(r14);                                                          # Offset of block
-  $length->setReg(r13);                                                         # New length
-  Mov "[r15+r14]", r13b;                                                        # Block length
-  PopR @save;                                                                   # Length of block is a byte
- }
+#sub BlockString::setBlockLength($$$)                                            # Set the length of the specified block to the specified length
+# {my ($blockString, $block, $length) = @_;                                      # Block string descriptor, number of xmm register addressing block, new length in a byte register
+#  PushR my @save = (r13, r14, r15);                                             # Result register
+#  $blockString->bsAddress->setReg(r15);                                         # Byte string
+#  $block->setReg(r14);                                                          # Offset of block
+#  $length->setReg(r13);                                                         # New length
+#  Mov "[r15+r14]", r13b;                                                        # Block length
+#  PopR @save;                                                                   # Length of block is a byte
+# }
 
 sub BlockString::setBlockLengthInZmm($$$)                                       # Set the block length of the numbered zmm to the specified length
  {my ($blockString, $length, $zmm) = @_;                                        # Block string descriptor, length as a variable, number of zmm register
   PushR my @save = (r15);                                                       # Save work register
   $length->setReg(r15);                                                         # New length
-  Vpinsrb "xmm$zmm", r15d, 0;                                                   # Block length
+  $length->putBIntoZmm($zmm, 0);                                                # Insert block length
   PopR @save;                                                                   # Length of block is a byte
  }
 
@@ -2813,253 +2827,198 @@ sub BlockString::putBlock($$$)                                                  
   PopR @save;                                                                   # Restore registers
  }
 
-sub BlockString::getNextBlock($$)                                               # Get the offset of the next block from the specified block in the specified block string and return it as a variable
- {my ($blockString, $block) = @_;                                               # Block string descriptor, variable addressing current block
-  my $n = $blockString->next;                                                   # Quad word of next offset
-  my $p = $blockString->prev;                                                   # Quad word of prev offset
-  PushR my @regs = (r13, r14, r15);                                             # Work registers
-  $blockString->bsAddress->setReg(r15);                                         # Byte string address
-  $block->setReg(r14);                                                          # Offset of block in byte string
-  Mov    r13d, "[r15+r14+$n]";                                                  # Offset of next offset
-  my $r = Vq("Offset of next block", r13);                                      # Save offset of next block as a variable
+#sub BlockString::getNextBlock($$)                                               # Get the offset of the next block from the specified block in the specified block string and return it as a variable
+# {my ($blockString, $block) = @_;                                               # Block string descriptor, variable addressing current block
+#  my $n = $blockString->next;                                                   # Quad word of next offset
+#  my $p = $blockString->prev;                                                   # Quad word of prev offset
+#  PushR my @regs = (r13, r14, r15);                                             # Work registers
+#  $blockString->bsAddress->setReg(r15);                                         # Byte string address
+#  $block->setReg(r14);                                                          # Offset of block in byte string
+#  Mov    r13d, "[r15+r14+$n]";                                                  # Offset of next offset
+#  my $r = Vq("Offset of next block", r13);                                      # Save offset of next block as a variable
+#  PopR @regs;                                                                   # Free work registers
+#  $r;                                                                           # Return address of next block
+# }
+#
+#sub BlockString::getNextBlockFromZmm($$)                                        # Get the offset of the next block from the numbered zmm and return in in a variable
+# {my ($blockString, $zmm) = @_;                                                 # Block string descriptor, numbered zmm
+#  my $n = $blockString->next;                                                   # Quad word of next offset
+#  my $p = $blockString->prev;                                                   # Quad word of prev offset
+#  PushR my @regs = (k7);                                                        # Work registers
+#  Mov    r13d, "[r15+r14+$n]";                                                  # Offset of next offset
+#  my $r = Vq("Offset of next block", r13);                                      # Save offset of next block as a variable
+#  PopR @regs;                                                                   # Free work registers
+#  $r;                                                                           # Return address of next block
+# }
+#
+#sub BlockString::getPrevBlock($$)                                               # Get the prev block from the block addressed by the numbered xmm register and return it in the same xmm
+# {my ($blockString, $block) = @_;                                               # Block string descriptor, variable addressing current bloxk
+#  my $n = $blockString->next;                                                   # Quad word of next offset
+#  my $p = $blockString->prev;                                                   # Quad word of prev offset
+#  PushR my @regs = (r13, r14, r15);                                             # Work registers
+#  $blockString->bsAddress->setReg(r15);                                         # Byte string address
+#  $block->setReg(r14);                                                          # Offset of block in byte string
+#  Mov    r13d, "[r15+r14+$p]";                                                  # Offset of next offset
+#  my $r = Vq("Offset of prev block", r13);                                      # Save offset of prev block as a variable
+#  PopR @regs;                                                                   # Free work registers
+#  $r;                                                                           # Return address of next block
+# }
+
+sub BlockString::getNextAndPrevBlockOffsetFromZmm($$)                           # Get the offsets of the next and previous blocks as variables from the specified zmm
+ {my ($blockString, $zmm) = @_;                                                 # Block string descriptor, zmm containing block
+  my $l = $blockString->links;                                                  # Location of links
+  PushR my @regs = (r14, r15);                                                  # Work registers
+  my $L = getQFromZmmAsVariable($zmm, $blockString->links);                     # Links in one register
+  $L->setReg(r15);                                                              # Links
+  Mov r14d, r15d;                                                                # Next
+  Shr r15, RegisterSize(r14d) * 8;                                              # Prev
+  my @r = (Vq("Next block offset", r14), Vq("Prev block offset", r15));         # Result
   PopR @regs;                                                                   # Free work registers
-  $r;                                                                           # Return address of next block
+  @r;                                                                           # Return (next, prev)
  }
 
-sub BlockString::getNextBlockFromZmm($$)                                        # Get the offset of the next block from the numbered zmm and return in in a variable
- {my ($blockString, $zmm) = @_;                                                 # Block string descriptor, numbered zmm
-  my $n = $blockString->next;                                                   # Quad word of next offset
-  my $p = $blockString->prev;                                                   # Quad word of prev offset
-  PushR my @regs = (k7);                                                        # Work registers
-  Mov    r13d, "[r15+r14+$n]";                                                  # Offset of next offset
-  my $r = Vq("Offset of next block", r13);                                      # Save offset of next block as a variable
+sub BlockString::putNextandPrevBlockOffsetIntoZmm($$$)                          # Save next and prev offsets into a zmm representing a block
+ {my ($blockString, $zmm, $next, $prev) = @_;                                   # Block string descriptor, zmm containing block, next offset as a variable, prev offset as a variable
+  PushR my @regs = (r14, r15);                                                  # Work registers
+  $next->setReg(r15);                                                           # Next offset
+  $prev->setReg(r14);                                                           # Prev offset
+  Shl r14, RegisterSize(r14d) * 8;                                              # Prev high
+  Or r15, r14;                                                                  # Links in one register
+  my $l = Vq("Links", r15);                                                     # Links as variable
+  $l->putQIntoZmm($zmm, $blockString->links);                                   # Load links into zmm
   PopR @regs;                                                                   # Free work registers
-  $r;                                                                           # Return address of next block
  }
 
-sub BlockString::getPrevBlock($$)                                               # Get the prev block from the block addressed by the numbered xmm register and return it in the same xmm
- {my ($blockString, $block) = @_;                                               # Block string descriptor, variable addressing current bloxk
-  my $n = $blockString->next;                                                   # Quad word of next offset
-  my $p = $blockString->prev;                                                   # Quad word of prev offset
-  PushR my @regs = (r13, r14, r15);                                             # Work registers
-  $blockString->bsAddress->setReg(r15);                                         # Byte string address
-  $block->setReg(r14);                                                          # Offset of block in byte string
-  Mov    r13d, "[r15+r14+$p]";                                                # Offset of next offset
-  my $r = Vq("Offset of prev block", r13);                                      # Save offset of prev block as a variable
-  PopR @regs;                                                                   # Free work registers
-  $r;                                                                           # Return address of next block
- }
-
-sub BlockString::putNext($$$)                                                   # Link the specified new block after the specified existing block in the specified block string
- {my ($blockString, $old, $new) = @_;                                           # Block string, number of xmm addressing existing old block in string, number of xmm addressing new block to be added
-  my $n = $blockString->next;                                                   # Quad word of next offset
-  my $p = $blockString->prev;                                                   # Quad word of prev offset
-  PushR my @save = (r12, r13, r14, r15);                                        # Work registers
-  my $bs  = r15;                                                                # Byte string
-  my $or  = r14;                                                                # Old block
-  my $nr  = r13;                                                                # New block
-  my $pr  = r12;                                                                # Next bloxk after old block
-  my $prd = r12d;                                                               # Next bloxk after old block
-  $blockString->bsAddress->setReg($bs);                                         # Byte string address
-  $old->setReg($or);                                                            # Offset of block in byte string
-  $new->setReg($nr);                                                            # Offset of block in byte string
-  Mov $prd, "[$bs+$or+$n]";                                                     # Block past old block
-  Mov "[$bs+$or+$n]", $nr;                                                      # Old block next to new block
-  Mov "[$bs+$nr+$p]", $or;                                                      # New block prev to old block
-  Mov "[$bs+$nr+$n]", $pr;                                                      # New block next to block past old block
-  Mov "[$bs+$pr+$p]", $nr;                                                      # Past block prev to new block
-  PopR @save;                                                                   # Free work registers
- }
+#sub BlockString::putNext($$$)                                                   # Put a block in a numbered zmm to another block in another zmm
+# {my ($blockString, $old, $new) = @_;                                           # Block string, number of xmm addressing existing old block in string, number of xmm addressing new block to be added
+#  my $n = $blockString->next;                                                   # Quad word of next offset
+#  my $p = $blockString->prev;                                                   # Quad word of prev offset
+#  PushR my @save = (r12, r13, r14, r15);                                        # Work registers
+#  my $bs  = r15;                                                                # Byte string
+#  my $or  = r14;                                                                # Old block
+#  my $nr  = r13;                                                                # New block
+#  my $pr  = r12;                                                                # Next bloxk after old block
+#  my $prd = r12d;                                                               # Next bloxk after old block
+#  $blockString->bsAddress->setReg($bs);                                         # Byte string address
+#  $old->setReg($or);                                                            # Offset of block in byte string
+#  $new->setReg($nr);                                                            # Offset of block in byte string
+#  Mov $prd, "[$bs+$or+$n]";                                                     # Block past old block
+#  Mov "[$bs+$or+$n]", $nr;                                                      # Old block next to new block
+#  Mov "[$bs+$nr+$p]", $or;                                                      # New block prev to old block
+#  Mov "[$bs+$nr+$n]", $pr;                                                      # New block next to block past old block
+#  Mov "[$bs+$pr+$p]", $nr;                                                      # Past block prev to new block
+#  PopR @save;                                                                   # Free work registers
+# }
 
 sub BlockString::dump($)                                                        # Dump a block string  to sysout
  {my ($blockString) = @_;                                                       # Block string descriptor
 
   PushR my @save = (zmm31);
   my $block  = $blockString->address;                                           # The first block
-               $blockString->getBlock($block, 31);                              # The first block
+               $blockString->getBlock($block, 31);                              # The first block in zmm31
   my $length = $blockString->getBlockLengthInZmm(31);                           # Length of block
-  $length->dump;
-  PrintOutRegisterInHex zmm31;
-  my $next = $blockString->getNextBlock($block);
-  $next->dump;
+  $length->dump; PrintOutRegisterInHex zmm31;                                   # Print block
+
+  ForEver                                                                       # Each block in string
+   {my ($start, $end) = @_;                                                     #
+    my ($next, $prev) = $blockString->getNextAndPrevBlockOffsetFromZmm(31);     # Get links from current block
+    If ($next == $block, sub{Jmp $end});                                        # Next block is the first block so we have printed the block string
+    $blockString->getBlock($next, 31);                                          # Next block in zmm
+    my $length = $blockString->getBlockLengthInZmm(31);                         # Length of block
+    $length->dump; PrintOutRegisterInHex zmm31;                                 # Print block
+   };
   PopR @save;
  }
 
 sub BlockString::append($$$)                                                    # Append the specified content in memory to the specified block string
  {my ($blockString, $source, $length) = @_;                                     # Block string descriptor, variable addressing source, variable containing length of source
-  my $success = Label;                                                          # Label for successful return
+  my $success = Label;                                                          # Append completed successfully
 
-  my $lastBlock = $blockString->getPrevBlock($blockString->address);            # The last block
-  my $lengthLastBlock = $blockString->getBlockLength($lastBlock);               # Length of the last block
+  PushR my @save = (zmm29, zmm30, zmm31);
+  my $first = $blockString->address;                                            # Offset of first block
+  $blockString->getBlock($first, 29);                                           # Get the first block
+  my ($last, $second) = $blockString->getNextAndPrevBlockOffsetFromZmm(29);     # Get the offsets of the next and previous blocks as variables from the specified zmm
 
-  my $spaceInLastBlock = $blockString->length - $lengthLastBlock;               # Space in last block
+  if (1)                                                                        # Fill a partially full first block in a string that only has one block
+   {If ($last == $first, sub                                                    # String only has one block
+     {my $lengthFirst = $blockString->getBlockLengthInZmm(29);                  # Length of the first block
+      my $spaceFirst  = $blockString->length - $lengthFirst;                    # Space in first block
 
-  If ($spaceInLastBlock >= $length, sub                                         # Enough space in last block
-   {PushR my @save = (zmm31);
-    $blockString->getBlock($lastBlock, 31);                                     # Get the last block
-    $source->setZmm(31, $lengthLastBlock+1, $length);                           # Append bytes
-PrintOutStringNL("AAAAA");
-PrintOutRegisterInHex zmm31;
-    $blockString->setBlockLengthInZmm($lengthLastBlock+$length, 31);            # Set the length
-PrintOutStringNL("BBBB");
-PrintOutRegisterInHex zmm31;
-    $blockString->putBlock($lastBlock, 31);                                     # Put the block
-    PrintOutRegisterInHex zmm31;
-    PopR @save;
-   });
+      If ($spaceFirst >= $length, sub                                           # Enough space in first block
+       {$source->setZmm(29, $lengthFirst + 1, $length);                         # Append bytes
+        $blockString->setBlockLengthInZmm($lengthFirst + $length, 29);          # Set the length
+        $blockString->putBlock($first, 29);                                     # Put the block
+        Jmp $success;
+       },
+      sub                                                                       # completely fill first block
+       {If ($spaceFirst >= 0, sub                                               # Some space in first block
+         {$source->setZmm(29, $lengthFirst + 1, $spaceFirst);                   # Append bytes to fill first block
+          $blockString->setBlockLengthInZmm($blockString->length, 29);          # Set the length
+          $source += $spaceFirst;
+          $length -= $spaceFirst;
+         });
+        Vmovdqa64 zmm31, zmm29;                                                 # Place the first block which is also the last block into the last block
+       }),
+     },
+    sub                                                                         # Fill partially full last block
+     {$blockString->getBlock($last, 31);                                        # Get the last block now known not to be the first block
+      my $lengthLast = $blockString->getBlockLengthInZmm(31);                   # Length of the last block
+      my $spaceLast  = $blockString->length - $lengthLast;                      # Space in last block
+
+      If ($spaceLast >= $length, sub                                            # Enough space in last block
+       {$source->setZmm(31, $lengthLast + 1, $length);                          # Append bytes
+        $blockString->setBlockLengthInZmm($lengthLast + $length, 31);           # Set the length
+        $blockString->putBlock($last, 31);                                      # Put the block
+        Jmp $success;
+       },
+      sub                                                                       # Completely fill last block
+       {If ($spaceLast >= 0, sub                                                # Some space in last block
+         {$source->setZmm(31, $lengthLast + 1, $spaceLast);                     # Append bytes to fill last block
+          $blockString->setBlockLengthInZmm($blockString->length, 31);          # Set the length
+          $source += $spaceLast;
+          $length -= $spaceLast;
+         });
+       }),
+     });
+   }
+
+  if (1)                                                                        # Add new blocks and fill them
+   {ForEver                                                                     # Fill any more blocks needed
+     {my ($start, $end) = @_;                                                   # Start and end of loop
+
+      my $new = $blockString->allocBlock;                                       # Allocate new block that we will insert next
+      $blockString->getBlock($new, 30);                                         # Get the new block which will have been properly formatted
+
+      my ($next, $prev) = $blockString->getNextAndPrevBlockOffsetFromZmm(31);   # Link new block
+      $blockString->putNextandPrevBlockOffsetIntoZmm(31, $new,  $prev);
+      $blockString->putNextandPrevBlockOffsetIntoZmm(30, $last, $next);
+      if ($first != $last)                                                      # If we are not on the first block we will need to update the first block
+       {$blockString->putNextandPrevBlockOffsetIntoZmm(29, $second, $new);
+        $blockString->putBlock($last, 31);                                      # Only write the block if it is not the first block as the first block will be written later
+       }
+
+      Vmovdqa64 zmm31, zmm30;                                                   # New block is now the last block
+      $last = $new;
+
+      If ($blockString->length >= $length, sub                                  # Enough space in last block to complete move
+       {$source->setZmm(31, $blockString->zero, $length);                       # Append bytes
+        $blockString->setBlockLengthInZmm($length, 31);                         # Set the length
+        $blockString->putBlock($last, 31);                                      # Put the block
+        Jmp $end;
+       },
+      sub                                                                       # Else we can move a full block and iterate
+       {$source->setZmm(31, $blockString->zero, $blockString->length);          # Append full block
+        $blockString->setBlockLengthInZmm($blockString->length, 31);            # Set the length
+        $source += $blockString->length;
+        $length -= $blockString->length;
+       });
+     };
+   }
+  $blockString->putBlock($first, 29);                                           # Put the first block back
+
+  SetLabel $success;                                                            # The move is now complete
+  PopR @save;
  }
-#    $lastBlock->setReg(r15);                                                    # Address last block
-#    $blockString->bsAddress->setReg(r12);                                       # Address last block
-#    PrintOutRegisterInHex r12;
-#    PrintOutRegisterInHex r15;
-#    Vmovdqu64 zmm31, "[r12+r15]";                                               # Load last block in zmm31
-#    $lengthLastBlock->setReg(r13);                                              # Length of last block
-#    Inc r13;                                                                    # Offset at which we should load
-#    PrintOutRegisterInHex r13;
-#    $moveLength->setReg(r14);
-#    $source->setReg(r15);
-#    LoadZmmFromMemory(31, r13, r14, r15);                                       # Fill block
-#    PrintOutRegisterInHex zmm0;
-#    $lastBlock->setReg(r15);                                                    # Last block address
-#    Vmovdqu64 "[r12+r15]", zmm31;                                               # Save filled last block
-#    PrintOutRegisterInHex zmm31;
-#    PopRR @save;
-#  });
-# }
-
-#  my $
-#  Keep my @regs(my $sourceAddress = rax, my $sourceLength = rdi);               # Keep parameters
-#  my $lastBlockAddress = 31;                                                    # Address of last block in block string
-#  my $lastBlockContent = 30;                                                    # Content of last block
-#  Copy("xmm$lastBlockAddress", "xmm$target");                                   # We will update this register with the position of the current last block
-#  $blockString->getPrevBlock($lastBlockAddress);                                # Last block as the chain is circular
-#
-#  $blockString->getBlockLength($lastBlockAddress, my $length = r15);            # Length of last block
-#  Minus(my $lengthToMove = r14, Copy(r13, $byteString->length), $length);       # Bytes needed to fill last block
-#  KeepFree $r13;
-#
-#  Cmp $lengthToMove, $sourceAvailable;                                          # Enough source to fill  the last block?
-#  IfGe
-#   {KeepFree $lengthToMove;
-#    Copy  $lengthToMove, $sourceAvailable;                                      # Truncate move to length available
-#
-#    $blockString->getBlock($lastBlockContent, $lastBlockAddress);               # Load last block into zmm from memory
-#    LoadZmmFromMemory($lastBlockContent, Add(r12, $length, Copy(r13, 1), $lengthToMove, $sourceAddress); # Load bytes into zmm
-#    KeepFree(r12, r13);
-#    $blockString->putBlock($lastBlockContent, $lastBlockAddress);               # Write block back into memory from zmm
-#    J $success;                                                                 # Append completed successfully
-#   }
-#
-#  $blockString->getBlock($lastBlockContent, $lastBlockAddress);                 # Load last block into zmm from memory
-#  LoadZmmFromMemory($lastBlockContent, Add(r12, $length, Copy(r13, 1), $lengthToMove, $sourceAddress); # Load bytes into zmm
-#  Decrement($sourceLength, $lengthToMove);
-#  my $newBlockAddress = 29;                                                     # xmm addressing new block
-#  $blockString->allocBlock($newBlock);                                          # Allocate a block to hold a zmm register in the byte string addressed by (byteString, ?) held in the numbered xmm register and return the offset of the block in the numbered xmm register
-#  $blockString->putNext($lastBlockAddress, $newBlockAddress);                   # Add this blocxk to the chain
-#
-# {my ($blockString, $xmm) = @_;                                                 # Block string descriptor, numbered xmm register to receive allocation
-#
-#
-#  KeepFree(r12, r13);
-#
-#  $blockString->putBlock($lastBlockContent, $lastBlockAddress);               # Write block back into memory from zmm
-#    J $success;                                                                 # Append completed successfully
-#   }
-#     }
-#  $blockString->getPrevBlock($lastBlock);                                       # Last block as the chain is circular
-#  GetLengthOfShortString rsi, $source;                                             # Length of source
-#  Mov r15, rsi;                                                                 # Length needed = length of source plus length of target
-#  Add r15, rdi;
-#  Cmp r15, $blockString->length0;                                               # Enough length in block ?
-#  IfLe                                                                          # Enough space in existing block
-#   {$blockString->getBlock (31, $target);                                       # Load first and only block in target
-#    ConcatenateShortStrings(31, $source);                                       # Concatenate source
-#    $blockString->putBlock (31, $target);                                       # Save target
-#    J $success;                                                                 # Success
-#   };
-#  Mov r15, rdi;                                                                 # Current length of target
-#  Cmp r15, $blockString->length1 / 2;                                           # Lots of space in target (although not enough)so worth moving some characters from source to target
-#  IfLe                                                                          # Enough space in existing block
-#   {$blockString->getBlock (31, $target);                                       # Load first and only block in target
-#    PushR $source;
-#    Mov rax, $blockString->length1;                                             # Maximum length in linked block
-#    Sub rax, rdi;                                                               # Amount to move from source into target
-#    Mov r15, rdi; Inc r15;                                                      # Position in target
-#    Mov r14, 1;                                                                 # Position in source
-#    LoadTargetZmmFromSourceZmm 31, r15, $source, r14, rax;                      # Move data from source to target
-#    Mov r15, $blockString->length1;                                             # New length of target
-#    Pinsrb 31, r15, 0;                                                          # Save new length of target
-#    $blockString->putBlock (31, $target);                                       # Save target block
-#
-#    Mov r15, 1;                                                                 # New position in source
-#    Add r14, rax;                                                               # Old position in source
-#    Mov r13, rsi;                                                               # Length of source
-#    Sub r13, rax;                                                               # Number of bytes to move
-#
-#    ClearRegisters zmm30;                                                       # Restructure source here
-#    LoadTargetZmmFromSourceZmm 30, r15, $source, r14, rax;                      # Move data from source to target
-#    Pinsrb xmm30, r15, 0;                                                       # Save length of new source
-#
-#    $blockString->allocBlock(29);                                               # Allocate space for next block
-#    $blockString->putBlock (30, 29);                                            # Save new source in block string
-#
-#    $blockString->putNext($target, 29);                                         # Write new block into memory
-#    J $success;                                                                 # Success
-#   };
-#
-#  SetLabel $success;                                                            # Success
-#  KeepFree @regs;                                                               # Free work registers
-#
-# }
-#
-#sub BlockString::appendShortString($$$)                                         # Append a source short string from a numbered zmm into the target block string addressed by the numbered xmm register
-# {my ($blockString, $target, $source) = @_;                                     # Block string, number of xmm addressing block string, number of zmm holding short string
-#  my $success = Label;                                                          # Label for successful return
-#  SaveFirstFour;                                                                # Save
-#  $blockString->getBlockLength($target, rdi);                                   # Length of target
-#  GetLengthOfShortString rsi, $source;                                             # Length of source
-#  Mov r15, rsi;                                                                 # Length needed = length of source plus length of target
-#  Add r15, rdi;
-#  Cmp r15, $blockString->length0;                                               # Enough length in block ?
-#  IfLe                                                                          # Enough space in existing block
-#   {$blockString->getBlock (31, $target);                                       # Load first and only block in target
-#    ConcatenateShortStrings(31, $source);                                       # Concatenate source
-#    $blockString->putBlock (31, $target);                                       # Save target
-#    J $success;                                                                 # Success
-#   };
-#  Mov r15, rdi;                                                                 # Current length of target
-#  Cmp r15, $blockString->length1 / 2;                                           # Lots of space in target (although not enough)so worth moving some characters from source to target
-#  IfLe                                                                          # Enough space in existing block
-#   {$blockString->getBlock (31, $target);                                       # Load first and only block in target
-#    PushR $source;
-#    Mov rax, $blockString->length1;                                             # Maximum length in linked block
-#    Sub rax, rdi;                                                               # Amount to move from source into target
-#    Mov r15, rdi; Inc r15;                                                      # Position in target
-#    Mov r14, 1;                                                                 # Position in source
-#    LoadTargetZmmFromSourceZmm 31, r15, $source, r14, rax;                      # Move data from source to target
-#    Mov r15, $blockString->length1;                                             # New length of target
-#    Pinsrb 31, r15, 0;                                                          # Save new length of target
-#    $blockString->putBlock (31, $target);                                       # Save target block
-#
-#    Mov r15, 1;                                                                 # New position in source
-#    Add r14, rax;                                                               # Old position in source
-#    Mov r13, rsi;                                                               # Length of source
-#    Sub r13, rax;                                                               # Number of bytes to move
-#
-#    ClearRegisters zmm30;                                                       # Restructure source here
-#    LoadTargetZmmFromSourceZmm 30, r15, $source, r14, rax;                      # Move data from source to target
-#    Pinsrb xmm30, r15, 0;                                                       # Save length of new source
-#
-#    $blockString->allocBlock(29);                                               # Allocate space for next block
-#    $blockString->putBlock (30, 29);                                            # Save new source in block string
-#
-#    $blockString->putNext($target, 29);                                         # Write new block into memory
-#    J $success;                                                                 # Success
-#   };
-#
-#  SetLabel $success;                                                            # Success
-# }
-#
 
 #D1 Tree                                                                        # Tree operations
 
@@ -8744,7 +8703,7 @@ Test::More->builder->output("/dev/null") if $localTest;                         
 
 if ($^O =~ m(bsd|linux)i)                                                       # Supported systems
  {if (confirmHasCommandLineCommand(q(nasm)) and LocateIntelEmulator)            # Network assembler and Intel Software Development emulator
-   {plan tests => 77;
+   {plan tests => 78;
    }
   else
    {plan skip_all =>qq(Nasm or Intel 64 emulator not available);
@@ -8756,7 +8715,7 @@ else
 
 my $start = time;                                                               # Tests
 
-goto latest unless caller(0);
+#goto latest unless caller(0);
 
 if (1) {                                                                        #TPrintOutString #TAssemble
   PrintOutString "Hello World";
@@ -9971,8 +9930,6 @@ if (1) {                                                                        
 END
  }
 
-latest:;
-
 if (1) {                                                                        #TgetDFromZmmAsVariable #TVariable::putDIntoZmm
   my $s = Rb(0..8);
   my $c = Vq("Content",   "[$s]");
@@ -9995,7 +9952,9 @@ q at offset 12 in zmm0: 0302 0100 0000 0302
 END
  }
 
-if (0) {                                                                        #TCreateBlockString
+latest:;
+
+if (1) {                                                                        #TCreateBlockString
   my $s = Rs(0..128);
   my $B = CreateByteString;
   my $b = $B->CreateBlockString(0);
@@ -10005,9 +9964,12 @@ if (0) {                                                                        
 
   $b->dump;
 
-  my $r = Assemble;
-  ok $r =~ m(xmm0: 0000 0000 0000 0010);
+  eq_or_diff Assemble, <<END;
+b at offset 0 in zmm31: 0000 0000 0000 000C
+ zmm31: 0000 0010 0000 0010   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0034 3332 3130   3332 3130 3231 300C
+END
  }
+
 
 unlink $_ for grep {/\A\.\/atmpa/} findFiles('.');                              # Remove temporary files
 
