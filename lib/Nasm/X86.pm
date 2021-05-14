@@ -816,11 +816,64 @@ if (1)                                                                          
    '""'  => \&str,
    '&'   => \&and,
    '|'   => \&or,
+   '+='  => \&plusAssign,
+   '-='  => \&minusAssign,
+   '='   => \&equals,
  }
 
 sub Variable::address($)                                                        # Get the address of a variable
  {my ($left) = @_;                                                              # Left variable
   "[".$left-> label."]"
+ }
+
+sub Variable::copy($$)                                                          # Copy one variable into another
+ {my ($left, $right) = @_;                                                      # Left variable, right variable
+
+  my $l = $left ->address;
+  my $r = $right->address;
+
+  if ($left->size == 3 and $right->size == 3)
+   {PushR my @save = (r15);
+    Mov r15, $r;
+    Mov $l, r15;
+    PopR @save;
+    return;
+   }
+
+  confess "Need more code";
+ }
+
+sub Variable::equals($$)                                                        # Equals operator
+ {my ($op, $left, $right) = @_;                                                 # Operator, left variable,  right variable
+  $op
+ }
+
+
+sub Variable::assign($$$)                                                       # Assign to the left hand side the value of the right hand side
+ {my ($left, $op, $right) = @_;                                                 # Left variable, operator, right variable
+
+  my $l = $left ->address;
+  my $r = $right->address;
+  if ($left->size == 3 and $right->size == 3)
+   {PushR my @save = (r14, r15);
+    Mov r14, $l;
+    Mov r15, $r;
+    &$op(r14,r15);
+    Mov $l, r14;
+    PopR @save;
+    return $left;
+   }
+  confess "Need more code";
+ }
+
+sub Variable::plusAssign($$)                                                    # Implement plus and assign
+ {my ($left, $right) = @_;                                                      # Left variable,  right variable
+  $left->assign(\&Add, $right);
+ }
+
+sub Variable::minusAssign($$)                                                   # Implement minus and assign
+ {my ($left, $right) = @_;                                                      # Left variable,  right variable
+  $left->assign(\&Sub, $right);
  }
 
 sub Variable::arithmetic($$$$)                                                  # Return a variable containing the result of an arithmetic operation on the left hand and right hand side variables
@@ -939,13 +992,13 @@ sub Variable::print($)                                                          
   PopR @regs;
  }
 
-sub Variable::dump($)                                                           # Dump the value of a variable on stdout
- {my ($left) = @_;                                                              # Left variable
+sub Variable::dump($;$)                                                         # Dump the value of a variable on stdout
+ {my ($left, $title) = @_;                                                      # Left variable, optional title
   PushR my @regs = (rax, rdi);
   Mov rax, $left->label;                                                        # Address in memory
   KeepFree rax;
   Mov rax, "[rax]";
-  &PrintOutString($left->name.": ");
+  &PrintOutString($title//$left->name.": ");
   &PrintOutRaxInHex();
   &PrintOutNL();
   PopR @regs;
@@ -2740,7 +2793,7 @@ sub ByteString::CreateBlockString($)                                            
     links      => $b - 2 * $o,                                                  # Location of links in bytes in zmm
     next       => $b - 1 * $o,                                                  # Location of next offset in block in bytes
     prev       => $b - 2 * $o,                                                  # Location of prev offset in block in bytes
-    zero       => Vq("Start of empty block", 0),                                # Variable containing zero == the start position for an empty block
+    one        => Vq("Start of empty block", 1),                                # Variable containing the start position for data in an empty block
     length     => Vq("Maximum block length",             $b - 2 * $o - 1),      # Variable containing maximum length in a block
     bsAddress  => Vq("Byte string backing block string", rax),                  # Variable addressing backing byte string
     address    => undef,                                                        # Variable addressing first block in string
@@ -2754,22 +2807,22 @@ sub ByteString::CreateBlockString($)                                            
 sub BlockString::allocBlock($)                                                  # Allocate a block to hold a zmm register in the specified byte string and return the offset of the block in a variable
  {my ($blockString) = @_;                                                       # Block string descriptor
   my $byteString = $blockString->byteString;
+
   Comment "Allocate a zmm block in a byte string";
+
   PushR my @regs = (rax, rdi, r14, r15);                                        # Save registers
   $blockString->bsAddress->setReg(rax);                                         # Set rax to byte string address
   Mov rdi, $blockString->size;                                                  # Size of allocation
   $byteString->allocate;                                                        # Allocate in byte string
   my $block = Vq("Offset of allocated block", rdi);                             # Save address of block
 
-  my $n = $blockString->next;                                                   # Quad word of next offset
-  my $p = $blockString->prev;                                                   # Quad word of prev offset
-  Mov "[rax+rdi+$n]", edi;                                                      # Initialize circular list
-  Mov "[rax+rdi+$p]", edi;
+  if (1)                                                                        # Initialize circular list
+   {my $n = $blockString->next;                                                 # Quad word of next offset
+    my $p = $blockString->prev;                                                 # Quad word of prev offset
+    Mov "[rax+rdi+$n]", edi;
+    Mov "[rax+rdi+$p]", edi;
+   }
 
-  Mov r15, 0;   #### Test only
-  Mov "[rax+rdi]", r15b;
-  Mov r14, 0xbbaabbaa;
-  Mov "[rax+rdi+1]", r14;
   PopR @regs;                                                                   # Restore registers
 
   $block;                                                                       # Variable containing address of allocation
@@ -2917,7 +2970,8 @@ sub BlockString::dump($)                                                        
   my $block  = $blockString->address;                                           # The first block
                $blockString->getBlock($block, 31);                              # The first block in zmm31
   my $length = $blockString->getBlockLengthInZmm(31);                           # Length of block
-  $length->dump; PrintOutRegisterInHex zmm31;                                   # Print block
+  $block->dump("BlockString at address: ");
+  $length->dump("Length: "); PrintOutRegisterInHex zmm31;                         # Print block
 
   ForEver                                                                       # Each block in string
    {my ($start, $end) = @_;                                                     #
@@ -2925,7 +2979,9 @@ sub BlockString::dump($)                                                        
     If ($next == $block, sub{Jmp $end});                                        # Next block is the first block so we have printed the block string
     $blockString->getBlock($next, 31);                                          # Next block in zmm
     my $length = $blockString->getBlockLengthInZmm(31);                         # Length of block
-    $length->dump; PrintOutRegisterInHex zmm31;                                 # Print block
+    $next  ->dump("Offset: ");                                                  # Print block
+    $length->dump("Length: ");
+    PrintOutRegisterInHex zmm31;
    };
   PopR @save;
  }
@@ -2937,7 +2993,7 @@ sub BlockString::append($$$)                                                    
   PushR my @save = (zmm29, zmm30, zmm31);
   my $first = $blockString->address;                                            # Offset of first block
   $blockString->getBlock($first, 29);                                           # Get the first block
-  my ($last, $second) = $blockString->getNextAndPrevBlockOffsetFromZmm(29);     # Get the offsets of the next and previous blocks as variables from the specified zmm
+  my ($second, $last) = $blockString->getNextAndPrevBlockOffsetFromZmm(29);     # Get the offsets of the next and previous blocks as variables from the specified zmm
 
   if (1)                                                                        # Fill a partially full first block in a string that only has one block
    {If ($last == $first, sub                                                    # String only has one block
@@ -2964,7 +3020,6 @@ sub BlockString::append($$$)                                                    
      {$blockString->getBlock($last, 31);                                        # Get the last block now known not to be the first block
       my $lengthLast = $blockString->getBlockLengthInZmm(31);                   # Length of the last block
       my $spaceLast  = $blockString->length - $lengthLast;                      # Space in last block
-
       If ($spaceLast >= $length, sub                                            # Enough space in last block
        {$source->setZmm(31, $lengthLast + 1, $length);                          # Append bytes
         $blockString->setBlockLengthInZmm($lengthLast + $length, 31);           # Set the length
@@ -2990,31 +3045,40 @@ sub BlockString::append($$$)                                                    
       $blockString->getBlock($new, 30);                                         # Get the new block which will have been properly formatted
 
       my ($next, $prev) = $blockString->getNextAndPrevBlockOffsetFromZmm(31);   # Link new block
-      $blockString->putNextandPrevBlockOffsetIntoZmm(31, $new,  $prev);
-      $blockString->putNextandPrevBlockOffsetIntoZmm(30, $last, $next);
-      if ($first != $last)                                                      # If we are not on the first block we will need to update the first block
-       {$blockString->putNextandPrevBlockOffsetIntoZmm(29, $second, $new);
+      If ($first == $last, sub                                                  # Connect first block to new block in string of one block
+       {$blockString->putNextandPrevBlockOffsetIntoZmm(31, $new,  $new);
+        $blockString->putNextandPrevBlockOffsetIntoZmm(30, $last, $last);
+       },
+      sub                                                                       # Connect lat block to new block in string of two or more blocks
+       {$blockString->putNextandPrevBlockOffsetIntoZmm(31, $new,  $prev);
+        $blockString->putNextandPrevBlockOffsetIntoZmm(30, $next, $last);
+        $blockString->putNextandPrevBlockOffsetIntoZmm(29, $second, $new);
         $blockString->putBlock($last, 31);                                      # Only write the block if it is not the first block as the first block will be written later
-       }
-
-      Vmovdqa64 zmm31, zmm30;                                                   # New block is now the last block
-      $last = $new;
+       });
 
       If ($blockString->length >= $length, sub                                  # Enough space in last block to complete move
-       {$source->setZmm(31, $blockString->zero, $length);                       # Append bytes
-        $blockString->setBlockLengthInZmm($length, 31);                         # Set the length
-        $blockString->putBlock($last, 31);                                      # Put the block
+       {$source->setZmm(30, $blockString->one, $length);                        # Append bytes
+        $blockString->setBlockLengthInZmm($length, 30);                         # Set the length
+        $blockString->putBlock($new, 30);                                       # Put the block
         Jmp $end;
-       },
-      sub                                                                       # Else we can move a full block and iterate
-       {$source->setZmm(31, $blockString->zero, $blockString->length);          # Append full block
-        $blockString->setBlockLengthInZmm($blockString->length, 31);            # Set the length
-        $source += $blockString->length;
-        $length -= $blockString->length;
        });
+
+      $source->setZmm(31, $blockString->one, $blockString->length);             # Append full block
+      $blockString->setBlockLengthInZmm($blockString->length, 31);              # Set the length
+      $source += $blockString->length;
+      $length -= $blockString->length;
+
+      Vmovdqa64 zmm31, zmm30;                                                   # New block is now the last block
+      $last->copy($new);                                                        # Make last equal to new for the next iteration
      };
    }
-  $blockString->putBlock($first, 29);                                           # Put the first block back
+
+  If ($first == $last, sub                                                      # Save first  block if there is more than two blocks in the string
+   {$blockString->putBlock($last, 31);                                          # Only write the block if it is not the first block as the first block will be written later
+   },
+  sub
+   {$blockString->putBlock($first, 29);                                         # Put the first block back
+   });
 
   SetLabel $success;                                                            # The move is now complete
   PopR @save;
@@ -8703,7 +8767,7 @@ Test::More->builder->output("/dev/null") if $localTest;                         
 
 if ($^O =~ m(bsd|linux)i)                                                       # Supported systems
  {if (confirmHasCommandLineCommand(q(nasm)) and LocateIntelEmulator)            # Network assembler and Intel Software Development emulator
-   {plan tests => 78;
+   {plan tests => 79;
    }
   else
    {plan skip_all =>qq(Nasm or Intel 64 emulator not available);
@@ -8715,7 +8779,7 @@ else
 
 my $start = time;                                                               # Tests
 
-#goto latest unless caller(0);
+goto latest unless caller(0);
 
 if (1) {                                                                        #TPrintOutString #TAssemble
   PrintOutString "Hello World";
@@ -9952,10 +10016,8 @@ q at offset 12 in zmm0: 0302 0100 0000 0302
 END
  }
 
-latest:;
-
 if (1) {                                                                        #TCreateBlockString
-  my $s = Rs(0..128);
+  my $s = Rb(0..128);
   my $B = CreateByteString;
   my $b = $B->CreateBlockString(0);
   $b->append(Vq("Source String", $s), Vq("Source Length", 3));
@@ -9965,8 +10027,45 @@ if (1) {                                                                        
   $b->dump;
 
   eq_or_diff Assemble, <<END;
-b at offset 0 in zmm31: 0000 0000 0000 000C
- zmm31: 0000 0010 0000 0010   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0034 3332 3130   3332 3130 3231 300C
+BlockString at address: 0000 0000 0000 0010
+Length: 0000 0000 0000 000C
+ zmm31: 0000 0010 0000 0010   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0004 0302 0100   0302 0100 0201 000C
+END
+ }
+
+latest:;
+
+if (1) {
+  my $s = Rb(0..128);
+  my $B = CreateByteString;
+  my $b = $B->CreateBlockString(0);
+  $b->append(Vq("Source String", $s), Vq("Source Length", 58));
+  $b->append(Vq("Source String", $s), Vq("Source Length", 52));
+  $b->append(Vq("Source String", $s), Vq("Source Length", 51));
+  $b->dump;
+
+  $b->append(Vq("Source String", $s), Vq("Source Length",  2));
+  $b->dump;
+
+  eq_or_diff Assemble, <<END;
+BlockString at address: 0000 0000 0000 0010
+Length: 0000 0000 0000 0037
+ zmm31: 0000 0090 0000 0050   3635 3433 3231 302F   2E2D 2C2B 2A29 2827   2625 2423 2221 201F   1E1D 1C1B 1A19 1817   1615 1413 1211 100F   0E0D 0C0B 0A09 0807   0605 0403 0201 0037
+Offset: 0000 0000 0000 0050
+Length: 0000 0000 0000 0037
+ zmm31: 0000 0010 0000 0090   3332 3130 2F2E 2D2C   2B2A 2928 2726 2524   2322 2120 1F1E 1D1C   1B1A 1918 1716 1514   1312 1110 0F0E 0D0C   0B0A 0908 0706 0504   0302 0100 3938 3737
+Offset: 0000 0000 0000 0090
+Length: 0000 0000 0000 0033
+ zmm31: 0000 0050 0000 0010   0000 0000 3231 302F   2E2D 2C2B 2A29 2827   2625 2423 2221 201F   1E1D 1C1B 1A19 1817   1615 1413 1211 100F   0E0D 0C0B 0A09 0807   0605 0403 0201 0033
+BlockString at address: 0000 0000 0000 0010
+Length: 0000 0000 0000 0037
+ zmm31: 0000 0090 0000 0050   3635 3433 3231 302F   2E2D 2C2B 2A29 2827   2625 2423 2221 201F   1E1D 1C1B 1A19 1817   1615 1413 1211 100F   0E0D 0C0B 0A09 0807   0605 0403 0201 0037
+Offset: 0000 0000 0000 0050
+Length: 0000 0000 0000 0037
+ zmm31: 0000 0010 0000 0090   3332 3130 2F2E 2D2C   2B2A 2928 2726 2524   2322 2120 1F1E 1D1C   1B1A 1918 1716 1514   1312 1110 0F0E 0D0C   0B0A 0908 0706 0504   0302 0100 3938 3737
+Offset: 0000 0000 0000 0090
+Length: 0000 0000 0000 0035
+ zmm31: 0000 0050 0000 0010   0000 0100 3231 302F   2E2D 2C2B 2A29 2827   2625 2423 2221 201F   1E1D 1C1B 1A19 1817   1615 1413 1211 100F   0E0D 0C0B 0A09 0807   0605 0403 0201 0035
 END
  }
 
