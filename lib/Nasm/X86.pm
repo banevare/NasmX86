@@ -849,29 +849,12 @@ sub Variable::equals($$)                                                        
  }
 
 
-# sub Variable::assign($$$)                                                       # Assign to the left hand side the value of the right hand side
-#  {my ($left, $op, $right) = @_;                                                 # Left variable, operator, right variable
-# 
-#   my $l = $left ->address;
-#   my $r = $right->address;
-#   if ($left->size == 3 and $right->size == 3)
-#    {PushR my @save = (r14, r15);
-#     Mov r14, $l;
-#     Mov r15, $r;
-#     &$op(r14,r15);
-#     Mov $l, r14;
-#     PopR @save;
-#     return $left;
-#    }
-#   confess "Need more code";
-# }
-
 sub Variable::assign($$$)                                                       # Assign to the left hand side the value of the right hand side
  {my ($left, $op, $right) = @_;                                                 # Left variable, operator, right variable
 
   my $l = $left ->address;
-  my $r = ref($right) ? $right->address : $right;
-  $left->size != 3 and ref($r) and $right->size != 3 and confess 'Size mismatch';
+  my $r = $right->address;
+  if ($left->size == 3 and $right->size == 3)
    {PushR my @save = (r14, r15);
     Mov r14, $l;
     Mov r15, $r;
@@ -1923,14 +1906,13 @@ sub LocalData::variable($$;$)                                                   
   $variable
  }
 
-use Data::Dumper;
 sub LocalVariable::stack($)                                                     # Address a local variable on the stack
  {my ($variable) = @_;                                                          # Variable
   @_ == 1 or confess;
-  my $loc = -$variable->loc;                                                     # Location of variable on stack
-  $loc -= 0x08;
-  print Dumper $loc;
-  "[rbp$loc]"                                                                  # Address variable
+  my $l = $variable->loc;                                                       # Location of variable on stack
+  my $S = $variable->size;
+  my $s = $S == 8 ? 'qword' : $S == 4 ? 'dword' : $S == 2 ? 'word' : 'byte';    # Variable size
+  "${s}[$l+rbp]"                                                                # Address variable
  }
 
 sub LocalData::allocate8($@)                                                    # Add some 8 byte local variables and return an array of variable definitions
@@ -3104,20 +3086,19 @@ sub BlockString::appendSub($$$)                                                 
   PopR @save;
  }
 
-my $BlockStringAppend;                                                          # Parameter list
-
 sub BlockString::append($$$)                                                    # Append the specified content in memory to the specified block string
  {my ($blockString, $Source, $Length) = @_;                                     # Block string descriptor, variable addressing source, variable containing length of source
 
-  if (!defined $BlockStringAppend)
+  my $b = $blockString->byteString;                                             # A byte string can contain many block strings
+  if (!defined $$b{BlockString}{append})
    {my $source = Vq("source");
     my $length = Vq("length");
     my $sub    = S {$blockString->appendSub($source, $length)}
                     name => "BlockString::Append";
-    $BlockStringAppend = [$sub, $source, $length];
+    $$b{BlockString}{append} = [$sub, $source, $length];
    }
 
-  my ($sub, $source, $length) = @$BlockStringAppend;
+  my ($sub, $source, $length) = $$b{BlockString}{append}->@*;
   $source->copy($Source);
   $length->copy($Length);
   Call $sub;
@@ -8818,7 +8799,7 @@ else
 
 my $start = time;                                                               # Tests
 
-goto latest unless caller(0);
+#goto latest unless caller(0);
 
 if (1) {                                                                        #TPrintOutString #TAssemble
   PrintOutString "Hello World";
