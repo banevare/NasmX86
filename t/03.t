@@ -1,9 +1,9 @@
 # Tino 2021/05/13 v3
 use strict;
 use warnings;
+use Test::More tests => 3;
 use Nasm::X86 qw(:all);
 use Data::Dump qw(dump);
-use Test::More tests => 3;
 
 my $s = join '', ('a' .. 'p')x4;
 
