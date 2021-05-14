@@ -5,7 +5,7 @@
 use strict;
 use warnings;
 use Nasm::X86 qw(:all);
-use Test::More tests => 1;
+use Test::Most tests => 1;
 
 Mov rax, 2;
 PrintOutRegisterInHex rax;
