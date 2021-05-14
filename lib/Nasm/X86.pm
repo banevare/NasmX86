@@ -721,8 +721,8 @@ sub LoadZmmFromMemory($$$$)                                                     
 
 #D2 Definitions                                                                 # Variable definitions
 
-sub Variable($$$)                                                               # Create a new variable with the specified size and name initialized via an expression
- {my ($size, $name, $expr) = @_;                                                # Size as a power of 2, name of variable, expression initializing variable
+sub Variable($$;$)                                                              # Create a new variable with the specified size and name initialized via an expression
+ {my ($size, $name, $expr) = @_;                                                # Size as a power of 2, name of variable, optional expression initializing variable
   $size =~ m(\A0|1|2|3|4|5|6|b|w|d|q|x|y|z\Z)i or confess "Size must be 0..6 or b|w|d|q|x|y|z";  # Check size of variable
 
   my $label = $size =~ m(\A0|b\Z) ? Db(0) :                                     # Allocate space for variable
@@ -735,7 +735,7 @@ sub Variable($$$)                                                               
 
   my $nSize = $size =~ tr(bwdqxyz) (0123456)r;                                  # Size of variable
 
-  if (!ref($expr))                                                              # Initialize variable
+  if (defined $expr)                                                            # Initialize variable if an initializer was supplied
    {my $t = "[$label]";
     if ($Registers{$expr})
      {Mov $t, $expr;
@@ -760,37 +760,37 @@ sub Variable($$$)                                                               
    );
  }
 
-sub Vb(*$)                                                                      # Define a byte variable
+sub Vb(*;$)                                                                     # Define a byte variable
  {my ($name, $expr) = @_;                                                       # Name of variable, initializing expression
   &Variable(0, @_)
  }
 
-sub Vw(*$)                                                                      # Define a word variable
+sub Vw(*;$)                                                                     # Define a word variable
  {my ($name, $expr) = @_;                                                       # Name of variable, initializing expression
   &Variable(1, @_)
  }
 
-sub Vd(*$)                                                                      # Define a double word variable
+sub Vd(*;$)                                                                     # Define a double word variable
  {my ($name, $expr) = @_;                                                       # Name of variable, initializing expression
   &Variable(2, @_)
  }
 
-sub Vq(*$)                                                                      # Define a quad variable
+sub Vq(*;$)                                                                     # Define a quad variable
  {my ($name, $expr) = @_;                                                       # Name of variable, initializing expression
   &Variable(3, @_)
  }
 
-sub Vx(*$)                                                                      # Define an xmm variable
+sub Vx(*;$)                                                                     # Define an xmm variable
  {my ($name, $expr) = @_;                                                       # Name of variable, initializing expression
   &Variable(4, @_)
  }
 
-sub Vy(*$)                                                                      # Define a ymm variable
+sub Vy(*;$)                                                                     # Define a ymm variable
  {my ($name, $expr) = @_;                                                       # Name of variable, initializing expression
   &Variable(5, @_)
  }
 
-sub Vz(*$)                                                                      # Define a zmm variable
+sub Vz(*;$)                                                                     # Define a zmm variable
  {my ($name, $expr) = @_;                                                       # Name of variable, initializing expression
   &Variable(6, @_)
  }
@@ -2971,7 +2971,7 @@ sub BlockString::dump($)                                                        
                $blockString->getBlock($block, 31);                              # The first block in zmm31
   my $length = $blockString->getBlockLengthInZmm(31);                           # Length of block
   $block->dump("BlockString at address: ");
-  $length->dump("Length: "); PrintOutRegisterInHex zmm31;                         # Print block
+  $length->dump("Length: "); PrintOutRegisterInHex zmm31;                       # Print block
 
   ForEver                                                                       # Each block in string
    {my ($start, $end) = @_;                                                     #
@@ -2986,7 +2986,7 @@ sub BlockString::dump($)                                                        
   PopR @save;
  }
 
-sub BlockString::append($$$)                                                    # Append the specified content in memory to the specified block string
+sub BlockString::appendSub($$$)                                                 # Append the specified content in memory to the specified block string
  {my ($blockString, $source, $length) = @_;                                     # Block string descriptor, variable addressing source, variable containing length of source
   my $success = Label;                                                          # Append completed successfully
 
@@ -3049,7 +3049,7 @@ sub BlockString::append($$$)                                                    
        {$blockString->putNextandPrevBlockOffsetIntoZmm(31, $new,  $new);
         $blockString->putNextandPrevBlockOffsetIntoZmm(30, $last, $last);
        },
-      sub                                                                       # Connect lat block to new block in string of two or more blocks
+      sub                                                                       # Connect last block to new block in string of two or more blocks
        {$blockString->putNextandPrevBlockOffsetIntoZmm(31, $new,  $prev);
         $blockString->putNextandPrevBlockOffsetIntoZmm(30, $next, $last);
         $blockString->putNextandPrevBlockOffsetIntoZmm(29, $second, $new);
@@ -3082,6 +3082,25 @@ sub BlockString::append($$$)                                                    
 
   SetLabel $success;                                                            # The move is now complete
   PopR @save;
+ }
+
+my $BlockStringAppend;                                                          # Parameter list
+
+sub BlockString::append($$$)                                                    # Append the specified content in memory to the specified block string
+ {my ($blockString, $Source, $Length) = @_;                                     # Block string descriptor, variable addressing source, variable containing length of source
+
+  if (!defined $BlockStringAppend)
+   {my $source = Vq("source");
+    my $length = Vq("length");
+    my $sub    = S {$blockString->appendSub($source, $length)}
+                    name => "BlockString::Append";
+    $BlockStringAppend = [$sub, $source, $length];
+   }
+
+  my ($sub, $source, $length) = @$BlockStringAppend;
+  $source->copy($Source);
+  $length->copy($Length);
+  Call $sub;
  }
 
 #D1 Tree                                                                        # Tree operations
