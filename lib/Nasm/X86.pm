@@ -1923,11 +1923,14 @@ sub LocalData::variable($$;$)                                                   
   $variable
  }
 
+use Data::Dumper;
 sub LocalVariable::stack($)                                                     # Address a local variable on the stack
  {my ($variable) = @_;                                                          # Variable
   @_ == 1 or confess;
-  my $loc = $variable->loc;                                                     # Location of variable on stack
-  "[$loc+rbp]"                                                                  # Address variable
+  my $loc = -$variable->loc;                                                     # Location of variable on stack
+  $loc -= 0x08;
+  print Dumper $loc;
+  "[rbp$loc]"                                                                  # Address variable
  }
 
 sub LocalData::allocate8($@)                                                    # Add some 8 byte local variables and return an array of variable definitions
