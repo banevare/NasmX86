@@ -849,12 +849,29 @@ sub Variable::equals($$)                                                        
  }
 
 
+# sub Variable::assign($$$)                                                       # Assign to the left hand side the value of the right hand side
+#  {my ($left, $op, $right) = @_;                                                 # Left variable, operator, right variable
+# 
+#   my $l = $left ->address;
+#   my $r = $right->address;
+#   if ($left->size == 3 and $right->size == 3)
+#    {PushR my @save = (r14, r15);
+#     Mov r14, $l;
+#     Mov r15, $r;
+#     &$op(r14,r15);
+#     Mov $l, r14;
+#     PopR @save;
+#     return $left;
+#    }
+#   confess "Need more code";
+# }
+
 sub Variable::assign($$$)                                                       # Assign to the left hand side the value of the right hand side
  {my ($left, $op, $right) = @_;                                                 # Left variable, operator, right variable
 
   my $l = $left ->address;
-  my $r = $right->address;
-  if ($left->size == 3 and $right->size == 3)
+  my $r = ref($right) ? $right->address : $right;
+  $left->size != 3 and ref($r) and $right->size != 3 and confess 'Size mismatch';
    {PushR my @save = (r14, r15);
     Mov r14, $l;
     Mov r15, $r;
