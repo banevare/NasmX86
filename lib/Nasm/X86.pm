@@ -918,7 +918,7 @@ sub Variable::division($$$)                                                     
     Mov r15, $r;
     Idiv r15;
     my $v = Vq(join(' ', '('.$left->name, $op, (ref($right) ? $right->name : '').')'), $op eq "%" ? rdx : rax);
-    PopR r15;
+    PopR @regs;
     return $v;
    }
   confess "Need more code";
