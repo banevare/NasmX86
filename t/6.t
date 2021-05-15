@@ -1,4 +1,5 @@
 #Tine 2021/05/14
+use v5.30;
 use Test::Most tests => 1;
 use Nasm::X86 qw(:all);
 use Data::Dump qw(dump);
