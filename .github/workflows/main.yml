@@ -1,4 +1,4 @@
-# Test NasmX86 2021-05-15 at 01:19:08
+# Test NasmX86 2021-05-15 at 01:25:06
 
 name: Test
 
@@ -54,4 +54,60 @@ jobs:
     - name: Prove
       run: |
         prove -Ilib
+
+    - name: Prove /home/phil/perl/cpan/NasmX86/t/1.t
+      run: |
+        prove -Ilib /home/phil/perl/cpan/NasmX86/t/1.t
+
+    - name: Prove /home/phil/perl/cpan/NasmX86/t/10.t
+      run: |
+        prove -Ilib /home/phil/perl/cpan/NasmX86/t/10.t
+
+    - name: Prove /home/phil/perl/cpan/NasmX86/t/11.t
+      run: |
+        prove -Ilib /home/phil/perl/cpan/NasmX86/t/11.t
+
+    - name: Prove /home/phil/perl/cpan/NasmX86/t/12.t
+      run: |
+        prove -Ilib /home/phil/perl/cpan/NasmX86/t/12.t
+
+    - name: Prove /home/phil/perl/cpan/NasmX86/t/13.t
+      run: |
+        prove -Ilib /home/phil/perl/cpan/NasmX86/t/13.t
+
+    - name: Prove /home/phil/perl/cpan/NasmX86/t/2.t
+      run: |
+        prove -Ilib /home/phil/perl/cpan/NasmX86/t/2.t
+
+    - name: Prove /home/phil/perl/cpan/NasmX86/t/3.t
+      run: |
+        prove -Ilib /home/phil/perl/cpan/NasmX86/t/3.t
+
+    - name: Prove /home/phil/perl/cpan/NasmX86/t/4.t
+      run: |
+        prove -Ilib /home/phil/perl/cpan/NasmX86/t/4.t
+
+    - name: Prove /home/phil/perl/cpan/NasmX86/t/5.t
+      run: |
+        prove -Ilib /home/phil/perl/cpan/NasmX86/t/5.t
+
+    - name: Prove /home/phil/perl/cpan/NasmX86/t/6.t
+      run: |
+        prove -Ilib /home/phil/perl/cpan/NasmX86/t/6.t
+
+    - name: Prove /home/phil/perl/cpan/NasmX86/t/7.t
+      run: |
+        prove -Ilib /home/phil/perl/cpan/NasmX86/t/7.t
+
+    - name: Prove /home/phil/perl/cpan/NasmX86/t/8.t
+      run: |
+        prove -Ilib /home/phil/perl/cpan/NasmX86/t/8.t
+
+    - name: Prove /home/phil/perl/cpan/NasmX86/t/9.t
+      run: |
+        prove -Ilib /home/phil/perl/cpan/NasmX86/t/9.t
+
+    - name: Prove /home/phil/perl/cpan/NasmX86/t/z.txt
+      run: |
+        prove -Ilib /home/phil/perl/cpan/NasmX86/t/z.txt
 
