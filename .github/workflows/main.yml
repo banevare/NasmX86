@@ -1,4 +1,4 @@
-# Test NasmX86 2021-05-15 at 05:28:03
+# Test NasmX86 2021-05-15 at 20:29:43
 
 name: Test
 
@@ -77,6 +77,11 @@ jobs:
       if: always()
       run: |
         prove -Ilib t/13.t
+
+    - name: Prove t/14.t
+      if: always()
+      run: |
+        prove -Ilib t/14.t
 
     - name: Prove t/2.t
       if: always()
