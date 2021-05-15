@@ -1739,6 +1739,14 @@ sub Variable::copyMemoryFrom($$)                                                
   RestoreFirstFour;
  }
 
+sub Variable::printOutMemoryInHex($)                                            # Print allocated memory in hex
+ {my ($memory) = @_;                                                            # Variable describing the memory
+  PushR my @save = (rax, rdi);
+  $memory->confirmIsMemory(@save);
+  &PrintOutMemoryInHexNL();                                                     # Print the memory
+  PopR @save;
+ }
+
 sub Variable::freeMemory($)                                                     # Free the memory described in this variable
  {my ($memory) = @_;                                                            # Variable describing memory as returned by AllocateMemory
   $memory->size == 4 or confess "Wrong size";
@@ -3351,6 +3359,7 @@ sub Exit(;$)                                                                    
    }
   elsif (@_ == 1)
    {Comment "Exit code: $c";
+    KeepFree  rdi;
     Mov rdi, $c;
    }
   KeepFree rax;
@@ -8909,10 +8918,14 @@ my $start = time;                                                               
 
 eval {goto latest} unless caller(0);
 
-if (1) {                                                                        #TPrintOutString #TAssemble
-  PrintOutString "Hello World";
+if (1) {                                                                        #TPrintOutStringNL #TPrintErrStringNL #TAssemble
+  PrintOutStringNL "Hello World";
+  PrintErrStringNL "Hello World";
 
-  ok Assemble =~ m(Hello World);
+  is_deeply Assemble, <<END;
+Hello World
+Hello World
+END
  }
 
 if (1) {                                                                        #TMov #TComment #TRs #TPrintOutMemory
@@ -9612,6 +9625,26 @@ if (1) {                                                                        
   ok $r =~ m(xmm1: 0000 0000 0000 0004   0000 0003 0002 0100);
   ok $r =~ m(0001 0200 0300 00000400 0000 0000 0000);
  }
+
+latest:;
+if (1) {                                                                        #T
+  my $s = Rb 0..255;
+  Mov rax, 256;
+  my $a = AllocateMemory;
+  Mov rdi, 256;
+  Mov rsi, $s;
+  CopyMemory;
+  KeepFree rdi, rsi;
+
+  my $b = AllocateMemory;
+PrintOutStringNL "AAAA";
+  $b->clearMemory;
+  $b->copyMemoryFrom($a);
+  $b->printOutMemoryInHex;
+
+  Assemble;
+ }
+exit;
 
 if (1) {                                                                        # Variable length shift
   Mov rax, -1;
