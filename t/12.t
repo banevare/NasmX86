@@ -1,18 +1,17 @@
-use strict;
-use warnings;
+#!/usr/bin/perl -I/home/phil/perl/cpan/NasmX86/lib
+# Tino 2021/05/13
 use Test::Most tests => 2;
 use Nasm::X86 qw(:all);
 
-
 my $fun = S{
-	SetLabel 'testfun_start';
-	SaveFirstSeven;
-	Mov rax,rdi;
-	Xor rdi,rdi;
-	Inc rdi;
-	PrintOutRegisterInHex rax;
-	RestoreFirstSeven;
-	SetLabel 'testfun_end';
+  SetLabel 'testfun_start';
+  SaveFirstSeven;
+  Mov rax,rdi;
+  Xor rdi,rdi;
+  Inc rdi;
+  PrintOutRegisterInHex rax;
+  RestoreFirstSeven;
+  SetLabel 'testfun_end';
 };
 Mov rdi,10;
 Call $fun;
