@@ -1,4 +1,5 @@
-
+#!/usr/bin/perl -I/home/phil/perl/cpan/NasmX86/lib
+# Tino 2021/05/13
 #Simple memory allocation test via nasm syntax
 use strict;
 use warnings;
