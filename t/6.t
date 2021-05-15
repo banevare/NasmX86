@@ -1,5 +1,5 @@
 #Tine 2021/05/14
-use Test::Most tests => 6;
+use Test::Most tests => 1;
 use Nasm::X86 qw(:all);
 
 my $oa = Vq 'vara', 10;
