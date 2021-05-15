@@ -1,6 +1,6 @@
-use strict;
-use warnings;
-use Test::More tests => 4;
+#!/usr/bin/perl -I/home/phil/perl/cpan/NasmX86/lib
+# Tino 2021/05/13
+use Test::Most tests => 4;
 use Nasm::X86 qw(:all);
 
 Mov rax,0b0001;
@@ -11,7 +11,7 @@ Mov rcx,0;
 Xor rax,0b0001;
 And rbx,0b0001;
 Or rdx,1;
-Or rcx,1; #rcx does not seem to behave as expected when running without the emulator
+Or rcx,1;                                                                       # rcx does not seem to behave as expected when running without the emulator
 PrintOutRegisterInHex rax;
 PrintOutRegisterInHex rbx;
 PrintOutRegisterInHex rdx;
