@@ -853,14 +853,12 @@ sub Variable::equals($$)                                                        
 sub Variable::assign($$$)                                                       # Assign to the left hand side the value of the right hand side
  {my ($left, $op, $right) = @_;                                                 # Left variable, operator, right variable
 
-  my $l = $left ->address;
-  my $r = $right->address;
-  if ($left->size == 3 and $right->size == 3)
+  if ($left->size == 3 and !ref($right) || $right->size == 3)
    {PushR my @save = (r14, r15);
-    Mov r14, $l;
-    Mov r15, $r;
+    Mov r14, $left ->address;
+    Mov r15, ref($right) ? $right->address : $right;
     &$op(r14,r15);
-    Mov $l, r14;
+    Mov $left ->address, r14;
     PopR @save;
     return $left;
    }
@@ -882,11 +880,11 @@ sub Variable::arithmetic($$$$)                                                  
 
   my $l = $left ->address;
   my $r = ref($right) ? $right->address : $right;                               # Right can be either a variable reference or a constant
-  if ($left->size == 3 and ! ref($right) || $right->size == 3)
+  if ($left->size == 3 and !ref($right) || $right->size == 3)
    {PushR r15;
     Mov r15, $l;
     &$op(r15, $r);
-    my $v = Vq(join(' ', '('.$left->name, $name, (ref($right) ? $right->name : '').')'), r15);
+    my $v = Vq(join(' ', '('.$left->name, $name, (ref($right) ? $right->name : $right).')'), r15);
     PopR r15;
     return $v;
    }
