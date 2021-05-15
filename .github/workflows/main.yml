@@ -1,4 +1,4 @@
-# Test NasmX86 2021-05-15 at 01:34:24
+# Test NasmX86 2021-05-15 at 01:46:06
 
 name: Test
 
@@ -60,84 +60,91 @@ jobs:
     - name: Prove t/1.t
       if: always()
       run: |
+        head lib/Nasm/X86.pm
         cat t/1.t
         prove -Ilib t/1.t
 
     - name: Prove t/10.t
       if: always()
       run: |
+        head lib/Nasm/X86.pm
         cat t/10.t
         prove -Ilib t/10.t
 
     - name: Prove t/11.t
       if: always()
       run: |
+        head lib/Nasm/X86.pm
         cat t/11.t
         prove -Ilib t/11.t
 
     - name: Prove t/12.t
       if: always()
       run: |
+        head lib/Nasm/X86.pm
         cat t/12.t
         prove -Ilib t/12.t
 
     - name: Prove t/13.t
       if: always()
       run: |
+        head lib/Nasm/X86.pm
         cat t/13.t
         prove -Ilib t/13.t
 
     - name: Prove t/2.t
       if: always()
       run: |
+        head lib/Nasm/X86.pm
         cat t/2.t
         prove -Ilib t/2.t
 
     - name: Prove t/3.t
       if: always()
       run: |
+        head lib/Nasm/X86.pm
         cat t/3.t
         prove -Ilib t/3.t
 
     - name: Prove t/4.t
       if: always()
       run: |
+        head lib/Nasm/X86.pm
         cat t/4.t
         prove -Ilib t/4.t
 
     - name: Prove t/5.t
       if: always()
       run: |
+        head lib/Nasm/X86.pm
         cat t/5.t
         prove -Ilib t/5.t
 
     - name: Prove t/6.t
       if: always()
       run: |
+        head lib/Nasm/X86.pm
         cat t/6.t
         prove -Ilib t/6.t
 
     - name: Prove t/7.t
       if: always()
       run: |
+        head lib/Nasm/X86.pm
         cat t/7.t
         prove -Ilib t/7.t
 
     - name: Prove t/8.t
       if: always()
       run: |
+        head lib/Nasm/X86.pm
         cat t/8.t
         prove -Ilib t/8.t
 
     - name: Prove t/9.t
       if: always()
       run: |
+        head lib/Nasm/X86.pm
         cat t/9.t
         prove -Ilib t/9.t
-
-    - name: Prove t/z.txt
-      if: always()
-      run: |
-        cat t/z.txt
-        prove -Ilib t/z.txt
 
