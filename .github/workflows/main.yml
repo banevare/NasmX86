@@ -1,4 +1,4 @@
-# Test NasmX86 2021-05-15 at 02:17:29
+# Test NasmX86 2021-05-15 at 02:32:55
 
 name: Test
 
@@ -126,6 +126,13 @@ jobs:
         head lib/Nasm/X86.pm
         cat t/6.t
         prove -Ilib t/6.t
+
+    - name: Prove t/6a.t
+      if: always()
+      run: |
+        head lib/Nasm/X86.pm
+        cat t/6a.t
+        prove -Ilib t/6a.t
 
     - name: Prove t/7.t
       if: always()
