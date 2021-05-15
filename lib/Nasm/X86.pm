@@ -3,6 +3,7 @@
 # Generate Nasm X86 code from Perl.  v1
 # Philip R Brenan at appaapps dot com, Appa Apps Ltd Inc., 2021
 #-------------------------------------------------------------------------------
+# podDocumentation
 package Nasm::X86;
 our $VERSION = "20210514";
 use warnings FATAL => qw(all);
@@ -13,7 +14,7 @@ use Data::Table::Text qw(confirmHasCommandLineCommand currentDirectory fff fileS
 use Asm::C qw(:all);
 use feature qw(say current_sub);
 
-# podDocumentation
+# Check that we are in fact generating the same code each time with sub S(.
 # AllocateAll8OnStack - replace with variables
 # Labels should be settable via $label->set
 # Register expressions via op overloading - register size and ability to add offsets, peek, pop, push clear register
@@ -2363,35 +2364,34 @@ END
   Call $sub;
  }
 
-sub CreateByteString()                                                          # Create an relocatable string of bytes in an arena and returns its address in rax
- {@_ == 0 or confess;
+sub CreateByteString(%)                                                         # Create an relocatable string of bytes in an arena and returns its address in rax. Optionally add a chain header so that 64 byte blocks of memory can be freed and reused within the byte string.
+ {my (%options) = @_;                                                           # free=>1 adds a free chain.
   Comment "Create byte string";
   my $N = 4096;                                                                 # Initial size of string
 
   my ($string, $size, $used) = All8Structure 2;                                 # String base
   my $data = $string->field(0, "start of data");                                # Start of data
 
-  my $sub  = S                                                                  # Create byte string
-   {SaveFirstFour;
-    Mov rax, $N;
-    AllocateMemory;
-    ClearRegisters   rdi;
-    Mov $used->addr, rdi;
-    KeepFree rdi;
+  my $free = $options{free};                                                    # Free space
 
-    Mov rdi, $N;
-    Mov $size->addr, rdi;
+  SaveFirstFour;
 
-    RestoreFirstFourExceptRax;
-   } name=> "CreateByteString";
+  Mov rax, $N;                                                                  # Amount of space to allocate
+  AllocateMemory;                                                               # Allocate memory
+  ClearRegisters rdi;                                                           # Clear register rdi
 
-  Call $sub;
+  Add rdi, RegisterSize rax if $options{free};                                  # Space for free chain
+  Mov $used->addr, rdi;              KeepFree rdi;                              # Used space
+  Mov rdi, $N; Mov $size->addr, rdi; KeepFree rdi;                              # Size
+
+  RestoreFirstFourExceptRax;
 
   genHash("ByteString",                                                         # Definition of byte string
     structure => $string,                                                       # Structure details
     size      => $size,                                                         # Size field details
     used      => $used,                                                         # Used field details
     data      => $data,                                                         # The first 8 bytes of the data
+    free      => $free,                                                         # True if the byte string has a free chain allocated in it
    );
  }
 
@@ -8798,7 +8798,7 @@ else
 
 my $start = time;                                                               # Tests
 
-#goto latest unless caller(0);
+eval {goto latest} unless caller(0);
 
 if (1) {                                                                        #TPrintOutString #TAssemble
   PrintOutString "Hello World";
@@ -10052,7 +10052,7 @@ Length: 0000 0000 0000 000C
 END
  }
 
-latest:;
+#latest:;
 
 if (1) {
   my $s = Rb(0..128);
