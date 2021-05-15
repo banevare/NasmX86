@@ -1,13 +1,15 @@
 #Tine 2021/05/14
 use Test::Most tests => 1;
 use Nasm::X86 qw(:all);
+use Data::Dump qw(dump);
 
 my $oa = Vq 'vara', 10;
 my $ob = Vq 'varb', 20;
-my $oc = Vq 'varc', 0;
-my $oi = Vq 'vari', 0;
-my $om = Vq 'varm', 0;
+my $oc = Vq 'varc',  0;
+my $oi = Vq 'vari',  0;
+my $om = Vq 'varm',  0;
 my $od = Vq 'vard', 10;
+say STDERR "AAAA ", dump([$oa, $ob, $oc, $oi, $om, $od]);
 SetLabel 'OP_tests';
 $oc = $oa + $ob;
 $oa -= 5;
@@ -17,6 +19,7 @@ $oi = $ob - $oa;
 $om = $oa * 2;
 KeepFree (rax);
 SetLabel 'Addressing_test';
+say STDERR "BBBB ", dump([$oa, $ob, $oc, $oi, $om, $od]);
 Mov rax,$oc->address;
 Mov rbx,$ob->address;
 Mov rdx,$oa->address;
