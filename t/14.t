@@ -4,25 +4,16 @@
 use Test::Most tests => 1;
 use Nasm::X86 qw(:all);
 
-my $vars = LocalData;
-my $a = $vars->variable(8, 'a');
-my $b = $vars->variable(8, 'b');
+my $sub = S
+ {my $vars = LocalData;
+  my $a = $vars->variable(8, 'a');
+  my $b = $vars->variable(8, 'b');
 
-$vars->start;
+  $vars->start;
+  Mov $b->stack,  4;
+  $vars->free;
+ };
 
-Mov $a->stack, 10;
-Mov $b->stack,  4;
-Mov rbx, $a->stack;
+Call $sub;
 
-Mov  r9, $b->stack;
-Add rbx, r9;
-
-PrintOutRegisterInHex r9;
-PrintOutRegisterInHex rbx;
-
-$vars->free;
-
-is_deeply Assemble, <<END;
-    r9: 0000 0000 0000 0004
-   rbx: 0000 0000 0000 000E
-END
+is_deeply Assemble, '';
