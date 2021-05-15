@@ -1,7 +1,7 @@
+#!/usr/bin/perl -I/home/phil/perl/cpan/NasmX86/lib
+# Tino 2021/05/13
 #Structure allocation test with 2 qword fields
-use strict;
-use warnings;
-use Test::More tests => 2;
+use Test::Most tests => 2;
 use Nasm::X86 qw(:all);
 
 Mov rax,8*8;
@@ -16,6 +16,7 @@ Mov rdx, $stf2->addr;
 PrintOutRegisterInHex rbx;
 PrintOutRegisterInHex rdx;
 FreeMemory;
+
 my $r = Assemble(emulator=>0);
 ok $r =~ m/rbx: 0000 0000 0000 000A/;
 ok $r =~ m/rdx: 0000 0000 0000 000B/;
