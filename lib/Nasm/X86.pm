@@ -1444,14 +1444,31 @@ sub Variable::print($)                                                          
 
 sub Variable::dump($;$)                                                         # Dump the value of a variable on stdout
  {my ($left, $title) = @_;                                                      # Left variable, optional title
-  PushR my @regs = (rax, rdi);
-  Mov rax, $left->label;                                                        # Address in memory
-  KeepFree rax;
-  Mov rax, "[rax]";
-  &PrintOutString($title//$left->name.": ");
-  &PrintOutRaxInHex();
-  &PrintOutNL();
-  PopR @regs;
+  if ($left->size == 3)                                                         # General purpose register
+   {PushR my @regs = (rax, rdi);
+    Mov rax, $left->label;                                                      # Address in memory
+    KeepFree rax;
+    Mov rax, "[rax]";
+    &PrintOutString($title//$left->name.": ");
+    &PrintOutRaxInHex();
+    &PrintOutNL();
+    PopR @regs;
+   }
+  elsif ($left->size == 4)                                                      # xmm
+   {PushR my @regs = (rax, rdi);
+    my $l = $left->label;                                                       # Address in memory
+    my $s = RegisterSize rax;
+    Mov rax, "[$l]";
+    Mov rdi, "[$l+$s]";
+    &PrintOutString($title//$left->name.": ");
+    &PrintOutRaxInHex();
+    &PrintOutString("  ");
+    KeepFree rax;
+    Mov rax, rdi;
+    &PrintOutRaxInHex();
+    &PrintOutNL();
+    PopR @regs;
+   }
  }
 
 sub Variable::debug($)                                                          # Dump the value of a variable on stdout with an indication of where the dump came from
@@ -1733,6 +1750,7 @@ sub Variable::copyMemoryFrom($$)                                                
   SaveFirstFour;
   $target->confirmIsMemory(rax, rdx);
   $source->confirmIsMemory(rsi, rdi);
+
   Cmp rdx, rdi;
   IfLt {PrintErrStringNL "Copy memory source is larger than target"; Exit(1)};  # Check memory sizes
   &CopyMemory();                                                                # Copy the memory
@@ -2112,6 +2130,9 @@ sub AllocateMemory                                                              
  {@_ == 0 or confess;
   Comment "Allocate memory";
 
+  PushR rdi;
+  Mov rdi, rax;
+
   Call S
    {SaveFirstSeven;
     my $d = extractMacroDefinitionsFromCHeaderFile "linux/mman.h";              # mmap constants
@@ -2131,6 +2152,7 @@ sub AllocateMemory                                                              
 
   my $a = Vxq("Allocated memory", rax, rdi);                                    # Allocate a variable to address the allocated memory and store its length
   $a->purpose = "Allocated memory";
+  PopR rdi;
   $a                                                                            # Return allocated memory details
  }
 
@@ -8904,7 +8926,7 @@ Test::More->builder->output("/dev/null") if $localTest;                         
 
 if ($^O =~ m(bsd|linux)i)                                                       # Supported systems
  {if (confirmHasCommandLineCommand(q(nasm)) and LocateIntelEmulator)            # Network assembler and Intel Software Development emulator
-   {plan tests => 79;
+   {plan tests => 80;
    }
   else
    {plan skip_all =>qq(Nasm or Intel 64 emulator not available);
@@ -9626,25 +9648,27 @@ if (1) {                                                                        
   ok $r =~ m(0001 0200 0300 00000400 0000 0000 0000);
  }
 
-latest:;
 if (1) {                                                                        #T
-  my $s = Rb 0..255;
-  Mov rax, 256;
+  my $N = 256;
+  my $s = Rb 0..$N-1;
+  Mov rax, $N;
   my $a = AllocateMemory;
-  Mov rdi, 256;
+  Mov rdi, $N;
   Mov rsi, $s;
   CopyMemory;
-  KeepFree rdi, rsi;
+  KeepFree rax, rdi, rsi;
 
+  Mov rax, $N;
   my $b = AllocateMemory;
-PrintOutStringNL "AAAA";
+
   $b->clearMemory;
   $b->copyMemoryFrom($a);
   $b->printOutMemoryInHex;
 
-  Assemble;
+  is_deeply Assemble, <<END;
+0001 0203 0405 06070809 0A0B 0C0D 0E0F1011 1213 1415 16171819 1A1B 1C1D 1E1F2021 2223 2425 26272829 2A2B 2C2D 2E2F3031 3233 3435 36373839 3A3B 3C3D 3E3F4041 4243 4445 46474849 4A4B 4C4D 4E4F5051 5253 5455 56575859 5A5B 5C5D 5E5F6061 6263 6465 66676869 6A6B 6C6D 6E6F7071 7273 7475 76777879 7A7B 7C7D 7E7F8081 8283 8485 86878889 8A8B 8C8D 8E8F9091 9293 9495 96979899 9A9B 9C9D 9E9FA0A1 A2A3 A4A5 A6A7A8A9 AAAB ACAD AEAFB0B1 B2B3 B4B5 B6B7B8B9 BABB BCBD BEBFC0C1 C2C3 C4C5 C6C7C8C9 CACB CCCD CECFD0D1 D2D3 D4D5 D6D7D8D9 DADB DCDD DEDFE0E1 E2E3 E4E5 E6E7E8E9 EAEB ECED EEEFF0F1 F2F3 F4F5 F6F7F8F9 FAFB FCFD FEFF
+END
  }
-exit;
 
 if (1) {                                                                        # Variable length shift
   Mov rax, -1;
