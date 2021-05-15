@@ -28,9 +28,9 @@ my @data;                                                                       
 my @bss;                                                                        # Block started by symbol
 my @text;                                                                       # Code
 
-my $sysin  = 0;                                                                 # File descriptor for standard input
-my $sysout = 1;                                                                 # File descriptor for standard output
-my $syserr = 2;                                                                 # File descriptor for standard error
+my $stdin  = 0;                                                                 # File descriptor for standard input
+my $stdout = 1;                                                                 # File descriptor for standard output
+my $stderr = 2;                                                                 # File descriptor for standard error
 
 my %Registers;                                                                  # The names of all the registers
 my %RegisterContaining;                                                         # The largest register containing a register
@@ -721,6 +721,442 @@ sub LoadZmmFromMemory($$$$)                                                     
   PopR r15;
  }
 
+#D1 Structured Programming                                                      # Structured programming constructs
+
+sub If($$;$)                                                                    # If
+ {my ($jump, $then, $else) = @_;                                                # Jump op code of variable, then - required , else - optional
+  @_ >= 2 && @_ <= 3 or confess;
+
+  if (ref($jump))                                                               # Variable reference - non zero then then else else
+   {PushR r15;
+    Mov r15, $jump->address;
+    Cmp r15,0;
+    PopR r15;
+    __SUB__->(q(Jz), $then, $else);
+   }
+  elsif (!$else)                                                                # No else
+   {Comment "if then";
+    my $end = Label;
+    push @text, <<END;
+    $jump $end;
+END
+    &$then;
+    SetLabel $end;
+   }
+  else                                                                          # With else
+   {Comment "if then else";
+    my $endIf     = Label;
+    my $startElse = Label;
+    push @text, <<END;
+    $jump $startElse
+END
+    &$then;
+    Jmp $endIf;
+    SetLabel $startElse;
+    &$else;
+    SetLabel  $endIf;
+   }
+ }
+
+sub IfEq(&;&)                                                                   # If equal execute the then body else the else body
+ {my ($then, $else) = @_;                                                       # Then - required , else - optional
+  If(q(Jne), $then, $else);                                                     # Opposite code
+ }
+
+sub IfNe(&;&)                                                                   # If not equal execute the then body else the else body
+ {my ($then, $else) = @_;                                                       # Then - required , else - optional
+  If(q(Je), $then, $else);                                                      # Opposite code
+ }
+
+sub IfNz(&;&)                                                                   # If not zero execute the then body else the else body
+ {my ($then, $else) = @_;                                                       # Then - required , else - optional
+  If(q(Jz), $then, $else);                                                      # Opposite code
+ }
+
+sub IfLt(&;&)                                                                   # If less than execute the then body else the else body
+ {my ($then, $else) = @_;                                                       # Then - required , else - optional
+  If(q(Jge), $then, $else);                                                     # Opposite code
+ }
+
+sub IfLe(&;&)                                                                   # If less than or equal execute the then body else the else body
+ {my ($then, $else) = @_;                                                       # Then - required , else - optional
+  If(q(Jg), $then, $else);                                                      # Opposite code
+ }
+
+sub IfGt(&;&)                                                                   # If greater than execute the then body else the else body
+ {my ($then, $else) = @_;                                                       # Then - required , else - optional
+  If(q(Jle), $then, $else);                                                     # Opposite code
+ }
+
+sub IfGe(&;&)                                                                   # If greater than or equal execute the then body else the else body
+ {my ($then, $else) = @_;                                                       # Then - required , else - optional
+  If(q(Jl), $then, $else);                                                      # Opposite code
+ }
+
+sub For(&$$$)                                                                   # For - iterate the body as long as register is less than limit incrementing by increment each time
+ {my ($body, $register, $limit, $increment) = @_;                               # Body, register, limit on loop, increment on each iteration
+  @_ == 4 or confess;
+  Comment "For $register $limit";
+  my $start = Label;
+  my $end   = Label;
+  SetLabel $start;
+  Cmp $register, $limit;
+  Jge $end;
+
+  &$body;
+
+  if ($increment == 1)
+   {Inc $register;
+   }
+  else
+   {Add $register, $increment;
+   }
+  Jmp $start;
+  SetLabel $end;
+ }
+
+sub ForIn(&$$$$)                                                                # For - iterate the body as long as register plus increment is less than than limit incrementing by increment each time
+ {my ($full, $last, $register, $limit, $increment) = @_;                        # Body for full block, body for last block , register, limit on loop, increment on each iteration
+  @_ == 5 or confess;
+  Comment "For $register $limit";
+  my $start = Label;
+  my $end   = Label;
+
+  SetLabel $start;                                                              # Start of loop
+  PushR $register;                                                              # Save the register so we can test that there is still room
+  Add   $register, $increment;                                                  # Add increment
+  Cmp   $register, $limit;                                                      # Test that we have room for increment
+  PopR  $register;                                                              # Remove increment
+  Jge   $end;
+
+  &$full;
+
+  Add $register, $increment;                                                    # Increment for real
+  Jmp $start;
+  SetLabel $end;
+
+  Sub $limit, $register;                                                        # Size of remainder
+  IfNz                                                                          # Non remainder
+   {&$last;                                                                     # Process remainder
+   }
+ }
+
+sub ForEver(&)                                                                  # Iterate for ever
+ {my ($body) = @_;                                                              # Body to iterate
+  @_ == 1 or confess;
+  Comment "ForEver";
+  my $start = Label;                                                            # Start label
+  my $end   = Label;                                                            # End label
+
+  SetLabel $start;                                                              # Start of loop
+
+  &$body($start, $end);                                                         # End of loop
+
+  Jmp $start;                                                                   # Restart loop
+  SetLabel $end;                                                                # End of loop
+ }
+
+sub S(&%)                                                                       # Create a sub with optional parameters name=> the name of the subroutine so it can be reused rather than regenerated, comment=> a comment describing the sub
+ {my ($body, %options) = @_;                                                    # Body, options.
+  @_ >= 1 or confess;
+  my $name    = $options{name};                                                 # Optional name for subroutine reuse
+  my $comment = $options{comment};                                              # Optional comment
+  Comment "Subroutine " .($comment) if $comment;
+
+  if ($name and my $n = $subroutines{$name}) {return $n}                        # Return the label of a pre-existing copy of the code
+
+  my $start = Label;
+  my $end   = Label;
+  Jmp $end;
+  SetLabel $start;
+  &$body;
+  Ret;
+  SetLabel $end;
+  $subroutines{$name} = $start if $name;                                        # Cache a reference to the generated code if a name was supplied
+
+  $start
+ }
+
+sub cr(&@)                                                                      # Call a subroutine with a reordering of the registers.
+ {my ($body, @registers) = @_;                                                  # Code to execute with reordered registers, registers to reorder
+  ReorderSyscallRegisters   @registers;
+  &$body;
+  UnReorderSyscallRegisters @registers;
+ }
+
+sub cxr(&@)                                                                     # Call a subroutine with a reordering of the xmm registers.
+ {my ($body, @registers) = @_;                                                  # Code to execute with reordered registers, registers to reorder
+  ReorderXmmRegisters   @registers;
+  &$body;
+  UnReorderXmmRegisters @registers;
+ }
+
+sub Comment(@)                                                                  # Insert a comment into the assembly code
+ {my (@comment) = @_;                                                           # Text of comment
+  my $c = join "", @comment;
+  push @text, <<END;
+; $c
+END
+ }
+
+sub DComment(@)                                                                 # Insert a comment into the data segment
+ {my (@comment) = @_;                                                           # Text of comment
+  my $c = join "", @comment;
+  push @data, <<END;
+; $c
+END
+ }
+
+sub RComment(@)                                                                 # Insert a comment into the read only data segment
+ {my (@comment) = @_;                                                           # Text of comment
+  my $c = join "", @comment;
+  push @data, <<END;
+; $c
+END
+ }
+
+#D1 Print                                                                       # Print
+
+sub PrintErrNL()                                                                # Print a new line to stderr
+ {@_ == 0 or confess;
+  my $a = Rb(10);
+  Comment "Write new line to stderr";
+
+  Call S                                                                        # Print new line
+   {SaveFirstFour;
+    Mov rax, 1;
+    Mov rdi, $stderr;
+    Mov rsi, $a;
+    Mov rdx, 1;
+    Syscall;
+    RestoreFirstFour()
+   } name => q(PrintOutNL);
+ }
+
+sub PrintErrString($)                                                           # Print a constant string to stderr.
+ {my ($string) = @_;                                                            # String
+  @_ == 1 or confess;
+
+  SaveFirstFour;
+  Comment "Write to stderr String: $string";
+  my ($c) = @_;
+  my $l = length($c);
+  my $a = Rs($c);
+  Mov rax, 1;
+  Mov rdi, $stderr;
+  Mov rsi, $a;
+  Mov rdx, $l;
+  Syscall;
+  RestoreFirstFour();
+ }
+
+sub PrintErrStringNL($)                                                         # Print a new line to stderr
+ {my ($string) = @_;                                                            # String
+  @_ == 1 or confess;
+  PrintErrString  ($string);
+  PrintErrNL;
+ }
+
+sub PrintOutNL()                                                                # Print a new line to stdout
+ {@_ == 0 or confess;
+  my $a = Rb(10);
+  Comment "Write new line";
+
+  Call S                                                                        # Print new line
+   {SaveFirstFour;
+    Mov rax, 1;
+    Mov rdi, $stdout;
+    Mov rsi, $a;
+    Mov rdx, 1;
+    Syscall;
+    RestoreFirstFour()
+   } name => q(PrintOutNL);
+ }
+
+sub PrintOutString($)                                                           # Print a constant string to sysout.
+ {my ($string) = @_;                                                            # String
+  @_ == 1 or confess;
+
+  SaveFirstFour;
+  Comment "Write String: $string";
+  my ($c) = @_;
+  my $l = length($c);
+  my $a = Rs($c);
+  Mov rax, 1;
+  Mov rdi, $stdout;
+  Mov rsi, $a;
+  Mov rdx, $l;
+  Syscall;
+  RestoreFirstFour();
+ }
+
+sub PrintOutStringNL($)                                                         # Print a constant string to sysout followed by new line
+ {my ($string) = @_;                                                            # String
+  @_ == 1 or confess;
+  PrintOutString  ($string);
+  PrintOutNL;
+ }
+
+sub hexTranslateTable                                                           #P Create/address a hex translate table and return its label
+ {my $h = '0123456789ABCDEF';
+  my @t;
+  for   my $i(split //, $h)
+   {for my $j(split //, $h)
+     {push @t, "$i$j";
+     }
+   }
+   Rs @t                                                                        # Constant strings are only saved if they are unique, else a read only copy is returned.
+ }
+
+sub PrintOutRaxInHex                                                            # Write the content of register rax to stderr in hexadecimal in big endian notation
+ {@_ == 0 or confess;
+  Comment "Print Rax In Hex";
+  my $hexTranslateTable = hexTranslateTable;
+
+  my $sub = S                                                                   # Address conversion routine
+   {SaveFirstFour rax;                                                          # Rax is a parameter
+    Mov rdx, rax;                                                               # Content to be printed
+    Mov rdi, 2;                                                                 # Length of a byte in hex
+    KeepFree rax;
+
+    for my $i(0..7)
+     {my $s = 8*$i;
+      KeepFree rax;
+      Mov rax, rdx;
+      Shl rax, $s;                                                              # Push selected byte high
+      Shr rax, 56;                                                              # Push select byte low
+      Shl rax, 1;                                                               # Multiply by two because each entry in the translation table is two bytes long
+      Lea rax, "[$hexTranslateTable+rax]";
+      PrintOutMemory;
+      PrintOutString ' ' if $i % 2 and $i < 7;
+     }
+    RestoreFirstFour;
+   } name => "PrintOutRaxInHex";
+
+  Call $sub;
+ }
+
+sub PrintOutRaxInReverseInHex                                                   # Write the content of register rax to stderr in hexadecimal in little endian notation
+ {@_ == 0 or confess;
+  Comment "Print Rax In Reverse In Hex";
+  Push rax;
+  Bswap rax;
+  PrintOutRaxInHex;
+  Pop rax;
+ }
+
+sub PrintOutRegisterInHex(@)                                                    # Print any register as a hex string
+ {my (@r) = @_;                                                                 # Name of the register to print
+
+  for my $r(@r)                                                                 # Each register to print
+   {Comment "Print register $r in Hex";
+
+    my $sub = S                                                                 # Reverse rax
+     {PrintOutString sprintf("%6s: ", $r);
+
+      my sub printReg(@)                                                        # Print the contents of a register
+       {my (@regs) = @_;                                                        # Size in bytes, work registers
+        my $s = RegisterSize $r;                                                # Size of the register
+        PushR @regs;                                                            # Save work registers
+        PushRR $r;                                                              # Place register contents on stack - might be a x|y|z - without tracking
+        PopRR  @regs;                                                           # Load work registers without tracking
+        for my $i(keys @regs)                                                   # Print work registers to print input register
+         {my $R = $regs[$i];
+          if ($R !~ m(\Arax))
+           {PrintOutString("  ");
+            Keep $R; KeepFree rax;
+            Mov rax, $R
+           }
+          PrintOutRaxInHex;                                                     # Print work register
+          PrintOutString(" ") unless $i == $#regs;
+         }
+        PopR @regs;                                                             # Balance the single push of what might be a large register
+       };
+      if    ($r =~ m(\A[kr])) {printReg qw(rax)}                                # 64 bit register requested
+      elsif ($r =~ m(\Ax))    {printReg qw(rax rbx)}                            # xmm*
+      elsif ($r =~ m(\Ay))    {printReg qw(rax rbx rcx rdx)}                    # ymm*
+      elsif ($r =~ m(\Az))    {printReg qw(rax rbx rcx rdx r8 r9 r10 r11)}      # zmm*
+
+      PrintOutNL;
+     } name => "PrintOutRegister${r}InHex";                                     # One routine per register printed
+
+    Call $sub;
+   }
+ }
+
+sub PrintOutRipInHex                                                            #P Print the instruction pointer in hex
+ {@_ == 0 or confess;
+  my @regs = qw(rax);
+  my $sub = S
+   {PushR @regs;
+    my $l = Label;
+    push @text, <<END;
+$l:
+END
+    Lea rax, "[$l]";                                                            # Current instruction pointer
+    PrintOutString "rip: ";
+    PrintOutRaxInHex;
+    PrintOutNL;
+    PopR @regs;
+   } name=> "PrintOutRipInHex";
+
+  Call $sub;
+ }
+
+sub PrintOutRflagsInHex                                                         #P Print the flags register in hex
+ {@_ == 0 or confess;
+  my @regs = qw(rax);
+
+  my $sub = S
+   {PushR @regs;
+    Pushfq;
+    Pop rax;
+    PrintOutString "rfl: ";
+    PrintOutRaxInHex;
+    PrintOutNL;
+    PopR @regs;
+   } name=> "PrintOutRflagsInHex";
+
+  Call $sub;
+ }
+
+sub PrintOutRegistersInHex                                                      # Print the general purpose registers in hex
+ {@_ == 0 or confess;
+
+  my $sub = S
+   {PrintOutRipInHex;
+    PrintOutRflagsInHex;
+
+    my @regs = qw(rax);
+    PushR @regs;
+
+    my $w = registers_64();
+    for my $r(sort @$w)
+     {next if $r =~ m(rip|rflags);
+      if ($r eq rax)
+       {Pop rax;
+        Push rax
+       }
+      PrintOutString reverse(pad(reverse($r), 3)).": ";
+      Keep $r unless KeepSet $r ; KeepFree rax;
+      Mov rax, $r;
+      PrintOutRaxInHex;
+      PrintOutNL;
+     }
+    PopR @regs;
+   } name=> "PrintOutRegistersInHex";
+
+  Call $sub;
+ }
+
+sub PrintOutZF                                                                  # Print the zero flag without disturbing it
+ {@_ == 0 or confess;
+
+  Pushfq;
+  IfNz {PrintOutStringNL "ZF=0"} sub {PrintOutStringNL "ZF=1"};
+  Popfq;
+ }
+
 #D1 Variables                                                                   # Variable definitions and operations
 
 #D2 Definitions                                                                 # Variable definitions
@@ -1094,8 +1530,8 @@ sub Variable::min($$)                                                           
   $left->setReg(r14);
   $right->setReg(r15);
   Cmp r14, r15;
-  &IfLt(sub {Mov r12, r14; KeepFree r12},
-        sub {Mov r12, r15; KeepFree r12});
+  IfLt(sub {Mov r12, r14; KeepFree r12},
+       sub {Mov r12, r15; KeepFree r12});
   my $r = Vq("Minimum(".$left->name.", ".$right->name.")", r12);
   PopR @save;
   $r
@@ -1274,6 +1710,35 @@ sub Variable::putQIntoZmm($$)                                                   
   $content->putBwdqIntoZmm('q', $zmm, $offset)                                  # Place the value of the content variable at the byte|word|double word|quad word in the numbered zmm register
  }
 
+sub Variable::confirmIsMemory($;$$)                                             #P Check that variable describes allocated memory and optionally load registers with its length and size
+ {my ($memory, $address, $length) = @_;                                         # Variable describing memory as returned by AllocateMemory, register to contain address, register to contain size
+  $memory->size == 4 or confess "Wrong size";
+  $memory->purpose =~ m(\AAllocated memory\Z) or confess "Not a memory allocator";
+  my $l = $memory->label;
+  my $s = RegisterSize rax;
+  Mov $address, "[$l]" if $address;                                             # Optionally load address
+  Mov $length,  "[$l+$s]" if $length;                                           # Optionally load length
+ }
+
+sub Variable::clearMemory($)                                                    # Clear the memory described in this variable
+ {my ($memory) = @_;                                                            # Variable describing memory as returned by AllocateMemory
+  PushR my @save = (rax, rdi);
+  $memory->confirmIsMemory(@save);
+  &ClearMemory();                                                               # Clear the memory
+  PopR @save;
+ }
+
+sub Variable::copyMemoryFrom($$)                                                # Copy from one block of memory to another
+ {my ($target, $source) = @_;                                                   # Variable describing the target, variable describing the source
+  SaveFirstFour;
+  $target->confirmIsMemory(rax, rdx);
+  $source->confirmIsMemory(rsi, rdi);
+  Cmp rdx, rdi;
+  IfLt {PrintErrStringNL "Copy memory source is larger than target"; Exit(1)};  # Check memory sizes
+  &CopyMemory();                                                                # Copy the memory
+  RestoreFirstFour;
+ }
+
 sub Variable::freeMemory($)                                                     # Free the memory described in this variable
  {my ($memory) = @_;                                                            # Variable describing memory as returned by AllocateMemory
   $memory->size == 4 or confess "Wrong size";
@@ -1305,404 +1770,6 @@ sub Variable::for($&)                                                           
   $index++;                                                                     # Increment
   Jmp $start;
   SetLabel $end;
- }
-
-#D1 Structured Programming                                                      # Structured programming constructs
-
-sub If($$;$)                                                                    # If
- {my ($jump, $then, $else) = @_;                                                # Jump op code of variable, then - required , else - optional
-  @_ >= 2 && @_ <= 3 or confess;
-
-  if (ref($jump))                                                               # Variable reference - non zero then then else else
-   {PushR r15;
-    Mov r15, $jump->address;
-    Cmp r15,0;
-    PopR r15;
-    __SUB__->(q(Jz), $then, $else);
-   }
-  elsif (!$else)                                                                # No else
-   {Comment "if then";
-    my $end = Label;
-    push @text, <<END;
-    $jump $end;
-END
-    &$then;
-    SetLabel $end;
-   }
-  else                                                                          # With else
-   {Comment "if then else";
-    my $endIf     = Label;
-    my $startElse = Label;
-    push @text, <<END;
-    $jump $startElse
-END
-    &$then;
-    Jmp $endIf;
-    SetLabel $startElse;
-    &$else;
-    SetLabel  $endIf;
-   }
- }
-
-sub IfEq(&;&)                                                                   # If equal execute the then body else the else body
- {my ($then, $else) = @_;                                                       # Then - required , else - optional
-  If(q(Jne), $then, $else);                                                     # Opposite code
- }
-
-sub IfNe(&;&)                                                                   # If not equal execute the then body else the else body
- {my ($then, $else) = @_;                                                       # Then - required , else - optional
-  If(q(Je), $then, $else);                                                      # Opposite code
- }
-
-sub IfNz(&;&)                                                                   # If not zero execute the then body else the else body
- {my ($then, $else) = @_;                                                       # Then - required , else - optional
-  If(q(Jz), $then, $else);                                                      # Opposite code
- }
-
-sub IfLt(&;&)                                                                   # If less than execute the then body else the else body
- {my ($then, $else) = @_;                                                       # Then - required , else - optional
-  If(q(Jge), $then, $else);                                                     # Opposite code
- }
-
-sub IfLe(&;&)                                                                   # If less than or equal execute the then body else the else body
- {my ($then, $else) = @_;                                                       # Then - required , else - optional
-  If(q(Jg), $then, $else);                                                      # Opposite code
- }
-
-sub IfGt(&;&)                                                                   # If greater than execute the then body else the else body
- {my ($then, $else) = @_;                                                       # Then - required , else - optional
-  If(q(Jle), $then, $else);                                                     # Opposite code
- }
-
-sub IfGe(&;&)                                                                   # If greater than or equal execute the then body else the else body
- {my ($then, $else) = @_;                                                       # Then - required , else - optional
-  If(q(Jl), $then, $else);                                                      # Opposite code
- }
-
-sub For(&$$$)                                                                   # For - iterate the body as long as register is less than limit incrementing by increment each time
- {my ($body, $register, $limit, $increment) = @_;                               # Body, register, limit on loop, increment on each iteration
-  @_ == 4 or confess;
-  Comment "For $register $limit";
-  my $start = Label;
-  my $end   = Label;
-  SetLabel $start;
-  Cmp $register, $limit;
-  Jge $end;
-
-  &$body;
-
-  if ($increment == 1)
-   {Inc $register;
-   }
-  else
-   {Add $register, $increment;
-   }
-  Jmp $start;
-  SetLabel $end;
- }
-
-sub ForIn(&$$$$)                                                                # For - iterate the body as long as register plus increment is less than than limit incrementing by increment each time
- {my ($full, $last, $register, $limit, $increment) = @_;                        # Body for full block, body for last block , register, limit on loop, increment on each iteration
-  @_ == 5 or confess;
-  Comment "For $register $limit";
-  my $start = Label;
-  my $end   = Label;
-
-  SetLabel $start;                                                              # Start of loop
-  PushR $register;                                                              # Save the register so we can test that there is still room
-  Add   $register, $increment;                                                  # Add increment
-  Cmp   $register, $limit;                                                      # Test that we have room for increment
-  PopR  $register;                                                              # Remove increment
-  Jge   $end;
-
-  &$full;
-
-  Add $register, $increment;                                                    # Increment for real
-  Jmp $start;
-  SetLabel $end;
-
-  Sub $limit, $register;                                                        # Size of remainder
-  IfNz                                                                          # Non remainder
-   {&$last;                                                                     # Process remainder
-   }
- }
-
-sub ForEver(&)                                                                  # Iterate for ever
- {my ($body) = @_;                                                              # Body to iterate
-  @_ == 1 or confess;
-  Comment "ForEver";
-  my $start = Label;                                                            # Start label
-  my $end   = Label;                                                            # End label
-
-  SetLabel $start;                                                              # Start of loop
-
-  &$body($start, $end);                                                         # End of loop
-
-  Jmp $start;                                                                   # Restart loop
-  SetLabel $end;                                                                # End of loop
- }
-
-sub S(&%)                                                                       # Create a sub with optional parameters name=> the name of the subroutine so it can be reused rather than regenerated, comment=> a comment describing the sub
- {my ($body, %options) = @_;                                                    # Body, options.
-  @_ >= 1 or confess;
-  my $name    = $options{name};                                                 # Optional name for subroutine reuse
-  my $comment = $options{comment};                                              # Optional comment
-  Comment "Subroutine " .($comment) if $comment;
-
-  if ($name and my $n = $subroutines{$name}) {return $n}                        # Return the label of a pre-existing copy of the code
-
-  my $start = Label;
-  my $end   = Label;
-  Jmp $end;
-  SetLabel $start;
-  &$body;
-  Ret;
-  SetLabel $end;
-  $subroutines{$name} = $start if $name;                                        # Cache a reference to the generated code if a name was supplied
-
-  $start
- }
-
-sub cr(&@)                                                                      # Call a subroutine with a reordering of the registers.
- {my ($body, @registers) = @_;                                                  # Code to execute with reordered registers, registers to reorder
-  ReorderSyscallRegisters   @registers;
-  &$body;
-  UnReorderSyscallRegisters @registers;
- }
-
-sub cxr(&@)                                                                     # Call a subroutine with a reordering of the xmm registers.
- {my ($body, @registers) = @_;                                                  # Code to execute with reordered registers, registers to reorder
-  ReorderXmmRegisters   @registers;
-  &$body;
-  UnReorderXmmRegisters @registers;
- }
-
-sub Comment(@)                                                                  # Insert a comment into the assembly code
- {my (@comment) = @_;                                                           # Text of comment
-  my $c = join "", @comment;
-  push @text, <<END;
-; $c
-END
- }
-
-sub DComment(@)                                                                 # Insert a comment into the data segment
- {my (@comment) = @_;                                                           # Text of comment
-  my $c = join "", @comment;
-  push @data, <<END;
-; $c
-END
- }
-
-sub RComment(@)                                                                 # Insert a comment into the read only data segment
- {my (@comment) = @_;                                                           # Text of comment
-  my $c = join "", @comment;
-  push @data, <<END;
-; $c
-END
- }
-
-#D1 Print                                                                       # Print
-
-sub PrintOutNL()                                                                # Print a new line to stdout
- {@_ == 0 or confess;
-  my $a = Rb(10);
-  Comment "Write new line";
-
-  my $s = S                                                                     # Print new line
-   {SaveFirstFour;
-    Mov rax, 1;
-    Mov rdi, 1;
-    Mov rsi, $a;
-    Mov rdx, 1;
-    Syscall;
-    RestoreFirstFour()
-   } name => q(PrintOutNL);
-
-  Call $s;
- }
-
-sub PrintOutString($)                                                           # Print a constant string to sysout.
- {my ($string) = @_;                                                            # String
-  @_ == 1 or confess;
-
-  SaveFirstFour;
-  Comment "Write String: $string";
-  my ($c) = @_;
-  my $l = length($c);
-  my $a = Rs($c);
-  Mov rax, 1;
-  Mov rdi, $sysout;
-  Mov rsi, $a;
-  Mov rdx, $l;
-  Syscall;
-  RestoreFirstFour();
- }
-
-sub PrintOutStringNL($)                                                         # Print a constant string to sysout followed by new line
- {my ($string) = @_;                                                            # String
-  @_ == 1 or confess;
-  PrintOutString  ($string);
-  PrintOutNL;
- }
-
-sub hexTranslateTable                                                           #P Create/address a hex translate table and return its label
- {my $h = '0123456789ABCDEF';
-  my @t;
-  for   my $i(split //, $h)
-   {for my $j(split //, $h)
-     {push @t, "$i$j";
-     }
-   }
-   Rs @t                                                                        # Constant strings are only saved if they are unique, else a read only copy is returned.
- }
-
-sub PrintOutRaxInHex                                                            # Write the content of register rax to stderr in hexadecimal in big endian notation
- {@_ == 0 or confess;
-  Comment "Print Rax In Hex";
-  my $hexTranslateTable = hexTranslateTable;
-
-  my $sub = S                                                                   # Address conversion routine
-   {SaveFirstFour rax;                                                          # Rax is a parameter
-    Mov rdx, rax;                                                               # Content to be printed
-    Mov rdi, 2;                                                                 # Length of a byte in hex
-    KeepFree rax;
-
-    for my $i(0..7)
-     {my $s = 8*$i;
-      KeepFree rax;
-      Mov rax, rdx;
-      Shl rax, $s;                                                              # Push selected byte high
-      Shr rax, 56;                                                              # Push select byte low
-      Shl rax, 1;                                                               # Multiply by two because each entry in the translation table is two bytes long
-      Lea rax, "[$hexTranslateTable+rax]";
-      PrintOutMemory;
-      PrintOutString ' ' if $i % 2 and $i < 7;
-     }
-    RestoreFirstFour;
-   } name => "PrintOutRaxInHex";
-
-  Call $sub;
- }
-
-sub PrintOutRaxInReverseInHex                                                   # Write the content of register rax to stderr in hexadecimal in little endian notation
- {@_ == 0 or confess;
-  Comment "Print Rax In Reverse In Hex";
-  Push rax;
-  Bswap rax;
-  PrintOutRaxInHex;
-  Pop rax;
- }
-
-sub PrintOutRegisterInHex(@)                                                    # Print any register as a hex string
- {my (@r) = @_;                                                                 # Name of the register to print
-
-  for my $r(@r)                                                                 # Each register to print
-   {Comment "Print register $r in Hex";
-
-    my $sub = S                                                                 # Reverse rax
-     {PrintOutString sprintf("%6s: ", $r);
-
-      my sub printReg(@)                                                        # Print the contents of a register
-       {my (@regs) = @_;                                                        # Size in bytes, work registers
-        my $s = RegisterSize $r;                                                # Size of the register
-        PushR @regs;                                                            # Save work registers
-        PushRR $r;                                                              # Place register contents on stack - might be a x|y|z - without tracking
-        PopRR  @regs;                                                           # Load work registers without tracking
-        for my $i(keys @regs)                                                   # Print work registers to print input register
-         {my $R = $regs[$i];
-          if ($R !~ m(\Arax))
-           {PrintOutString("  ");
-            Keep $R; KeepFree rax;
-            Mov rax, $R
-           }
-          PrintOutRaxInHex;                                                     # Print work register
-          PrintOutString(" ") unless $i == $#regs;
-         }
-        PopR @regs;                                                             # Balance the single push of what might be a large register
-       };
-      if    ($r =~ m(\A[kr])) {printReg qw(rax)}                                # 64 bit register requested
-      elsif ($r =~ m(\Ax))    {printReg qw(rax rbx)}                            # xmm*
-      elsif ($r =~ m(\Ay))    {printReg qw(rax rbx rcx rdx)}                    # ymm*
-      elsif ($r =~ m(\Az))    {printReg qw(rax rbx rcx rdx r8 r9 r10 r11)}      # zmm*
-
-      PrintOutNL;
-     } name => "PrintOutRegister${r}InHex";                                     # One routine per register printed
-
-    Call $sub;
-   }
- }
-
-sub PrintOutRipInHex                                                            #P Print the instruction pointer in hex
- {@_ == 0 or confess;
-  my @regs = qw(rax);
-  my $sub = S
-   {PushR @regs;
-    my $l = Label;
-    push @text, <<END;
-$l:
-END
-    Lea rax, "[$l]";                                                            # Current instruction pointer
-    PrintOutString "rip: ";
-    PrintOutRaxInHex;
-    PrintOutNL;
-    PopR @regs;
-   } name=> "PrintOutRipInHex";
-
-  Call $sub;
- }
-
-sub PrintOutRflagsInHex                                                         #P Print the flags register in hex
- {@_ == 0 or confess;
-  my @regs = qw(rax);
-
-  my $sub = S
-   {PushR @regs;
-    Pushfq;
-    Pop rax;
-    PrintOutString "rfl: ";
-    PrintOutRaxInHex;
-    PrintOutNL;
-    PopR @regs;
-   } name=> "PrintOutRflagsInHex";
-
-  Call $sub;
- }
-
-sub PrintOutRegistersInHex                                                      # Print the general purpose registers in hex
- {@_ == 0 or confess;
-
-  my $sub = S
-   {PrintOutRipInHex;
-    PrintOutRflagsInHex;
-
-    my @regs = qw(rax);
-    PushR @regs;
-
-    my $w = registers_64();
-    for my $r(sort @$w)
-     {next if $r =~ m(rip|rflags);
-      if ($r eq rax)
-       {Pop rax;
-        Push rax
-       }
-      PrintOutString reverse(pad(reverse($r), 3)).": ";
-      Keep $r unless KeepSet $r ; KeepFree rax;
-      Mov rax, $r;
-      PrintOutRaxInHex;
-      PrintOutNL;
-     }
-    PopR @regs;
-   } name=> "PrintOutRegistersInHex";
-
-  Call $sub;
- }
-
-sub PrintOutZF                                                                  # Print the zero flag without disturbing it
- {@_ == 0 or confess;
-
-  Pushfq;
-  IfNz {PrintOutStringNL "ZF=0"} sub {PrintOutStringNL "ZF=1"};
-  Popfq;
  }
 
 #D1 Processes                                                                   # Create and manage processes
@@ -2018,7 +2085,7 @@ sub PrintOutMemory                                                              
     Mov rdx, rdi;
     KeepFree rax, rdi;
     Mov rax, 1;
-    Mov rdi, $sysout;
+    Mov rdi, $stdout;
     Syscall;
     RestoreFirstFour();
    } name => "PrintOutMemory";
