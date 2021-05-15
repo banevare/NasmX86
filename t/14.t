@@ -1,4 +1,5 @@
-#Testing of call frames and local variable assignment
+#Author: Tino <gordon.zar@gmail.com>
+#Description: Testing of call frames and local variable assignment
 use strict;
 use warnings;
 use Test::Most tests => 2;
