@@ -42,7 +42,6 @@ Exit 0; #generates duplicate code because the exit is automaticly generated
 Assemble keep => 't14_tmp';
 my $t14_out = qx(./t14_tmp);
 isnt $?, 11, 'Segfault test';
-print $? . "\n";
 is_deeply $t14_out,<<END;
    rax: 0000 0000 0000 000F
    rdx: 0000 0000 0000 000E
