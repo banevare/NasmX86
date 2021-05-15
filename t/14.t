@@ -1,54 +1,28 @@
-#Author: Tino <gordon.zar@gmail.com>
-#Description: Testing of call frames and local variable assignment
-use strict;
-use warnings;
-use Test::Most tests => 2;
+#!/usr/bin/perl -I/home/phil/perl/cpan/NasmX86/lib
+# Tino 2021/05/15
+#Testing of call frames and local variable assignment
+use Test::Most tests => 1;
 use Nasm::X86 qw(:all);
 
-sub add_5{
-	my $vars = LocalData;
-	my $v = $vars->variable(8,'local_5');
-	$vars->start;
-	Mov $v->stack, 5;
-	Add rdi, $v->stack;
-	Mov rax,rdi;
-	$vars->free;
-}
+my $vars = LocalData;
+my $a = $vars->variable(8, 'a');
+my $b = $vars->variable(8, 'b');
 
-sub add_2_locals{
-	my $vars = LocalData;
-	my $a = $vars->variable(8,'a');
-	my $b = $vars->variable(8,'b');
-	$vars->start;
-	KeepFree(rax);
-	Mov $a->stack, 10;
-	Mov $b->stack, 4; #FIXME: call stack gets overwritten here
-	Mov rbx, $a->stack;
-	Mov r9, $b->stack;
-	Add rbx, r9;
-	Mov rax, rbx;
-	$vars->free;
-}
+$vars->start;
 
-my $locrut = S{add_2_locals;};
-KeepFree(rbp, rsp, rax);
-my $routine = S{add_5;};
-Mov rdi,10;
-Call $routine;
-PrintOutRegisterInHex rax;
-Call $locrut;
-Mov rdx, rax;
-PrintOutRegisterInHex rdx;
-Exit 0; #generates duplicate code because the exit is automaticly generated
-Assemble keep => 't14_tmp';
-my $t14_out = qx(./t14_tmp);
-isnt $?, 11, 'Segfault test';
-print $? . "\n";
-is_deeply $t14_out,<<END;
-   rax: 0000 0000 0000 000F
-   rdx: 0000 0000 0000 000E
+Mov $a->stack, 10;
+Mov $b->stack,  4;
+Mov rbx, $a->stack;
+
+Mov  r9, $b->stack;
+Add rbx, r9;
+
+PrintOutRegisterInHex r9;
+PrintOutRegisterInHex rbx;
+
+$vars->free;
+
+is_deeply Assemble, <<END;
+    r9: 0000 0000 0000 0004
+   rbx: 0000 0000 0000 000E
 END
-unlink 't14_tmp';
-
-
-done_testing;
