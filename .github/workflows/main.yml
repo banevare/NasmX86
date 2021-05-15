@@ -1,4 +1,4 @@
-# Test NasmX86 2021-05-15 at 01:30:47
+# Test NasmX86 2021-05-15 at 01:33:11
 
 name: Test
 
@@ -11,6 +11,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v2
+      with:
+        ref: 'main'
 
     - name: Install Data::Table::Text
       run: |
