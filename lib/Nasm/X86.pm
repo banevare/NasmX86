@@ -1912,7 +1912,7 @@ sub LocalVariable::stack($)                                                     
   my $l = $variable->loc;                                                       # Location of variable on stack
   my $S = $variable->size;
   my $s = $S == 8 ? 'qword' : $S == 4 ? 'dword' : $S == 2 ? 'word' : 'byte';    # Variable size
-  "${s}[$l+rbp]"                                                                # Address variable
+  "${s}[rbp-$l]"                                                                # Address variable
  }
 
 sub LocalData::allocate8($@)                                                    # Add some 8 byte local variables and return an array of variable definitions
