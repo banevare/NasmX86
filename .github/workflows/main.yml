@@ -1,4 +1,4 @@
-# Test NasmX86 2021-05-15 at 02:42:18
+# Test NasmX86 2021-05-15 at 02:42:36
 
 name: Test
 
@@ -52,10 +52,6 @@ jobs:
     - name: Test
       run: |
         perl lib/Nasm/X86.pm
-
-    - name: Prove
-      run: |
-        #prove -Ilib
 
     - name: Prove t/1.t
       if: always()
@@ -127,3 +123,7 @@ jobs:
       run: |
         prove -Ilib t/9.t
 
+
+    - name: Prove
+      run: |
+        #prove -Ilib
