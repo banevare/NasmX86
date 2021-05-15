@@ -1,5 +1,5 @@
 #!/usr/bin/perl -I/home/phil/perl/cpan/NasmX86/lib
-#Tine 2021/05/14
+#Tin0 2021/05/14
 use Test::Most tests => 1;
 use Nasm::X86 qw(:all);
 
