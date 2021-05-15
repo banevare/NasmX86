@@ -247,6 +247,8 @@ END
 
 sub ClearRegisters(@);                                                          # Clear registers by setting them to zero
 sub Comment(@);                                                                 # Insert a comment into the assembly code
+sub DComment(@);                                                                # Insert a comment into the data section
+sub RComment(@);                                                                # Insert a comment into the read only data section
 sub KeepFree(@);                                                                # Free registers so that they can be reused
 sub Keep(@);                                                                    # Mark free registers so that they are not updated until we Free them or complain if the register is already in use.
 sub KeepPop(@);                                                                 # Reset the status of the specified registers to the status quo ante the last push
@@ -727,13 +729,14 @@ sub Variable($$;$)                                                              
  {my ($size, $name, $expr) = @_;                                                # Size as a power of 2, name of variable, optional expression initializing variable
   $size =~ m(\A0|1|2|3|4|5|6|b|w|d|q|x|y|z\Z)i or confess "Size must be 0..6 or b|w|d|q|x|y|z";  # Check size of variable
 
+  DComment qq(Variable name: "$name", size: $size);
   my $label = $size =~ m(\A0|b\Z) ? Db(0) :                                     # Allocate space for variable
               $size =~ m(\A1|w\Z) ? Dw(0) :                                     # Allocate space for variable
               $size =~ m(\A2|d\Z) ? Dd(0) :
               $size =~ m(\A3|q\Z) ? Dq(0) :
-              $size =~ m(\A4|x\Z) ? Dx(0,0) :
-              $size =~ m(\A5|y\Z) ? Dy(0,0,0,0) :
-              $size =~ m(\A6|z\Z) ? Dz(0,0,0,0,0,0,0,0) : undef;
+              $size =~ m(\A4|x\Z) ? Dq(0,0) :
+              $size =~ m(\A5|y\Z) ? Dq(0,0,0,0) :
+              $size =~ m(\A6|z\Z) ? Dq(0,0,0,0,0,0,0,0) : undef;
 
   my $nSize = $size =~ tr(bwdqxyz) (0123456)r;                                  # Size of variable
 
@@ -749,16 +752,17 @@ sub Variable($$;$)                                                              
       Mov $t, r15w        if $nSize == 1;
       Mov $t, r15d        if $nSize == 2;
       Mov $t, r15         if $nSize == 3;
-      Pinsrq $t, r15, 0   if $nSize >  3;
+#     Pinsrq $t, r15, 0   if $nSize >  3;
       PopR r15;
      }
    }
 
   genHash("Variable",                                                           # Variable definition
-    size  => $nSize,                                                            # Size of variable
-    name  => $name,                                                             # Name of the variable
-    expr  => $expr,                                                             # Expression that initializes the variable
-    label => $label,                                                            # Address in memory
+    size    => $nSize,                                                          # Size of variable
+    name    => $name,                                                           # Name of the variable
+    expr    => $expr,                                                           # Expression that initializes the variable
+    label   => $label,                                                          # Address in memory
+    purpose => undef,                                                           # Purpose of this variable
    );
  }
 
@@ -785,6 +789,16 @@ sub Vq(*;$)                                                                     
 sub Vx(*;$)                                                                     # Define an xmm variable
  {my ($name, $expr) = @_;                                                       # Name of variable, initializing expression
   &Variable(4, @_)
+ }
+
+sub Vxq(*$$)                                                                    # Define an xmm variable
+ {my ($name, $i1, $i2) = @_;                                                    # Name of variable, initializing expression as two quad words
+  my $x = Variable(4, $name);
+  my $l = $x->label;
+  my $s = RegisterSize(rax);
+  Mov "[$l]",    $i1;
+  Mov "[$l+$s]", $i2;
+  $x
  }
 
 sub Vy(*;$)                                                                     # Define a ymm variable
@@ -1260,7 +1274,20 @@ sub Variable::putQIntoZmm($$)                                                   
   $content->putBwdqIntoZmm('q', $zmm, $offset)                                  # Place the value of the content variable at the byte|word|double word|quad word in the numbered zmm register
  }
 
-sub Variable::for(&$)                                                           # Iterate the body from 0 limit times.
+sub Variable::freeMemory($)                                                     # Free the memory described in this variable
+ {my ($memory) = @_;                                                            # Variable describing memory as returned by AllocateMemory
+  $memory->size == 4 or confess "Wrong size";
+  $memory->purpose =~ m(\AAllocated memory\Z) or confess "Not a memory allocator";
+  PushR my @save = (rax, rdi);
+  my $l = $memory->label;
+  my $s = RegisterSize rax;
+  Mov rax, "[$l]";
+  Mov rdi, "[$l+$s]";
+  &FreeMemory();                                                                # Free the memory
+  PopR @save;
+ }
+
+sub Variable::for($&)                                                           # Iterate the body from 0 limit times.
  {my ($limit, $body) = @_;                                                      # Limit, Body
   @_ == 2 or confess;
   Comment "Variable::For $limit";
@@ -1454,6 +1481,22 @@ sub Comment(@)                                                                  
  {my (@comment) = @_;                                                           # Text of comment
   my $c = join "", @comment;
   push @text, <<END;
+; $c
+END
+ }
+
+sub DComment(@)                                                                 # Insert a comment into the data segment
+ {my (@comment) = @_;                                                           # Text of comment
+  my $c = join "", @comment;
+  push @data, <<END;
+; $c
+END
+ }
+
+sub RComment(@)                                                                 # Insert a comment into the read only data segment
+ {my (@comment) = @_;                                                           # Text of comment
+  my $c = join "", @comment;
+  push @data, <<END;
 ; $c
 END
  }
@@ -1912,7 +1955,7 @@ sub LocalVariable::stack($)                                                     
   my $l = $variable->loc;                                                       # Location of variable on stack
   my $S = $variable->size;
   my $s = $S == 8 ? 'qword' : $S == 4 ? 'dword' : $S == 2 ? 'word' : 'byte';    # Variable size
-  "${s}[rbp-$l]"                                                                # Address variable
+  "${s}[rbp-$l]"                                                                # Address variable - offsets are negative per Tino
  }
 
 sub LocalData::allocate8($@)                                                    # Add some 8 byte local variables and return an array of variable definitions
@@ -1994,7 +2037,7 @@ sub AllocateMemory                                                              
  {@_ == 0 or confess;
   Comment "Allocate memory";
 
-  my $sub = S
+  Call S
    {SaveFirstSeven;
     my $d = extractMacroDefinitionsFromCHeaderFile "linux/mman.h";              # mmap constants
     my $pa = $$d{MAP_PRIVATE} | $$d{MAP_ANONYMOUS};
@@ -2011,14 +2054,16 @@ sub AllocateMemory                                                              
     RestoreFirstSevenExceptRax;
    } name=> "AllocateMemory";
 
-  Call $sub;
+  my $a = Vxq("Allocated memory", rax, rdi);                                    # Allocate a variable to address the allocated memory and store its length
+  $a->purpose = "Allocated memory";
+  $a                                                                            # Return allocated memory details
  }
 
 sub FreeMemory                                                                  # Free memory via munmap. The address of the memory is in rax, the length to free is in rdi
  {@_ == 0 or confess;
   Comment "Free memory";
 
-  my $sub = S
+  Call S
    {SaveFirstFour;
     Mov rsi, rdi;
     Mov rdi, rax;
@@ -2026,8 +2071,6 @@ sub FreeMemory                                                                  
     Syscall;
     RestoreFirstFourExceptRax;
    } name=> "FreeMemory";
-
-  Call $sub;
  }
 
 sub ClearMemory()                                                               # Clear memory - the address of the memory is in rax, the length in rdi
@@ -2377,9 +2420,9 @@ sub CreateByteString(%)                                                         
   SaveFirstFour;
 
   Mov rax, $N;                                                                  # Amount of space to allocate
-  AllocateMemory;                                                               # Allocate memory
-  ClearRegisters rdi;                                                           # Clear register rdi
+  my $address = AllocateMemory;                                                 # Allocate memory and save its location in a variable
 
+  ClearRegisters rdi;                                                           # Clear register rdi
   Add rdi, RegisterSize rax if $options{free};                                  # Space for free chain
   Mov $used->addr, rdi;              KeepFree rdi;                              # Used space
   Mov rdi, $N; Mov $size->addr, rdi; KeepFree rdi;                              # Size
@@ -2392,6 +2435,7 @@ sub CreateByteString(%)                                                         
     used      => $used,                                                         # Used field details
     data      => $data,                                                         # The first 8 bytes of the data
     free      => $free,                                                         # True if the byte string has a free chain allocated in it
+    address   => $address,                                                      # Address and length of memory
    );
  }
 
@@ -2400,7 +2444,7 @@ sub ByteString::updateSpace($)                                                  
   my $size = $byteString->size->addr;
   my $used = $byteString->used->addr;
 
-  my $sub = S                                                                   # Read file
+  Call S                                                                        # Allocate more space if required
    {Comment "Allocate more space for a byte string";
     SaveFirstFour;
     Mov rdx, $used;                                                             # Used
@@ -2433,8 +2477,6 @@ sub ByteString::updateSpace($)                                                  
 
     RestoreFirstFourExceptRax;                                                  # Return new byte string
    } name=> "ByteString::updateSpace";
-
-  Call $sub;
  }
 
 sub ByteString::makeReadOnly($)                                                 # Make a byte string read only
@@ -8921,11 +8963,12 @@ if (1) {
   ok Assemble =~ m(zmm0: 504F 4E4D 4C4B 4A49   4847 4645 4443 4241   706F 6E6D 6C6B 6A69   6867 6665 6463 6261   504F 4E4D 4C4B 4A49   4847 4645 4443 4241   706F 6E6D 6C6B 6A69   6867 6665 6463 6261)s;
  }
 
-if (1) {                                                                        #TAllocateMemory #TFreeMemory
+
+if (1) {                                                                        #TAllocateMemory #TVariable::freeMemory
   my $N = 2048;
   my $q = Rs('a'..'p');
   Mov rax, $N; KeepFree rax;
-  AllocateMemory;
+  my $a = AllocateMemory;
   PrintOutRegisterInHex rax;
 
   Vmovdqu8 xmm0, "[$q]";
@@ -8933,10 +8976,8 @@ if (1) {                                                                        
   Mov rdi,16;
   PrintOutMemory;
   PrintOutNL;
-  KeepFree rdi;
 
-  Mov rdi, $N;
-  FreeMemory;
+  $a->freeMemory;
   PrintOutRegisterInHex rax;
 
   ok Assemble =~ m(abcdefghijklmnop)s;
@@ -9125,6 +9166,10 @@ if (1) {                                                                        
   ClearMemory;
   PrintOutRegisterInHex rax;
   PrintOutMemoryInHex;
+
+  KeepFree rdi;
+  Mov rdi, $N;
+  FreeMemory;
 
   my $r = Assemble;
   if ($r =~ m((0000.*0000))s)
@@ -10052,8 +10097,6 @@ Length: 0000 0000 0000 000C
 END
  }
 
-#latest:;
-
 if (1) {
   my $s = Rb(0..128);
   my $B = CreateByteString;
@@ -10088,7 +10131,7 @@ Length: 0000 0000 0000 0035
 END
  }
 
-
+unlink $_ for qw(hash print2 sde-log.txt sde-ptr-check.out.txt z.asm z.txt);    # Remove incidental files
 unlink $_ for grep {/\A\.\/atmpa/} findFiles('.');                              # Remove temporary files
 
 lll "Finished:", time - $start,  "bytes assembled:",   totalBytesAssembled;
