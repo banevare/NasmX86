@@ -1,4 +1,4 @@
-# Test NasmX86 2021-05-15 at 01:25:06
+# Test NasmX86 2021-05-15 at 01:27:32
 
 name: Test
 
@@ -57,57 +57,71 @@ jobs:
 
     - name: Prove /home/phil/perl/cpan/NasmX86/t/1.t
       run: |
+        cat /home/phil/perl/cpan/NasmX86/t/1.t
         prove -Ilib /home/phil/perl/cpan/NasmX86/t/1.t
 
     - name: Prove /home/phil/perl/cpan/NasmX86/t/10.t
       run: |
+        cat /home/phil/perl/cpan/NasmX86/t/10.t
         prove -Ilib /home/phil/perl/cpan/NasmX86/t/10.t
 
     - name: Prove /home/phil/perl/cpan/NasmX86/t/11.t
       run: |
+        cat /home/phil/perl/cpan/NasmX86/t/11.t
         prove -Ilib /home/phil/perl/cpan/NasmX86/t/11.t
 
     - name: Prove /home/phil/perl/cpan/NasmX86/t/12.t
       run: |
+        cat /home/phil/perl/cpan/NasmX86/t/12.t
         prove -Ilib /home/phil/perl/cpan/NasmX86/t/12.t
 
     - name: Prove /home/phil/perl/cpan/NasmX86/t/13.t
       run: |
+        cat /home/phil/perl/cpan/NasmX86/t/13.t
         prove -Ilib /home/phil/perl/cpan/NasmX86/t/13.t
 
     - name: Prove /home/phil/perl/cpan/NasmX86/t/2.t
       run: |
+        cat /home/phil/perl/cpan/NasmX86/t/2.t
         prove -Ilib /home/phil/perl/cpan/NasmX86/t/2.t
 
     - name: Prove /home/phil/perl/cpan/NasmX86/t/3.t
       run: |
+        cat /home/phil/perl/cpan/NasmX86/t/3.t
         prove -Ilib /home/phil/perl/cpan/NasmX86/t/3.t
 
     - name: Prove /home/phil/perl/cpan/NasmX86/t/4.t
       run: |
+        cat /home/phil/perl/cpan/NasmX86/t/4.t
         prove -Ilib /home/phil/perl/cpan/NasmX86/t/4.t
 
     - name: Prove /home/phil/perl/cpan/NasmX86/t/5.t
       run: |
+        cat /home/phil/perl/cpan/NasmX86/t/5.t
         prove -Ilib /home/phil/perl/cpan/NasmX86/t/5.t
 
     - name: Prove /home/phil/perl/cpan/NasmX86/t/6.t
       run: |
+        cat /home/phil/perl/cpan/NasmX86/t/6.t
         prove -Ilib /home/phil/perl/cpan/NasmX86/t/6.t
 
     - name: Prove /home/phil/perl/cpan/NasmX86/t/7.t
       run: |
+        cat /home/phil/perl/cpan/NasmX86/t/7.t
         prove -Ilib /home/phil/perl/cpan/NasmX86/t/7.t
 
     - name: Prove /home/phil/perl/cpan/NasmX86/t/8.t
       run: |
+        cat /home/phil/perl/cpan/NasmX86/t/8.t
         prove -Ilib /home/phil/perl/cpan/NasmX86/t/8.t
 
     - name: Prove /home/phil/perl/cpan/NasmX86/t/9.t
       run: |
+        cat /home/phil/perl/cpan/NasmX86/t/9.t
         prove -Ilib /home/phil/perl/cpan/NasmX86/t/9.t
 
     - name: Prove /home/phil/perl/cpan/NasmX86/t/z.txt
       run: |
+        cat /home/phil/perl/cpan/NasmX86/t/z.txt
         prove -Ilib /home/phil/perl/cpan/NasmX86/t/z.txt
 
