@@ -1,3 +1,4 @@
+#!/usr/bin/perl -I/home/phil/perl/cpan/NasmX86/lib
 #-------------------------------------------------------------------------------
 # Test Nasm X86
 # Philip R Brenan at appaapps dot com, Appa Apps Ltd Inc., 2021
