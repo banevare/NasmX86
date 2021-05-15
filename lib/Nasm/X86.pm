@@ -1,15 +1,10 @@
 #!/usr/bin/perl -I/home/phil/perl/cpan/DataTableText/lib/ -I. -I/home/phil/perl/cpan/AsmC/lib/
 #-------------------------------------------------------------------------------
-# Generate Nasm X86 code from Perl.
+# Generate Nasm X86 code from Perl.  v1
 # Philip R Brenan at appaapps dot com, Appa Apps Ltd Inc., 2021
 #-------------------------------------------------------------------------------
-# podDocumentation
-# AllocateAll8OnStack - replace with variables
-# Labels should be settable via $label->set
-# Register expressions via op overloading - register size and ability to add offsets, peek, pop, push clear register
-# Indent opcodes by call depth, - replace push @text with a method call
 package Nasm::X86;
-our $VERSION = "20210510";
+our $VERSION = "20210514";
 use warnings FATAL => qw(all);
 use strict;
 use Carp qw(confess cluck);
@@ -17,6 +12,12 @@ use Data::Dump qw(dump);
 use Data::Table::Text qw(confirmHasCommandLineCommand currentDirectory fff fileSize findFiles fpe fpf genHash lll owf pad readFile );
 use Asm::C qw(:all);
 use feature qw(say current_sub);
+
+# podDocumentation
+# AllocateAll8OnStack - replace with variables
+# Labels should be settable via $label->set
+# Register expressions via op overloading - register size and ability to add offsets, peek, pop, push clear register
+# Indent opcodes by call depth, - replace push @text with a method call
 
 my %rodata;                                                                     # Read only data already written
 my %rodatas;                                                                    # Read only string already written
