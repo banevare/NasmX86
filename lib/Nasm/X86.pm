@@ -863,13 +863,15 @@ sub S(&%)                                                                       
   my $comment = $options{comment};                                              # Optional comment
   Comment "Subroutine " .($comment) if $comment;
 
-  if ($name and my $n = $subroutines{$name}) {return $n}                        # Return the label of a pre-existing copy of the code
+# if ($name and my $n = $subroutines{$name}) {return $n}                        # Return the label of a pre-existing copy of the code
 
   my $start = Label;
   my $end   = Label;
   Jmp $end;
   SetLabel $start;
+# my @text = @text; @text = ();
   &$body;
+  # "ByteString::append"
   Ret;
   SetLabel $end;
   $subroutines{$name} = $start if $name;                                        # Cache a reference to the generated code if a name was supplied
@@ -2403,6 +2405,7 @@ sub ConcatenateShortStrings($$)                                                 
 
   my $sub = S                                                                   # Read file
    {Comment "Concatenate the short string in zmm$right to the short string in zmm$left";
+    PushR my @save = (k7, rcx, r14, r15);
     GetLengthOfShortString r15, $right;                                         # Right length
     Mov   r14, -1;                                                              # Expand mask
     Bzhi  r14, r14, r15;                                                        # Skip bits for left
@@ -2418,6 +2421,7 @@ sub ConcatenateShortStrings($$)                                                 
     Dec   rcx;                                                                  # Length of left
     Add   rcx, r15;                                                             # Length of combined string = length of left plus length of right
     Pinsrb "xmm${left}", cl, 0;                                                 # Save length in result
+    PopR @save;
    } name=> "ConcatenateShortStrings${left}and${right}";
 
   Call $sub;
@@ -2660,7 +2664,7 @@ sub ByteString::m($)                                                            
   PushR rax;                                                                    # Get address of byte string
   $byteString->address->setReg(rax);
 
-#  Call S                                                                        # Append content
+  #Call S                                                                        # Append content
    {Comment "Append memory to a byte string";
     $byteString->updateSpace;                                                   # Update space if needed
     SaveFirstFour;
@@ -2763,7 +2767,7 @@ sub ByteString::append($$)                                                      
   $target->address->setReg(rax);
   $source->address->setReg(rdi);
 
- #Call S                                                                        # Copy byte string
+  Call S                                                                        # Copy byte string
    {Comment "Concatenate byte strings";
     SaveFirstFour;
     Mov rdx, rdi;                                                               # Address byte string to be copied
@@ -2771,7 +2775,7 @@ sub ByteString::append($$)                                                      
     Lea rsi, $source->data->addr(rdx);
     $target->m;                                                                 # Move data
     RestoreFirstFourExceptRax;                                                  # Return the possibly expanded byte string
-   };# name => "ByteString::rdiInHex";
+   } name => "ByteString::append";
 
   PopR @save;
  }
@@ -8963,9 +8967,9 @@ test unless caller;
 # podDocumentation
 __DATA__
 use Time::HiRes qw(time);
-use Test::Most;
+use Test::More;
 
-bail_on_fail;
+#bail_on_fail;
 
 my $develop   = -e q(/home/phil/);                                              # Developing
 my $localTest = ((caller(1))[0]//'Nasm::X86') eq "Nasm::X86";                   # Local testing mode
@@ -10238,7 +10242,7 @@ if (1) {                                                                        
   getDFromZmmAsVariable(0, 12)->dump;
   getQFromZmmAsVariable(0, 12)->dump;
 
-  eq_or_diff Assemble, <<END;
+  is_deeply Assemble, <<END;
   zmm0: 0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0706 0504 0302 0100   0000 0302 0100 0000   0100 0000 0000 0000
 b at offset 12 in zmm0: 0000 0000 0000 0002
 w at offset 12 in zmm0: 0000 0000 0000 0302
@@ -10257,7 +10261,7 @@ if (1) {                                                                        
 
   $b->dump;
 
-  eq_or_diff Assemble, <<END;
+  is_deeply Assemble, <<END;
 BlockString at address: 0000 0000 0000 0010
 Length: 0000 0000 0000 000C
  zmm31: 0000 0010 0000 0010   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0004 0302 0100   0302 0100 0201 000C
@@ -10276,7 +10280,7 @@ if (1) {
   $b->append(Vq("Source String", $s), Vq("Source Length",  2));
   $b->dump;
 
-  eq_or_diff Assemble, <<END;
+  is_deeply Assemble, <<END;
 BlockString at address: 0000 0000 0000 0010
 Length: 0000 0000 0000 0037
  zmm31: 0000 0090 0000 0050   3635 3433 3231 302F   2E2D 2C2B 2A29 2827   2625 2423 2221 201F   1E1D 1C1B 1A19 1817   1615 1413 1211 100F   0E0D 0C0B 0A09 0807   0605 0403 0201 0037
