@@ -2664,7 +2664,7 @@ sub ByteString::m($)                                                            
   PushR rax;                                                                    # Get address of byte string
   $byteString->address->setReg(rax);
 
-  #Call S                                                                        # Append content
+  Call S                                                                        # Append content
    {Comment "Append memory to a byte string";
     $byteString->updateSpace;                                                   # Update space if needed
     SaveFirstFour;
@@ -2681,7 +2681,7 @@ sub ByteString::m($)                                                            
     Mov $used,   $length;
 
     RestoreFirstFourExceptRax;                                                  # Return the possibly expanded byte string
-   };# name=> "ByteString::m";
+   } name=> "ByteString::m";
 
   PopR rax;
  }
@@ -2693,6 +2693,7 @@ sub ByteString::q($$)                                                           
   Mov rsi, Rs($const);                                                          # Constant
   Mov rdi, length($const);
   $byteString->m;                                                               # Move data
+
   RestoreFirstFourExceptRax;                                                    # Return the possibly expanded byte string
  }
 
@@ -2857,7 +2858,7 @@ sub ByteString::read($)                                                         
   PushR rax;                                                                    # Get address of byte string
   $byteString->address->setReg(rax);
 
- #Call S                                                                        # Copy byte string
+  Call S                                                                        # Copy byte string
    {Comment "Read a byte string";
     SaveFirstFour;
     Mov rdx, rax;                                                               # Save address of byte string
@@ -2873,7 +2874,7 @@ sub ByteString::read($)                                                         
     FreeMemory;                                                                 # Address of allocated memory in rax, length in rdi
     PopR rax;                                                                   # Address byte string
     RestoreFirstFourExceptRax;
-   };# name => "ByteString::read";
+   } name => "ByteString::read";
   PopR rax;
  }
 
