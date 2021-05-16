@@ -5,6 +5,7 @@
 use Test::Most tests => 2;
 use Nasm::X86 qw(:all);
 
+if(1){ #TRCX emulator-less clobber test
 EMU: {
 Start;
 Mov rcx, 0;
@@ -14,8 +15,8 @@ is_deeply Assemble(emulator => 1), <<END;
    rcx: 0000 0000 0000 0000
 END
 }
-SKIP: {
-skip 'Skipping. Nature of bug unknown', 1;
+TODO: {
+local $TODO = 'Exact problem not yet fully identified';
 Start;
 Mov rcx, 0;
 PrintOutRegisterInHex rcx;
@@ -23,5 +24,6 @@ PrintOutRegisterInHex rcx;
 is_deeply Assemble(emulator => 0), <<END;
    rcx: 0000 0000 0000 0000
 END
+}
 }
 done_testing;

@@ -6,17 +6,18 @@ use warnings;
 use Test::More tests => 1;
 use Nasm::X86 qw(:all);
 
-my $l = Label;
-Mov rcx,10;
-Mov rax,0;
-SetLabel $l;
-PrintOutRegisterInHex rax;
-Add rax,2;
-Dec rcx;
-Cmp rcx,0;
-Jnz $l;
-my $r = Assemble;
-is_deeply $r, <<END;
+if(1){ #TBranching loop test
+   my $l = Label;
+   Mov rcx,10;
+   Mov rax,0;
+   SetLabel $l;
+   PrintOutRegisterInHex rax;
+   Add rax,2;
+   Dec rcx;
+   Cmp rcx,0;
+   Jnz $l;
+   my $r = Assemble;
+   is_deeply $r, <<END;
    rax: 0000 0000 0000 0000
    rax: 0000 0000 0000 0002
    rax: 0000 0000 0000 0004
@@ -28,3 +29,4 @@ is_deeply $r, <<END;
    rax: 0000 0000 0000 0010
    rax: 0000 0000 0000 0012
 END
+}

@@ -4,16 +4,18 @@
 use Test::Most tests => 1;
 use Nasm::X86 qw(:all);
 
-my $sub = S
- {my $vars = LocalData;
-  my $a = $vars->variable(8, 'a');
-  my $b = $vars->variable(8, 'b');
+if(1){ #TStack-frame corruption test via LocalData
+   my $sub = S
+   {my $vars = LocalData;
+      my $a = $vars->variable(8, 'a');
+      my $b = $vars->variable(8, 'b');
 
-  $vars->start;
-  Mov $b->stack,  4;
-  $vars->free;
- };
+      $vars->start;
+      Mov $b->stack,  4;
+      $vars->free;
+   };
 
-Call $sub;
+   Call $sub;
 
-is_deeply Assemble, '';
+   is_deeply Assemble, '';
+}
