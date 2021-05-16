@@ -2548,7 +2548,7 @@ sub ByteString::updateSpace($)                                                  
   my $size = $byteString->size->addr;
   my $used = $byteString->used->addr;
 
-  PushR rax;                                                                    # Get address of byte string
+  KeepFree rax;
   $byteString->address->setReg(rax);
 
   Call S                                                                        # Allocate more space if required
@@ -2585,8 +2585,6 @@ sub ByteString::updateSpace($)                                                  
 
     RestoreFirstFourExceptRax;                                                  # Return new byte string
    } name=> "ByteString::updateSpace";
-
-  PopR rax;
  }
 
 sub ByteString::makeReadOnly($)                                                 # Make a byte string read only
@@ -2662,7 +2660,7 @@ sub ByteString::m($)                                                            
   PushR rax;                                                                    # Get address of byte string
   $byteString->address->setReg(rax);
 
-  Call S                                                                        # Append content
+#  Call S                                                                        # Append content
    {Comment "Append memory to a byte string";
     $byteString->updateSpace;                                                   # Update space if needed
     SaveFirstFour;
@@ -2679,7 +2677,7 @@ sub ByteString::m($)                                                            
     Mov $used,   $length;
 
     RestoreFirstFourExceptRax;                                                  # Return the possibly expanded byte string
-   } name=> "ByteString::m";
+   };# name=> "ByteString::m";
 
   PopR rax;
  }
@@ -2765,16 +2763,15 @@ sub ByteString::append($$)                                                      
   $target->address->setReg(rax);
   $source->address->setReg(rdi);
 
-  Call S                                                                        # Copy byte string
+ #Call S                                                                        # Copy byte string
    {Comment "Concatenate byte strings";
     SaveFirstFour;
     Mov rdx, rdi;                                                               # Address byte string to be copied
-    Mov rdi, $target->used->addr(rdx);
-    Lea rsi, $target->data->addr(rdx);
-PrintOutRegisterInHex rax, rdi, rsi;
+    Mov rdi, $source->used->addr(rdx);
+    Lea rsi, $source->data->addr(rdx);
     $target->m;                                                                 # Move data
     RestoreFirstFourExceptRax;                                                  # Return the possibly expanded byte string
-   } name => "ByteString::rdiInHex";
+   };# name => "ByteString::rdiInHex";
 
   PopR @save;
  }
@@ -2856,7 +2853,7 @@ sub ByteString::read($)                                                         
   PushR rax;                                                                    # Get address of byte string
   $byteString->address->setReg(rax);
 
-  Call S                                                                        # Copy byte string
+ #Call S                                                                        # Copy byte string
    {Comment "Read a byte string";
     SaveFirstFour;
     Mov rdx, rax;                                                               # Save address of byte string
@@ -2872,8 +2869,7 @@ sub ByteString::read($)                                                         
     FreeMemory;                                                                 # Address of allocated memory in rax, length in rdi
     PopR rax;                                                                   # Address byte string
     RestoreFirstFourExceptRax;
-   } name => "ByteString::read";
-
+   };# name => "ByteString::read";
   PopR rax;
  }
 
@@ -2950,19 +2946,19 @@ sub ByteString::dump($)                                                         
     SaveFirstFour;
     PrintOutStringNL("Byte String");
 
-    Push rax;                                                                   # Print size
+    PushR rax;                                                                   # Print size
     Mov rax, $byteString->size->addr;
     PrintOutString("  Size: ");
     PrintOutRaxInHex;
     PrintOutNL;
-    Pop rax;
+    PopR rax;
 
-    Push rax;                                                                   # Print used
+    PushR rax;                                                                   # Print used
     Mov rax, $byteString->used->addr;
     PrintOutString("  Used: ");
     PrintOutRaxInHex;
     PrintOutNL;
-    Pop rax;
+    PopR rax;
     RestoreFirstFour;
    } name => "ByteString::dump";
 
@@ -9358,15 +9354,12 @@ if (1) {                                                                        
   ok index(removeNonAsciiChars($r), removeNonAsciiChars(readFile $0)) >= 0;     # Output contains this file
  }
 
-latest:;
-
 if (1) {                                                                        #TCreateByteString #TByteString::clear #TByteString::out #TByteString::copy #TByteString::nl
   my $a = CreateByteString;                                                     # Create a string
-  $a->q(my $t = 'ab');                                                          # Append a constant to the byte string
-
+  $a->q('ab');
   my $b = CreateByteString;                                                     # Create target byte string
-  $b->append($a);                                                                     # Copy source to target
-  $b->append($a);                                                                     # Copy source to target
+  $b->append($a);
+  $b->append($a);
   $a->append($b);
   $b->append($a);
   $a->append($b);
@@ -9374,13 +9367,13 @@ if (1) {                                                                        
   $a->append($b);
   $b->append($a);
 
-  $b->out;                                                                      # Print byte string
-  $a->clear;                                                                    # Clear byte string
+  $b->out;   PrintOutNL;                                                        # Print byte string
+  $a->clear; $a->out;                                                           # Clear byte string
 
-  my $T = "$t\n" x 8;                                                           # Expected response
-  ok Assemble =~ m($T)s;                                                        # Assemble and execute
+  is_deeply Assemble, <<END;                                                    # Assemble and execute
+abababababababababababababababababababababababababababababababababab
+END
  }
-exit;
 
 if (1) {                                                                        #TReorderSyscallRegisters #TUnReorderSyscallRegisters
   Mov rax, 1;  Mov rdi, 2;  Mov rsi,  3;  Mov rdx,  4;
@@ -9430,7 +9423,7 @@ if (1) {                                                                        
 if (1) {                                                                        # Print this file  #TByteString::read #TByteString::z #TByteString::q
   my $s = CreateByteString;                                                     # Create a string
   $s->q($0);                                                                    # Append a constant to the byte string
-  $s->z;                                                                        # New line
+  $s->z;                                                                        # Trailing zero
   $s->read;
   $s->out;
 
@@ -9527,7 +9520,7 @@ if (1) {                                                                        
 
   ok Assemble =~ m(rax: FFFF FFFF FFFF FFFF);
  }
-exit(-1);
+
 # It is one of the happiest characteristics of this glorious country that official utterances are invariably regarded as unanswerable
 
 if (1) {                                                                        #TPrintOutZF #TSetZF #TClearZF
