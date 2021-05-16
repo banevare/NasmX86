@@ -7,4 +7,7 @@ my $str = CreateByteString;
 $str->q('Simple string');
 $str->nl;
 $str->out;
-ok Assemble =~ m/Simple string\n/;
+
+is_deeply Assemble, <<END;
+Simple string
+END
