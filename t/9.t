@@ -1,8 +1,6 @@
 #!/usr/bin/perl -I/home/phil/perl/cpan/NasmX86/lib
 # Tino 2021/05/13
 #Simple branching loop test
-use strict;
-use warnings;
 use Test::More tests => 1;
 use Nasm::X86 qw(:all);
 
