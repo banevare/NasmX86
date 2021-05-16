@@ -1,6 +1,6 @@
 #!/usr/bin/perl -I/home/phil/perl/cpan/NasmX86/lib
 #Author: tino <gordon.zar@gmail.com>
-use Test::Most tests => 2;
+use Test::Most tests => 1;
 use Data::Table::Text qw(readFile);
 use Nasm::X86 qw(:all);
 
