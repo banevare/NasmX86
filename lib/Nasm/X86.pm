@@ -10,7 +10,7 @@ use warnings FATAL => qw(all);
 use strict;
 use Carp qw(confess cluck);
 use Data::Dump qw(dump);
-use Data::Table::Text qw(confirmHasCommandLineCommand currentDirectory fff fileSize findFiles fpe fpf genHash lll owf pad readFile );
+use Data::Table::Text qw(confirmHasCommandLineCommand currentDirectory fff fileSize findFiles fpe fpf genHash lll owf pad readFile stringsAreNotEqual);
 use Asm::C qw(:all);
 use feature qw(say current_sub);
 
@@ -879,6 +879,51 @@ sub S(&%)                                                                       
   $start
  }
 
+sub S2(&%)                                                                       # Create a sub with optional parameters name=> the name of the subroutine so it can be reused rather than regenerated, comment=> a comment describing the sub
+ {my ($body, %options) = @_;                                                    # Body, options.
+  @_ >= 1 or confess;
+  my $name    = $options{name};                                                 # Optional name for subroutine reuse
+  my $comment = $options{comment};                                              # Optional comment
+  Comment "Subroutine " .($comment) if $comment;
+
+  if ($name and my $n = $subroutines{$name}) {return $n}                        # Return the label of a pre-existing copy of the code
+
+  my $start = Label;
+  my $end   = Label;
+  Jmp $end;
+
+  SetLabel $start;
+
+  my $textN = @text;
+  &$body;
+
+#  my $label = $start;                                                           # Start label
+#  if ($name)                                                                    # Check generated code against last set of code
+#   {my $text  = join "\n", @text[$textN..$#text];
+#    if (my $s = $subroutines{$name})                                            # Previously generated
+#     {my ($l, $t) = @$s;
+#      if ($t ne $text)
+#       {say STDERR "Original $name:\n", $t,    "\n";
+#        say STDERR "Current  $name:\n", $text, "\n";
+#        say STDERR dump(stringsAreNotEqual($t, $text));
+#        confess "Different code for $name";
+#       }
+#      $label = $l;
+#      $#text = $textN - 1;
+#     }
+#    else                                                                        # First generation
+#     {$subroutines{$name} = [$start, $text];
+#     }
+#   }
+
+  Ret;
+  SetLabel $end;
+
+  $subroutines{$name} = $start if $name;
+
+  $start                                                                        # Label to call subroutine
+ }
+
 sub cr(&@)                                                                      # Call a subroutine with a reordering of the registers.
  {my ($body, @registers) = @_;                                                  # Code to execute with reordered registers, registers to reorder
   ReorderSyscallRegisters   @registers;
@@ -932,7 +977,7 @@ sub PrintErrNL()                                                                
     Mov rdx, 1;
     Syscall;
     RestoreFirstFour()
-   } name => q(PrintOutNL);
+   } name => q(PrintErrNL);
  }
 
 sub PrintErrString($)                                                           # Print a constant string to stderr.
@@ -1224,9 +1269,32 @@ sub Vq(*;$)                                                                     
   &Variable(3, @_)
  }
 
-sub Vx(*;$)                                                                     # Define an xmm variable
- {my ($name, $expr) = @_;                                                       # Name of variable, initializing expression
-  &Variable(4, @_)
+sub VxyzInit($@)                                                                # Initialize an xyz register from general purpose registers
+ {my ($var, @expr) = @_;                                                        # Variable, initializing general purpose registers or undef
+  my $N = 2 ** ($var->size - 3);                                                # Number of quads to fully initialize
+  @expr <= $N or confess "$N initializers required";                            # Number of quads to fully initialize
+  my $l = $var->label;                                                          # Label
+  my $s = RegisterSize(rax);                                                    # Size of initializers
+  for my $i(keys @expr)                                                         # Each initializer
+   {my $o = $s * $i;                                                            # Offset
+    Mov "qword[$l+$o]", $expr[$i] if $expr[$i];                                      # Move in initial value if present
+   }
+  $var
+ }
+
+sub Vx(*;@)                                                                     # Define an xmm variable
+ {my ($name, @expr) = @_;                                                       # Name of variable, initializing expression
+  VxyzInit(&Variable(4, $name), @expr);
+ }
+
+sub Vy(*;@)                                                                     # Define an ymm variable
+ {my ($name, @expr) = @_;                                                       # Name of variable, initializing expression
+  VxyzInit(&Variable(5, $name), @expr);
+ }
+
+sub Vz(*;@)                                                                     # Define an zmm variable
+ {my ($name, @expr) = @_;                                                       # Name of variable, initializing expression
+  VxyzInit(&Variable(6, $name), @expr);
  }
 
 sub Vxq(*$$)                                                                    # Define an xmm variable
@@ -1237,16 +1305,6 @@ sub Vxq(*$$)                                                                    
   Mov "[$l]",    $i1;
   Mov "[$l+$s]", $i2;
   $x
- }
-
-sub Vy(*;$)                                                                     # Define a ymm variable
- {my ($name, $expr) = @_;                                                       # Name of variable, initializing expression
-  &Variable(5, @_)
- }
-
-sub Vz(*;$)                                                                     # Define a zmm variable
- {my ($name, $expr) = @_;                                                       # Name of variable, initializing expression
-  &Variable(6, @_)
  }
 
 #D2 Operations                                                                  # Variable operations
@@ -2159,7 +2217,7 @@ sub AllocateMemory                                                              
     RestoreFirstSevenExceptRax;
    } name=> "AllocateMemory";
 
-  my $a = Vxq("Allocated memory", rax, rdi);                                    # Allocate a variable to address the allocated memory and store its length
+  my $a = Vx("Allocated memory", rax, rdi);                                     # Allocate a variable to address the allocated memory and store its length
   $a->purpose = "Allocated memory";
   PopR rdi;
   $a                                                                            # Return allocated memory details
@@ -3464,7 +3522,7 @@ my $totalBytesAssembled = 0;                                                    
 
 sub Assemble(%)                                                                 # Assemble the generated code
  {my (%options) = @_;                                                           # Options
-  Exit 0 unless @text > 4 and $text[-4] =~ m(Exit Code:);                       # Exit with code 0 if no other exit has been taken
+  Exit 0 unless @text > 4 and $text[-4] =~ m(Exit code:);                       # Exit with code 0 if no other exit has been taken
 
   my $k = $options{keep};                                                       # Keep the executable
   my $r = join "\n", map {s/\s+\Z//sr} @rodata;
