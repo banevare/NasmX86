@@ -15,8 +15,5 @@ if(1){ #TExit call duplication test
    my $assembly = readFile 'z.asm';
    note $assembly;
    ok $assembly =~ m/Exit code: 1/, 'Exit code 1 present';
-TODO: {
-         local $TODO = 'Feature not yet fully implemented';
-         ok not($assembly =~ m/Exit code: 0/), "Exit code 0 must not be present when an Exit call exists already";
-      }
+   ok not($assembly =~ m/Exit code: 0/), "Exit code 0 must not be present when an Exit call exists already";
 }
