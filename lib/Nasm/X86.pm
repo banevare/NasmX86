@@ -97,6 +97,7 @@ END
   my @i3 =  split /\s+/, <<END;                                                 # Triple operand instructions
 bzhi
 kadd kand kandn kor kshiftl kshiftr kunpck kxnor kxor
+
 vdpps
 vprolq
 vgetmantps
@@ -105,7 +106,7 @@ vmulpd vaddpd
 END
 
   my @i3qdwb =  split /\s+/, <<END;                                             # Triple operand instructions which have qdwb versions
-pinsr pextr vpinsr vpextr
+pinsr pextr vpinsr vpextr vpadd vpsub
 END
 
   my @i4 =  split /\s+/, <<END;                                                 # Quadruple operand instructions
@@ -1235,17 +1236,19 @@ sub Variable($$;$)                                                              
       Mov $t, r15w        if $nSize == 1;
       Mov $t, r15d        if $nSize == 2;
       Mov $t, r15         if $nSize == 3;
-#     Pinsrq $t, r15, 0   if $nSize >  3;
       PopR r15;
      }
    }
 
   genHash("Variable",                                                           # Variable definition
-    size    => $nSize,                                                          # Size of variable
-    name    => $name,                                                           # Name of the variable
-    expr    => $expr,                                                           # Expression that initializes the variable
-    label   => $label,                                                          # Address in memory
-    purpose => undef,                                                           # Purpose of this variable
+    expr     => $expr,                                                          # Expression that initializes the variable
+    label    => $label,                                                         # Address in memory
+    laneSize => undef,                                                          # Size of the lanes in this variable
+    name     => $name,                                                          # Name of the variable
+    purpose  => undef,                                                          # Purpose of this variable
+    size     => $nSize,                                                         # Size of variable
+    signed   => undef,                                                          # Elements of x|y|zmm registers are signed if true
+    saturate => undef,                                                          # Computations should saturate rather then wrap if true
    );
  }
 
@@ -1271,13 +1274,23 @@ sub Vq(*;$)                                                                     
 
 sub VxyzInit($@)                                                                # Initialize an xyz register from general purpose registers
  {my ($var, @expr) = @_;                                                        # Variable, initializing general purpose registers or undef
+  if (@expr == 1 and $expr[0] =~ m(\Al))                                        # Load from the memory at the specifed labe;
+   {if ($var->size == 6)
+     {PushR zmm0;
+      Vmovdqu8 zmm0, "[".$expr[0]."]";
+      Vmovdqu8 $var->address, zmm0;
+      PopR  zmm0;
+      return $var;
+     }
+    confess "More code needed";
+   }
   my $N = 2 ** ($var->size - 3);                                                # Number of quads to fully initialize
   @expr <= $N or confess "$N initializers required";                            # Number of quads to fully initialize
   my $l = $var->label;                                                          # Label
   my $s = RegisterSize(rax);                                                    # Size of initializers
   for my $i(keys @expr)                                                         # Each initializer
    {my $o = $s * $i;                                                            # Offset
-    Mov "qword[$l+$o]", $expr[$i] if $expr[$i];                                      # Move in initial value if present
+    Mov "qword[$l+$o]", $expr[$i] if $expr[$i];                                 # Move in initial value if present
    }
   $var
  }
@@ -1295,16 +1308,6 @@ sub Vy(*;@)                                                                     
 sub Vz(*;@)                                                                     # Define an zmm variable
  {my ($name, @expr) = @_;                                                       # Name of variable, initializing expression
   VxyzInit(&Variable(6, $name), @expr);
- }
-
-sub Vxq(*$$)                                                                    # Define an xmm variable
- {my ($name, $i1, $i2) = @_;                                                    # Name of variable, initializing expression as two quad words
-  my $x = Variable(4, $name);
-  my $l = $x->label;
-  my $s = RegisterSize(rax);
-  Mov "[$l]",    $i1;
-  Mov "[$l+$s]", $i2;
-  $x
  }
 
 #D2 Operations                                                                  # Variable operations
@@ -1392,13 +1395,29 @@ sub Variable::arithmetic($$$$)                                                  
 
   my $l = $left ->address;
   my $r = ref($right) ? $right->address : $right;                               # Right can be either a variable reference or a constant
-  if ($left->size == 3 and !ref($right) || $right->size == 3)
+
+  if ($left->size == 3 and !ref($right) || $right->size == 3)                   # Vq
    {PushR r15;
     Mov r15, $l;
     &$op(r15, $r);
     my $v = Vq(join(' ', '('.$left->name, $name, (ref($right) ? $right->name : $right).')'), r15);
     PopR r15;
     return $v;
+   }
+
+  if ($left->size == 6 and ref($right) and $right->size == 6)                   # Vz
+   {if ($name =~ m(add|sub))
+     {PushR my @save = (zmm0, zmm1);
+      Vmovdqu64 zmm0, $left->address;
+      Vmovdqu64 zmm1, $right->address;
+      my $l = $left->laneSize // $right->laneSize // 0;                         # Size of elements to add
+      my $o = substr("bwdq", $l, 1);                                            # Size of operation
+      eval "Vp$name$o zmm0, zmm0, zmm1";                                        # Add or subtract
+      my $z = Vz(join(' ', $left->name, $op, $right->name));                    # Variable to hold result
+      Vmovdqu64 $z->address, zmm0;                                              # Save result in variable
+      PopR @save;
+      return $z;
+     }
    }
   confess "Need more code";
  }
@@ -1705,23 +1724,29 @@ sub Variable::setZmm($$$$)                                                      
   PopR @save;
  }
 
-sub Variable::getZmm($$)                                                        # Load bytes from the memory addressed by the specified source variable into the numbered zmm register.
- {my ($source, $target) = @_;                                                   # Variable containing the address of the source, number of zmm to get
+sub Variable::loadZmm($$)                                                       # Load bytes from the memory addressed by the specified source variable into the numbered zmm register.
+ {my ($source, $zmm) = @_;                                                      # Variable containing the address of the source, number of zmm to get
   @_ == 2 or confess;
-  Comment "Get Zmm from Memory";
-  PushR r15;
-  $source->setReg(r15);
-  Vmovdqu8 "zmm${target}", "[r15]";                                             # Read from memory
-  PopR r15;
+  if ($source->size == 3)                                                       # Load through memory addressed by a Vq
+   {Comment "Load zmm$zmm from memory addressed by ".$source->name;
+    PushR r15;
+    $source->setReg(r15);
+    Vmovdqu8 "zmm$zmm", "[r15]";
+    PopR r15;
+   }
+  elsif ($source->size == 6)                                                    # Load from Vz
+   {Comment "Load zmm$zmm from ".$source->name;
+    Vmovdqu8 "zmm$zmm", $source->address;
+   }
  }
 
-sub Variable::putZmm($$)                                                        # Write bytes into the memory addressed by the source variable from the numbered zmm register.
- {my ($source, $target) = @_;                                                   # Variable containing the address of the source, number of zmm to put
+sub Variable::saveZmm($$)                                                       # Save bytes into the memory addressed by the target variable from the numbered zmm register.
+ {my ($target, $zmm) = @_;                                                      # Variable containing the address of the source, number of zmm to put
   @_ == 2 or confess;
-  Comment "Put Zmm from Memory";
+  Comment "Save zmm$zmm into memory addressed by ".$target->name;
   PushR r15;
-  $source->setReg(r15);
-  Vmovdqu8 "[r15]", "zmm${target}";                                             # Write into memory
+  $target->setReg(r15);
+  Vmovdqu8 "[r15]", "zmm$zmm";                                                  # Write into memory
   PopR r15;
  }
 
@@ -10271,20 +10296,22 @@ END
  }
 
 if (1) {                                                                        #TVariable::getZmm  #TVariable::setZmm
-  my $s = Rb(0..128);
-  my $t = Db(map {0} 0..128);
-  my $source = Vq(Source, $s);
-  my $target = Vq(Target, $t);
-  $source->getZmm(0);
-  PrintOutRegisterInHex zmm0;
+  my $a = Vz a, Rb((map {"0x${_}0"} 0..9, 'a'..'f')x4);
+  my $b = Vz b, Rb((map {"0x0${_}"} 0..9, 'a'..'f')x4);
 
-  $target->putZmm(0);
-  $target->getZmm(1);
-  PrintOutRegisterInHex zmm1;
+   $a      ->loadZmm(0);                                                        # Show variable in zmm0
+   $b      ->loadZmm(1);                                                        # Show variable in zmm1
+
+  ($a + $b)->loadZmm(2);                                                        # Add bytes      and show in zmm2
+  ($a - $b)->loadZmm(3);                                                        # Subtract bytes and show in zmm3
+
+  PrintOutRegisterInHex "zmm$_" for 0..3;
 
   is_deeply Assemble, <<END;
-  zmm0: 3F3E 3D3C 3B3A 3938   3736 3534 3332 3130   2F2E 2D2C 2B2A 2928   2726 2524 2322 2120   1F1E 1D1C 1B1A 1918   1716 1514 1312 1110   0F0E 0D0C 0B0A 0908   0706 0504 0302 0100
-  zmm1: 3F3E 3D3C 3B3A 3938   3736 3534 3332 3130   2F2E 2D2C 2B2A 2928   2726 2524 2322 2120   1F1E 1D1C 1B1A 1918   1716 1514 1312 1110   0F0E 0D0C 0B0A 0908   0706 0504 0302 0100
+  zmm0: F0E0 D0C0 B0A0 9080   7060 5040 3020 1000   F0E0 D0C0 B0A0 9080   7060 5040 3020 1000   F0E0 D0C0 B0A0 9080   7060 5040 3020 1000   F0E0 D0C0 B0A0 9080   7060 5040 3020 1000
+  zmm1: 0F0E 0D0C 0B0A 0908   0706 0504 0302 0100   0F0E 0D0C 0B0A 0908   0706 0504 0302 0100   0F0E 0D0C 0B0A 0908   0706 0504 0302 0100   0F0E 0D0C 0B0A 0908   0706 0504 0302 0100
+  zmm2: FFEE DDCC BBAA 9988   7766 5544 3322 1100   FFEE DDCC BBAA 9988   7766 5544 3322 1100   FFEE DDCC BBAA 9988   7766 5544 3322 1100   FFEE DDCC BBAA 9988   7766 5544 3322 1100
+  zmm3: E1D2 C3B4 A596 8778   695A 4B3C 2D1E 0F00   E1D2 C3B4 A596 8778   695A 4B3C 2D1E 0F00   E1D2 C3B4 A596 8778   695A 4B3C 2D1E 0F00   E1D2 C3B4 A596 8778   695A 4B3C 2D1E 0F00
 END
  }
 
