@@ -1,6 +1,6 @@
 #!/usr/bin/perl -I/home/phil/perl/cpan/DataTableText/lib/ -I. -I/home/phil/perl/cpan/AsmC/lib/
 #-------------------------------------------------------------------------------
-# Generate Nasm X86 code from Perl.  v1
+# Generate X86 assembler code using Perl as a macro pre-processor.
 # Philip R Brenan at appaapps dot com, Appa Apps Ltd Inc., 2021
 #-------------------------------------------------------------------------------
 # podDocumentation
@@ -10,7 +10,7 @@ use warnings FATAL => qw(all);
 use strict;
 use Carp qw(confess cluck);
 use Data::Dump qw(dump);
-use Data::Table::Text qw(confirmHasCommandLineCommand currentDirectory fff fileSize findFiles formatTable fpe fpf genHash lll owf pad readFile stringsAreNotEqual temporaryFile);
+use Data::Table::Text qw(confirmHasCommandLineCommand currentDirectory fff fileMd5Sum fileSize findFiles formatTable fpe fpf genHash lll owf pad readFile stringsAreNotEqual temporaryFile);
 use Asm::C qw(:all);
 use feature qw(say current_sub);
 
@@ -852,15 +852,13 @@ sub ForEver(&)                                                                  
   SetLabel $end;                                                                # End of loop
  }
 
-my @subroutinesCreated = ('');                                                  # Number of subroutines created
-
 sub Macro(&%)                                                                   # Create a sub with optional parameters name=> the name of the subroutine so it can be reused rather than regenerated, comment=> a comment describing the sub
  {my ($body, %options) = @_;                                                    # Body, options.
 
   @_ >= 1 or confess;
   my $name = $options{name} // [caller(1)]->[3];                                # Optional name for subroutine reuse
   if ($name and !$options{keepOut} and my $n = $subroutines{$name}) {return $n} # Return the label of a pre-existing copy of the code
-  push @subroutinesCreated, $name;
+
   my $start = Label;
   my $end   = Label;
   Jmp $end;
@@ -869,7 +867,6 @@ sub Macro(&%)                                                                   
   Ret;
   SetLabel $end;
   $subroutines{$name} = $start if $name;                                        # Cache a reference to the generated code if a name was supplied
-  pop @subroutinesCreated;
 
   $start
  }
@@ -1336,7 +1333,6 @@ sub Variable($$;$)                                                              
     purpose   => undef,                                                         # Purpose of this variable
     reference => undef,                                                         # Reference to another variable
     saturate  => undef,                                                         # Computations should saturate rather then wrap if true
-    scope     => $subroutinesCreated[-1],                                       # The number of the subroutine we were in when this variable was created
     signed    => undef,                                                         # Elements of x|y|zmm registers are signed if true
     size      => $nSize,                                                        # Size of variable
    );
@@ -1719,15 +1715,6 @@ sub Variable::debug($)                                                          
   PopR @regs;
  }
 
-sub Variable::checkScopeOfCreatingSubroutine($)                                 #P Check that this variable is in scope: a subroutine that has been called rather than inserted might refer to the wrong variable unless the scopes match.
- {my ($variable) = @_;                                                          # Variable to check
-  my $m = 'Variable: "'.$variable->name                                         # Check that the variable was created in the same scope
-        .'" does not belong to this subroutine.'."\n"
-        . 'Variable created in scope: '. $variable->scope."\n"
-        . 'Current scope is: '.          dump(\@subroutinesCreated)."\n";
-  confess $m  if $variable->scope ne $subroutinesCreated[-1];
-  }
-
 sub Variable::isRef($)                                                          # Check whether the specified  variable is a reference to another variable
  {my ($variable) = @_;                                                          # Variable
   my $n = $variable->name;                                                      # Variable name
@@ -1737,7 +1724,6 @@ sub Variable::isRef($)                                                          
 
 sub Variable::setReg($$@)                                                       # Set the named registers from the content of the variable
  {my ($variable, $register, @registers) = @_;                                   # Variable, register to load, optional further registers to load
-# $variable->checkScopeOfCreatingSubroutine;
   if ($variable->size == 3)                                                     # General purpose register
    {if ($variable->isRef)
      {Mov $register, $variable->address;
@@ -1762,7 +1748,6 @@ sub Variable::setReg($$@)                                                       
 
 sub Variable::getReg($$@)                                                       # Load the variable from the named registers
  {my ($variable, $register, @registers) = @_;                                   # Variable, register to load, optional further registers to load from
-#  $variable->checkScopeOfCreatingSubroutine;
   if ($variable->size == 3)
    {if ($variable->isRef)
      {Comment "Get variable value from register";
@@ -3798,7 +3783,7 @@ use vars qw(@ISA @EXPORT @EXPORT_OK %EXPORT_TAGS);
 
 =head1 Name
 
-Nasm::X86 - Generate Nasm assembler code
+Nasm::X86 - Generate X86 assembler code using Perl as a macro pre-processor.
 
 =head1 Synopsis
 
@@ -3845,21 +3830,22 @@ END
 =head2 Dynamic string held in an arena
 
 Create a dynamic byte string, add some content to it, write the byte string to
-a file and then execute it:.
+stdout:
 
-  my $s = CreateByteString;                                                     # Create a string
-  $s->ql(<<END);                                                                # Write code to execute
-#!/usr/bin/bash
-whoami
-ls -la
-pwd
+  my $a = CreateByteString;                                                     # Create a string
+  my $b = CreateByteString;                                                     # Create a string
+  $a->q('aa');
+  $b->q('bb');
+  $a->q('AA');
+  $b->q('BB');
+  $a->q('aa');
+  $b->q('bb');
+  $a->out;
+  $b->out;
+  PrintOutNL;
+  is_deeply Assemble, <<END;                                                    # Assemble and execute
+aaAAaabbBBbb
 END
-  $s->write;                                                                    # Write code to a temporary file
-  $s->bash;                                                                     # Execute the temporary file
-  $s->unlink;                                                                   # Execute the temporary file
-
-  my $u = qx(whoami); chomp($u);
-  ok Assemble =~ m($u);
 
 =head2 Process management
 
@@ -9717,7 +9703,8 @@ if (1) {                                                                        
   $s->out;
 
   my $r = Assemble(1 => my $f = temporaryFile);
-  ok index(removeNonAsciiChars(readFile $f), removeNonAsciiChars(readFile $0)) >= 0;     # Output contains this file
+  is_deeply fileMd5Sum($f), fileMd5Sum($0);                                     # Output contains this file
+  unlink $f;
  }
 
 if (0) {                                                                        # Print rdi in hex into a byte string #TByteString::rdiInHex
@@ -9759,12 +9746,12 @@ whoami
 ls -la
 pwd
 END
-  $s->write->call($s->bs, my $f = Vq('file', Rs("zzz.sh")));                      # Write code to a file
+  $s->write         ->call($s->bs, my $f = Vq('file', Rs("zzz.sh")));           # Write code to a file
   executeFileViaBash->call($f);                                                 # Execute the file
-  unlinkFile->call($f);                                                         # Delete the file
+  unlinkFile        ->call($f);                                                 # Delete the file
 
   my $u = qx(whoami); chomp($u);
-  ok Assemble(emulator=>0) =~ m($u);
+  ok Assemble(emulator=>0) =~ m($u);                                            # The Intel Software Development Emulator is way too slow on these operations.
  }
 
 if (1) {                                                                        # Make a byte string readonly
