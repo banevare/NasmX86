@@ -5,7 +5,7 @@
 #-------------------------------------------------------------------------------
 # podDocumentation
 package Nasm::X86;
-our $VERSION = "20210514";
+our $VERSION = "20210519";
 use warnings FATAL => qw(all);
 use strict;
 use Carp qw(confess cluck);
@@ -13,12 +13,6 @@ use Data::Dump qw(dump);
 use Data::Table::Text qw(confirmHasCommandLineCommand currentDirectory fff fileSize findFiles formatTable fpe fpf genHash lll owf pad readFile stringsAreNotEqual temporaryFile);
 use Asm::C qw(:all);
 use feature qw(say current_sub);
-
-# Parameter passing mechanism
-# AllocateAll8OnStack - replace with variables
-# Labels should be settable via $label->set
-# Register expressions via op overloading - register size and ability to add offsets, peek, pop, push clear register
-# Indent opcodes by call depth, - replace push @text with a method call
 
 my %rodata;                                                                     # Read only data already written
 my %rodatas;                                                                    # Read only string already written
@@ -860,7 +854,7 @@ sub ForEver(&)                                                                  
 
 my @subroutinesCreated = ('');                                                  # Number of subroutines created
 
-sub S(&%)                                                                       # Create a sub with optional parameters name=> the name of the subroutine so it can be reused rather than regenerated, comment=> a comment describing the sub
+sub Macro(&%)                                                                   # Create a sub with optional parameters name=> the name of the subroutine so it can be reused rather than regenerated, comment=> a comment describing the sub
  {my ($body, %options) = @_;                                                    # Body, options.
 
   @_ >= 1 or confess;
@@ -880,7 +874,7 @@ sub S(&%)                                                                       
   $start
  }
 
-sub S2(&%)                                                                      # Create a sub with a specified name, comment, in and out parameters
+sub Subroutine(&%)                                                              # Create a subroutine that can be called in assembler code
  {my ($body, %options) = @_;                                                    # Body, options.
   @_ >= 1 or confess;
   my $name    = $options{name} // [caller(1)]->[3];                             # Subroutine name
@@ -1021,7 +1015,7 @@ sub PrintErrNL()                                                                
   my $a = Rb(10);
   Comment "Write new line to stderr";
 
-  Call S                                                                        # Print new line
+  Call Macro                                                                    # Print new line
    {SaveFirstFour;
     Mov rax, 1;
     Mov rdi, $stderr;
@@ -1061,7 +1055,7 @@ sub PrintOutNL()                                                                
   my $a = Rb(10);
   Comment "Write new line";
 
-  Call S                                                                        # Print new line
+  Call Macro                                                                        # Print new line
    {SaveFirstFour;
     Mov rax, 1;
     Mov rdi, $stdout;
@@ -1112,7 +1106,7 @@ sub PrintOutRaxInHex                                                            
   Comment "Print Rax In Hex";
   my $hexTranslateTable = hexTranslateTable;
 
-  my $sub = S                                                                   # Address conversion routine
+  my $sub = Macro                                                               # Address conversion routine
    {SaveFirstFour rax;                                                          # Rax is a parameter
     Mov rdx, rax;                                                               # Content to be printed
     Mov rdi, 2;                                                                 # Length of a byte in hex
@@ -1150,7 +1144,7 @@ sub PrintOutRegisterInHex(@)                                                    
   for my $r(@r)                                                                 # Each register to print
    {Comment "Print register $r in Hex";
 
-    Call S                                                                      # Reverse rax
+    Call Macro                                                                      # Reverse rax
      {PrintOutString sprintf("%6s: ", $r);
 
       my sub printReg(@)                                                        # Print the contents of a register
@@ -1184,7 +1178,7 @@ sub PrintOutRegisterInHex(@)                                                    
 sub PrintOutRipInHex                                                            #P Print the instruction pointer in hex
  {@_ == 0 or confess;
   my @regs = qw(rax);
-  my $sub = S
+  my $sub = Macro
    {PushR @regs;
     my $l = Label;
     push @text, <<END;
@@ -1204,7 +1198,7 @@ sub PrintOutRflagsInHex                                                         
  {@_ == 0 or confess;
   my @regs = qw(rax);
 
-  my $sub = S
+  my $sub = Macro
    {PushR @regs;
     Pushfq;
     Pop rax;
@@ -1220,7 +1214,7 @@ sub PrintOutRflagsInHex                                                         
 sub PrintOutRegistersInHex                                                      # Print the general purpose registers in hex
  {@_ == 0 or confess;
 
-  my $sub = S
+  my $sub = Macro
    {PrintOutRipInHex;
     PrintOutRflagsInHex;
 
@@ -2107,7 +2101,7 @@ sub GetPidInHex()                                                               
   Comment "Get Pid";
   my $hexTranslateTable = hexTranslateTable;
 
-  my $sub = S                                                                   # Address conversion routine
+  my $sub = Macro                                                                   # Address conversion routine
    {SaveFirstFour;
     Mov rax, 39;                                                                # Get pid
     Syscall;
@@ -2153,7 +2147,7 @@ sub WaitPid()                                                                   
  {@_ == 0 or confess;
   Comment "WaitPid - wait for the pid in rax";
 
-  my $sub = S                                                                   # Wait pid
+  my $sub = Macro                                                               # Wait pid
    {SaveFirstSeven;
     Mov rdi,rax;
     Mov rax, 61;
@@ -2170,7 +2164,7 @@ sub WaitPid()                                                                   
 sub ReadTimeStampCounter()                                                      # Read the time stamp counter and return the time in nanoseconds in rax
  {@_ == 0 or confess;
 
-  my $sub = S                                                                   # Read time stamp
+  my $sub = Macro                                                               # Read time stamp
    {Comment "Read Time-Stamp Counter";
     Push rdx;
     Rdtsc;
@@ -2365,7 +2359,7 @@ sub PrintOutMemoryInHex                                                         
  {@_ == 0 or confess;
   Comment "Print out memory in hex";
 
-  Call S
+  Call Macro
    {my $size = RegisterSize rax;
     SaveFirstFour;
     Mov rsi,rax;                                                                # Position in memory
@@ -2389,7 +2383,7 @@ sub PrintOutMemoryInHexNL                                                       
 sub PrintOutMemory                                                              # Print the memory addressed by rax for a length of rdi::
  {@_ == 0 or confess;
 
-  Call S
+  Call Macro
    {Comment "Print memory";
     SaveFirstFour rax, rdi;
     Mov rsi, rax;
@@ -2412,7 +2406,7 @@ sub PrintOutMemoryNL                                                            
 sub AllocateMemory                                                              # Allocate the specified amount of memory via mmap and return its address
  {@_ == 0 or confess;
 
-  S2
+  Subroutine
    {my ($p) = @_;                                                               # Parameters
     Comment "Allocate memory";
     SaveFirstSeven;
@@ -2438,7 +2432,7 @@ sub FreeMemory                                                                  
  {@_ == 0 or confess;
   Comment "Free memory";
 
-  S2
+  Subroutine
    {my ($p) = @_;                                                               # Parameters
     SaveFirstFour;
     Mov rax, 11;                                                                # Munmap
@@ -2455,7 +2449,7 @@ sub ClearMemory()                                                               
 
   my $size = RegisterSize zmm0;
 
-  S2
+  Subroutine
    {my ($p) = @_;                                                               # Parameters
     SaveFirstFour;
     $$p{address}->setReg(rax);
@@ -2476,7 +2470,7 @@ sub ClearMemory()                                                               
 sub CopyMemory()                                                                # Copy memory, the target is addressed by rax, the length is in rdi, the source is addressed by rsi
  {@_ == 0 or confess;
 
-  S2
+  Subroutine
    {my ($p) = @_;                                                               # Parameters
     Comment "Copy memory";
     my $source   = rsi;
@@ -2505,7 +2499,7 @@ sub OpenRead()                                                                  
  {@_ == 0 or confess;
   Comment "Open a file for read";
 
-  my $sub = S
+  my $sub = Macro
    {my $S = extractMacroDefinitionsFromCHeaderFile "asm-generic/fcntl.h";       # Constants for reading a file
     my $O_RDONLY = $$S{O_RDONLY};
     SaveFirstFour;
@@ -2524,7 +2518,7 @@ sub OpenWrite()                                                                 
  {@_ == 0 or confess;
   Comment "Open a file for write";
 
-  my $sub = S                                                                   # Open file
+  my $sub = Macro                                                                   # Open file
    {my $S = extractMacroDefinitionsFromCHeaderFile "fcntl.h";                   # Constants for creating a file
 #   my $T = extractMacroDefinitionsFromCHeaderFile "sys/stat.h";
     my $O_WRONLY  = $$S{O_WRONLY};
@@ -2552,7 +2546,7 @@ sub OpenWrite()                                                                 
 sub CloseFile()                                                                 # Close the file whose descriptor is in rax
  {@_ == 0 or confess;
 
-  my $sub = S                                                                   # Open file
+  my $sub = Macro                                                               # Open file
    {Comment "Close a file";
     SaveFirstFour;
     Mov rdi, rax;
@@ -2571,7 +2565,7 @@ sub StatSize()                                                                  
   my $Size = $$S{stat}{size};
   my $off  = $$S{stat}{fields}{st_size}{loc};
 
-  my $sub = S                                                                   # Stat file
+  my $sub = Macro                                                               # Stat file
    {Comment "Stat a file for size";
     SaveFirstFour rax;
     Mov rdi, rax;                                                               # File name
@@ -2590,7 +2584,7 @@ sub StatSize()                                                                  
 sub ReadFile()                                                                  # Read a file whose name is addressed by rax into memory.  The address of the mapped memory and its length are returned in registers rax,rdi
  {@_ == 0 or confess;
 
-  S2                                                                            # Read file
+  Subroutine                                                                            # Read file
    {my ($p) = @_;
     Comment "Read a file into memory";
     SaveFirstSeven;                                                             # Generated code
@@ -2633,7 +2627,7 @@ sub LoadShortStringFromMemoryToZmm2($)                                          
  {my ($zmm) = @_;                                                               # Zmm register to load
   @_ == 1 or confess;
 
-  my $sub = S                                                                   # Read file
+  my $sub = Macro                                                                   # Read file
    {Comment "Load a short string from memory into zmm$zmm";
     PushR rax;
     Mov r15b, "[rax]";                                                          # Load first byte which is the length of the string
@@ -2682,7 +2676,7 @@ sub ConcatenateShortStrings($$)                                                 
  {my ($left, $right) = @_;                                                      # Target zmm, source zmm
   @_ == 2 or confess;
 
-  my $sub = S                                                                   # Read file
+  my $sub = Macro                                                                   # Read file
    {Comment "Concatenate the short string in zmm$right to the short string in zmm$left";
     PushR my @save = (k7, rcx, r14, r15);
     GetLengthOfShortString r15, $right;                                         # Right length
@@ -2711,7 +2705,7 @@ sub ConcatenateShortStrings($$)                                                 
 sub Hash()                                                                      # Hash a string addressed by rax with length held in rdi and return the hash code in r15
  {@_ == 0 or confess;
 
-  my $sub = S                                                                   # Read file
+  my $sub = Macro                                                               # Read file
    {Comment "Hash";
 
     PushR my @regs = (rax, rdi, k1, zmm0, zmm1);                                # Save registers
@@ -2775,7 +2769,7 @@ sub Hash()                                                                      
 sub Cstrlen()                                                                   # Length of the C style string addressed by rax returning the length in r15
  {@_ == 0 or confess;
 
-  my $sub  = S                                                                  # Create byte string
+  my $sub  = Macro                                                              # Create byte string
    {Comment "C strlen";
     PushR my @regs = (rax, rdi, rcx);
     Mov rdi, rax;
@@ -2802,7 +2796,7 @@ sub CreateByteString(%)                                                         
   my ($string, $size, $used, $free) = All8Structure 3;                          # String base
   my $data = $string->field(0, "start of data");                                # Start of data
 
-  my $s = S2
+  my $s = Subroutine
    {my ($p) = @_;                                                               # Parameters
     SaveFirstFour;
 
@@ -2833,7 +2827,7 @@ sub ByteString::length($)                                                       
   my $size = $byteString->size->addr;
   my $used = $byteString->used->addr;
 
-  S2                                                                            # Allocate more space if required
+  Subroutine                                                                            # Allocate more space if required
    {my ($p) = @_;                                                               # Parameters
     Comment "Byte string length";
     SaveFirstFour;
@@ -2850,7 +2844,7 @@ sub ByteString::updateSpace($)                                                  
   my $size = $byteString->size->addr;
   my $used = $byteString->used->addr;
 
-  S2                                                                            # Allocate more space if required
+  Subroutine                                                                            # Allocate more space if required
    {my ($p) = @_;                                                               #
     Comment "Allocate more space for a byte string";
 
@@ -2883,7 +2877,7 @@ sub ByteString::updateSpace($)                                                  
 sub ByteString::makeReadOnly($)                                                 # Make a byte string read only
  {my ($byteString) = @_;                                                        # Byte string descriptor
 
-  S2                                                                            # Read file
+  Subroutine                                                                            # Read file
    {my ($p) = @_;                                                               # Parameters
     Comment "Make a byte string readable";
     SaveFirstFour;
@@ -2902,7 +2896,7 @@ sub ByteString::makeReadOnly($)                                                 
 sub ByteString::makeWriteable($)                                                # Make a byte string writable
  {my ($byteString) = @_;                                                        # Byte string descriptor
 
-  S2                                                                            # Read file
+  Subroutine                                                                            # Read file
    {my ($p) = @_;                                                               # Parameters
     Comment "Make a byte string writable";
     SaveFirstFour;
@@ -2920,7 +2914,7 @@ sub ByteString::makeWriteable($)                                                
 sub ByteString::allocate($)                                                     # Allocate the amount of space indicated in rdi in the byte string addressed by rax and return the offset of the allocation in the arena in rdi
  {my ($byteString) = @_;                                                        # Byte string descriptor
 
-  S2                                                                            # Allocate space
+  Subroutine                                                                            # Allocate space
    {my ($p) = @_;                                                               # Parameters
     Comment "Allocate space in a byte string";
     SaveFirstFour;
@@ -2942,7 +2936,7 @@ sub ByteString::m($)                                                            
  {my ($byteString) = @_;                                                        # Byte string descriptor
   my $used = $byteString->used->addr;
 
-  S2                                                                            # Append content
+  Subroutine                                                                            # Append content
    {my ($p) = @_;                                                               # Parameters
     Comment "Append memory to a byte string";
     SaveFirstFour;
@@ -3031,7 +3025,7 @@ sub ByteString::rdiInHex                                                        
 sub ByteString::append($)                                                       # Append one byte string to another
  {my ($byteString) = @_;                                                        # Byte string descriptor, var target byte string, var source byte string
 
-  S2
+  Subroutine
    {my ($p) = @_;                                                               # Parameters
     Comment "Concatenate byte strings";
     SaveFirstFour;
@@ -3047,7 +3041,7 @@ sub ByteString::append($)                                                       
 sub ByteString::clear($)                                                        # Clear the byte string addressed by rax
  {my ($byteString) = @_;                                                        # Byte string descriptor, var byte string
 
-  S2
+  Subroutine
    {my ($p) = @_;                                                               # Parameters
     Comment "Clear byte string";
     PushR my @save = (rax, rdi);
@@ -3061,7 +3055,7 @@ sub ByteString::clear($)                                                        
 sub ByteString::write($$)                                                       # Write the content in a byte string addressed by rax to a temporary file and replace the byte string content with the name of the  temporary file
  {my ($byteString) = @_;                                                        # Byte string descriptor
 
-  S2                                                                            # Copy byte string
+  Subroutine                                                                            # Copy byte string
    {my ($p) = @_;                                                               # Parameters
     Comment "Write a byte string to a file";
     SaveFirstFour;
@@ -3091,7 +3085,7 @@ sub ByteString::write($$)                                                       
 sub ByteString::read($)                                                         # Read the named file (terminated with a zero byte) and place it into the named byte string.
  {my ($byteString) = @_;                                                        # Byte string descriptor
 
-  S2                                                                            # Copy byte string
+  Subroutine                                                                            # Copy byte string
    {my ($p) = @_;                                                               # Parameters
     Comment "Read a byte string";
     ReadFile->call($$p{file}, (my $size = Vq(size)), my $address = Vq(address));
@@ -3112,7 +3106,7 @@ sub ByteString::out($)                                                          
  }
 
 sub executeFileViaBash()                                                        # Execute the file named in the byte string addressed by rax with bash
- {S2                                                                            # Bash string
+ {Subroutine                                                                            # Bash string
    {my ($p) = @_;                                                               # Parameters
     Comment "Execute a file via bash";
     SaveFirstFour;
@@ -3136,7 +3130,7 @@ sub executeFileViaBash()                                                        
  }
 
 sub unlinkFile()                                                                # Unlink the named file
- {S2
+ {Subroutine
    {my ($p) = @_;                                                               # Parameters
     Comment "Unlink a file";
     SaveFirstFour;
@@ -3153,12 +3147,12 @@ sub ByteString::dump($)                                                         
   PushR rax;                                                                    # Get address of byte string
   $byteString->address->setReg(rax);
 
-  Call S                                                                        # Bash string
+  Call Macro                                                                    # Bash string
    {Comment "Print details of a byte string";
     SaveFirstFour;
     PrintOutStringNL("Byte String");
 
-    PushR rax;                                                                   # Print size
+    PushR rax;                                                                  # Print size
     Mov rax, $byteString->size->addr;
     PrintOutString("  Size: ");
     PrintOutRaxInHex;
@@ -9190,7 +9184,7 @@ Test::More->builder->output("/dev/null") if $localTest;                         
 
 if ($^O =~ m(bsd|linux)i)                                                       # Supported systems
  {if (confirmHasCommandLineCommand(q(nasm)) and LocateIntelEmulator)            # Network assembler and Intel Software Development emulator
-   {plan tests => 93;
+   {plan tests => 92;
    }
   else
    {plan skip_all =>qq(Nasm or Intel 64 emulator not available);
@@ -9449,13 +9443,14 @@ if (1) {                                                                        
   PrintOutRegisterInHex rax;
   KeepFree rax, rdi;
 
-  Mov rax, Rs(my $f = "zzz.txt");                                               # File to write
+  Mov rax, Rs(my $f = "zzzTemporaryFile.txt");                                  # File to write
   OpenWrite;                                                                    # Open file
   CloseFile;                                                                    # Close file
 
-  my $r = Assemble;
-  ok $r =~ m(( 0000){3} 0003)i;                                                 # Expected file number
-  ok $r =~ m(( 0000){4})i;                                                      # Expected file number
+  is_deeply Assemble, <<END;
+   rax: 0000 0000 0000 0003
+   rax: 0000 0000 0000 0000
+END
   ok -e $f;                                                                     # Created file
   unlink $f;
  }
@@ -9544,7 +9539,7 @@ if (1) {                                                                        
   Mov rax, 0x44332211;
   PrintOutRegisterInHex rax;
 
-  my $s = S
+  my $s = Macro
    {PrintOutRegisterInHex rax;
     Inc rax;
     PrintOutRegisterInHex rax;
@@ -10614,7 +10609,7 @@ END
  }
 
 if (0) {
-  my $s = S2
+  my $s = Subroutine
    {my ($parameters) = @_;                                                      #
     $$parameters{a}->setReg(rax);
     $$parameters{b}->setReg(rdx);
