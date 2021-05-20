@@ -9181,9 +9181,7 @@ test unless caller;
 # podDocumentation
 __DATA__
 use Time::HiRes qw(time);
-use Test::Most;
-
-bail_on_fail;
+use Test::More;
 
 my $develop   = -e q(/home/phil/);                                              # Developing
 my $localTest = ((caller(1))[0]//'Nasm::X86') eq "Nasm::X86";                   # Local testing mode
