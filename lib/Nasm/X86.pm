@@ -939,6 +939,7 @@ sub Nasm::X86::Sub::call($%)                                                    
   while(@parameters)                                                            # Namify parameters supplied by the caller
    {my $p = shift @parameters;                                                  # Check parameters provided by caller
     my $n = ref($p) ? $p->name : $p;
+confess unless $n;
     my $v = ref($p) ? $p       : shift @parameters;
     confess "Invalid parameter: '$n'" unless $sub->in->{$n} or $sub->out->{$n} or $sub->io->{$n};
     $p{$n} = $v;
@@ -2440,14 +2441,12 @@ sub CopyMemory()                                                                
     my $length   = rdi;
     my $copied   = rdx;
     my $transfer = r8;
+
     SaveFirstSeven;
     $$p{source}->setReg($source);
     $$p{target}->setReg($target);
     $$p{size}  ->setReg($length);
     ClearRegisters $copied;
-PrintOutRegisterInHex rax;
-PrintOutRegisterInHex rdi;
-PrintOutRegisterInHex rsi;
 
     For                                                                           # Clear memory
      {Mov "r8b", "[$source+$copied]";
@@ -2904,7 +2903,8 @@ sub ByteString::m($)                                                            
     $$p{bs}     ->setReg(rax);
     $$p{size}   ->setReg(rdi);
     $$p{address}->setReg(rsi);
-    Lea $target, $byteString->data->addr;                                       # Address of data field
+#   Lea $target, $byteString->data->addr;                                       # Address of data field
+    Mov $target, rax;
     Add $target, $used;                                                         # Skip over used data
 
     PushR rax;         ## Probably not needed                                                         # Save address of byte string
@@ -2912,6 +2912,7 @@ sub ByteString::m($)                                                            
     CopyMemory->call(source=>$$p{address}, size=>$$p{size}, target=>Vq(target,$target));                                                                 # Move data in
     PopR rax;                                                                   # Restore address of byte string
 
+    KeepFree $length;
     Mov $length, $used;                                                         # Update used field
     Add $length, rdi;
     Mov $used,   $length;
@@ -2986,27 +2987,28 @@ sub ByteString::rdiInHex                                                        
   RestoreFirstSeven;
  }
 
-sub ByteString::append($$$)                                                     # Append one byte string to another
- {my ($byteString, $target, $source) = @_;                                      # Byte string descriptor, var target byte string, var source byte string
+sub ByteString::append($)                                                       # Append one byte string to another
+ {my ($byteString) = @_;                                                        # Byte string descriptor, var target byte string, var source byte string
 
   S2
-   {my ($p) = @_;
+   {my ($p) = @_;                                                               # Parameters
     Comment "Concatenate byte strings";
     SaveFirstFour;
     $$p{source}->setReg(rax);
     Mov rdi, $byteString->used->addr;
+    Sub rdi, $byteString->structure->size;
     Lea rsi, $byteString->data->addr;
-    $byteString->m->call($target, Vq(address, rsi), Vq(size, rdi));
+    $byteString->m->call(bs=>$$p{target}, Vq(address, rsi), Vq(size, rdi));
     RestoreFirstFour;
-   } in => {target=>$target, source=>$source};
+   } in => {target=>3, source=>3};
  }
 
-sub ByteString::clear($$)                                                       # Clear the byte string addressed by rax
- {my ($byteString, $bs) = @_;                                                   # Byte string descriptor, var byte string
+sub ByteString::clear($)                                                        # Clear the byte string addressed by rax
+ {my ($byteString) = @_;                                                        # Byte string descriptor, var byte string
 
   PushR my @save = (rax, rdi);
-  $bs->setReg(rax);
-  ClearRegisters rdi;
+  $byteString->bs->setReg(rax);
+  Mov rdi, $byteString->structure->size;
   Mov $byteString->used->addr, rdi;
   PopR     @save;
  }
@@ -3101,6 +3103,7 @@ sub ByteString::out($)                                                          
   SaveFirstFour;
   $byteString->bs->setReg(rax);
   Mov rdi, $byteString->used->addr;                                             # Length to print
+  Sub rdi, $byteString->structure->size;                                       # Length to print
   Lea rax, $byteString->data->addr;                                             # Address of data field
   PrintOutMemory;
   RestoreFirstFour;
@@ -9575,48 +9578,47 @@ if (1) {                                                                        
   ok index(removeNonAsciiChars($r), removeNonAsciiChars(readFile $0)) >= 0;     # Output contains this file
  }
 
-latest:;
 if (1) {                                                                        #TCreateByteString #TByteString::clear #TByteString::out #TByteString::copy #TByteString::nl
   my $a = CreateByteString;                                                     # Create a string
-  $a->q('aa');
-  $a->out;
   my $b = CreateByteString;                                                     # Create a string
+  $a->q('aa');
   $b->q('bb');
-  $b->out;
   $a->q('AA');
-  $a->out;
   $b->q('BB');
+  $a->q('aa');
+  $b->q('bb');
+  $a->out;
   $b->out;
-
-  my $r = Assemble;
-  say STDERR "AAAA ", dump($r);
-#  is_deeply Assemble, <<END;                                                    # Assemble and execute
-#aa
-#bb
-#aaAA
-#bbBB
-#END
+  PrintOutNL;
+  is_deeply Assemble, <<END;                                                    # Assemble and execute
+aaAAaabbBBbb
+END
  }
-exit;
 
 if (1) {                                                                        #TCreateByteString #TByteString::clear #TByteString::out #TByteString::copy #TByteString::nl
   my $a = CreateByteString;                                                     # Create a string
   $a->q('ab');
   my $b = CreateByteString;                                                     # Create target byte string
-  $b->append($a);
-  $b->append($a);
-  $a->append($b);
-  $b->append($a);
-  $a->append($b);
-  $b->append($a);
-  $a->append($b);
-  $b->append($a);
+  $a->bs(r15);
+  $a->append->call(target=>$b->bs, source=>$a->bs);
+  $a->append->call(target=>$b->bs, source=>$a->bs);
+  $a->append->call(target=>$a->bs, source=>$b->bs);
+  $a->append->call(target=>$b->bs, source=>$a->bs);
+  $a->append->call(target=>$a->bs, source=>$b->bs);
+  $a->append->call(target=>$b->bs, source=>$a->bs);
+  $a->append->call(target=>$b->bs, source=>$a->bs);
+  $a->append->call(target=>$b->bs, source=>$a->bs);
+  $a->append->call(target=>$b->bs, source=>$a->bs);
 
+
+  $a->out;   PrintOutNL;                                                        # Print byte string
   $b->out;   PrintOutNL;                                                        # Print byte string
-  $a->clear; $a->out;                                                           # Clear byte string
+  $a->clear;
+  $a->out;                                                                      # Clear byte string
 
   is_deeply Assemble, <<END;                                                    # Assemble and execute
-abababababababababababababababababababababababababababababababababab
+abababababababab
+ababababababababababababababababababababababababababababababababababababab
 END
  }
 
