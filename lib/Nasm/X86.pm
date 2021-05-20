@@ -1012,7 +1012,7 @@ sub PrintErrNL()                                                                
   my $a = Rb(10);
   Comment "Write new line to stderr";
 
-  Call Macro                                                                    # Print new line
+  Call Macro
    {SaveFirstFour;
     Mov rax, 1;
     Mov rdi, $stderr;
@@ -1052,7 +1052,7 @@ sub PrintOutNL()                                                                
   my $a = Rb(10);
   Comment "Write new line";
 
-  Call Macro                                                                        # Print new line
+  Call Macro
    {SaveFirstFour;
     Mov rax, 1;
     Mov rdi, $stdout;
@@ -1103,7 +1103,7 @@ sub PrintOutRaxInHex                                                            
   Comment "Print Rax In Hex";
   my $hexTranslateTable = hexTranslateTable;
 
-  my $sub = Macro                                                               # Address conversion routine
+  my $sub = Macro
    {SaveFirstFour rax;                                                          # Rax is a parameter
     Mov rdx, rax;                                                               # Content to be printed
     Mov rdi, 2;                                                                 # Length of a byte in hex
@@ -1141,7 +1141,7 @@ sub PrintOutRegisterInHex(@)                                                    
   for my $r(@r)                                                                 # Each register to print
    {Comment "Print register $r in Hex";
 
-    Call Macro                                                                      # Reverse rax
+    Call Macro
      {PrintOutString sprintf("%6s: ", $r);
 
       my sub printReg(@)                                                        # Print the contents of a register
@@ -2086,7 +2086,7 @@ sub GetPidInHex()                                                               
   Comment "Get Pid";
   my $hexTranslateTable = hexTranslateTable;
 
-  my $sub = Macro                                                                   # Address conversion routine
+  my $sub = Macro
    {SaveFirstFour;
     Mov rax, 39;                                                                # Get pid
     Syscall;
@@ -2132,7 +2132,7 @@ sub WaitPid()                                                                   
  {@_ == 0 or confess;
   Comment "WaitPid - wait for the pid in rax";
 
-  my $sub = Macro                                                               # Wait pid
+  my $sub = Macro
    {SaveFirstSeven;
     Mov rdi,rax;
     Mov rax, 61;
@@ -2149,7 +2149,7 @@ sub WaitPid()                                                                   
 sub ReadTimeStampCounter()                                                      # Read the time stamp counter and return the time in nanoseconds in rax
  {@_ == 0 or confess;
 
-  my $sub = Macro                                                               # Read time stamp
+  my $sub = Macro
    {Comment "Read Time-Stamp Counter";
     Push rdx;
     Rdtsc;
@@ -2469,7 +2469,7 @@ sub CopyMemory()                                                                
     $$p{target}->setReg($target);
     $$p{size}  ->setReg($length);
     ClearRegisters $copied;
-    For                                                                           # Clear memory
+    For                                                                         # Clear memory
      {Mov "r8b", "[$source+$copied]";
       Mov "[$target+$copied]", "r8b";
      } $copied, $length, 1;
@@ -2503,7 +2503,7 @@ sub OpenWrite()                                                                 
  {@_ == 0 or confess;
   Comment "Open a file for write";
 
-  my $sub = Macro                                                                   # Open file
+  my $sub = Macro
    {my $S = extractMacroDefinitionsFromCHeaderFile "fcntl.h";                   # Constants for creating a file
 #   my $T = extractMacroDefinitionsFromCHeaderFile "sys/stat.h";
     my $O_WRONLY  = $$S{O_WRONLY};
@@ -2531,7 +2531,7 @@ sub OpenWrite()                                                                 
 sub CloseFile()                                                                 # Close the file whose descriptor is in rax
  {@_ == 0 or confess;
 
-  my $sub = Macro                                                               # Open file
+  my $sub = Macro
    {Comment "Close a file";
     SaveFirstFour;
     Mov rdi, rax;
@@ -2550,7 +2550,7 @@ sub StatSize()                                                                  
   my $Size = $$S{stat}{size};
   my $off  = $$S{stat}{fields}{st_size}{loc};
 
-  my $sub = Macro                                                               # Stat file
+  my $sub = Macro
    {Comment "Stat a file for size";
     SaveFirstFour rax;
     Mov rdi, rax;                                                               # File name
@@ -2569,7 +2569,7 @@ sub StatSize()                                                                  
 sub ReadFile()                                                                  # Read a file whose name is addressed by rax into memory.  The address of the mapped memory and its length are returned in registers rax,rdi
  {@_ == 0 or confess;
 
-  Subroutine                                                                            # Read file
+  Subroutine                                                                    # Read file
    {my ($p) = @_;
     Comment "Read a file into memory";
     SaveFirstSeven;                                                             # Generated code
@@ -2608,11 +2608,11 @@ sub ReadFile()                                                                  
 
 #D1 Short Strings                                                               # Operations on Short Strings
 
-sub LoadShortStringFromMemoryToZmm2($)                                           # Load the short string addressed by rax into the zmm register with the specified number
+sub LoadShortStringFromMemoryToZmm2($)                                          # Load the short string addressed by rax into the zmm register with the specified number
  {my ($zmm) = @_;                                                               # Zmm register to load
   @_ == 1 or confess;
 
-  my $sub = Macro                                                                   # Read file
+  my $sub = Macro
    {Comment "Load a short string from memory into zmm$zmm";
     PushR rax;
     Mov r15b, "[rax]";                                                          # Load first byte which is the length of the string
@@ -2661,7 +2661,7 @@ sub ConcatenateShortStrings($$)                                                 
  {my ($left, $right) = @_;                                                      # Target zmm, source zmm
   @_ == 2 or confess;
 
-  my $sub = Macro                                                                   # Read file
+  my $sub = Macro                                                               # Read file
    {Comment "Concatenate the short string in zmm$right to the short string in zmm$left";
     PushR my @save = (k7, rcx, r14, r15);
     GetLengthOfShortString r15, $right;                                         # Right length
@@ -2812,7 +2812,7 @@ sub ByteString::length($)                                                       
   my $size = $byteString->size->addr;
   my $used = $byteString->used->addr;
 
-  Subroutine                                                                            # Allocate more space if required
+  Subroutine                                                                    # Allocate more space if required
    {my ($p) = @_;                                                               # Parameters
     Comment "Byte string length";
     SaveFirstFour;
@@ -2829,8 +2829,8 @@ sub ByteString::updateSpace($)                                                  
   my $size = $byteString->size->addr;
   my $used = $byteString->used->addr;
 
-  Subroutine                                                                            # Allocate more space if required
-   {my ($p) = @_;                                                               #
+  Subroutine
+   {my ($p) = @_;                                                               # Parameters
     Comment "Allocate more space for a byte string";
 
     SaveFirstFour;
@@ -2862,7 +2862,7 @@ sub ByteString::updateSpace($)                                                  
 sub ByteString::makeReadOnly($)                                                 # Make a byte string read only
  {my ($byteString) = @_;                                                        # Byte string descriptor
 
-  Subroutine                                                                            # Read file
+  Subroutine
    {my ($p) = @_;                                                               # Parameters
     Comment "Make a byte string readable";
     SaveFirstFour;
@@ -2881,7 +2881,7 @@ sub ByteString::makeReadOnly($)                                                 
 sub ByteString::makeWriteable($)                                                # Make a byte string writable
  {my ($byteString) = @_;                                                        # Byte string descriptor
 
-  Subroutine                                                                            # Read file
+  Subroutine
    {my ($p) = @_;                                                               # Parameters
     Comment "Make a byte string writable";
     SaveFirstFour;
@@ -2899,7 +2899,7 @@ sub ByteString::makeWriteable($)                                                
 sub ByteString::allocate($)                                                     # Allocate the amount of space indicated in rdi in the byte string addressed by rax and return the offset of the allocation in the arena in rdi
  {my ($byteString) = @_;                                                        # Byte string descriptor
 
-  Subroutine                                                                            # Allocate space
+  Subroutine
    {my ($p) = @_;                                                               # Parameters
     Comment "Allocate space in a byte string";
     SaveFirstFour;
@@ -2921,7 +2921,7 @@ sub ByteString::m($)                                                            
  {my ($byteString) = @_;                                                        # Byte string descriptor
   my $used = $byteString->used->addr;
 
-  Subroutine                                                                            # Append content
+  Subroutine
    {my ($p) = @_;                                                               # Parameters
     Comment "Append memory to a byte string";
     SaveFirstFour;
@@ -3040,7 +3040,7 @@ sub ByteString::clear($)                                                        
 sub ByteString::write($$)                                                       # Write the content in a byte string addressed by rax to a temporary file and replace the byte string content with the name of the  temporary file
  {my ($byteString) = @_;                                                        # Byte string descriptor
 
-  Subroutine                                                                            # Copy byte string
+  Subroutine
    {my ($p) = @_;                                                               # Parameters
     Comment "Write a byte string to a file";
     SaveFirstFour;
@@ -3070,7 +3070,7 @@ sub ByteString::write($$)                                                       
 sub ByteString::read($)                                                         # Read the named file (terminated with a zero byte) and place it into the named byte string.
  {my ($byteString) = @_;                                                        # Byte string descriptor
 
-  Subroutine                                                                            # Copy byte string
+  Subroutine
    {my ($p) = @_;                                                               # Parameters
     Comment "Read a byte string";
     ReadFile->call($$p{file}, (my $size = Vq(size)), my $address = Vq(address));
@@ -3091,7 +3091,7 @@ sub ByteString::out($)                                                          
  }
 
 sub executeFileViaBash()                                                        # Execute the file named in the byte string addressed by rax with bash
- {Subroutine                                                                            # Bash string
+ {Subroutine
    {my ($p) = @_;                                                               # Parameters
     Comment "Execute a file via bash";
     SaveFirstFour;
@@ -3144,7 +3144,7 @@ sub ByteString::dump($)                                                         
     PrintOutNL;
     PopR rax;
 
-    PushR rax;                                                                   # Print used
+    PushR rax;                                                                  # Print used
     Mov rax, $byteString->used->addr;
     PrintOutString("  Used: ");
     PrintOutRaxInHex;
