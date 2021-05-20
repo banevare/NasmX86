@@ -1360,7 +1360,7 @@ sub Vq(*;$)                                                                     
 
 sub VxyzInit($@)                                                                # Initialize an xyz register from general purpose registers
  {my ($var, @expr) = @_;                                                        # Variable, initializing general purpose registers or undef
-  if (@expr == 1 and $expr[0] =~ m(\Al))                                        # Load from the memory at the specifed labe;
+  if (@expr == 1 and $expr[0] =~ m(\Al))                                        # Load from the memory at the specified label
    {if ($var->size == 6)
      {PushR zmm0;
       Vmovdqu8 zmm0, "[".$expr[0]."]";
@@ -1994,7 +1994,7 @@ sub Variable::putQIntoZmm($$)                                                   
  }
 
 sub Variable::confirmIsMemory($;$$)                                             #P Check that variable describes allocated memory and optionally load registers with its length and size
- {my ($memory, $address, $length) = @_;                                         # Variable describing memory as returned by AllocateMemory, register to contain address, register to contain size
+ {my ($memory, $address, $length) = @_;                                         # Variable describing memory as returned by Allocate Memory, register to contain address, register to contain size
   $memory->size == 4 or confess "Wrong size";
   $memory->purpose =~ m(\AAllocated memory\Z) or confess "Not a memory allocator";
   my $l = $memory->label;
@@ -2004,7 +2004,7 @@ sub Variable::confirmIsMemory($;$$)                                             
  }
 
 sub Variable::clearMemory($)                                                    # Clear the memory described in this variable
- {my ($memory) = @_;                                                            # Variable describing memory as returned by AllocateMemory
+ {my ($memory) = @_;                                                            # Variable describing memory as returned by Allocate Memory
   PushR my @save = (rax, rdi);
   $memory->confirmIsMemory(@save);
   &ClearMemory();                                                               # Clear the memory
@@ -2032,7 +2032,7 @@ sub Variable::printOutMemoryInHex($)                                            
  }
 
 sub Variable::freeMemory($)                                                     # Free the memory described in this variable
- {my ($memory) = @_;                                                            # Variable describing memory as returned by AllocateMemory
+ {my ($memory) = @_;                                                            # Variable describing memory as returned by Allocate Memory
   $memory->size == 4 or confess "Wrong size";
   $memory->purpose =~ m(\AAllocated memory\Z) or confess "Not a memory allocator";
   PushR my @save = (rax, rdi);
@@ -3252,7 +3252,7 @@ sub BlockString::getBlock($$$$)                                                 
  }
 
 sub BlockString::putBlock($$$$)                                                 # Write the numbered zmm to the block at the specified offset in the specified byte string
- {my ($blockString, $bsa, $block, $zmm) = @_;                                   # Block string descriptor, blosk in byte string, content variable
+ {my ($blockString, $bsa, $block, $zmm) = @_;                                   # Block string descriptor, block in byte string, content variable
   PushR my @save = (r14, r15);                                                  # Work registers
   $bsa->setReg(r15);                                                            # Byte string address
   $block->setReg(r14);                                                          # Offset of block in byte string
