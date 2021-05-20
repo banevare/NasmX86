@@ -2445,6 +2445,9 @@ sub CopyMemory()                                                                
     $$p{target}->setReg($target);
     $$p{size}  ->setReg($length);
     ClearRegisters $copied;
+PrintOutRegisterInHex rax;
+PrintOutRegisterInHex rdi;
+PrintOutRegisterInHex rsi;
 
     For                                                                           # Clear memory
      {Mov "r8b", "[$source+$copied]";
@@ -2901,7 +2904,6 @@ sub ByteString::m($)                                                            
     $$p{bs}     ->setReg(rax);
     $$p{size}   ->setReg(rdi);
     $$p{address}->setReg(rsi);
-
     Lea $target, $byteString->data->addr;                                       # Address of data field
     Add $target, $used;                                                         # Skip over used data
 
@@ -9576,8 +9578,6 @@ if (1) {                                                                        
 latest:;
 if (1) {                                                                        #TCreateByteString #TByteString::clear #TByteString::out #TByteString::copy #TByteString::nl
   my $a = CreateByteString;                                                     # Create a string
-  PrintOutNL;
-
   $a->q('aa');
   $a->out;
   my $b = CreateByteString;                                                     # Create a string
@@ -9587,14 +9587,15 @@ if (1) {                                                                        
   $a->out;
   $b->q('BB');
   $b->out;
-  PrintOutNL;
 
-  is_deeply Assemble, <<END;                                                    # Assemble and execute
-aa
-bb
-aaAA
-bbBB
-END
+  my $r = Assemble;
+  say STDERR "AAAA ", dump($r);
+#  is_deeply Assemble, <<END;                                                    # Assemble and execute
+#aa
+#bb
+#aaAA
+#bbBB
+#END
  }
 exit;
 
