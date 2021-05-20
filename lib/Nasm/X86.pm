@@ -10,7 +10,7 @@ use warnings FATAL => qw(all);
 use strict;
 use Carp qw(confess cluck);
 use Data::Dump qw(dump);
-use Data::Table::Text qw(confirmHasCommandLineCommand currentDirectory fff fileSize findFiles fpe fpf genHash lll owf pad readFile stringsAreNotEqual);
+use Data::Table::Text qw(confirmHasCommandLineCommand currentDirectory fff fileSize findFiles formatTable fpe fpf genHash lll owf pad readFile stringsAreNotEqual);
 use Asm::C qw(:all);
 use feature qw(say current_sub);
 
@@ -939,9 +939,15 @@ sub Nasm::X86::Sub::call($%)                                                    
   while(@parameters)                                                            # Namify parameters supplied by the caller
    {my $p = shift @parameters;                                                  # Check parameters provided by caller
     my $n = ref($p) ? $p->name : $p;
-confess unless $n;
     my $v = ref($p) ? $p       : shift @parameters;
-    confess "Invalid parameter: '$n'" unless $sub->in->{$n} or $sub->out->{$n} or $sub->io->{$n};
+    unless ($sub->in->{$n} or $sub->out->{$n} or $sub->io->{$n})
+     {my @t;
+      push @t, map {[q(in),  $_]} keys $sub->in ->%*;
+      push @t, map {[q(io),  $_]} keys $sub->io ->%*;
+      push @t, map {[q(out), $_]} keys $sub->out->%*;
+      my $t = formatTable([@t], [qw(Type Name)]);
+      confess "Invalid parameter: '$n'\n$t";
+     }
     $p{$n} = $v;
    }
 
@@ -953,10 +959,12 @@ confess unless $n;
   for my $p(keys $sub->io->%*)                                                  # Load io parameters
    {confess "Missing io parameter: $p" unless my $v = $p{$p};
     if ($v->isRef)                                                              # If we already have a reference we can just copy the content
-     {$sub->variables->{$p}->copy($v);
+     {say STDERR "AAAA not Copy $v to $p ";
+      $sub->variables->{$p}->copy($v);
      }
     else                                                                        # Otherwise make a reference
-     {$sub->variables->{$p}->copyAddress($v);
+     {say STDERR "BBBB address  Copy $v to $p ";
+      $sub->variables->{$p}->copyAddress($v);
      }
    }
 
@@ -1441,6 +1449,7 @@ sub Variable::address($;$)                                                      
 sub Variable::copy($$)                                                          # Copy one variable into another
  {my ($left, $right) = @_;                                                      # Left variable, right variable
 
+  ref($right) =~ m(Variable) or confess "Variable required";
   my $l = $left ->address;
   my $r = $right->address;
 
@@ -1514,11 +1523,20 @@ sub Variable::arithmetic($$$$)                                                  
   my $r = ref($right) ? $right->address : $right;                               # Right can be either a variable reference or a constant
 
   if ($left->size == 3 and !ref($right) || $right->size == 3)                   # Vq
-   {PushR r15;
+   {PushR my @save = (r14, r15);
     Mov r15, $l;
-    &$op(r15, $r);
+    if ($left->reference)                                                       # Dereference left if necessary
+     {KeepFree r15;
+      Mov r15, "[r15]";
+     }
+    Mov r14, $r;
+    if ($right->reference)                                                      # Dereference right if necessary
+     {KeepFree r14;
+      Mov r14, "[r14]";
+     }
+    &$op(r15, r14);
     my $v = Vq(join(' ', '('.$left->name, $name, (ref($right) ? $right->name : $right).')'), r15);
-    PopR r15;
+    PopR @save;
     return $v;
    }
 
@@ -2549,18 +2567,18 @@ sub ReadFile()                                                                  
  {@_ == 0 or confess;
 
   S2                                                                            # Read file
-   {my ($parameters) = @_;
+   {my ($p) = @_;
     Comment "Read a file into memory";
     SaveFirstSeven;                                                             # Generated code
     my ($local, $file, $addr, $size, $fdes) = AllocateAll8OnStack 4;            # Local data
 
-    $$parameters{file}->setReg(rax);                                            # File name
+    $$p{file}->setReg(rax);                                                     # File name
 
     StatSize;                                                                   # File size
     Mov $size, rax;                                                             # Save file size
     KeepFree rax;
 
-    $$parameters{file}->setReg(rax);                                            # File name
+    $$p{file}->setReg(rax);                                                     # File name
     OpenRead;                                                                   # Open file for read
     Mov $fdes, rax;                                                             # Save file descriptor
     KeepFree rax;
@@ -2579,8 +2597,10 @@ sub ReadFile()                                                                  
     Syscall;
     Mov rdi, $size;
     $local->free;                                                               # Free stack frame
-    RestoreFirstSevenExceptRaxAndRdi;
-   } in=>{file => 3};
+    $$p{address}->getReg(rax);
+    $$p{size}   ->getReg(rdi);
+    RestoreFirstSeven;
+   } in => {file => 3}, out => {address => 3, size => 3};
  }
 
 #D1 Short Strings                                                               # Operations on Short Strings
@@ -2773,7 +2793,7 @@ sub CreateByteString(%)                                                         
     RestoreFirstFour;
    } out => {bs => 3};
 
-  $s->call(my $bs = Vq(bs));
+  $s->call(my $bs = Vq(bs));                                                    # Variable that holds the reference to the byte string
 
   genHash("ByteString",                                                         # Definition of byte string
     structure => $string,                                                       # Structure details
@@ -2784,6 +2804,23 @@ sub CreateByteString(%)                                                         
    );
  }
 
+sub ByteString::length($)                                                       # Get the length of a byte string
+ {my ($byteString) = @_;                                                        # Byte string descriptor
+  my $size = $byteString->size->addr;
+  my $used = $byteString->used->addr;
+
+  S2                                                                            # Allocate more space if required
+   {my ($p) = @_;                                                               # Parameters
+    Comment "Byte string length";
+    SaveFirstFour;
+    $$p{bs}->setReg(rax);                                                       # Address byte string
+    Mov rdx, $byteString->used->addr;                                           # Used
+    Sub rdx, $byteString->structure->size;
+    $$p{size}->getReg(rdx);
+    RestoreFirstFour;
+   } in => {bs=>3}, out => {size=>3};
+ }
+
 sub ByteString::updateSpace($)                                                  #P Make sure that the byte string addressed by rax has enough space to accommodate content of length rdi
  {my ($byteString) = @_;                                                        # Byte string descriptor
   my $size = $byteString->size->addr;
@@ -2792,39 +2829,35 @@ sub ByteString::updateSpace($)                                                  
   S2                                                                            # Allocate more space if required
    {my ($p) = @_;                                                               #
     Comment "Allocate more space for a byte string";
+
     SaveFirstFour;
     $$p{bs}->setReg(rax);                                                       # Address byte string
-    Mov rdx, $byteString->used->addr;                                           # Used
-    $$p{size}->setReg(rdi);                                                     # Length required
-    Add rdx, rdi;                                                               # Wanted
-    Cmp rdx, $size;                                                             # Space needed versus actual size
-    KeepFree rdi, rdx;
+PrintOutStringNL "UUUUU";
+$$p{bs}->dump;
+PrintOutRegisterInHex rax;
+    my $oldSize = Vq(oldSize, $size);                                           # Size
+PrintOutStringNL "UUUU11";
+    my $oldUsed = Vq(oldUsed, $used);                                           # Used
+    my $minSize = $oldSize + $$p{size};                                         # Minimum size of new string
+    KeepFree rax;
+    If ($minSize > $oldSize, sub                                                # More space needed
+     {Mov rax, 4096;                                                            # Minimum byte string size
+      $minSize->setReg(rdx);
+      ForEver
+       {my ($start, $end) = @_;
+        Shl rax, 1;                                                             # New byte string size - double the size of the old byte string
+        Cmp rax, rdx;                                                           # Big enough?
+        IfGe {Jmp $end};                                                        # Big enough!
+       };
 
-    IfGt                                                                        # More space needed
-     {Mov rsi, rax;                                                             # Old byte string
-      KeepFree rax;
+      my $newSize = Vq(size, rax);                                              # Save new byte string size
+      AllocateMemory->call(size => $newSize, my $address = Vq(address));        # Create new byte string
 
-      Mov rdi, $size;                                                           # Old byte string size
-      Mov rax, rdi;                                                             # Old byte string length
+      CopyMemory->call(target => $address, source => $$p{bs}, size => $oldUsed);# Copy old byte string into new byte string
+      FreeMemory->call(address=>$$p{bs}, size=>$oldSize);                       # Free previous memory previously occupied byte string
+      $$p{bs}->copyAddress($address);                                           # Save new byte string address
+     });
 
-      my $double = SetLabel Label;                                              # Keep doubling until we have a string area that is big enough to hold the new data
-      Shl rax, 1;                                                               # New byte string size - double the size of the old byte string
-      Cmp rax, rdx;                                                             # Big enough ?
-      Jl $double;                                                               # Still too low
-      $$p{size}->getReg(rdx);
-
-      Mov rdx, rax;                                                             # Save new byte string size
-      AllocateMemory;                                                           # Create new byte string
-      $$p{bs}->getReg(rax);
-
-      CopyMemory;                                                               # Copy old byte string into new byte string
-      Mov $size, rdx;                                                           # rdx can be reused now we have saved the size of the new bye string
-
-      PushR rax;                                                                # Free old byte string
-      Mov rax, rsi;                                                             # Old byte string
-      FreeMemory;
-      PopR rax;
-     };
     RestoreFirstFour;
    } io => {bs=>3}, in=>{size=>3};
  }
@@ -2891,31 +2924,35 @@ sub ByteString::allocate($)                                                     
 sub ByteString::m($)                                                            # Append the content with length rdi addressed by rsi to the byte string addressed by rax
  {my ($byteString) = @_;                                                        # Byte string descriptor
   my $used = $byteString->used->addr;
-  my $target = rdx;                                                             # Register that addresses target of move
-  my $length = rdx;                                                             # Register used to update used field
 
   S2                                                                            # Append content
    {my ($p) = @_;                                                               # Parameters
     Comment "Append memory to a byte string";
+
+PrintOutStringNL "SSS111";
+$$p{bs}->dump;
     $byteString->updateSpace->call($$p{bs}, $$p{size});                         # Update space if needed
 
     SaveFirstFour;
-    $$p{bs}     ->setReg(rax);
-    $$p{size}   ->setReg(rdi);
-    $$p{address}->setReg(rsi);
-#   Lea $target, $byteString->data->addr;                                       # Address of data field
-    Mov $target, rax;
-    Add $target, $used;                                                         # Skip over used data
+    $$p{bs}->setReg(rax);
+    my $oldUsed = Vq("used", $used);
+    my $target  = $oldUsed + $$p{bs};
+    KeepFree rax;
+PrintOutStringNL "SSS222";
+$$p{bs}->dump;
+$target->dump('target');
+$$p{address}->dump("source");
+$$p{size}->dump;
+#$oldUsed->dump;
+    CopyMemory->call(source=>$$p{address}, size=>$oldUsed, target=>$target);         # Move data in
+PrintOutStringNL "SSS333";
 
-    PushR rax;         ## Probably not needed                                                         # Save address of byte string
-    Mov rax, $target;                                                           # Address target
-    CopyMemory->call(source=>$$p{address}, size=>$$p{size}, target=>Vq(target,$target));                                                                 # Move data in
-    PopR rax;                                                                   # Restore address of byte string
+    KeepFree rdx;
+    my $newUsed = $oldUsed + $$p{size};
 
-    KeepFree $length;
-    Mov $length, $used;                                                         # Update used field
-    Add $length, rdi;
-    Mov $used,   $length;
+    $$p{bs} ->setReg(rax);                                                      # Update used field
+    $newUsed->setReg(rdi);
+    Mov $used, rdi;
 
     RestoreFirstFour;
    } io => { bs => 3}, in => {address => 3, size => 3};
@@ -2941,22 +2978,20 @@ sub ByteString::q($$)                                                           
 #   }
 # }
 
-sub ByteString::char($$$)                                                       # Append a character expressed as a decimal number to the byte string addressed by rax
- {my ($byteString, $bs, $char) = @_;                                            # Byte string descriptor, var byte string, decimal number of character to be appended
-  PushR rax;
-  Mov al, $char;
-  $byteString->m->call($bs, Vq(string, rax), Vq(size, 1));                      # Move data
-  PopR rax;
+sub ByteString::char($$)                                                        # Append a character expressed as a decimal number to the byte string addressed by rax
+ {my ($byteString, $char) = @_;                                                 # Byte string descriptor, var byte string, decimal number of character to be appended
+  my $s = Rb(ord($char));
+  $byteString->m->call($byteString->bs, Vq(address, $s), Vq(size, 1));          # Move data
  }
 
-sub ByteString::nl($$)                                                          # Append a new line to the byte string addressed by rax
- {my ($byteString, $bs) = @_;                                                   # Byte string descriptor, var byte string
-  $byteString->char($bs, ord("\n"));
+sub ByteString::nl($)                                                           # Append a new line to the byte string addressed by rax
+ {my ($byteString) = @_;                                                        # Byte string descriptor, var byte string
+  $byteString->char("\n");
  }
 
-sub ByteString::z($$)                                                           # Append a trailing zero to the byte string addressed by rax
- {my ($byteString, $bs) = @_;                                                   # Byte string descriptor, var byte string
-  $byteString->char($bs, 0);
+sub ByteString::z($)                                                            # Append a trailing zero to the byte string addressed by rax
+ {my ($byteString) = @_;                                                        # Byte string descriptor
+  $byteString->char("\0");
  }
 
 sub ByteString::rdiInHex                                                        # Add the content of register rdi in hexadecimal in big endian notation to a byte string
@@ -3006,11 +3041,15 @@ sub ByteString::append($)                                                       
 sub ByteString::clear($)                                                        # Clear the byte string addressed by rax
  {my ($byteString) = @_;                                                        # Byte string descriptor, var byte string
 
-  PushR my @save = (rax, rdi);
-  $byteString->bs->setReg(rax);
-  Mov rdi, $byteString->structure->size;
-  Mov $byteString->used->addr, rdi;
-  PopR     @save;
+  S2
+   {my ($p) = @_;                                                               # Parameters
+    Comment "Clear byte string";
+    PushR my @save = (rax, rdi);
+    $$p{bs}->setReg(rax);
+    Mov rdi, $byteString->structure->size;
+    Mov $byteString->used->addr, rdi;
+    PopR     @save;
+   } in => {bs => 3};
  }
 
 sub ByteString::write($$)                                                       # Write the content in a byte string addressed by rax to a temporary file and replace the byte string content with the name of the  temporary file
@@ -3071,31 +3110,24 @@ sub ByteString::write($$)                                                       
    }  in => {bs=>3};
  }
 
-sub ByteString::read($)                                                         # Read the file named in the byte string (terminated with a zero byte) addressed by rax and place it into the byte string after clearing the byte string to remove the file name contained therein.
+sub ByteString::read($)                                                         # Read the named file (terminated with a zero byte) and place it into the named byte string.
  {my ($byteString) = @_;                                                        # Byte string descriptor
 
-  PushR rax;                                                                    # Get address of byte string
-  $byteString->address->setReg(rax);
-
-# Call S                                                                        # Copy byte string
-   {Comment "Read a byte string";
-    SaveFirstFour;
-    Mov rdx, rax;                                                               # Save address of byte string
-    Lea rax, $byteString->data->addr;                                           # Address file name with rax
-    ReadFile;                                                                   # Read the file named by rax
-    Mov rsi, rax;                                                               # Address of content in rax, length of content in rdi
-    KeepFree rax;
-    Mov rax, rdx;                                                               # Address of byte string
-    $byteString->clear;                                                         # Remove file name in byte string
-    $byteString->m;                                                             # Move data into byte string
-    PushR rax;                                                                  # We might have a new byte string by now
-    Mov rax, rsi;                                                               # File data
-    FreeMemory;                                                                 # Address of allocated memory in rax, length in rdi
-    PopR rax;                                                                   # Address byte string
-    RestoreFirstFour;
-   }# name => "ByteString::read";
-
-  PopR rax;
+  S2                                                                            # Copy byte string
+   {my ($p) = @_;                                                               # Parameters
+    Comment "Read a byte string";
+PrintOutStringNL "RRR111";
+$$p{bs}->dump;
+    ReadFile->call($$p{file}, (my $size = Vq(size)), my $address = Vq(address));
+PrintOutStringNL "RRR222";
+$$p{bs}->dump;
+    $byteString->m->call($$p{bs}, $size, $address);                             # Move data into byte string
+PrintOutStringNL "RRR333";
+$$p{bs}->dump;
+    FreeMemory    ->call(         $size, $address);                             # Free memory allocated by read
+PrintOutStringNL "RRR444";
+$$p{bs}->dump;
+   } io => {bs => 3}, in => {file => 3};
  }
 
 sub ByteString::out($)                                                          # Print the specified byte string addressed by rax on sysout
@@ -3103,7 +3135,7 @@ sub ByteString::out($)                                                          
   SaveFirstFour;
   $byteString->bs->setReg(rax);
   Mov rdi, $byteString->used->addr;                                             # Length to print
-  Sub rdi, $byteString->structure->size;                                       # Length to print
+  Sub rdi, $byteString->structure->size;                                        # Length to print
   Lea rax, $byteString->data->addr;                                             # Address of data field
   PrintOutMemory;
   RestoreFirstFour;
@@ -9613,12 +9645,19 @@ if (1) {                                                                        
 
   $a->out;   PrintOutNL;                                                        # Print byte string
   $b->out;   PrintOutNL;                                                        # Print byte string
-  $a->clear;
-  $a->out;                                                                      # Clear byte string
+  $a->length->call($a->bs, my $sa = Vq(size)); $sa->dump;
+  $a->length->call($b->bs, my $sb = Vq(size)); $sb->dump;
+  $a->clear ->call($a->bs);
+  $a->length->call($a->bs, my $sA = Vq(size)); $sA->dump;
+  $a->length->call($b->bs, my $sB = Vq(size)); $sB->dump;
 
   is_deeply Assemble, <<END;                                                    # Assemble and execute
 abababababababab
 ababababababababababababababababababababababababababababababababababababab
+size: 0000 0000 0000 0010
+size: 0000 0000 0000 004A
+size: 0000 0000 0000 0000
+size: 0000 0000 0000 004A
 END
  }
 
@@ -9667,16 +9706,32 @@ if (1) {                                                                        
   ok Assemble =~ m(rax: 0000 0000 0000 003C.*rax: 0000 0000 0000 0003)s;
  }
 
+if (1) {                                                                        #TByteString::nl
+  my $s = CreateByteString;
+  $s->q("A");
+  $s->nl;
+  $s->q("B");
+  $s->out;
+
+  is_deeply dump(Assemble), <<END;
+A
+B
+END
+ }
+
+latest:;
+
 if (1) {                                                                        # Print this file  #TByteString::read #TByteString::z #TByteString::q
   my $s = CreateByteString;                                                     # Create a string
-  $s->q($0);                                                                    # Append a constant to the byte string
-  $s->z;                                                                        # Trailing zero
-  $s->read;
+PrintOutStringNL "AAAAAAAAAAAA";
+  $s->read->call($s->bs, Vq(file, Rs($0)));
+PrintOutStringNL "BBBBBBBBBBB";
   $s->out;
 
   my $r = Assemble;
   ok index(removeNonAsciiChars($r), removeNonAsciiChars(readFile $0)) >= 0;     # Output contains this file
  }
+exit;
 
 if (1) {                                                                        # Print rdi in hex into a byte string #TByteString::rdiInHex
   my $s = CreateByteString;                                                     # Create a string
