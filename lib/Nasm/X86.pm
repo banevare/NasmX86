@@ -920,7 +920,7 @@ sub S2(&%)                                                                      
   SetLabel $end;
 
   &ScopeEnd;                                                                    # End scope
-
+  defined($name) or confess "Name missing";
   $subroutines{$name} = genHash(__PACKAGE__."::Sub",                            # Subroutine definition
     start     => $start,
     scope     => $scope,
@@ -940,6 +940,7 @@ sub Nasm::X86::Sub::call($%)                                                    
   while(@parameters)                                                            # Namify parameters supplied by the caller
    {my $p = shift @parameters;                                                  # Check parameters provided by caller
     my $n = ref($p) ? $p->name : $p;
+
     my $v = ref($p) ? $p       : shift @parameters;
     unless ($sub->in->{$n} or $sub->out->{$n} or $sub->io->{$n})
      {my @t;
@@ -1550,7 +1551,7 @@ sub Variable::arithmetic($$$$)                                                  
       Mov r15, "[r15]";
      }
     Mov r14, $r;
-    if ($right->reference)                                                      # Dereference right if necessary
+    if (ref($right) and $right->reference)                                      # Dereference right if necessary
      {KeepFree r14;
       Mov r14, "[r14]";
      }
@@ -2430,7 +2431,7 @@ sub AllocateMemory                                                              
     $$p{address}->getReg(rax);                                                  # Amount of memory
 
     RestoreFirstSeven;
-   } in=>{size=>3}, out=>{address=>3};
+   } in => {size=>3}, out => {address=>3};
  }
 
 sub FreeMemory                                                                  # Free memory
@@ -2883,58 +2884,55 @@ sub ByteString::makeReadOnly($)                                                 
  {my ($byteString) = @_;                                                        # Byte string descriptor
 
   S2                                                                            # Read file
-   {my ($parameters) = @_;                                                      #
+   {my ($p) = @_;                                                               # Parameters
     Comment "Make a byte string readable";
     SaveFirstFour;
-    $$parameters{bs}->setReg(rax);
+    $$p{bs}->setReg(rax);
     Mov rdi, rax;                                                               # Address of byte string
     Mov rsi, $byteString->size->addr;                                           # Size of byte string
+    KeepFree rax;
+
     Mov rdx, 1;                                                                 # Read only access
     Mov rax, 10;
     Syscall;
     RestoreFirstFour;                                                           # Return the possibly expanded byte string
-   } in => {bs => $byteString};
+   } in => {bs => 3};
  }
 
 sub ByteString::makeWriteable($)                                                # Make a byte string writable
  {my ($byteString) = @_;                                                        # Byte string descriptor
 
   S2                                                                            # Read file
-   {my ($parameters) = @_;                                                      #
+   {my ($p) = @_;                                                               # Parameters
     Comment "Make a byte string writable";
     SaveFirstFour;
-    $$parameters{bs}->setReg(rax);
+    $$p{bs}->setReg(rax);
     Mov rdi, rax;                                                               # Address of byte string
     Mov rsi, $byteString->size->addr;                                           # Size of byte string
+    KeepFree rax;
     Mov rdx, 3;                                                                 # Read only access
     Mov rax, 10;
     Syscall;
     RestoreFirstFour;                                                           # Return the possibly expanded byte string
-   } in => {bs => $byteString};
+   } in => {bs => 3};
  }
 
 sub ByteString::allocate($)                                                     # Allocate the amount of space indicated in rdi in the byte string addressed by rax and return the offset of the allocation in the arena in rdi
  {my ($byteString) = @_;                                                        # Byte string descriptor
-  my $used   = rdx;                                                             # Register used to calculate how much of the byte string has been used
-  my $offset = rsi;                                                             # Register used to hold current offset
 
   S2                                                                            # Allocate space
-   {my ($parameters) = @_;                                                      #
+   {my ($p) = @_;                                                               # Parameters
     Comment "Allocate space in a byte string";
     SaveFirstFour;
 
-PrintOutStringNL "AAAA1111";
-    $byteString->updateSpace->call($$parameters{bs}, $$parameters{size});       # Update space if needed
-PrintOutStringNL "AAAA2222";
-    $$parameters{bs}  ->setReg(rax);
-    $$parameters{size}->setReg(rdi);
-    Mov $used, $byteString->used->addr;                                         # Currently used
-    Mov $offset, $used;                                                         # Current offset
-    Add $used, rdi;                                                             # Add the requested length to get the amount now used
-    Mov $byteString->used->addr, $used;
-    Mov rdi, $offset;
-    Add rdi, $byteString->structure->size;                                      # This is the offset from the start of the byte string - which means that it will never be less than 16
-    $$parameters{offset}->getReg(rdi);
+    $byteString->updateSpace->call($$p{bs}, $$p{size});                         # Update space if needed
+    $$p{bs}  ->setReg(rax);
+    Mov rsi, $byteString->used->addr;                                           # Currently used
+    $$p{offset}->getReg(rsi);
+    $$p{size}  ->setReg(rdi);
+    Add rsi, rdi;
+    Mov $byteString->used->addr, rsi;                                           # Currently used
+    KeepFree rax, rdi, rsi;
 
     RestoreFirstFour;
    } in => {bs => 3, size => 3}, out => {offset => 3};
@@ -3061,61 +3059,33 @@ sub ByteString::clear($)                                                        
  }
 
 sub ByteString::write($$)                                                       # Write the content in a byte string addressed by rax to a temporary file and replace the byte string content with the name of the  temporary file
- {my ($byteString, $bs) = @_;                                                   # Byte string descriptor, var byte string
-  my $FileNameSize = 12;                                                        # Size of the temporary file name
+ {my ($byteString) = @_;                                                        # Byte string descriptor
 
   S2                                                                            # Copy byte string
    {my ($p) = @_;                                                               # Parameters
-    Comment "Write a byte string to a temporary file";
-    SaveFirstSeven;
-    $$p{bs}->setReg(rax);
+    Comment "Write a byte string to a file";
+    SaveFirstFour;
 
-    my $string = r8;                                                            # Byte string
-    my $file   = r9;                                                            # File descriptor
-
-    Mov $string, rax;                                                           # Save address of byte string
-
-    GetPidInHex;                                                                # Name of file
-    Push rax;
-    if (1)
-     {my @c = split //, "atmpat";
-      while(@c)
-       {my $a = pop @c; my $b = pop @c;
-        my $x = sprintf("%x%x", ord($a), ord($b));
-        KeepFree rax;
-        Mov rax, "0x$x";
-        Push ax;
-       }
-     }
-
+    $$p{file}->setReg(rax);
+    OpenWrite;                                                                  # Open file
+    my $file = Vq('fd', rax);                                                   # File descriptor
     KeepFree rax;
-    Mov rax, rsp;                                                               # Address file name
-    OpenWrite;                                                                  # Create a temporary file
-    Mov $file, rax;                                                             # File descriptor
 
+    $$p{bs}->setReg(rax);                                                       # Write file
+    Lea rsi, $byteString->data->addr;
+    Mov rdx, $byteString->used->addr;
+    Sub rdx, $byteString->structure->size;
     KeepFree rax;
+
     Mov rax, 1;                                                                 # Write content to file
-    Mov rdi, $file;
-    Lea rsi, $byteString->data->addr($string);
-    Mov rdx, $byteString->used->addr($string);
+    $file->setReg(rdi);
     Syscall;
-    KeepFree rax, rdi;
+    KeepFree rax, rdi, rsi, rdx;
 
-    Mov rax, $string;                                                           # Clear string and add file name
-    $byteString->clear->call($bs);
-    KeepFree rax;
-
-    Mov rax, $string;                                                           # Put file name in byte string
-    Mov rsi, rsp;
-    Mov rdi, 1+$FileNameSize;                                                   # File name size plus one trailing zero
-    $byteString->m;
-    Add rsp, 2+$FileNameSize;                                                   # File name size plus two trailing zeros
-    KeepFree rax;
-
-    Mov rax, $file;
+    $file->setReg(rax);
     CloseFile;
-    RestoreFirstSeven;
-   }  in => {bs=>3};
+    RestoreFirstFour;
+   }  in => {bs => 3, file => 3};
  }
 
 sub ByteString::read($)                                                         # Read the named file (terminated with a zero byte) and place it into the named byte string.
@@ -3141,56 +3111,40 @@ sub ByteString::out($)                                                          
   RestoreFirstFour;
  }
 
-sub ByteString::bash($)                                                         # Execute the file named in the byte string addressed by rax with bash
- {my ($byteString) = @_;                                                        # Byte string descriptor
-
-  PushR rax;                                                                    # Get address of byte string
-  $byteString->address->setReg(rax);
-
-  Call S                                                                        # Bash string
-   {Comment "Execute a byte string via bash";
+sub executeFileViaBash()                                                        # Execute the file named in the byte string addressed by rax with bash
+ {S2                                                                            # Bash string
+   {my ($p) = @_;                                                               # Parameters
+    Comment "Execute a file via bash";
     SaveFirstFour;
-    Mov rdx, rax;                                                               # Save byte string address
     Fork;                                                                       # Fork
 
-    Test rax,rax;
+    Test rax, rax;
 
     IfNz                                                                        # Parent
      {WaitPid;
      }
     sub                                                                         # Child
      {KeepFree rax;
-      Mov rax, rdx;                                                             # Restore address of byte string
-      KeepFree rdx;
-      Lea rdi, $byteString->data->addr;
-      KeepFree rax;
+      $$p{file}->setReg(rdi);
       Mov rsi, 0;
       Mov rdx, 0;
       Mov rax, 59;
       Syscall;
      };
     RestoreFirstFour;
-   } name => "ByteString::bash";
-
-  PopR rax;
+   } in => {file => 3};
  }
 
-sub ByteString::unlink($)                                                       # Unlink the file named in the byte string addressed by rax with bash
- {my ($byteString) = @_;                                                        # Byte string descriptor
-
-  PushR rax;                                                                    # Get address of byte string
-  $byteString->address->setReg(rax);
-
-  Call S                                                                        # Bash string
-   {Comment "Unlink a file named in a byte string";
+sub unlinkFile()                                                                # Unlink the named file
+ {S2
+   {my ($p) = @_;                                                               # Parameters
+    Comment "Unlink a file";
     SaveFirstFour;
-    Lea rdi, $byteString->data->addr;
+    $$p{file}->setReg(rdi);
     Mov rax, 87;
     Syscall;
     RestoreFirstFour;
-   } name => "ByteString::unlink";
-
-  PopR rax;
+   } in => {file => 3};
  }
 
 sub ByteString::dump($)                                                         # Dump details of a byte string
@@ -9238,7 +9192,7 @@ Test::More->builder->output("/dev/null") if $localTest;                         
 
 if ($^O =~ m(bsd|linux)i)                                                       # Supported systems
  {if (confirmHasCommandLineCommand(q(nasm)) and LocateIntelEmulator)            # Network assembler and Intel Software Development emulator
-   {plan tests => 80;
+   {plan tests => 93;
    }
   else
    {plan skip_all =>qq(Nasm or Intel 64 emulator not available);
@@ -9804,7 +9758,6 @@ if (0) {                                                                        
   ok Assemble =~ m(tmp);
  }
 
-latest:;
 if (1) {                                                                        # Execute the content of a byte string #TByteString::bash #TByteString::write #TByteString::out #TByteString::unlink #TByteString::ql
   my $s = CreateByteString;                                                     # Create a string
   $s->ql(<<END);                                                                # Write code to execute
@@ -9813,22 +9766,18 @@ whoami
 ls -la
 pwd
 END
-say STDERR "AAAA ";
-  $s->write;                                                                    # Write code to a temporary file
-say STDERR "AAAA ";
-  $s->bash;                                                                     # Execute the temporary file
-say STDERR "AAAA ";
-  $s->unlink;                                                                   # Execute the temporary file
-say STDERR "AAAA ";
+  $s->write->call($s->bs, my $f = Vq('file', Rs("zzz.sh")));                      # Write code to a file
+  executeFileViaBash->call($f);                                                 # Execute the file
+  unlinkFile->call($f);                                                         # Delete the file
 
   my $u = qx(whoami); chomp($u);
   ok Assemble(emulator=>0) =~ m($u);
  }
-exit;
+
 if (1) {                                                                        # Make a byte string readonly
   my $s = CreateByteString;                                                     # Create a byte string
   $s->q("Hello");                                                               # Write code to byte string
-  $s->makeReadOnly;                                                             # Make byte string read only
+  $s->makeReadOnly->call($s->bs);                                               # Make byte string read only
   $s->q(" World");                                                              # Try to write to byte string
 
   ok Assemble =~ m(SDE ERROR: DEREFERENCING BAD MEMORY POINTER.*mov byte ptr .rax.rdx.1., r8b);
@@ -9837,8 +9786,8 @@ if (1) {                                                                        
 if (1) {                                                                        # Make a read only byte string writable  #TByteString::makeReadOnly #TByteString::makeWriteable
   my $s = CreateByteString;                                                     # Create a byte string
   $s->q("Hello");                                                               # Write data to byte string
-  $s->makeReadOnly;                                                             # Make byte string read only - tested above
-  $s->makeWriteable;                                                             # Make byte string writable again
+  $s->makeReadOnly ->call($s->bs);                                              # Make byte string read only - tested above
+  $s->makeWriteable->call($s->bs);                                              # Make byte string writable again
   $s->q(" World");                                                              # Try to write to byte string
   $s->out;
 
@@ -9847,18 +9796,18 @@ if (1) {                                                                        
 
 if (1) {                                                                        # Allocate some space in byte string #TByteString::allocate
   my $s = CreateByteString;                                                     # Create a byte string
-  Mov r8,  rax;
-  Mov rdi, my $w = 0x20;                                                        # Space wanted
-  $s->allocate;                                                                 # Allocate space wanted
-  PrintOutRegisterInHex rdi;
-  KeepFree rdi;
-  Mov rdi, $w;                                                                  # Space wanted
-  $s->allocate;                                                                 # Allocate space wanted
-  PrintOutRegisterInHex rdi;
+  $s->allocate->call($s->bs, Vq(size, 0x20), my $o1 = Vq(offset));              # Allocate space wanted
+  $s->allocate->call($s->bs, Vq(size, 0x30), my $o2 = Vq(offset));
+  $s->allocate->call($s->bs, Vq(size, 0x10), my $o3 = Vq(offset));
+  $o1->dump;
+  $o2->dump;
+  $o3->dump;
 
-  my $e = sprintf("rdi: 0000 0000 0000 %04X", $s->structure->size);             # Expected results
-  my $E = sprintf("rdi: 0000 0000 0000 %04X", $s->structure->size+$w);
-  ok Assemble =~ m($e.*$E)s;
+  is_deeply Assemble, <<END;
+offset: 0000 0000 0000 0018
+offset: 0000 0000 0000 0038
+offset: 0000 0000 0000 0068
+END
  }
 
 if (1) {                                                                        #TSetRegisterToMinusOne
@@ -10025,11 +9974,10 @@ if (1) {                                                                        
   PrintOutRegisterInHex xmm1;
   Sub rsp, 16;
 
-# Copy memory, the target is addressed by rax, the length is in rdi, the source is addressed by rsi
-  Mov rax, rsp;
+  Mov rax, rsp;                                                                 # Copy memory, the target is addressed by rax, the length is in rdi, the source is addressed by rsi
   Mov rdi, 16;
   Mov rsi, $s;
-  CopyMemory;
+  CopyMemory->call(Vq(source, rsi), Vq(target, rax), Vq(size, rdi));
   PrintOutMemoryInHex;
 
   my $r = Assemble;
@@ -10038,22 +9986,18 @@ if (1) {                                                                        
   ok $r =~ m(0001 0200 0300 00000400 0000 0000 0000);
  }
 
-if (1) {                                                                        #T
+if (1) {                                                                        #TAllocateMemory
   my $N = 256;
   my $s = Rb 0..$N-1;
-  Mov rax, $N;
-  my $a = AllocateMemory;
+  AllocateMemory->call(Vq(size, $N), my $a = Vq(address));
+  CopyMemory    ->call(Vq(source, $s), Vq(size, $N), target => $a);
+  AllocateMemory->call(Vq(size, $N), my $b = Vq(address));
+
+  CopyMemory    ->call(source => $a, target => $b, Vq(size, $N));
+
+  $b->setReg(rax);
   Mov rdi, $N;
-  Mov rsi, $s;
-  CopyMemory;
-  KeepFree rax, rdi, rsi;
-
-  Mov rax, $N;
-  my $b = AllocateMemory;
-
-  $b->clearMemory;
-  $b->copyMemoryFrom($a);
-  $b->printOutMemoryInHex;
+  PrintOutMemoryInHexNL;
 
   is_deeply Assemble, <<END;
 0001 0203 0405 06070809 0A0B 0C0D 0E0F1011 1213 1415 16171819 1A1B 1C1D 1E1F2021 2223 2425 26272829 2A2B 2C2D 2E2F3031 3233 3435 36373839 3A3B 3C3D 3E3F4041 4243 4445 46474849 4A4B 4C4D 4E4F5051 5253 5455 56575859 5A5B 5C5D 5E5F6061 6263 6465 66676869 6A6B 6C6D 6E6F7071 7273 7475 76777879 7A7B 7C7D 7E7F8081 8283 8485 86878889 8A8B 8C8D 8E8F9091 9293 9495 96979899 9A9B 9C9D 9E9FA0A1 A2A3 A4A5 A6A7A8A9 AAAB ACAD AEAFB0B1 B2B3 B4B5 B6B7B8B9 BABB BCBD BEBFC0C1 C2C3 C4C5 C6C7C8C9 CACB CCCD CECFD0D1 D2D3 D4D5 D6D7D8D9 DADB DCDD DEDFE0E1 E2E3 E4E5 E6E7E8E9 EAEB ECED EEEFF0F1 F2F3 F4F5 F6F7F8F9 FAFB FCFD FEFF
@@ -10461,7 +10405,7 @@ if (1) {                                                                        
   my $h = $g /  2;    $h->print;
   my $i = $a %  2;    $i->print;
 
-  If($a == 3, sub{PrintOutStringNL "a == 3"});
+  If ($a == 3, sub{PrintOutStringNL "a == 3"});
 
   is_deeply Assemble, <<END;
 0300 0000 0000 0000
@@ -10479,31 +10423,27 @@ END
 if (1) {                                                                        #TVariable::dump  #TVariable::print
   my $a = Vq(a, 3); $a->dump;
   my $b = Vq(b, 2); $b->dump;
-  my $c = $a +  $b; $c->print;
-  my $d = $c -  $a; $d->print;
-  my $e = $d == $b; $e->print;
-  my $f = $d != $b; $f->print;
-  my $g = $a *  $b; $g->print;
-  my $h = $g /  $b; $h->print;
-  my $i = $a %  $b; $i->print;
-
-  If($a == 3, sub{PrintOutStringNL "a == 3"});
-
+  my $c = $a +  $b; $c->dump;
+  my $d = $c -  $a; $d->dump;
+  my $e = $d == $b; $e->dump;
+  my $f = $d != $b; $f->dump;
+  my $g = $a *  $b; $g->dump;
+  my $h = $g /  $b; $h->dump;
+  my $i = $a %  $b; $i->dump;
   is_deeply Assemble, <<END;
 a: 0000 0000 0000 0003
 b: 0000 0000 0000 0002
-0500 0000 0000 0000
-0200 0000 0000 0000
-0100 0000 0000 0000
-0000 0000 0000 0000
-0600 0000 0000 0000
-0300 0000 0000 0000
-0100 0000 0000 0000
-a == 3
+(a add b): 0000 0000 0000 0005
+((a add b) sub a): 0000 0000 0000 0002
+(((a add b) sub a) eq b): 0000 0000 0000 0001
+(((a add b) sub a) ne b): 0000 0000 0000 0000
+(a times b): 0000 0000 0000 0006
+((a times b) / b): 0000 0000 0000 0003
+(a % b): 0000 0000 0000 0001
 END
  }
 
-if (1) {                                                                        #TVariable::dump
+if (1) {                                                                        #TVariable::for
   Vq(limit,10)->for(sub
    {my ($i, $start, $next, $end) = @_;
     $i->print;
@@ -10624,7 +10564,7 @@ q at offset 12 in zmm0: 0302 0100 0000 0302
 END
  }
 
-if (1) {                                                                        #TCreateBlockString
+if (0) {                                                                        #TCreateBlockString
   my $s = Rb(0..128);
   my $B = CreateByteString;
   my $b = $B->CreateBlockString(0);
@@ -10641,7 +10581,7 @@ Length: 0000 0000 0000 000C
 END
  }
 
-if (1) {
+if (0) {
   my $s = Rb(0..128);
   my $B = CreateByteString;
   my $b = $B->CreateBlockString(0);
@@ -10675,7 +10615,7 @@ Length: 0000 0000 0000 0035
 END
  }
 
-if (1) {
+if (0) {
   my $s = S2
    {my ($parameters) = @_;                                                      #
     $$parameters{a}->setReg(rax);
