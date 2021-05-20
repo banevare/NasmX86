@@ -10,7 +10,7 @@ use warnings FATAL => qw(all);
 use strict;
 use Carp qw(confess cluck);
 use Data::Dump qw(dump);
-use Data::Table::Text qw(confirmHasCommandLineCommand currentDirectory fff fileSize findFiles formatTable fpe fpf genHash lll owf pad readFile stringsAreNotEqual);
+use Data::Table::Text qw(confirmHasCommandLineCommand currentDirectory fff fileSize findFiles formatTable fpe fpf genHash lll owf pad readFile stringsAreNotEqual temporaryFile);
 use Asm::C qw(:all);
 use feature qw(say current_sub);
 
@@ -260,6 +260,7 @@ sub PopR(@);                                                                    
 sub PopRR(@);                                                                   # Pop a list of registers off the stack without tracking
 sub PrintOutMemory;                                                             # Print the memory addressed by rax for a length of rdi
 sub PrintOutRegisterInHex(@);                                                   # Print any register as a hex string
+sub PrintOutStringNL($);                                                        # Print a constant string to sysout followed by new line
 sub PushR(@);                                                                   # Push a list of registers onto the stack
 sub PushRR(@);                                                                  # Push a list of registers onto the stack without tracking
 sub Syscall();                                                                  # System call in linux 64 format
@@ -959,12 +960,10 @@ sub Nasm::X86::Sub::call($%)                                                    
   for my $p(keys $sub->io->%*)                                                  # Load io parameters
    {confess "Missing io parameter: $p" unless my $v = $p{$p};
     if ($v->isRef)                                                              # If we already have a reference we can just copy the content
-     {say STDERR "AAAA not Copy $v to $p ";
-      $sub->variables->{$p}->copy($v);
+     {$sub->variables->{$p}->copy($v);
      }
     else                                                                        # Otherwise make a reference
-     {say STDERR "BBBB address  Copy $v to $p ";
-      $sub->variables->{$p}->copyAddress($v);
+     {$sub->variables->{$p}->copyAddress($v);
      }
    }
 
@@ -1453,12 +1452,33 @@ sub Variable::copy($$)                                                          
   my $l = $left ->address;
   my $r = $right->address;
 
-
   if ($left->size == 3 and $right->size == 3)
    {Comment "Copy parameter ".$right->name.' to '.$left->name;
     PushR my @save = (r15);
     Mov r15, $r;
     Mov $l, r15;
+    PopR @save;
+    return;
+   }
+
+  confess "Need more code";
+ }
+
+sub Variable::copyRef($$)                                                       # Copy one variable into an referenced variable
+ {my ($left, $right) = @_;                                                      # Left variable, right variable
+
+  $left->reference           or confess "Reference required for: ".$left->name;
+  ref($right) =~ m(Variable) or confess "Variable required";
+  my $l = $left ->address;
+  my $r = $right->address;
+
+
+  if ($left->size == 3 and $right->size == 3)
+   {Comment "Copy parameter ".$right->name.' to '.$left->name;
+    PushR my @save = (r14, r15);
+    Mov r15, $r;
+    Mov r14, $l;
+    Mov "[r14]", r15;
     PopR @save;
     return;
    }
@@ -1663,6 +1683,10 @@ sub Variable::dump($;$)                                                         
    {PushR my @regs = (rax, rdi);
     Mov rax, $left->label;                                                      # Address in memory
     KeepFree rax;
+    if ($left->reference)
+     {Mov rax, "[rax]";
+      KeepFree rax;
+     }
     Mov rax, "[rax]";
     &PrintOutString($title//$left->name.": ");
     &PrintOutRaxInHex();
@@ -2361,7 +2385,7 @@ sub PrintOutMemoryInHexNL                                                       
   PrintOutNL;
  }
 
-sub PrintOutMemory                                                              # Print the memory addressed by rax for a length of rdi
+sub PrintOutMemory                                                              # Print the memory addressed by rax for a length of rdi::
  {@_ == 0 or confess;
 
   Call S
@@ -2465,7 +2489,6 @@ sub CopyMemory()                                                                
     $$p{target}->setReg($target);
     $$p{size}  ->setReg($length);
     ClearRegisters $copied;
-
     For                                                                           # Clear memory
      {Mov "r8b", "[$source+$copied]";
       Mov "[$target+$copied]", "r8b";
@@ -2832,13 +2855,9 @@ sub ByteString::updateSpace($)                                                  
 
     SaveFirstFour;
     $$p{bs}->setReg(rax);                                                       # Address byte string
-PrintOutStringNL "UUUUU";
-$$p{bs}->dump;
-PrintOutRegisterInHex rax;
     my $oldSize = Vq(oldSize, $size);                                           # Size
-PrintOutStringNL "UUUU11";
     my $oldUsed = Vq(oldUsed, $used);                                           # Used
-    my $minSize = $oldSize + $$p{size};                                         # Minimum size of new string
+    my $minSize = $oldUsed + $$p{size};                                         # Minimum size of new string
     KeepFree rax;
     If ($minSize > $oldSize, sub                                                # More space needed
      {Mov rax, 4096;                                                            # Minimum byte string size
@@ -2849,18 +2868,16 @@ PrintOutStringNL "UUUU11";
         Cmp rax, rdx;                                                           # Big enough?
         IfGe {Jmp $end};                                                        # Big enough!
        };
-
       my $newSize = Vq(size, rax);                                              # Save new byte string size
       AllocateMemory->call(size => $newSize, my $address = Vq(address));        # Create new byte string
-
       CopyMemory->call(target => $address, source => $$p{bs}, size => $oldUsed);# Copy old byte string into new byte string
       FreeMemory->call(address=>$$p{bs}, size=>$oldSize);                       # Free previous memory previously occupied byte string
-      $$p{bs}->copyAddress($address);                                           # Save new byte string address
+      $$p{bs}->copyRef($address);                                               # Save new byte string address
      });
 
     RestoreFirstFour;
    } io => {bs=>3}, in=>{size=>3};
- }
+ } # updateSpace
 
 sub ByteString::makeReadOnly($)                                                 # Make a byte string read only
  {my ($byteString) = @_;                                                        # Byte string descriptor
@@ -2906,7 +2923,9 @@ sub ByteString::allocate($)                                                     
     Comment "Allocate space in a byte string";
     SaveFirstFour;
 
+PrintOutStringNL "AAAA1111";
     $byteString->updateSpace->call($$parameters{bs}, $$parameters{size});       # Update space if needed
+PrintOutStringNL "AAAA2222";
     $$parameters{bs}  ->setReg(rax);
     $$parameters{size}->setReg(rdi);
     Mov $used, $byteString->used->addr;                                         # Currently used
@@ -2928,24 +2947,14 @@ sub ByteString::m($)                                                            
   S2                                                                            # Append content
    {my ($p) = @_;                                                               # Parameters
     Comment "Append memory to a byte string";
-
-PrintOutStringNL "SSS111";
-$$p{bs}->dump;
-    $byteString->updateSpace->call($$p{bs}, $$p{size});                         # Update space if needed
-
     SaveFirstFour;
     $$p{bs}->setReg(rax);
     my $oldUsed = Vq("used", $used);
+    $byteString->updateSpace->call($$p{bs}, $$p{size});                         # Update space if needed
+
     my $target  = $oldUsed + $$p{bs};
     KeepFree rax;
-PrintOutStringNL "SSS222";
-$$p{bs}->dump;
-$target->dump('target');
-$$p{address}->dump("source");
-$$p{size}->dump;
-#$oldUsed->dump;
-    CopyMemory->call(source=>$$p{address}, size=>$oldUsed, target=>$target);         # Move data in
-PrintOutStringNL "SSS333";
+    CopyMemory->call(source=>$$p{address}, $$p{size}, target=>$target);         # Move data in
 
     KeepFree rdx;
     my $newUsed = $oldUsed + $$p{size};
@@ -2969,14 +2978,13 @@ sub ByteString::q($$)                                                           
   $byteString->m->call($bs, $ad, $sz);
  }
 
-#sub ByteString::ql($$$)                                                         # Append a quoted string containing new line characters to the byte string addressed by rax
-# {my ($byteString, $bs, $const) = @_;                                           # Byte string descriptor, byte string, constant
-#  my @l = split /\s*\n/, $const;
-#  for my $l(@l)
-#   {$byteString->q->call(bs, ($l);
-#    $byteString->nl;
-#   }
-# }
+sub ByteString::ql($$)                                                          # Append a quoted string containing new line characters to the byte string addressed by rax
+ {my ($byteString, $const) = @_;                                                # Byte string, constant
+  for my $l(split /\s*\n/, $const)
+   {$byteString->q($l);
+    $byteString->nl;
+   }
+ }
 
 sub ByteString::char($$)                                                        # Append a character expressed as a decimal number to the byte string addressed by rax
  {my ($byteString, $char) = @_;                                                 # Byte string descriptor, var byte string, decimal number of character to be appended
@@ -3116,17 +3124,9 @@ sub ByteString::read($)                                                         
   S2                                                                            # Copy byte string
    {my ($p) = @_;                                                               # Parameters
     Comment "Read a byte string";
-PrintOutStringNL "RRR111";
-$$p{bs}->dump;
     ReadFile->call($$p{file}, (my $size = Vq(size)), my $address = Vq(address));
-PrintOutStringNL "RRR222";
-$$p{bs}->dump;
     $byteString->m->call($$p{bs}, $size, $address);                             # Move data into byte string
-PrintOutStringNL "RRR333";
-$$p{bs}->dump;
     FreeMemory    ->call(         $size, $address);                             # Free memory allocated by read
-PrintOutStringNL "RRR444";
-$$p{bs}->dump;
    } io => {bs => 3}, in => {file => 3};
  }
 
@@ -3791,9 +3791,11 @@ END
    }
 
   my $cmd  = qq(nasm -f elf64 -g -l $l -o $o $c && ld -o $e $o && chmod 744 $e);# Assemble
+  my $err  = "2>". ($options{2} // '&1');
+  my $out  = $options{1} ? "1>".$options{1} : '';
   my $exec = $emulator                                                          # Execute with or without the emulator
-             ? qq($sde -ptr-check -- ./$e 2>&1)
-             :                    qq(./$e 2>&1);
+             ? qq($sde -ptr-check -- ./$e $err $out)
+             :                    qq(./$e $err $out);
 
   $cmd .= qq( && $exec) unless $k;                                              # Execute automatically unless suppressed by user
 
@@ -3810,7 +3812,7 @@ END
 
 sub removeNonAsciiChars($)                                                      #P Return a copy of the specified string with all the non ascii characters removed
  {my ($string) = @_;                                                            # String
-  $string =~ s([^0x0-0x7f]) ()gsr;                                              # Remove non ascii characters
+  $string =~ s([^a-z0..9]) ()igsr;                                              # Remove non ascii characters
  }
 
 sub totalBytesAssembled                                                         #P Total size in bytes of all files assembled during testing
@@ -9225,7 +9227,9 @@ test unless caller;
 # podDocumentation
 __DATA__
 use Time::HiRes qw(time);
-use Test::More;
+use Test::Most;
+
+bail_on_fail;
 
 my $develop   = -e q(/home/phil/);                                              # Developing
 my $localTest = ((caller(1))[0]//'Nasm::X86') eq "Nasm::X86";                   # Local testing mode
@@ -9603,11 +9607,51 @@ if (1) {                                                                        
  }
 
 if (1) {                                                                        #TReadFile #TPrintMemory
-  ReadFile->call(Vq(file, Rs($0)));                                             # Read file
+  ReadFile->call(Vq(file, Rs($0)), (my $s = Vq(size)), my $a = Vq(address));    # Read file
+  $a->setReg(rax);
+  $s->setReg(rdi);
   PrintOutMemory;                                                               # Print memory
 
-  my $r = Assemble;                                                             # Assemble and execute
-  ok index(removeNonAsciiChars($r), removeNonAsciiChars(readFile $0)) >= 0;     # Output contains this file
+  my $r = Assemble(1 => (my $f = temporaryFile));                               # Assemble and execute
+  my $i = index(removeNonAsciiChars(readFile $f), removeNonAsciiChars(readFile $0));     # Output contains this file
+  ok $i > -1;
+ }
+
+if (1) {                                                                        #TCreateByteString #TByteString::clear #TByteString::out #TByteString::copy #TByteString::nl
+  my $a = CreateByteString;                                                     # Create a string
+  $a->q('aa');
+  $a->out;
+  PrintOutNL;
+  is_deeply Assemble, <<END;                                                    # Assemble and execute
+aa
+END
+ }
+
+if (1) {                                                                        #TCreateByteString #TByteString::clear #TByteString::out #TByteString::copy #TByteString::nl
+  my $a = CreateByteString;                                                     # Create a string
+  my $b = CreateByteString;                                                     # Create a string
+  $a->q('aa');
+  $b->q('bb');
+  $a->out;
+  PrintOutNL;
+  $b->out;
+  PrintOutNL;
+  is_deeply Assemble, <<END;                                                    # Assemble and execute
+aa
+bb
+END
+ }
+
+if (1) {                                                                        #TCreateByteString #TByteString::clear #TByteString::out #TByteString::copy #TByteString::nl
+  my $a = CreateByteString;                                                     # Create a string
+  my $b = CreateByteString;                                                     # Create a string
+  $a->q('aa');
+  $a->q('AA');
+  $a->out;
+  PrintOutNL;
+  is_deeply Assemble, <<END;                                                    # Assemble and execute
+aaAA
+END
  }
 
 if (1) {                                                                        #TCreateByteString #TByteString::clear #TByteString::out #TByteString::copy #TByteString::nl
@@ -9712,28 +9756,24 @@ if (1) {                                                                        
   $s->nl;
   $s->q("B");
   $s->out;
+  PrintOutNL;
 
-  is_deeply dump(Assemble), <<END;
+  is_deeply Assemble, <<END;
 A
 B
 END
  }
 
-latest:;
-
 if (1) {                                                                        # Print this file  #TByteString::read #TByteString::z #TByteString::q
   my $s = CreateByteString;                                                     # Create a string
-PrintOutStringNL "AAAAAAAAAAAA";
   $s->read->call($s->bs, Vq(file, Rs($0)));
-PrintOutStringNL "BBBBBBBBBBB";
   $s->out;
 
-  my $r = Assemble;
-  ok index(removeNonAsciiChars($r), removeNonAsciiChars(readFile $0)) >= 0;     # Output contains this file
+  my $r = Assemble(1 => my $f = temporaryFile);
+  ok index(removeNonAsciiChars(readFile $f), removeNonAsciiChars(readFile $0)) >= 0;     # Output contains this file
  }
-exit;
 
-if (1) {                                                                        # Print rdi in hex into a byte string #TByteString::rdiInHex
+if (0) {                                                                        # Print rdi in hex into a byte string #TByteString::rdiInHex
   my $s = CreateByteString;                                                     # Create a string
   Mov rdi, 0x88776655;
   Shl rdi, 32;
@@ -9752,7 +9792,7 @@ if (1) {                                                                        
   ok Assemble =~ m(rax: 00);
  }
 
-if (1) {                                                                        # Write a hex string to a temporary file
+if (0) {                                                                        # Write a hex string to a temporary file
   my $s = CreateByteString;                                                     # Create a string
   Mov rdi, 0x88776655;                                                          # Write into string
   Shl rdi, 32;
@@ -9764,6 +9804,7 @@ if (1) {                                                                        
   ok Assemble =~ m(tmp);
  }
 
+latest:;
 if (1) {                                                                        # Execute the content of a byte string #TByteString::bash #TByteString::write #TByteString::out #TByteString::unlink #TByteString::ql
   my $s = CreateByteString;                                                     # Create a string
   $s->ql(<<END);                                                                # Write code to execute
@@ -9772,14 +9813,18 @@ whoami
 ls -la
 pwd
 END
+say STDERR "AAAA ";
   $s->write;                                                                    # Write code to a temporary file
+say STDERR "AAAA ";
   $s->bash;                                                                     # Execute the temporary file
+say STDERR "AAAA ";
   $s->unlink;                                                                   # Execute the temporary file
+say STDERR "AAAA ";
 
   my $u = qx(whoami); chomp($u);
   ok Assemble(emulator=>0) =~ m($u);
  }
-
+exit;
 if (1) {                                                                        # Make a byte string readonly
   my $s = CreateByteString;                                                     # Create a byte string
   $s->q("Hello");                                                               # Write code to byte string
