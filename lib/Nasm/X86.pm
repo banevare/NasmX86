@@ -5,7 +5,7 @@
 #-------------------------------------------------------------------------------
 # podDocumentation
 package Nasm::X86;
-our $VERSION = "20210519";
+our $VERSION = "20210520";
 use warnings FATAL => qw(all);
 use strict;
 use Carp qw(confess cluck);
