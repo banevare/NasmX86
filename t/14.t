@@ -4,7 +4,7 @@
 use Test::Most tests => 1;
 use Nasm::X86 qw(:all);
 
-my $sub = S
+my $sub = Nasm::X86::Subroutine
  {my $vars = LocalData;
   my $a = $vars->variable(8, 'a');
   my $b = $vars->variable(8, 'b');
@@ -12,8 +12,8 @@ my $sub = S
   $vars->start;
   Mov $b->stack,  4;
   $vars->free;
- };
+ } name => 'testroutine';
 
-Call $sub;
+Call $sub->start;
 
 is_deeply Assemble, '';

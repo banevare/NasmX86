@@ -52,7 +52,7 @@ if(1){ #TMethod presence in variable objects #TVariale allocation test
     like $r, qr/yvar/, 'Presence of yvar in output';
   }
   like $r, qr/qvar: AAAA BBBB CCCC DDDD/, 'Presence of qvar in output with correct value';
-  like $r, qr/xvar: 0000 0000 0000 0000  0000 0000 0000 0004/, 'Presence of xvar in output with correct value';
+  like $r, qr/xvar: 0000 0000 0000 0004  0000 0000 0000 0000/, 'Presence of xvar in output with correct value';
 #    like $r, qr/xmmvar/;
 }
 done_testing;
