@@ -9963,7 +9963,7 @@ else
 
 my $start = time;                                                               # Tests
 
-eval {goto latest} unless caller(0);
+eval {goto latest} unless caller(0);                                            # Go to latest test if specified
 
 if (1) {                                                                        #TPrintOutStringNL #TPrintErrStringNL #TAssemble
   PrintOutStringNL "Hello World";
@@ -11375,17 +11375,23 @@ Length: 0000 0000 0000 0035
 END
  }
 
+#latest:;
+
 if (1) {
-  my $s = Rb(0..128);
+  my $s = Rb(0..255);
   my $B = CreateByteString;
   my $b = $B->CreateBlockString;
-  $b->append(source=>Vq(source, $s), Vq(size, 58));
-  $b->append(Vq(source, $s), size=>Vq(size, 52));
-  $b->append(Vq(source, $s), Vq(size, 51));
+
+  $b->append(source=>Vq(source, $s), Vq(size, 64));
+  $b->append(source=>Vq(source, $s), Vq(size, 64));
   $b->dump;
   $b->clear;
-  $b->append(Vq(source, $s), Vq(size,  2));
+  $b->append(Vq(source, $s), Vq(size,  64));
   $b->dump;
+  $b->clear;
+  $b->append(Vq(source, $s), Vq(size,  1));
+  $b->dump;
+  $b->clear;
 
   is_deeply Assemble, <<END;
 BlockString at address: 0000 0000 0000 0018
@@ -11393,13 +11399,19 @@ Length: 0000 0000 0000 0037
  zmm31: 0000 0098 0000 0058   3635 3433 3231 302F   2E2D 2C2B 2A29 2827   2625 2423 2221 201F   1E1D 1C1B 1A19 1817   1615 1413 1211 100F   0E0D 0C0B 0A09 0807   0605 0403 0201 0037
 Offset: 0000 0000 0000 0058
 Length: 0000 0000 0000 0037
- zmm31: 0000 0018 0000 0098   3332 3130 2F2E 2D2C   2B2A 2928 2726 2524   2322 2120 1F1E 1D1C   1B1A 1918 1716 1514   1312 1110 0F0E 0D0C   0B0A 0908 0706 0504   0302 0100 3938 3737
+ zmm31: 0000 0018 0000 0098   2D2C 2B2A 2928 2726   2524 2322 2120 1F1E   1D1C 1B1A 1918 1716   1514 1312 1110 0F0E   0D0C 0B0A 0908 0706   0504 0302 0100 3F3E   3D3C 3B3A 3938 3737
 Offset: 0000 0000 0000 0098
-Length: 0000 0000 0000 0033
- zmm31: 0000 0058 0000 0018   0000 0000 3231 302F   2E2D 2C2B 2A29 2827   2625 2423 2221 201F   1E1D 1C1B 1A19 1817   1615 1413 1211 100F   0E0D 0C0B 0A09 0807   0605 0403 0201 0033
+Length: 0000 0000 0000 0012
+ zmm31: 0000 0058 0000 0018   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 003F 3E3D   3C3B 3A39 3837 3635   3433 3231 302F 2E12
 BlockString at address: 0000 0000 0000 0018
-Length: 0000 0000 0000 0002
- zmm31: 0000 0018 0000 0018   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0001 0002
+Length: 0000 0000 0000 0037
+ zmm31: 0000 00D8 0000 00D8   3635 3433 3231 302F   2E2D 2C2B 2A29 2827   2625 2423 2221 201F   1E1D 1C1B 1A19 1817   1615 1413 1211 100F   0E0D 0C0B 0A09 0807   0605 0403 0201 0037
+Offset: 0000 0000 0000 00D8
+Length: 0000 0000 0000 0009
+ zmm31: 0000 0018 0000 0018   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 3F3E   3D3C 3B3A 3938 3709
+BlockString at address: 0000 0000 0000 0018
+Length: 0000 0000 0000 0001
+ zmm31: 0000 0018 0000 0018   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0001
 END
  }
 
