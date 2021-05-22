@@ -2868,13 +2868,13 @@ sub CreateByteString(%)                                                         
    );
  }
 
-sub ByteString::length($)                                                       # Get the length of a byte string
- {my ($byteString) = @_;                                                        # Byte string descriptor
-  @_ == 1 or confess;
+sub ByteString::length($@)                                                      # Get the length of a byte string
+ {my ($byteString, @variables) = @_;                                            # Byte string descriptor, variables
+  @_ >= 2 or confess;
   my $size = $byteString->size->addr;
   my $used = $byteString->used->addr;
 
-  Subroutine                                                                    # Allocate more space if required
+  my $s = Subroutine                                                            # Allocate more space if required
    {my ($p) = @_;                                                               # Parameters
     Comment "Byte string length";
     SaveFirstFour;
@@ -2884,6 +2884,8 @@ sub ByteString::length($)                                                       
     $$p{size}->getReg(rdx);
     RestoreFirstFour;
    } in => {bs=>3}, out => {size=>3};
+
+  $s->call($byteString->bs, @variables);
  }
 
 sub ByteString::updateSpace($@)                                                 #P Make sure that the byte string addressed by rax has enough space to accommodate content of length rdi
@@ -10412,11 +10414,11 @@ if (1) {                                                                        
 
   $a->out;   PrintOutNL;                                                        # Print byte string
   $b->out;   PrintOutNL;                                                        # Print byte string
-  $a->length->call($a->bs, my $sa = Vq(size)); $sa->dump;
-  $a->length->call($b->bs, my $sb = Vq(size)); $sb->dump;
+  $a->length(my $sa = Vq(size)); $sa->dump;
+  $b->length(my $sb = Vq(size)); $sb->dump;
   $a->clear ->call($a->bs);
-  $a->length->call($a->bs, my $sA = Vq(size)); $sA->dump;
-  $a->length->call($b->bs, my $sB = Vq(size)); $sB->dump;
+  $a->length(my $sA = Vq(size)); $sA->dump;
+  $b->length(my $sB = Vq(size)); $sB->dump;
 
   is_deeply Assemble, <<END;                                                    # Assemble and execute
 abababababababab
