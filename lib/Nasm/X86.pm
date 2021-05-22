@@ -2984,11 +2984,11 @@ sub ByteString::allocate($)                                                     
  }
 
 sub ByteString::m($)                                                            # Append the content with length rdi addressed by rsi to the byte string addressed by rax
- {my ($byteString) = @_;                                                        # Byte string descriptor
-  @_ == 1 or confess;
+ {my ($byteString, @variables) = @_;                                            # Byte string descriptor, variables
+  @_ >= 4 or confess;
   my $used = $byteString->used->addr;
 
-  Subroutine
+  my $s = Subroutine
    {my ($p) = @_;                                                               # Parameters
     Comment "Append memory to a byte string";
     SaveFirstFour;
@@ -3009,6 +3009,8 @@ sub ByteString::m($)                                                            
 
     RestoreFirstFour;
    } io => { bs => 3}, in => {address => 3, size => 3};
+
+  $s->call(@variables);
  }
 
 sub ByteString::q($$)                                                           # Append a constant string to the byte string
@@ -3020,7 +3022,7 @@ sub ByteString::q($$)                                                           
   my $bs = $byteString->bs;                                                     # Move data
   my $ad = Vq(address, $s);
   my $sz = Vq(size, length($string));
-  $byteString->m->call($bs, $ad, $sz);
+  $byteString->m($bs, $ad, $sz);
  }
 
 sub ByteString::ql($$)                                                          # Append a quoted string containing new line characters to the byte string addressed by rax
@@ -3036,7 +3038,7 @@ sub ByteString::char($$)                                                        
  {my ($byteString, $char) = @_;                                                 # Byte string descriptor, number of character to be appended
   @_ == 2 or confess;
   my $s = Rb(ord($char));
-  $byteString->m->call($byteString->bs, Vq(address, $s), Vq(size, 1));          # Move data
+  $byteString->m($byteString->bs, Vq(address, $s), Vq(size, 1));          # Move data
  }
 
 sub ByteString::nl($)                                                           # Append a new line to the byte string addressed by rax
@@ -3092,7 +3094,7 @@ sub ByteString::append($)                                                       
     Mov rdi, $byteString->used->addr;
     Sub rdi, $byteString->structure->size;
     Lea rsi, $byteString->data->addr;
-    $byteString->m->call(bs=>$$p{target}, Vq(address, rsi), Vq(size, rdi));
+    $byteString->m(bs=>$$p{target}, Vq(address, rsi), Vq(size, rdi));
     RestoreFirstFour;
    } in => {target=>3, source=>3};
  }
@@ -3151,7 +3153,7 @@ sub ByteString::read($)                                                         
    {my ($p) = @_;                                                               # Parameters
     Comment "Read a byte string";
     ReadFile($$p{file}, (my $size = Vq(size)), my $address = Vq(address));
-    $byteString->m->call($$p{bs}, $size, $address);                             # Move data into byte string
+    $byteString->m($$p{bs}, $size, $address);                                   # Move data into byte string
     FreeMemory($size, $address);                                                # Free memory allocated by read
    } io => {bs => 3}, in => {file => 3};
  }
