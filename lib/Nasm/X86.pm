@@ -3405,29 +3405,6 @@ sub BlockString::putNextandPrevBlockOffsetIntoZmm($$$$)                         
   PopR @regs;                                                                   # Free work registers
  }
 
-#sub BlockString::putNext($$$)                                                  # Put a block in a numbered zmm to another block in another zmm
-# {my ($blockString, $old, $new) = @_;                                          # Block string, number of xmm addressing existing old block in string, number of xmm addressing new block to be added
-#  my $n = $blockString->next;                                                  # Quad word of next offset
-#  my $p = $blockString->prev;                                                  # Quad word of prev offset
-#  PushR my @save = (r12, r13, r14, r15);                                       # Work registers
-#  my $bs  = r15;                                                               # Byte string
-#  my $or  = r14;                                                               # Old block
-#  my $nr  = r13;                                                               # New block
-#  my $pr  = r12;                                                               # Next bloxk after old block
-#  my $prd = r12d;                                                              # Next bloxk after old block
-#  $blockString->bsAddress->setReg($bs);                                        # Byte string address
-#  $old->setReg($or);                                                           # Offset of block in byte string
-#  $new->setReg($nr);                                                           # Offset of block in byte string
-#  Mov $prd, "[$bs+$or+$n]";                                                    # Block past old block
-#  Mov "[$bs+$or+$n]", $nr;                                                     # Old block next to new block
-#  Mov "[$bs+$nr+$p]", $or;                                                     # New block prev to old block
-#  Mov "[$bs+$nr+$n]", $pr;                                                     # New block next to block past old block
-#  Mov "[$bs+$pr+$p]", $nr;                                                     # Past block prev to new block
-#  PopR @save;                                                                  # Free work registers
-# }
-
-#$b->dump->call($b->address, $b->first)
-
 sub BlockString::dump($)                                                        # Dump a block string  to sysout
  {my ($blockString) = @_;                                                       # Block string descriptor
   @_ == 1 or confess;
@@ -3458,9 +3435,9 @@ sub BlockString::dump($)                                                        
   $s->call($blockString->address, $blockString->first);
  }
 
-sub BlockString::append($$$)                                                    # Append the specified content in memory to the specified block string
- {my ($blockString, $source, $size) = @_;                                       # Block string descriptor, source address, source length
-  @_ == 3 or confess;
+sub BlockString::append($@)                                                     # Append the specified content in memory to the specified block string
+ {my ($blockString, @variables) = @_;                                           # Block string descriptor, source variable, length variable
+  @_ >= 3 or confess;
 
   my $s = Subroutine
    {my ($p) = @_;                                                               # Parameters
@@ -3560,7 +3537,7 @@ sub BlockString::append($$$)                                                    
     PopR @save;
    }  in => {bs => 3, first => 3, source => 3, size => 3};
 
-  $s->call($blockString->address, $blockString->first, $source, $size);
+  $s->call($blockString->address, $blockString->first, @variables);
  }
 
 #D1 Tree                                                                        # Tree operations
@@ -11411,8 +11388,8 @@ if (1) {
   my $s = Rb(0..128);
   my $B = CreateByteString;
   my $b = $B->CreateBlockString;
-  $b->append(Vq(source, $s), Vq(size, 58));
-  $b->append(Vq(source, $s), Vq(size, 52));
+  $b->append(source=>Vq(source, $s), Vq(size, 58));
+  $b->append(Vq(source, $s), size=>Vq(size, 52));
   $b->append(Vq(source, $s), Vq(size, 51));
   $b->dump;
 
