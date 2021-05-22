@@ -5,7 +5,7 @@
 #-------------------------------------------------------------------------------
 # podDocumentation
 package Nasm::X86;
-our $VERSION = "20210520";
+our $VERSION = "20210521";
 use warnings FATAL => qw(all);
 use strict;
 use Carp qw(confess cluck);
@@ -3975,7 +3975,7 @@ which is used by default if it is present, specify:
 Generate X86 assembler code using Perl as a macro pre-processor.
 
 
-Version "20210520".
+Version "20210521".
 
 
 The following sections describe the methods in each functional area of this
