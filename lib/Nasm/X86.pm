@@ -2931,7 +2931,7 @@ sub ByteString::makeReadOnly($)                                                 
  {my ($byteString) = @_;                                                        # Byte string descriptor
   @_ == 1 or confess;
 
-  Subroutine
+  my $s = Subroutine
    {my ($p) = @_;                                                               # Parameters
     Comment "Make a byte string readable";
     SaveFirstFour;
@@ -2945,13 +2945,15 @@ sub ByteString::makeReadOnly($)                                                 
     Syscall;
     RestoreFirstFour;                                                           # Return the possibly expanded byte string
    } in => {bs => 3};
+
+  $s->call(bs => $byteString->bs);
  }
 
 sub ByteString::makeWriteable($)                                                # Make a byte string writable
  {my ($byteString) = @_;                                                        # Byte string descriptor
   @_ == 1 or confess;
 
-  Subroutine
+  my $s = Subroutine
    {my ($p) = @_;                                                               # Parameters
     Comment "Make a byte string writable";
     SaveFirstFour;
@@ -2964,6 +2966,8 @@ sub ByteString::makeWriteable($)                                                
     Syscall;
     RestoreFirstFour;                                                           # Return the possibly expanded byte string
    } in => {bs => 3};
+
+  $s->call(bs => $byteString->bs);
  }
 
 sub ByteString::allocate($@)                                                    # Allocate the amount of space indicated in rdi in the byte string addressed by rax and return the offset of the allocation in the arena in rdi
@@ -10551,7 +10555,7 @@ END
 if (1) {                                                                        # Make a byte string readonly
   my $s = CreateByteString;                                                     # Create a byte string
   $s->q("Hello");                                                               # Write code to byte string
-  $s->makeReadOnly->call($s->bs);                                               # Make byte string read only
+  $s->makeReadOnly;                                                             # Make byte string read only
   $s->q(" World");                                                              # Try to write to byte string
 
   ok Assemble =~ m(SDE ERROR: DEREFERENCING BAD MEMORY POINTER.*mov byte ptr .rax.rdx.1., r8b);
@@ -10560,8 +10564,8 @@ if (1) {                                                                        
 if (1) {                                                                        # Make a read only byte string writable  #TByteString::makeReadOnly #TByteString::makeWriteable
   my $s = CreateByteString;                                                     # Create a byte string
   $s->q("Hello");                                                               # Write data to byte string
-  $s->makeReadOnly ->call($s->bs);                                              # Make byte string read only - tested above
-  $s->makeWriteable->call($s->bs);                                              # Make byte string writable again
+  $s->makeReadOnly;                                                             # Make byte string read only - tested above
+  $s->makeWriteable;                                                            # Make byte string writable again
   $s->q(" World");                                                              # Try to write to byte string
   $s->out;
 
