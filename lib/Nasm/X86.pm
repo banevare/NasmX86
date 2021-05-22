@@ -2457,7 +2457,7 @@ sub AllocateMemory(@)                                                           
     $$p{address}->getReg(rax);                                                  # Amount of memory
 
     RestoreFirstSeven;
-   } in => {size=>3}, out => {address=>3};
+   } in => {size => 3}, out => {address=>3};
 
   $s->call(@variables);
  }
@@ -2883,7 +2883,7 @@ sub ByteString::length($@)                                                      
     Sub rdx, $byteString->structure->size;
     $$p{size}->getReg(rdx);
     RestoreFirstFour;
-   } in => {bs=>3}, out => {size=>3};
+   } in => {bs=>3}, out => {size => 3};
 
   $s->call($byteString->bs, @variables);
  }
@@ -2922,7 +2922,7 @@ sub ByteString::updateSpace($@)                                                 
      });
 
     RestoreFirstFour;
-   } io => {bs=>3}, in=>{size=>3};
+   } io => {bs=>3}, in=>{size => 3};
 
   $s->call(@variables);
  } # updateSpace
@@ -2994,7 +2994,7 @@ sub ByteString::allocate($@)                                                    
   $s->call($byteString->bs, @variables);
  }
 
-sub ByteString::m($)                                                            # Append the content with length rdi addressed by rsi to the byte string addressed by rax
+sub ByteString::m($@)                                                           # Append the content with length rdi addressed by rsi to the byte string addressed by rax
  {my ($byteString, @variables) = @_;                                            # Byte string descriptor, variables
   @_ >= 4 or confess;
   my $used = $byteString->used->addr;
