@@ -2964,11 +2964,11 @@ sub ByteString::makeWriteable($)                                                
    } in => {bs => 3};
  }
 
-sub ByteString::allocate($)                                                     # Allocate the amount of space indicated in rdi in the byte string addressed by rax and return the offset of the allocation in the arena in rdi
- {my ($byteString) = @_;                                                        # Byte string descriptor
-  @_ == 1 or confess;
+sub ByteString::allocate($@)                                                    # Allocate the amount of space indicated in rdi in the byte string addressed by rax and return the offset of the allocation in the arena in rdi
+ {my ($byteString, @variables) = @_;                                            # Byte string descriptor, variables
+  @_ >= 3 or confess;
 
-  Subroutine
+  my $s = Subroutine
    {my ($p) = @_;                                                               # Parameters
     Comment "Allocate space in a byte string";
     SaveFirstFour;
@@ -2984,6 +2984,8 @@ sub ByteString::allocate($)                                                     
 
     RestoreFirstFour;
    } in => {bs => 3, size => 3}, out => {offset => 3};
+
+  $s->call($byteString->bs, @variables);
  }
 
 sub ByteString::m($)                                                            # Append the content with length rdi addressed by rsi to the byte string addressed by rax
@@ -3298,8 +3300,7 @@ sub BlockString::allocBlock($@)                                                 
     Comment "Allocate a block in a block string";
 
     PushR my @regs = (rax, rdi, r14, r15);                                      # Save registers
-    $byteString->allocate->call
-     ($byteString->bs, Vq(size, $blockString->size), $$p{offset});
+    $byteString->allocate(Vq(size, $blockString->size), $$p{offset});
 
     PopR @regs;
    } in => {bs => 3}, out => {offset => 3};
@@ -10563,9 +10564,9 @@ if (1) {                                                                        
 
 if (1) {                                                                        # Allocate some space in byte string #TByteString::allocate
   my $s = CreateByteString;                                                     # Create a byte string
-  $s->allocate->call($s->bs, Vq(size, 0x20), my $o1 = Vq(offset));              # Allocate space wanted
-  $s->allocate->call($s->bs, Vq(size, 0x30), my $o2 = Vq(offset));
-  $s->allocate->call($s->bs, Vq(size, 0x10), my $o3 = Vq(offset));
+  $s->allocate(Vq(size, 0x20), my $o1 = Vq(offset));                            # Allocate space wanted
+  $s->allocate(Vq(size, 0x30), my $o2 = Vq(offset));
+  $s->allocate(Vq(size, 0x10), my $o3 = Vq(offset));
   $o1->dump;
   $o2->dump;
   $o3->dump;
