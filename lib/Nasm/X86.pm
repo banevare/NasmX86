@@ -3935,12 +3935,13 @@ each process involved:
 
 Read this file:
 
-  Mov rax, Rs($0);                                                              # File to read
-  ReadFile;                                                                     # Read file
-  PrintOutMemory;                                                               # Print memory
+  ReadFile(Vq(file, Rs($0)), (my $s = Vq(size)), my $a = Vq(address));          # Read file
+  $a->setReg(rax);                                                              # Address of file in memory
+  $s->setReg(rdi);                                                              # Length  of file in memory
+  PrintOutMemory;                                                               # Print contents of memory to stdout
 
-  my $r = Assemble;                                                             # Assemble and execute
-  ok index($r, readFile($0)) > -1;                                              # Output contains this file
+  my $r = Assemble(1 => (my $f = temporaryFile));                               # Assemble and execute
+  ok fileMd5Sum($f) eq fileMd5Sum($0);                                          # Output contains this file
 
 =head2 Installation
 
@@ -8057,13 +8058,12 @@ B<Example:>
   
     ReadFile(Vq(file, Rs($0)), (my $s = Vq(size)), my $a = Vq(address));          # Read file  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-    $a->setReg(rax);
-    $s->setReg(rdi);
-    PrintOutMemory;                                                               # Print memory
+    $a->setReg(rax);                                                              # Address of file in memory
+    $s->setReg(rdi);                                                              # Length  of file in memory
+    PrintOutMemory;                                                               # Print contents of memory to stdout
   
     my $r = Assemble(1 => (my $f = temporaryFile));                               # Assemble and execute
-    my $i = index(removeNonAsciiChars(readFile $f), removeNonAsciiChars(readFile $0));     # Output contains this file
-    ok $i > -1;
+    ok fileMd5Sum($f) eq fileMd5Sum($0);                                          # Output contains this file
   
 
 =head1 Short Strings
@@ -10242,13 +10242,12 @@ if (1) {                                                                        
 
 if (1) {                                                                        #TReadFile #TPrintMemory
   ReadFile(Vq(file, Rs($0)), (my $s = Vq(size)), my $a = Vq(address));          # Read file
-  $a->setReg(rax);
-  $s->setReg(rdi);
-  PrintOutMemory;                                                               # Print memory
+  $a->setReg(rax);                                                              # Address of file in memory
+  $s->setReg(rdi);                                                              # Length  of file in memory
+  PrintOutMemory;                                                               # Print contents of memory to stdout
 
   my $r = Assemble(1 => (my $f = temporaryFile));                               # Assemble and execute
-  my $i = index(removeNonAsciiChars(readFile $f), removeNonAsciiChars(readFile $0));     # Output contains this file
-  ok $i > -1;
+  ok fileMd5Sum($f) eq fileMd5Sum($0);                                          # Output contains this file
  }
 
 if (1) {                                                                        #TCreateByteString #TByteString::clear #TByteString::out #TByteString::copy #TByteString::nl
