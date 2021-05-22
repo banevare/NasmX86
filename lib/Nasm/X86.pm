@@ -2480,13 +2480,14 @@ sub FreeMemory(@)                                                               
   $s->call(@variables);
  }
 
-sub ClearMemory()                                                               # Clear memory - the address of the memory is in rax, the length in rdi
- {@_ == 0 or confess;
+sub ClearMemory(@)                                                              # Clear memory - the address of the memory is in rax, the length in rdi
+ {my (@variables) = @_;                                                         # Variables
+  @_ >= 2 or confess;
   Comment "Clear memory";
 
   my $size = RegisterSize zmm0;
 
-  Subroutine
+  my $s = Subroutine
    {my ($p) = @_;                                                               # Parameters
     SaveFirstFour;
     $$p{address}->setReg(rax);
@@ -2502,6 +2503,8 @@ sub ClearMemory()                                                               
     PopR zmm0;
     RestoreFirstFour;
    } in => {size => 3, address => 3};
+
+  $s->call(@variables);
  }
 
 sub CopyMemory(@)                                                               # Copy memory, the target is addressed by rax, the length is in rdi, the source is addressed by rsi
@@ -10291,7 +10294,7 @@ if (1) {                                                                        
   AllocateMemory($N, my $A = Vq(address));
   $A->dump;
 
-  ClearMemory->call($N, $A);
+  ClearMemory($N, $A);
 
   $A->setReg(rax);
   $N->setReg(rdi);
