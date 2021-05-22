@@ -254,7 +254,8 @@ sub PopR(@);                                                                    
 sub PopRR(@);                                                                   # Pop a list of registers off the stack without tracking
 sub PrintOutMemory;                                                             # Print the memory addressed by rax for a length of rdi
 sub PrintOutRegisterInHex(@);                                                   # Print any register as a hex string
-sub PrintOutStringNL($);                                                        # Print a constant string to sysout followed by new line
+sub PrintOutStringNL(@);                                                        # Print a constant string to stdout followed by new line
+sub PrintString($@);                                                             # Print a constant string to the specified channel
 sub PushR(@);                                                                   # Push a list of registers onto the stack
 sub PushRR(@);                                                                  # Push a list of registers onto the stack without tracking
 sub Syscall();                                                                  # System call in linux 64 format
@@ -1008,15 +1009,16 @@ END
 
 #D1 Print                                                                       # Print
 
-sub PrintErrNL()                                                                # Print a new line to stderr
- {@_ == 0 or confess;
+sub PrintNL($)                                                                  # Print a new line to stdout  or stderr
+ {my ($channel) = @_;                                                           # Channel to write on
+  @_ == 1 or confess;
   my $a = Rb(10);
-  Comment "Write new line to stderr";
+  Comment "Write new line to $channel";
 
   Call Macro
    {SaveFirstFour;
     Mov rax, 1;
-    Mov rdi, $stderr;
+    Mov rdi, $channel;
     Mov rsi, $a;
     Mov rdx, 1;
     Syscall;
@@ -1024,68 +1026,54 @@ sub PrintErrNL()                                                                
    } name => q(PrintErrNL);
  }
 
-sub PrintErrString($)                                                           # Print a constant string to stderr.
- {my ($string) = @_;                                                            # String
-  @_ == 1 or confess;
+sub PrintErrNL()                                                                # Print a new line to stderr
+ {@_ == 0 or confess;
+  PrintNL($stderr);
+ }
 
-  SaveFirstFour;
-  Comment "Write to stderr String: $string";
-  my ($c) = @_;
+sub PrintOutNL()                                                                # Print a new line to stderr
+ {@_ == 0 or confess;
+  PrintNL($stdout);
+ }
+
+sub PrintString($@)                                                             # Print a constant string to the specified channel
+ {my ($channel, @string) = @_;                                                  # Channel, Strings
+  @_ >= 1 or confess;
+
+  my $c = join ' ', @string;
   my $l = length($c);
   my $a = Rs($c);
+
+  SaveFirstFour;
+  Comment "Write to channel  $channel, the string: $c";
   Mov rax, 1;
-  Mov rdi, $stderr;
+  Mov rdi, $channel;
   Mov rsi, $a;
   Mov rdx, $l;
   Syscall;
   RestoreFirstFour();
  }
 
-sub PrintErrStringNL($)                                                         # Print a new line to stderr
- {my ($string) = @_;                                                            # String
-  @_ == 1 or confess;
-  PrintErrString  ($string);
+sub PrintErrString(@)                                                           # Print a constant string to stderr.
+ {my (@string) = @_;                                                            # String
+  PrintString($stderr, @string);
+ }
+
+sub PrintOutString(@)                                                           # Print a constant string to stdout.
+ {my (@string) = @_;                                                            # String
+  PrintString($stdout, @string);
+ }
+
+sub PrintErrStringNL(@)                                                         # Print a constant string followed by a new line to stderr
+ {my (@string) = @_;                                                            # Strings
+  PrintErrString(@string);
   PrintErrNL;
  }
 
-sub PrintOutNL()                                                                # Print a new line to stdout
- {@_ == 0 or confess;
-  my $a = Rb(10);
-  Comment "Write new line";
-
-  Call Macro
-   {SaveFirstFour;
-    Mov rax, 1;
-    Mov rdi, $stdout;
-    Mov rsi, $a;
-    Mov rdx, 1;
-    Syscall;
-    RestoreFirstFour()
-   } name => q(PrintOutNL);
- }
-
-sub PrintOutString($)                                                           # Print a constant string to sysout.
- {my ($string) = @_;                                                            # String
-  @_ == 1 or confess;
-
-  SaveFirstFour;
-  Comment "Write String: $string";
-  my ($c) = @_;
-  my $l = length($c);
-  my $a = Rs($c);
-  Mov rax, 1;
-  Mov rdi, $stdout;
-  Mov rsi, $a;
-  Mov rdx, $l;
-  Syscall;
-  RestoreFirstFour();
- }
-
-sub PrintOutStringNL($)                                                         # Print a constant string to sysout followed by new line
- {my ($string) = @_;                                                            # String
-  @_ == 1 or confess;
-  PrintOutString  ($string);
-  PrintOutNL;
+sub PrintOutStringNL(@)                                                         # Print a constant string followed by a new line to stdout
+ {my (@string) = @_;                                                            # Strings
+  PrintOutString(@string);
+  PrintErrNL;
  }
 
 sub hexTranslateTable                                                           #P Create/address a hex translate table and return its label
@@ -1099,9 +1087,10 @@ sub hexTranslateTable                                                           
    Rs @t                                                                        # Constant strings are only saved if they are unique, else a read only copy is returned.
  }
 
-sub PrintOutRaxInHex                                                            # Write the content of register rax to stderr in hexadecimal in big endian notation
- {@_ == 0 or confess;
-  Comment "Print Rax In Hex";
+sub PrintRaxInHex($)                                                            # Write the content of register rax in hexadecimal in big endian notation to the specified channel
+ {my ($channel) = @_;                                                           # Channel
+  @_ == 1 or confess;
+  Comment "Print Rax In Hex on channel: $channel";
   my $hexTranslateTable = hexTranslateTable;
 
   my $sub = Macro
@@ -1118,13 +1107,23 @@ sub PrintOutRaxInHex                                                            
       Shr rax, 56;                                                              # Push select byte low
       Shl rax, 1;                                                               # Multiply by two because each entry in the translation table is two bytes long
       Lea rax, "[$hexTranslateTable+rax]";
-      PrintOutMemory;
-      PrintOutString ' ' if $i % 2 and $i < 7;
+      PrintMemory($channel);
+      PrintString($channel, ' ') if $i % 2 and $i < 7;
      }
     RestoreFirstFour;
-   } name => "PrintOutRaxInHex";
+   } name => "PrintOutRaxInHexOn$channel";
 
   Call $sub;
+ }
+
+sub PrintErrRaxInHex()                                                          # Write the content of register rax in hexadecimal in big endian notation to stderr
+ {@_ == 0 or confess;
+  PrintRaxInHex($stderr);
+ }
+
+sub PrintOutRaxInHex()                                                          # Write the content of register rax in hexadecimal in big endian notation to stderr
+ {@_ == 0 or confess;
+  PrintRaxInHex($stdout);
  }
 
 sub PrintOutRaxInReverseInHex                                                   # Write the content of register rax to stderr in hexadecimal in little endian notation
@@ -1136,14 +1135,15 @@ sub PrintOutRaxInReverseInHex                                                   
   Pop rax;
  }
 
-sub PrintOutRegisterInHex(@)                                                    # Print any register as a hex string
- {my (@r) = @_;                                                                 # Name of the register to print
+sub PrintRegisterInHex($@)                                                      # Print the named registers as hex strings
+ {my ($channel, @r) = @_;                                                       # Names of the registers to print
+  @_ >= 2 or confess;
 
   for my $r(@r)                                                                 # Each register to print
-   {Comment "Print register $r in Hex";
+   {Comment "Print register $r in Hex on channel: $channel";
 
     Call Macro
-     {PrintOutString sprintf("%6s: ", $r);
+     {PrintString($channel,  sprintf("%6s: ", $r));                             # Register name
 
       my sub printReg(@)                                                        # Print the contents of a register
        {my (@regs) = @_;                                                        # Size in bytes, work registers
@@ -1154,12 +1154,12 @@ sub PrintOutRegisterInHex(@)                                                    
         for my $i(keys @regs)                                                   # Print work registers to print input register
          {my $R = $regs[$i];
           if ($R !~ m(\Arax))
-           {PrintOutString("  ");
+           {PrintString($channel, "  ");                                        # Separate blocks of bytes with a space
             Keep $R; KeepFree rax;
             Mov rax, $R
            }
-          PrintOutRaxInHex;                                                     # Print work register
-          PrintOutString(" ") unless $i == $#regs;
+          PrintRaxInHex($channel);                                              # Print work register
+          PrintString($channel, " ") unless $i == $#regs;
          }
         PopR @regs;                                                             # Balance the single push of what might be a large register
        };
@@ -1169,8 +1169,18 @@ sub PrintOutRegisterInHex(@)                                                    
       elsif ($r =~ m(\Az))    {printReg qw(rax rbx rcx rdx r8 r9 r10 r11)}      # zmm*
 
       PrintOutNL;
-     } name => "PrintOutRegister${r}InHex";                                     # One routine per register printed
+     } name => "PrintOutRegister${r}InHexOn$channel";                           # One routine per register printed
    }
+ }
+
+sub PrintErrRegisterInHex(@)                                                    # Print the named registers as hex strings on stderr
+ {my (@r) = @_;                                                                 # Names of the registers to print
+  PrintRegisterInHex $stdout, @r;
+ }
+
+sub PrintOutRegisterInHex(@)                                                    # Print the named registers as hex strings on stdout
+ {my (@r) = @_;                                                                 # Names of the registers to print
+  PrintRegisterInHex $stdout, @r;
  }
 
 sub PrintOutRipInHex                                                            #P Print the instruction pointer in hex
@@ -2386,9 +2396,10 @@ sub AllocateAll8OnStack($)                                                      
 
 #D1 Memory                                                                      # Allocate and print memory
 
-sub PrintOutMemoryInHex                                                         # Dump memory from the address in rax for the length in rdi
- {@_ == 0 or confess;
-  Comment "Print out memory in hex";
+sub PrintMemoryInHex($)                                                         # Dump memory from the address in rax for the length in rdi on the specified channel
+ {my ($channel) = @_;                                                           # Channel
+  @_ == 1 or confess;
+  Comment "Print out memory in hex on channel: $channel";
 
   Call Macro
    {my $size = RegisterSize rax;
@@ -2398,38 +2409,69 @@ sub PrintOutMemoryInHex                                                         
     For                                                                         # Print string in blocks
      {Mov rax, "[rsi]";
       Bswap rax;
-      PrintOutRaxInHex;
+      PrintRaxInHex($channel);
      } rsi, rdi, $size;
     RestoreFirstFour;
-   } name=> "PrintOutMemoryInHex";
+   } name=> "PrintOutMemoryInHexOnChannel$channel";
+ }
+
+sub PrintErrMemoryInHex                                                         # Dump memory from the address in rax for the length in rdi on stderr
+ {@_ == 0 or confess;
+  PrintMemoryInHex($stderr);
+ }
+
+sub PrintOutMemoryInHex                                                         # Dump memory from the address in rax for the length in rdi on stdout
+ {@_ == 0 or confess;
+  PrintMemoryInHex($stdout);
+ }
+
+sub PrintErrMemoryInHexNL                                                       # Dump memory from the address in rax for the length in rdi and then print a new line
+ {@_ == 0 or confess;
+  PrintMemoryInHex($stderr);
+  PrintNL($stderr);
  }
 
 sub PrintOutMemoryInHexNL                                                       # Dump memory from the address in rax for the length in rdi and then print a new line
  {@_ == 0 or confess;
-  Comment "Print out memory in hex then new line";
-  PrintOutMemoryInHex;
-  PrintOutNL;
+  PrintMemoryInHex($stdout);
+  PrintNL($stdout);
  }
 
-sub PrintOutMemory                                                              # Print the memory addressed by rax for a length of rdi::
- {@_ == 0 or confess;
+sub PrintMemory                                                                 # Print the memory addressed by rax for a length of rdi on the specified channel
+ {my ($channel) = @_;                                                           # Channel
+  @_ == 1 or confess;
 
   Call Macro
-   {Comment "Print memory";
+   {Comment "Print memory on channel: $channel";
     SaveFirstFour rax, rdi;
     Mov rsi, rax;
     Mov rdx, rdi;
     KeepFree rax, rdi;
     Mov rax, 1;
-    Mov rdi, $stdout;
+    Mov rdi, $channel;
     Syscall;
     RestoreFirstFour();
-   } name => "PrintOutMemory";
+   } name => "PrintOutMemoryOnChannel$channel";
  }
 
-sub PrintOutMemoryNL                                                            # Print the memory addressed by rax for a length of rdi followed by a new line
+sub PrintErrMemory                                                              # Print the memory addressed by rax for a length of rdi on sterr
  {@_ == 0 or confess;
-  Comment "Print out memory then new line";
+  PrintMemory($stdout);
+ }
+
+sub PrintOutMemory                                                              # Print the memory addressed by rax for a length of rdi on stdout
+ {@_ == 0 or confess;
+  PrintMemory($stdout);
+ }
+
+sub PrintErrMemoryNL                                                            # Print the memory addressed by rax for a length of rdi followed by a new line on stderr
+ {@_ == 0 or confess;
+  PrintErrMemory;
+  PrintErrNL;
+ }
+
+sub PrintOutMemoryNL                                                            # Print the memory addressed by rax for a length of rdi followed by a new line on stdout
+ {@_ == 0 or confess;
   PrintOutMemory;
   PrintOutNL;
  }
@@ -3379,7 +3421,7 @@ sub BlockString::getNextAndPrevBlockOffsetFromZmm($$)                           
   $L->setReg(r15);                                                              # Links
   Mov r14d, r15d;                                                               # Next
   Shr r15, RegisterSize(r14d) * 8;                                              # Prev
-  my @r = (Vq("Next block offset", r14), Vq("Prev block offset", r15));         # Result
+  my @r = (Vq("Next block offset", r15), Vq("Prev block offset", r14));         # Result
   PopR @regs;                                                                   # Free work registers
   @r;                                                                           # Return (next, prev)
  }
@@ -3389,8 +3431,8 @@ sub BlockString::putNextandPrevBlockOffsetIntoZmm($$$$)                         
   @_ == 4 or confess;
   if ($next and $prev)                                                          # Set both previous and next
    {PushR my @regs = (r14, r15);                                                # Work registers
-    $next->setReg(r15);                                                         # Next offset
-    $prev->setReg(r14);                                                         # Prev offset
+    $next->setReg(r14);                                                         # Next offset
+    $prev->setReg(r15);                                                         # Prev offset
     Shl r14, RegisterSize(r14d) * 8;                                            # Prev high
     Or r15, r14;                                                                # Links in one register
     my $l = Vq("Links", r15);                                                   # Links as variable
@@ -3455,6 +3497,7 @@ sub BlockString::append($@)                                                     
     PushR my @save = (zmm29, zmm30, zmm31);
     $blockString->getBlock($$p{bs}, $$p{first}, 29);                            # Get the first block
     my ($second, $last) = $blockString->getNextAndPrevBlockOffsetFromZmm(29);   # Get the offsets of the second and last blocks
+    my $mode = Vq(mode, 0);
 
     if (1)                                                                      # Fill a partially full first block in a string that only has one block
      {If ($last == $$p{first}, sub                                              # String only has one block
@@ -3472,28 +3515,40 @@ sub BlockString::append($@)                                                     
            {$$p{source}->setZmm(29, $lengthFirst + 1, $spaceFirst);             # Append bytes to fill first block
             $blockString->setBlockLengthInZmm($L, 29);                          # Set the length
             $$p{source} += $spaceFirst;
-            $$p{size} -= $spaceFirst;
+            $$p{size}   -= $spaceFirst;
            });
+####
+          $mode->copy(Vq(mode, 1));
           Vmovdqa64 zmm31, zmm29;                                               # Place the first block which is also the last block into the last block
          }),
        },
       sub                                                                       # Fill partially full last block
        {$blockString->getBlock($$p{bs}, $last, 31);                             # Get the last block now known not to be the first block
+PrintOutStringNL "JJJ11";
+#$last     ->dump("Last  :");
+#PrintOutRegisterInHex zmm31;
         my $lengthLast = $blockString->getBlockLengthInZmm(31);                 # Length of the last block
         my $spaceLast  = $L - $lengthLast;                                      # Space in last block
         If ($spaceLast >= $$p{size}, sub                                        # Enough space in last block
          {$$p{source}->setZmm(31, $lengthLast + 1, $$p{size});                  # Append bytes
           $blockString->setBlockLengthInZmm($lengthLast + $$p{size}, 31);       # Set the length
           $blockString->putBlock($$p{bs}, $last, 31);                           # Put the block
+#PrintOutStringNL "JJJ22";
+#PrintOutRegisterInHex zmm31;
           Jmp $success;
          },
         sub                                                                     # Completely fill last block
          {If ($spaceLast >= 0, sub                                              # Some space in last block
            {$$p{source}->setZmm(31, $lengthLast + 1, $spaceLast);               # Append bytes to fill last block
             $blockString->setBlockLengthInZmm($L, 31);                          # Set the length
+            $blockString->putBlock($$p{bs}, $last, 31);                         # Put the block
             $$p{source} += $spaceLast;
             $$p{size} -= $spaceLast;
+#PrintOutStringNL "JJJ333";
+#$last     ->dump("Last  :");
+#PrintOutRegisterInHex zmm31;
            });
+          $mode->copy(Vq(mode, 2));
          }),
        });
      }
@@ -3504,41 +3559,94 @@ sub BlockString::append($@)                                                     
 
         $blockString->allocBlock($$p{bs}, my $new = Vq(offset));                # Allocate new block that we will insert next
         $blockString->getBlock($$p{bs}, $new, 30);                              # Get the new block which will have been properly formatted
+PrintOutStringNL "NEWWW";
+$mode->dump("mode :");
+$new->dump("New :");
 
         my ($next, $prev) = $blockString->getNextAndPrevBlockOffsetFromZmm(31); # Link new block
         If ($$p{first} == $last, sub                                            # Connect first block to new block in string of one block
          {$blockString->putNextandPrevBlockOffsetIntoZmm(31, $new,  $new);
           $blockString->putNextandPrevBlockOffsetIntoZmm(30, $last, $last);
+          Vmovdqa64 zmm29, zmm31;                                               # The string had one block which becomes the first block
+###11
+#PrintOutStringNL "AAAA";
+#$$p{first}->dump("First :");
+#$last     ->dump("Last  :");
+#$prev     ->dump("Prev  :");
+#$next     ->dump("Next  :");
+#$new      ->dump("New   :");
+#$second   ->dump("Second:");
+#PrintOutRegisterInHex zmm31, zmm30;
          },
         sub                                                                     # Connect last block to new block in string of two or more blocks
-         {$blockString->putNextandPrevBlockOffsetIntoZmm(31, $new,    $prev);
-          $blockString->putNextandPrevBlockOffsetIntoZmm(30, $next,   $last);
-          $blockString->putNextandPrevBlockOffsetIntoZmm(29, $second, $new);
-          $blockString->putBlock($$p{bs}, $last, 31);                           # Only write the block if it is not the first block as the first block will be written later
+         {$blockString->putNextandPrevBlockOffsetIntoZmm(31, $new,    $prev);   # From last block
+          $blockString->putNextandPrevBlockOffsetIntoZmm(30, $next,   $last);   # From new block
+          $blockString->putNextandPrevBlockOffsetIntoZmm(29, undef,   $new);    # From first block
+PrintOutStringNL "BBBB";
+#$$p{first}->dump("First :");
+#$last     ->dump("Last  :");
+#PrintOutRegisterInHex zmm31;
+#$prev     ->dump("Prev  :");
+#$next     ->dump("Next  :");
+#$new      ->dump("New   :");
+#$second   ->dump("Second:");
+#PrintOutRegisterInHex zmm29, zmm31, zmm30;
+###22
+#PrintOutStringNL "BBBB";
          });
 
         If ($L >= $$p{size}, sub                                                # Enough space in last block to complete move
-         {$$p{source}->setZmm(30, Vq('one', 1), $$p{size});                     # Append bytes
+         {$$p{source}->setZmm(30, Vq('one', 1), $$p{size});                     # Append remaining bytes from position 1 after the length field
           $blockString->setBlockLengthInZmm($$p{size}, 30);                     # Set the length
-          $blockString->putBlock($$p{bs}, $new, 30);                            # Put the block
+          $blockString->putNextandPrevBlockOffsetIntoZmm(30, undef,   $prev);   # From new block
+          If ($mode == Vq(mode, 1), sub
+           {$blockString->putBlock($$p{bs}, $new, 30);                          # Put the new block
+           },
+          sub
+           {$blockString->putBlock($$p{bs}, $last, 30);                         # Put the last block
+           });
+####3
+PrintOutStringNL "CCCC";
+$mode     ->dump("Mode  :");
+$last     ->dump("Last  :");
+#$new      ->dump("New   :");
+#$prev     ->dump("Prev  :");
+#PrintOutRegisterInHex zmm30;
           Jmp $end;
          });
 
-        $$p{source}->setZmm(31, Vq('one', 1), $L);                              # Append full block
+        $$p{source}->setZmm(31, Vq('one', 1), $L);                              # Append full block starting at position 1 after the length field
         $blockString->setBlockLengthInZmm($L, 31);                              # Set the length
+
+PrintOutStringNL "DDDD";
+        $blockString->putBlock($$p{bs}, $last, 31);                             # Only write the block if it is not the first block as the first block will be written later
+#$$p{first}    ->dump("First :");
+#$last     ->dump("Last  :");
+#PrintOutRegisterInHex zmm31;
         $$p{source} += $L;
         $$p{size}   -= $L;
+#$$p{source}->dump("Source");
 
         Vmovdqa64 zmm31, zmm30;                                                 # New block is now the last block
+#PrintOutStringNL "EEEE";
         $last->copy($new);                                                      # Make last equal to new for the next iteration
        };
      }
 
     If ($$p{first} == $last, sub                                                # Save first  block if there is more than two blocks in the string
-     {$blockString->putBlock($$p{bs}, $last, 31);                               # Only write the block if it is not the first block as the first block will be written later
+     {PrintOutStringNL "FFFF";
+      #$last     ->dump("Last  :");
+      #PrintOutRegisterInHex zmm31;
+
+       $blockString->putBlock($$p{bs}, $last, 31);                               # Only write the block if it is not the first block as the first block will be written later
      },
     sub
-     {$blockString->putBlock($$p{bs}, $$p{first}, 29);                          # Put the first block back
+     {PrintOutStringNL "GGGG";
+      #$$p{first}    ->dump("First  :");
+      #$last    ->dump("Last   :");
+      #PrintOutRegisterInHex zmm29;
+       $blockString->putNextandPrevBlockOffsetIntoZmm(29, undef,  $last);       # From new block
+       $blockString->putBlock($$p{bs}, $$p{first}, 29);                         # Put the first block back
      });
 
     SetLabel $success;                                                          # The move is now complete
@@ -9942,7 +10050,9 @@ test unless caller;
 # podDocumentation
 __DATA__
 use Time::HiRes qw(time);
-use Test::More;
+use Test::Most;
+
+bail_on_fail;
 
 my $develop   = -e q(/home/phil/);                                              # Developing
 my $localTest = ((caller(1))[0]//'Nasm::X86') eq "Nasm::X86";                   # Local testing mode
@@ -9951,7 +10061,7 @@ Test::More->builder->output("/dev/null") if $localTest;                         
 
 if ($^O =~ m(bsd|linux)i)                                                       # Supported systems
  {if (confirmHasCommandLineCommand(q(nasm)) and LocateIntelEmulator)            # Network assembler and Intel Software Development emulator
-   {plan tests => 95;
+   {plan tests => 93;
    }
   else
    {plan skip_all =>qq(Nasm or Intel 64 emulator not available);
@@ -11341,6 +11451,51 @@ Length: 0000 0000 0000 000C
 END
  }
 
+=pod
+
+if (1) {
+  my $s = Rb(0..128);
+  my $B = CreateByteString;
+  my $b = $B->CreateBlockString;
+  $b->append(Vq(source, $s), Vq(size, 56));
+
+  $b->dump;
+
+  is_deeply Assemble, <<END;
+BlockString at address: 0000 0000 0000 0018
+Length: 0000 0000 0000 0037
+ zmm31: 0000 0058 0000 0058   3635 3433 3231 302F   2E2D 2C2B 2A29 2827   2625 2423 2221 201F   1E1D 1C1B 1A19 1817   1615 1413 1211 100F   0E0D 0C0B 0A09 0807   0605 0403 0201 0037
+Offset: 0000 0000 0000 0058
+Length: 0000 0000 0000 0001
+ zmm31: 0000 0018 0000 0018   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 3701
+END
+ }
+
+latest:;
+
+if (1) {
+  my $s = Rb(0..128);
+  my $B = CreateByteString;
+  my $b = $B->CreateBlockString;
+  $b->append(Vq(source, $s), Vq(size, 56));
+  $b->append(Vq(source, $s), Vq(size, 56));
+
+  $b->dump;
+
+  Assemble; exit;
+  is_deeply Assemble, <<END;
+BlockString at address: 0000 0000 0000 0018
+Length: 0000 0000 0000 0037
+ zmm31: 0000 0058 0000 0058   3635 3433 3231 302F   2E2D 2C2B 2A29 2827   2625 2423 2221 201F   1E1D 1C1B 1A19 1817   1615 1413 1211 100F   0E0D 0C0B 0A09 0807   0605 0403 0201 0037
+Offset: 0000 0000 0000 0058
+Length: 0000 0000 0000 0001
+ zmm31: 0000 0018 0000 0018   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 3701
+END
+ }
+exit;
+
+latest:;
+
 if (1) {
   my $s = Rb(0..128);
   my $B = CreateByteString;
@@ -11352,6 +11507,8 @@ if (1) {
 
   $b->append(Vq(source, $s), Vq(size,  2));
   $b->dump;
+
+  Assemble; exit;
 
   is_deeply Assemble, <<END;
 BlockString at address: 0000 0000 0000 0018
@@ -11374,8 +11531,7 @@ Length: 0000 0000 0000 0035
  zmm31: 0000 0058 0000 0018   0000 0100 3231 302F   2E2D 2C2B 2A29 2827   2625 2423 2221 201F   1E1D 1C1B 1A19 1817   1615 1413 1211 100F   0E0D 0C0B 0A09 0807   0605 0403 0201 0035
 END
  }
-
-#latest:;
+exit;
 
 if (1) {
   my $s = Rb(0..255);
@@ -11415,11 +11571,111 @@ Length: 0000 0000 0000 0001
 END
  }
 
+if (1) {
+  my $B = CreateByteString;
+  my $b = $B->CreateBlockString;
+  $b->getBlock($b->address, $b->first, 30);
+  PrintOutRegisterInHex zmm30;
+  ClearRegisters zmm30;
+  $b->putBlock($b->address, $b->first, 30);
+  $b->getBlock($b->address, $b->first, 29);
+  PrintOutRegisterInHex zmm29;
+
+  $b->putNextandPrevBlockOffsetIntoZmm(31, Vq('next', 0x1111),  Vq('prev', 0x2222));
+  my ($next, $prev) = $b->getNextAndPrevBlockOffsetFromZmm(31);
+  $b->setBlockLengthInZmm(Vq('length', 0x32), 31);
+  my $l = $b->getBlockLengthInZmm(31);
+  PrintOutRegisterInHex zmm31;
+  $l->dump;
+  $next->dump;
+  $prev->dump;
+  $b->putNextandPrevBlockOffsetIntoZmm(31, Vq('next', 0x3333), undef);
+  $b->putNextandPrevBlockOffsetIntoZmm(31, undef, Vq(prev, 0x4444));
+  PrintOutRegisterInHex zmm31;
+
+  is_deeply Assemble, <<END;
+ zmm30: 0000 0018 0000 0018   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+ zmm29: 0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+ zmm31: 0000 1111 0000 2222   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0032
+b at offset 0 in zmm31: 0000 0000 0000 0032
+Next block offset: 0000 0000 0000 1111
+Prev block offset: 0000 0000 0000 2222
+ zmm31: 0000 3333 0000 4444   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0032
+END
+ }
+
+latest:;
+
+if (1) {
+  my $s = Rb(0..255);
+  my $B = CreateByteString;
+  my $b = $B->CreateBlockString;
+
+  $b->append(source=>Vq(source, $s), Vq(size, 255));
+  $b->dump;
+
+  is_deeply Assemble, <<END;
+BlockString at address: 0000 0000 0000 0018
+Length: 0000 0000 0000 0037
+ zmm31: 0000 0058 0000 0118   3635 3433 3231 302F   2E2D 2C2B 2A29 2827   2625 2423 2221 201F   1E1D 1C1B 1A19 1817   1615 1413 1211 100F   0E0D 0C0B 0A09 0807   0605 0403 0201 0037
+Offset: 0000 0000 0000 0058
+Length: 0000 0000 0000 0037
+ zmm31: 0000 0098 0000 0018   A4A3 A2A1 A09F 9E9D   9C9B 9A99 9897 9695   9493 9291 908F 8E8D   8C8B 8A89 8887 8685   8483 8281 807F 7E7D   7C7B 7A79 7877 7675   7473 7271 706F 6E37
+Offset: 0000 0000 0000 0098
+Length: 0000 0000 0000 0037
+ zmm31: 0000 00D8 0000 0058   DBDA D9D8 D7D6 D5D4   D3D2 D1D0 CFCE CDCC   CBCA C9C8 C7C6 C5C4   C3C2 C1C0 BFBE BDBC   BBBA B9B8 B7B6 B5B4   B3B2 B1B0 AFAE ADAC   ABAA A9A8 A7A6 A537
+Offset: 0000 0000 0000 00D8
+Length: 0000 0000 0000 0023
+ zmm31: 0000 0018 0000 0098   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 FEFD FCFB   FAF9 F8F7 F6F5 F4F3   F2F1 F0EF EEED ECEB   EAE9 E8E7 E6E5 E4E3   E2E1 E0DF DEDD DC23
+END
+ }
+exit;
+if (1) {
+  my $s = Rb(0..255);
+  my $B = CreateByteString;
+  my $b = $B->CreateBlockString;
+
+  $b->append(source=>Vq(source, $s), Vq(size, 255));
+  $b->append(source=>Vq(source, $s), Vq(size, 2));
+  $b->dump;
+
+  eq_or_diff Assemble, <<END;
+BlockString at address: 0000 0000 0000 0018
+Length: 0000 0000 0000 0037
+ zmm31: 0000 0058 0000 00D8   3635 3433 3231 302F   2E2D 2C2B 2A29 2827   2625 2423 2221 201F   1E1D 1C1B 1A19 1817   1615 1413 1211 100F   0E0D 0C0B 0A09 0807   0605 0403 0201 0037
+Offset: 0000 0000 0000 0058
+Length: 0000 0000 0000 0037
+ zmm31: 0000 0098 0000 0018   A4A3 A2A1 A09F 9E9D   9C9B 9A99 9897 9695   9493 9291 908F 8E8D   8C8B 8A89 8887 8685   8483 8281 807F 7E7D   7C7B 7A79 7877 7675   7473 7271 706F 6E37
+Offset: 0000 0000 0000 0098
+Length: 0000 0000 0000 0037
+ zmm31: 0000 00D8 0000 0058   DBDA D9D8 D7D6 D5D4   D3D2 D1D0 CFCE CDCC   CBCA C9C8 C7C6 C5C4   C3C2 C1C0 BFBE BDBC   BBBA B9B8 B7B6 B5B4   B3B2 B1B0 AFAE ADAC   ABAA A9A8 A7A6 A537
+Offset: 0000 0000 0000 00D8
+Length: 0000 0000 0000 0025
+ zmm31: 0000 0018 0000 0098   0000 0000 0000 0000   0000 0000 0000 0000   0000 0100 FEFD FCFB   FAF9 F8F7 F6F5 F4F3   F2F1 F0EF EEED ECEB   EAE9 E8E7 E6E5 E4E3   E2E1 E0DF DEDD DC25
+END
+ }
+
+latest:;
+
+if (1) {
+  my $s = Rb(0..255);
+  my $B = CreateByteString;
+  my $b = $B->CreateBlockString;
+
+  $b->append(source=>Vq(source, $s), Vq(size, 255));
+  $b->append(source=>Vq(source, $s), Vq(size, 55));
+  $b->dump;
+
+  Assemble;
+#  is_deeply Assemble, <<END;
+#END
+ }
+
 if (0) {
   is_deeply Assemble, <<END;
 END
  }
-
+=cut
 unlink $_ for qw(hash print2 sde-log.txt sde-ptr-check.out.txt z.txt);          # Remove incidental files
 
 lll "Finished:", time - $start,  "bytes assembled:",   totalBytesAssembled;
