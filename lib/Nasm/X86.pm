@@ -3261,7 +3261,7 @@ sub ByteString::CreateBlockString($)                                            
     first   => Vq('first'),                                                     # Variable addressing first block in block string
    );
 
-  $s->allocBlock->call(bs => $byteString->bs, my $first = Vq(offset));          # Allocate first block
+  $s->allocBlock(bs => $byteString->bs, my $first = Vq(offset));                # Allocate first block
   $s->first->copy($first);                                                      # Save first block
 
   if (1)                                                                        # Initialize circular list
@@ -3283,12 +3283,12 @@ sub BlockString::address($)                                                     
   $blockString->bs->bs;
  }
 
-sub BlockString::allocBlock($)                                                  # Allocate a block to hold a zmm register in the specified byte string and return the offset of the block in a variable
- {my ($blockString) = @_;                                                       # Block string descriptor, variable containing address of underlying byte string
-  @_ == 1 or confess;
+sub BlockString::allocBlock($@)                                                 # Allocate a block to hold a zmm register in the specified byte string and return the offset of the block in a variable
+ {my ($blockString, @variables) = @_;                                           # Block string descriptor, variables
+  @_ >= 3 or confess;
   my $byteString = $blockString->bs;
 
-  Subroutine
+  my $s = Subroutine
    {my ($p) = @_;                                                               # Parameters
     Comment "Allocate a block in a block string";
 
@@ -3297,35 +3297,16 @@ sub BlockString::allocBlock($)                                                  
      ($byteString->bs, Vq(size, $blockString->size), $$p{offset});
 
     PopR @regs;
-   } in => {bs => 3}, out => {offset => 3}
- }
+   } in => {bs => 3}, out => {offset => 3};
 
-#sub BlockString::getBlockLength($$)                                            # Get the length of the block at the specified offset and return it as a new variable
-# {my ($blockString, $block) = @_;                                              # Block string descriptor, variable containing offset of block whose length we want
-#  PushR my @save = (r13, r14, r15);                                            # Result register
-#  $blockString->bsAddress->setReg(r14);                                        # Byte string
-#  $block->setReg(r15);                                                         # Offset in byte string to block
-#  Mov r13b, "[r15+r14]";                                                       # Block length
-#  my $r = Vq("Length of block", r13);                                          # Block length variable
-#  PopR @save;                                                                  # Length of block is a byte
-#  $r                                                                           # Result variable
-# }
+  $s->call(@variables);
+ }
 
 sub BlockString::getBlockLengthInZmm($$)                                        # Get the block length of the numbered zmm and return it in a variable
  {my ($blockString, $zmm) = @_;                                                 # Block string descriptor, number of zmm register
   @_ == 2 or confess;
   getBFromZmmAsVariable $zmm, 0;                                                # Block length
  }
-
-#sub BlockString::setBlockLength($$$)                                           # Set the length of the specified block to the specified length
-# {my ($blockString, $block, $length) = @_;                                     # Block string descriptor, number of xmm register addressing block, new length in a byte register
-#  PushR my @save = (r13, r14, r15);                                            # Result register
-#  $blockString->bsAddress->setReg(r15);                                        # Byte string
-#  $block->setReg(r14);                                                         # Offset of block
-#  $length->setReg(r13);                                                        # New length
-#  Mov "[r15+r14]", r13b;                                                       # Block length
-#  PopR @save;                                                                  # Length of block is a byte
-# }
 
 sub BlockString::setBlockLengthInZmm($$$)                                       # Set the block length of the numbered zmm to the specified length
  {my ($blockString, $length, $zmm) = @_;                                        # Block string descriptor, length as a variable, number of zmm register
@@ -3355,43 +3336,6 @@ sub BlockString::putBlock($$$$)                                                 
   Vmovdqu64 "[r15+r14]", "zmm$zmm";                                             # Write to memory
   PopR @save;                                                                   # Restore registers
  }
-
-#sub BlockString::getNextBlock($$)                                              # Get the offset of the next block from the specified block in the specified block string and return it as a variable
-# {my ($blockString, $block) = @_;                                              # Block string descriptor, variable addressing current block
-#  my $n = $blockString->next;                                                  # Quad word of next offset
-#  my $p = $blockString->prev;                                                  # Quad word of prev offset
-#  PushR my @regs = (r13, r14, r15);                                            # Work registers
-#  $blockString->bsAddress->setReg(r15);                                        # Byte string address
-#  $block->setReg(r14);                                                         # Offset of block in byte string
-#  Mov    r13d, "[r15+r14+$n]";                                                 # Offset of next offset
-#  my $r = Vq("Offset of next block", r13);                                     # Save offset of next block as a variable
-#  PopR @regs;                                                                  # Free work registers
-#  $r;                                                                          # Return address of next block
-# }
-#
-#sub BlockString::getNextBlockFromZmm($$)                                       # Get the offset of the next block from the numbered zmm and return in in a variable
-# {my ($blockString, $zmm) = @_;                                                # Block string descriptor, numbered zmm
-#  my $n = $blockString->next;                                                  # Quad word of next offset
-#  my $p = $blockString->prev;                                                  # Quad word of prev offset
-#  PushR my @regs = (k7);                                                       # Work registers
-#  Mov    r13d, "[r15+r14+$n]";                                                 # Offset of next offset
-#  my $r = Vq("Offset of next block", r13);                                     # Save offset of next block as a variable
-#  PopR @regs;                                                                  # Free work registers
-#  $r;                                                                          # Return address of next block
-# }
-#
-#sub BlockString::getPrevBlock($$)                                              # Get the prev block from the block addressed by the numbered xmm register and return it in the same xmm
-# {my ($blockString, $block) = @_;                                              # Block string descriptor, variable addressing current bloxk
-#  my $n = $blockString->next;                                                  # Quad word of next offset
-#  my $p = $blockString->prev;                                                  # Quad word of prev offset
-#  PushR my @regs = (r13, r14, r15);                                            # Work registers
-#  $blockString->bsAddress->setReg(r15);                                        # Byte string address
-#  $block->setReg(r14);                                                         # Offset of block in byte string
-#  Mov    r13d, "[r15+r14+$p]";                                                 # Offset of next offset
-#  my $r = Vq("Offset of prev block", r13);                                     # Save offset of prev block as a variable
-#  PopR @regs;                                                                  # Free work registers
-#  $r;                                                                          # Return address of next block
-# }
 
 sub BlockString::getNextAndPrevBlockOffsetFromZmm($$)                           # Get the offsets of the next and previous blocks as variables from the specified zmm
  {my ($blockString, $zmm) = @_;                                                 # Block string descriptor, zmm containing block
@@ -3509,7 +3453,7 @@ sub BlockString::append($@)                                                     
      {ForEver                                                                   # Fill any more blocks needed
        {my ($start, $end) = @_;                                                 # Start and end of loop
 
-        $blockString->allocBlock->call($$p{bs}, my $new = Vq(offset));          # Allocate new block that we will insert next
+        $blockString->allocBlock($$p{bs}, my $new = Vq(offset));                # Allocate new block that we will insert next
         $blockString->getBlock($$p{bs}, $new, 30);                              # Get the new block which will have been properly formatted
 
         my ($next, $prev) = $blockString->getNextAndPrevBlockOffsetFromZmm(31); # Link new block
