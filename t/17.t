@@ -1,6 +1,5 @@
+#!/usr/bin/perl -I/home/phil/perl/cpan/NasmX86/lib
 #Author: tino <gordon.zar@gmail.com>
-use strict;
-use warnings;
 use Test::Most tests => 15;
 use Nasm::X86 qw(:all);
 

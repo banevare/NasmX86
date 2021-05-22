@@ -1,3 +1,4 @@
+#!/usr/bin/perl -I/home/phil/perl/cpan/NasmX86/lib
 #Author: Tino <gordon.zar@gmai.com>
 #Descripton: Simple for loop iteration test
 use Test::Most tests => 1;
