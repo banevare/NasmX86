@@ -2883,13 +2883,14 @@ sub ByteString::length($)                                                       
    } in => {bs=>3}, out => {size=>3};
  }
 
-sub ByteString::updateSpace($)                                                  #P Make sure that the byte string addressed by rax has enough space to accommodate content of length rdi
- {my ($byteString) = @_;                                                        # Byte string descriptor
-  @_ == 1 or confess;
+sub ByteString::updateSpace($@)                                                 #P Make sure that the byte string addressed by rax has enough space to accommodate content of length rdi
+ {my ($byteString, @variables) = @_;                                            # Byte string descriptor, variables
+
+  @_ >= 3 or confess;
   my $size = $byteString->size->addr;
   my $used = $byteString->used->addr;
 
-  Subroutine
+  my $s = Subroutine
    {my ($p) = @_;                                                               # Parameters
     Comment "Allocate more space for a byte string";
 
@@ -2917,6 +2918,8 @@ sub ByteString::updateSpace($)                                                  
 
     RestoreFirstFour;
    } io => {bs=>3}, in=>{size=>3};
+
+  $s->call(@variables);
  } # updateSpace
 
 sub ByteString::makeReadOnly($)                                                 # Make a byte string read only
@@ -2967,7 +2970,7 @@ sub ByteString::allocate($)                                                     
     Comment "Allocate space in a byte string";
     SaveFirstFour;
 
-    $byteString->updateSpace->call($$p{bs}, $$p{size});                         # Update space if needed
+    $byteString->updateSpace($$p{bs}, $$p{size});                               # Update space if needed
     $$p{bs}  ->setReg(rax);
     Mov rsi, $byteString->used->addr;                                           # Currently used
     $$p{offset}->getReg(rsi);
@@ -2991,7 +2994,7 @@ sub ByteString::m($)                                                            
     SaveFirstFour;
     $$p{bs}->setReg(rax);
     my $oldUsed = Vq("used", $used);
-    $byteString->updateSpace->call($$p{bs}, $$p{size});                         # Update space if needed
+    $byteString->updateSpace($$p{bs}, $$p{size});                               # Update space if needed
 
     my $target  = $oldUsed + $$p{bs};
     KeepFree rax;
