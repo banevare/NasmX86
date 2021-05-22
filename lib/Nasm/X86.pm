@@ -3160,17 +3160,19 @@ sub ByteString::write($)                                                        
    }  in => {bs => 3, file => 3};
  }
 
-sub ByteString::read($)                                                         # Read the named file (terminated with a zero byte) and place it into the named byte string.
- {my ($byteString) = @_;                                                        # Byte string descriptor
-  @_ == 1 or confess;
+sub ByteString::read($@)                                                        # Read the named file (terminated with a zero byte) and place it into the named byte string.
+ {my ($byteString, @variables) = @_;                                            # Byte string descriptor, variables
+  @_ >= 2 or confess;
 
-  Subroutine
+  my $s = Subroutine
    {my ($p) = @_;                                                               # Parameters
     Comment "Read a byte string";
     ReadFile($$p{file}, (my $size = Vq(size)), my $address = Vq(address));
     $byteString->m($$p{bs}, $size, $address);                                   # Move data into byte string
     FreeMemory($size, $address);                                                # Free memory allocated by read
    } io => {bs => 3}, in => {file => 3};
+
+  $s->call(bs => $byteString->bs, @variables);
  }
 
 sub ByteString::out($)                                                          # Print the specified byte string addressed by rax on sysout
@@ -10497,7 +10499,7 @@ END
 
 if (1) {                                                                        # Print this file  #TByteString::read #TByteString::z #TByteString::q
   my $s = CreateByteString;                                                     # Create a string
-  $s->read->call($s->bs, Vq(file, Rs($0)));
+  $s->read(Vq(file, Rs($0)));
   $s->out;
 
   my $r = Assemble(1 => my $f = temporaryFile);
