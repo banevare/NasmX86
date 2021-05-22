@@ -3129,11 +3129,11 @@ sub ByteString::clear($@)                                                       
   $s->call(bs => $byteString->bs);
  }
 
-sub ByteString::write($)                                                        # Write the content in a byte string addressed by rax to a temporary file and replace the byte string content with the name of the  temporary file
- {my ($byteString) = @_;                                                        # Byte string descriptor
-  @_ == 1 or confess;
+sub ByteString::write($@)                                                       # Write the content in a byte string addressed by rax to a temporary file and replace the byte string content with the name of the  temporary file
+ {my ($byteString, @variables) = @_;                                            # Byte string descriptor, variables
+  @_ >= 2 or confess;
 
-  Subroutine
+  my $s = Subroutine
    {my ($p) = @_;                                                               # Parameters
     Comment "Write a byte string to a file";
     SaveFirstFour;
@@ -3158,6 +3158,8 @@ sub ByteString::write($)                                                        
     CloseFile;
     RestoreFirstFour;
    }  in => {bs => 3, file => 3};
+
+  $s->call(bs => $byteString->bs, @variables);
  }
 
 sub ByteString::read($@)                                                        # Read the named file (terminated with a zero byte) and place it into the named byte string.
@@ -3184,20 +3186,21 @@ sub ByteString::out($)                                                          
     Comment "Write a byte string";
     SaveFirstFour;
     $$p{bs}->setReg(rax);
-    Mov rdi, $byteString->used->addr;                                             # Length to print
-    Sub rdi, $byteString->structure->size;                                        # Length to print
-    Lea rax, $byteString->data->addr;                                             # Address of data field
+    Mov rdi, $byteString->used->addr;                                           # Length to print
+    Sub rdi, $byteString->structure->size;                                      # Length to print
+    Lea rax, $byteString->data->addr;                                           # Address of data field
     PrintOutMemory;
     RestoreFirstFour;
    } in => {bs => 3};
 
-  $s->call ($byteString->bs);
+  $s->call($byteString->bs);
  }
 
-sub executeFileViaBash()                                                        # Execute the file named in the byte string addressed by rax with bash
- {@_ == 0 or confess;
+sub executeFileViaBash(@)                                                       # Execute the file named in the byte string addressed by rax with bash
+ {my (@variables) = @_;                                                         # Variables
+  @_ >= 1 or confess;
 
-  Subroutine
+  my $s = Subroutine
    {my ($p) = @_;                                                               # Parameters
     Comment "Execute a file via bash";
     SaveFirstFour;
@@ -3218,12 +3221,15 @@ sub executeFileViaBash()                                                        
      };
     RestoreFirstFour;
    } in => {file => 3};
+
+  $s->call(@variables);
  }
 
-sub unlinkFile()                                                                # Unlink the named file
- {@_ == 0 or confess;
+sub unlinkFile(@)                                                               # Unlink the named file
+ {my (@variables) = @_;                                                         # Variables
+  @_ >= 1 or confess;
 
-  Subroutine
+  my $s = Subroutine
    {my ($p) = @_;                                                               # Parameters
     Comment "Unlink a file";
     SaveFirstFour;
@@ -3232,6 +3238,8 @@ sub unlinkFile()                                                                
     Syscall;
     RestoreFirstFour;
    } in => {file => 3};
+
+  $s->call(@variables);
  }
 
 sub ByteString::dump($)                                                         # Dump details of a byte string
@@ -10552,9 +10560,9 @@ whoami
 ls -la
 pwd
 END
-  $s->write         ->call($s->bs, my $f = Vq('file', Rs("zzz.sh")));           # Write code to a file
-  executeFileViaBash->call($f);                                                 # Execute the file
-  unlinkFile        ->call($f);                                                 # Delete the file
+  $s->write         (my $f = Vq('file', Rs("zzz.sh")));                         # Write code to a file
+  executeFileViaBash($f);                                                       # Execute the file
+  unlinkFile        ($f);                                                       # Delete the file
 
   my $u = qx(whoami); chomp($u);
   ok Assemble(emulator=>0) =~ m($u);                                            # The Intel Software Development Emulator is way too slow on these operations.
