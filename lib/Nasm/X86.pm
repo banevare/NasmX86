@@ -3426,11 +3426,13 @@ sub BlockString::putNextandPrevBlockOffsetIntoZmm($$$$)                         
 #  PopR @save;                                                                  # Free work registers
 # }
 
+#$b->dump->call($b->address, $b->first)
+
 sub BlockString::dump($)                                                        # Dump a block string  to sysout
  {my ($blockString) = @_;                                                       # Block string descriptor
   @_ == 1 or confess;
 
-  Subroutine
+  my $s = Subroutine
    {my ($p) = @_;                                                               # Parameters
     Comment "Dump a block in a block string";
     PushR my @save = (zmm31);
@@ -3452,13 +3454,15 @@ sub BlockString::dump($)                                                        
      };
     PopR @save;
    } in => {bs => 3, first => 3};
+
+  $s->call($blockString->address, $blockString->first);
  }
 
-sub BlockString::append($)                                                      # Append the specified content in memory to the specified block string
- {my ($blockString) = @_;                                                       # Block string descriptor
-  @_ == 1 or confess;
+sub BlockString::append($$$)                                                    # Append the specified content in memory to the specified block string
+ {my ($blockString, $source, $size) = @_;                                       # Block string descriptor, source address, source length
+  @_ == 3 or confess;
 
-  Subroutine
+  my $s = Subroutine
    {my ($p) = @_;                                                               # Parameters
     my $success = Label;                                                        # Append completed successfully
     my $L = Vq(size, $blockString->length);                                     # Length of a full block
@@ -3555,6 +3559,8 @@ sub BlockString::append($)                                                      
     SetLabel $success;                                                          # The move is now complete
     PopR @save;
    }  in => {bs => 3, first => 3, source => 3, size => 3};
+
+  $s->call($blockString->address, $blockString->first, $source, $size);
  }
 
 #D1 Tree                                                                        # Tree operations
@@ -11388,11 +11394,11 @@ if (1) {                                                                        
   my $s = Rb(0..255);
   my $B =     CreateByteString;
   my $b = $B->CreateBlockString;
-  $b->append->call($b->address, $b->first, Vq(source, $s), Vq(size, 3));
-  $b->append->call($b->address, $b->first, Vq(source, $s), Vq(size, 4));
-  $b->append->call($b->address, $b->first, Vq(source, $s), Vq(size, 5));
+  $b->append(Vq(source, $s), Vq(size, 3));
+  $b->append(Vq(source, $s), Vq(size, 4));
+  $b->append(Vq(source, $s), Vq(size, 5));
 
-  $b->dump->call($b->address, $b->first);
+  $b->dump;
 
   is_deeply Assemble, <<END;
 BlockString at address: 0000 0000 0000 0018
@@ -11405,13 +11411,13 @@ if (1) {
   my $s = Rb(0..128);
   my $B = CreateByteString;
   my $b = $B->CreateBlockString;
-  $b->append->call($b->address, $b->first, Vq(source, $s), Vq(size, 58));
-  $b->append->call($b->address, $b->first, Vq(source, $s), Vq(size, 52));
-  $b->append->call($b->address, $b->first, Vq(source, $s), Vq(size, 51));
-  $b->dump->call($b->address, $b->first);
+  $b->append(Vq(source, $s), Vq(size, 58));
+  $b->append(Vq(source, $s), Vq(size, 52));
+  $b->append(Vq(source, $s), Vq(size, 51));
+  $b->dump;
 
-  $b->append->call($b->address, $b->first, Vq(source, $s), Vq(size,  2));
-  $b->dump->call($b->address, $b->first);
+  $b->append(Vq(source, $s), Vq(size,  2));
+  $b->dump;
 
   is_deeply Assemble, <<END;
 BlockString at address: 0000 0000 0000 0018
@@ -11441,6 +11447,6 @@ END
  }
 
 unlink $_ for qw(hash print2 sde-log.txt sde-ptr-check.out.txt z.asm z.txt);    # Remove incidental files
-unlink $_ for grep {/\A\.\/atmpa/} findFiles('.');                              # Remove temporary files
+#unlink $_ for grep {/\A\.\/atmpa/} findFiles('.');                              # Remove temporary files
 
 lll "Finished:", time - $start,  "bytes assembled:",   totalBytesAssembled;
