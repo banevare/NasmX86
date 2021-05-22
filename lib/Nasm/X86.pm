@@ -2086,7 +2086,7 @@ sub Nasm::X86::Variable::freeMemory($)                                          
   my $s = RegisterSize rax;
   Mov rax, "[$l]";
   Mov rdi, "[$l+$s]";
-  &FreeMemory();                                                                # Free the memory
+  &FreeMemory;                                                                  # Free the memory
   PopR @save;
  }
 
@@ -2434,10 +2434,11 @@ sub PrintOutMemoryNL                                                            
   PrintOutNL;
  }
 
-sub AllocateMemory                                                              # Allocate the specified amount of memory via mmap and return its address
- {@_ == 0 or confess;
+sub AllocateMemory(@)                                                           # Allocate the specified amount of memory via mmap and return its address
+ {my (@variables) = @_;                                                         # Parameters
+  @_ >= 2 or confess;
 
-  Subroutine
+  my $s = Subroutine
    {my ($p) = @_;                                                               # Parameters
     Comment "Allocate memory";
     SaveFirstSeven;
@@ -2457,13 +2458,16 @@ sub AllocateMemory                                                              
 
     RestoreFirstSeven;
    } in => {size=>3}, out => {address=>3};
+
+  $s->call(@variables);
  }
 
-sub FreeMemory                                                                  # Free memory
- {@_ == 0 or confess;
+sub FreeMemory(@)                                                               # Free memory
+ {my (@variables) = @_;                                                         # Variables
+  @_ >= 2 or confess;
   Comment "Free memory";
 
-  Subroutine
+  my $s = Subroutine
    {my ($p) = @_;                                                               # Parameters
     SaveFirstFour;
     Mov rax, 11;                                                                # Munmap
@@ -2472,6 +2476,8 @@ sub FreeMemory                                                                  
     Syscall;
     RestoreFirstFour;
    } in => {size=>3, address=>3};
+
+  $s->call(@variables);
  }
 
 sub ClearMemory()                                                               # Clear memory - the address of the memory is in rax, the length in rdi
@@ -2498,10 +2504,11 @@ sub ClearMemory()                                                               
    } in => {size => 3, address => 3};
  }
 
-sub CopyMemory()                                                                # Copy memory, the target is addressed by rax, the length is in rdi, the source is addressed by rsi
- {@_ == 0 or confess;
+sub CopyMemory(@)                                                               # Copy memory, the target is addressed by rax, the length is in rdi, the source is addressed by rsi
+ {my (@variables) = @_;                                                         # Variables
+  @_ >= 3 or confess;
 
-  Subroutine
+  my $s = Subroutine
    {my ($p) = @_;                                                               # Parameters
     Comment "Copy memory";
     my $source   = rsi;
@@ -2522,6 +2529,8 @@ sub CopyMemory()                                                                
 
     RestoreFirstSeven;
    } in => {source => 3, target => 3, size => 3};
+
+  $s->call(@variables);
  }
 
 #D1 Files                                                                       # Process a file
@@ -2612,10 +2621,11 @@ sub StatSize()                                                                  
   Call $sub;
  }
 
-sub ReadFile()                                                                  # Read a file whose name is addressed by rax into memory.  The address of the mapped memory and its length are returned in registers rax,rdi
- {@_ == 0 or confess;
+sub ReadFile(@)                                                                 # Read a file whose name is addressed by rax into memory.  The address of the mapped memory and its length are returned in registers rax,rdi
+ {my (@variables) = @_;                                                         # Variables
+  @_ >= 3 or confess;
 
-  Subroutine                                                                    # Read file
+  my $s = Subroutine
    {my ($p) = @_;
     Comment "Read a file into memory";
     SaveFirstSeven;                                                             # Generated code
@@ -2650,6 +2660,8 @@ sub ReadFile()                                                                  
     $$p{size}   ->getReg(rdi);
     RestoreFirstSeven;
    } in => {file => 3}, out => {address => 3, size => 3};
+
+  $s->call(@variables);
  }
 
 #D1 Short Strings                                                               # Operations on Short Strings
@@ -2831,7 +2843,7 @@ sub CreateByteString(%)                                                         
    {my ($p) = @_;                                                               # Parameters
     SaveFirstFour;
 
-    AllocateMemory->call($N, address=>$$p{bs});                                 # Allocate memory and save its location in a variable
+    AllocateMemory($N, address=>$$p{bs});                                       # Allocate memory and save its location in a variable
 
     $$p{bs}->setReg(rax);
     $N     ->setReg(rdx);
@@ -2897,9 +2909,9 @@ sub ByteString::updateSpace($)                                                  
         IfGe {Jmp $end};                                                        # Big enough!
        };
       my $newSize = Vq(size, rax);                                              # Save new byte string size
-      AllocateMemory->call(size => $newSize, my $address = Vq(address));        # Create new byte string
-      CopyMemory->call(target => $address, source => $$p{bs}, size => $oldUsed);# Copy old byte string into new byte string
-      FreeMemory->call(address=>$$p{bs}, size=>$oldSize);                       # Free previous memory previously occupied byte string
+      AllocateMemory(size => $newSize, my $address = Vq(address));              # Create new byte string
+      CopyMemory(target  => $address, source => $$p{bs}, size => $oldUsed);     # Copy old byte string into new byte string
+      FreeMemory(address => $$p{bs},  size   => $oldSize);                      # Free previous memory previously occupied byte string
       $$p{bs}->copyRef($address);                                               # Save new byte string address
      });
 
@@ -2983,7 +2995,7 @@ sub ByteString::m($)                                                            
 
     my $target  = $oldUsed + $$p{bs};
     KeepFree rax;
-    CopyMemory->call(source=>$$p{address}, $$p{size}, target=>$target);         # Move data in
+    CopyMemory(source => $$p{address}, $$p{size}, target => $target);           # Move data in
 
     KeepFree rdx;
     my $newUsed = $oldUsed + $$p{size};
@@ -3135,9 +3147,9 @@ sub ByteString::read($)                                                         
   Subroutine
    {my ($p) = @_;                                                               # Parameters
     Comment "Read a byte string";
-    ReadFile->call($$p{file}, (my $size = Vq(size)), my $address = Vq(address));
+    ReadFile($$p{file}, (my $size = Vq(size)), my $address = Vq(address));
     $byteString->m->call($$p{bs}, $size, $address);                             # Move data into byte string
-    FreeMemory    ->call(         $size, $address);                             # Free memory allocated by read
+    FreeMemory($size, $address);                                                # Free memory allocated by read
    } io => {bs => 3}, in => {file => 3};
  }
 
@@ -10135,7 +10147,7 @@ if (1) {
 if (1) {                                                                        #TAllocateMemory #TVariable::freeMemory
   my $N = Vq(size, 2048);
   my $q = Rs('a'..'p');
-  AllocateMemory->call($N, my $address = Vq(address));
+  AllocateMemory($N, my $address = Vq(address));
   $address->dump;
 
   Vmovdqu8 xmm0, "[$q]";
@@ -10145,7 +10157,7 @@ if (1) {                                                                        
   PrintOutMemory;
   PrintOutNL;
 
-  FreeMemory->call(address => $address, size=> $N);
+  FreeMemory(address => $address, size=> $N);
 
   ok Assemble =~ m(address: 0000.*abcdefghijklmnop)s;
  }
@@ -10327,7 +10339,7 @@ END
 if (1) {                                                                        #TAllocateMemory #TFreeMemory #TClearMemory
   my $N = Vq(size, 4096);                                                       # Size of the initial allocation which should be one or more pages
 
-  AllocateMemory->call($N, my $A = Vq(address));
+  AllocateMemory($N, my $A = Vq(address));
   $A->dump;
 
   ClearMemory->call($N, $A);
@@ -10336,7 +10348,7 @@ if (1) {                                                                        
   $N->setReg(rdi);
   PrintOutMemoryInHex;
 
-  FreeMemory->call($N, $A);
+  FreeMemory($N, $A);
 
   my $r = Assemble;
   if ($r =~ m((0000.*0000))s)
@@ -10363,7 +10375,7 @@ if (1) {                                                                        
  }
 
 if (1) {                                                                        #TReadFile #TPrintMemory
-  ReadFile->call(Vq(file, Rs($0)), (my $s = Vq(size)), my $a = Vq(address));    # Read file
+  ReadFile(Vq(file, Rs($0)), (my $s = Vq(size)), my $a = Vq(address));          # Read file
   $a->setReg(rax);
   $s->setReg(rdi);
   PrintOutMemory;                                                               # Print memory
@@ -10780,7 +10792,7 @@ if (1) {                                                                        
   Mov rax, rsp;                                                                 # Copy memory, the target is addressed by rax, the length is in rdi, the source is addressed by rsi
   Mov rdi, 16;
   Mov rsi, $s;
-  CopyMemory->call(Vq(source, rsi), Vq(target, rax), Vq(size, rdi));
+  CopyMemory(Vq(source, rsi), Vq(target, rax), Vq(size, rdi));
   PrintOutMemoryInHex;
 
   my $r = Assemble;
@@ -10792,11 +10804,11 @@ if (1) {                                                                        
 if (1) {                                                                        #TAllocateMemory
   my $N = 256;
   my $s = Rb 0..$N-1;
-  AllocateMemory->call(Vq(size, $N), my $a = Vq(address));
-  CopyMemory    ->call(Vq(source, $s), Vq(size, $N), target => $a);
-  AllocateMemory->call(Vq(size, $N), my $b = Vq(address));
+  AllocateMemory(Vq(size, $N), my $a = Vq(address));
+  CopyMemory(Vq(source, $s), Vq(size, $N), target => $a);
 
-  CopyMemory    ->call(source => $a, target => $b, Vq(size, $N));
+  AllocateMemory(Vq(size, $N), my $b = Vq(address));
+  CopyMemory(source => $a, target => $b, Vq(size, $N));
 
   $b->setReg(rax);
   Mov rdi, $N;
