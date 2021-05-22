@@ -3179,13 +3179,19 @@ sub ByteString::out($)                                                          
  {my ($byteString) = @_;                                                        # Byte string descriptor
   @_ == 1 or confess;
 
-  SaveFirstFour;
-  $byteString->bs->setReg(rax);
-  Mov rdi, $byteString->used->addr;                                             # Length to print
-  Sub rdi, $byteString->structure->size;                                        # Length to print
-  Lea rax, $byteString->data->addr;                                             # Address of data field
-  PrintOutMemory;
-  RestoreFirstFour;
+  my $s = Subroutine
+   {my ($p) = @_;                                                               # Parameters
+    Comment "Write a byte string";
+    SaveFirstFour;
+    $$p{bs}->setReg(rax);
+    Mov rdi, $byteString->used->addr;                                             # Length to print
+    Sub rdi, $byteString->structure->size;                                        # Length to print
+    Lea rax, $byteString->data->addr;                                             # Address of data field
+    PrintOutMemory;
+    RestoreFirstFour;
+   } in => {bs => 3};
+
+  $s->call ($byteString->bs);
  }
 
 sub executeFileViaBash()                                                        # Execute the file named in the byte string addressed by rax with bash
