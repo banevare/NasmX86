@@ -3108,11 +3108,11 @@ sub ByteString::append($)                                                       
   $s->call(target=>$byteString->bs, @variables);
  }
 
-sub ByteString::clear($)                                                        # Clear the byte string addressed by rax
+sub ByteString::clear($@)                                                       # Clear the byte string addressed by rax
  {my ($byteString) = @_;                                                        # Byte string descriptor
-  @_ == 1 or confess;
+  @_ >= 1 or confess;
 
-  Subroutine
+  my $s = Subroutine
    {my ($p) = @_;                                                               # Parameters
     Comment "Clear byte string";
     PushR my @save = (rax, rdi);
@@ -3121,6 +3121,8 @@ sub ByteString::clear($)                                                        
     Mov $byteString->used->addr, rdi;
     PopR     @save;
    } in => {bs => 3};
+
+  $s->call(bs => $byteString->bs);
  }
 
 sub ByteString::write($)                                                        # Write the content in a byte string addressed by rax to a temporary file and replace the byte string content with the name of the  temporary file
@@ -10416,7 +10418,7 @@ if (1) {                                                                        
   $b->out;   PrintOutNL;                                                        # Print byte string
   $a->length(my $sa = Vq(size)); $sa->dump;
   $b->length(my $sb = Vq(size)); $sb->dump;
-  $a->clear ->call($a->bs);
+  $a->clear;
   $a->length(my $sA = Vq(size)); $sA->dump;
   $b->length(my $sB = Vq(size)); $sB->dump;
 
