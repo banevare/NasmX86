@@ -3088,10 +3088,10 @@ sub ByteString::rdiInHex                                                        
  }
 
 sub ByteString::append($)                                                       # Append one byte string to another
- {my ($byteString) = @_;                                                        # Byte string descriptor
-  @_ == 1 or confess;
+ {my ($byteString, @variables) = @_;                                            # Byte string descriptor
+  @_ >= 3 or confess;
 
-  Subroutine
+  my $s = Subroutine
    {my ($p) = @_;                                                               # Parameters
     Comment "Concatenate byte strings";
     SaveFirstFour;
@@ -3102,6 +3102,8 @@ sub ByteString::append($)                                                       
     $byteString->m(bs=>$$p{target}, Vq(address, rsi), Vq(size, rdi));
     RestoreFirstFour;
    } in => {target=>3, source=>3};
+
+  $s->call(target=>$byteString->bs, @variables);
  }
 
 sub ByteString::clear($)                                                        # Clear the byte string addressed by rax
@@ -10397,15 +10399,15 @@ if (1) {                                                                        
   $a->q('ab');
   my $b = CreateByteString;                                                     # Create target byte string
   $a->bs(r15);
-  $a->append->call(target=>$b->bs, source=>$a->bs);
-  $a->append->call(target=>$b->bs, source=>$a->bs);
-  $a->append->call(target=>$a->bs, source=>$b->bs);
-  $a->append->call(target=>$b->bs, source=>$a->bs);
-  $a->append->call(target=>$a->bs, source=>$b->bs);
-  $a->append->call(target=>$b->bs, source=>$a->bs);
-  $a->append->call(target=>$b->bs, source=>$a->bs);
-  $a->append->call(target=>$b->bs, source=>$a->bs);
-  $a->append->call(target=>$b->bs, source=>$a->bs);
+  $b->append(source=>$a->bs);
+  $b->append(source=>$a->bs);
+  $a->append(source=>$b->bs);
+  $b->append(source=>$a->bs);
+  $a->append(source=>$b->bs);
+  $b->append(source=>$a->bs);
+  $b->append(source=>$a->bs);
+  $b->append(source=>$a->bs);
+  $b->append(source=>$a->bs);
 
 
   $a->out;   PrintOutNL;                                                        # Print byte string
