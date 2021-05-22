@@ -3959,17 +3959,30 @@ L<https://github.com/philiprbrenan/NasmX86/blob/main/.github/workflows/main.yml>
 
 =head2 Execution Options
 
-The L<Assemble(%options)> function takes the following keywords to control assembly
-and execution of the assembled code:
+The L<Assemble(%options)> function takes the following keywords to control
+assembly and execution of the assembled code:
+
+=head3 Keep
 
 To produce a named executable without running it, specify:
 
  keep=>"executable file name"
 
-To run the executable produced by L<Assemble(%options)> without the Intel emulator,
-which is used by default if it is present, specify:
+=head3 Emulator
+
+To run the executable produced by L<Assemble(%options)> without the Intel
+emulator, which is used by default if it is present, specify:
 
  emulator=>0
+
+
+=head3 Redirecting stdout or stderr
+
+To redirect the output on B<stdout> or B<stderr> use the 1 => fileName or 2 =>
+fileName parameters:
+
+ 1 => (my $o = temporaryFile),
+ 2 => (my $o = temporaryFile),
 
 =head1 Description
 
