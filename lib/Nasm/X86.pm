@@ -2825,6 +2825,7 @@ sub Hash()                                                                      
     Vgetmantps   zmm0, zmm0, 4;                                                 # Normalize to 1 to 2, see: https://hjlebbink.github.io/x86doc/html/VGETMANTPD.html
 
     Add rdi, rax;                                                               # Upper limit of string
+
     ForIn                                                                       # Hash in ymm0 sized blocks
      {Vmovdqu ymm1, "[rax]";                                                    # Load data to hash
       Vcvtudq2pd zmm1, ymm1;                                                    # Convert to float
@@ -4039,8 +4040,8 @@ END
   my $cmd  = qq(nasm -f elf64 -g -l $l -o $o $c && ld -o $e $o && chmod 744 $e);# Assemble
   my $o1 = 'zzzOut.txt';
   my $o2 = 'zzzErr.txt';
-  my $out  = "1>$o1";
-  my $err  = "2>$o2";
+  my $out  = $k ? '' : "1>$o1";
+  my $err  = $k ? '' : "2>$o2";
   my $exec = $emulator                                                          # Execute with or without the emulator
              ? qq($sde -ptr-check -- ./$e $err $out)
              :                    qq(./$e $err $out);
@@ -4049,10 +4050,13 @@ END
 
   say STDERR qq($cmd);
   my $R    = qx($cmd);
-  say STDERR readFile($o1) if $options{debug};
-  say STDERR readFile($o2) if $options{debug};
 
-  if ($debug < 2 and readFile($o2) =~ m(SDE ERROR:)s)                           # Emulator detected an error
+  if (!$k and $debug)
+   {say STDERR readFile($o1);
+    say STDERR readFile($o2);
+   }
+
+  if (!$k and $debug < 2 and readFile($o2) =~ m(SDE ERROR:)s)                   # Emulator detected an error
    {confess "SDE ERROR\n".readFile($o2);
    }
 
@@ -10183,7 +10187,7 @@ Test::More->builder->output("/dev/null") if $localTest;                         
 
 if ($^O =~ m(bsd|linux)i)                                                       # Supported systems
  {if (confirmHasCommandLineCommand(q(nasm)) and LocateIntelEmulator)            # Network assembler and Intel Software Development emulator
-   {plan tests => 94;
+   {plan tests => 96;
    }
   else
    {plan skip_all =>qq(Nasm or Intel 64 emulator not available);
@@ -11097,7 +11101,7 @@ if (1) {                                                                        
   ok Assemble =~ m(r15: 0000 0000 0000 0004);
  }
 
-if (0) {      #######FIX#######TESTTSTSTSTSTTSTS                                                                  # Hash a string #THash
+if (1) {                                                                        # Hash a string #THash
   Mov rax, "[rbp+24]";
   Cstrlen;                                                                      # Length of string to hash
   Mov rdi, r15;
@@ -11106,7 +11110,6 @@ if (0) {      #######FIX#######TESTTSTSTSTSTTSTS                                
   PrintOutRegisterInHex r15;
 
   my $e = Assemble keep=>'hash';                                                # Assemble to the specified file name
-
   ok qx($e "")  =~ m(r15: 0000 3F80 0000 3F80);                                 # Test well known hashes
   ok qx($e "a") =~ m(r15: 0000 3F80 C000 45B2);
 
@@ -11586,7 +11589,7 @@ if (1) {                                                                        
   $b->append(Vq(source, $s), Vq(size, 165)); $b->dump;
   $b->append(Vq(source, $s), Vq(size,   2)); $b->dump;
 
-  ok Assemble(debug => 1, eq => <<END);
+  ok Assemble(debug => 0, eq => <<END);
 Block String Dump
 Offset: 0000 0000 0000 0018   Length: 0000 0000 0000 0037
  zmm31: 0000 0058 0000 0098   3635 3433 3231 302F   2E2D 2C2B 2A29 2827   2625 2423 2221 201F   1E1D 1C1B 1A19 1817   1615 1413 1211 100F   0E0D 0C0B 0A09 0807   0605 0403 0201 0037
