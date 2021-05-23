@@ -3987,7 +3987,7 @@ sub totalBytesAssembled                                                         
 # Export - eeee
 #-------------------------------------------------------------------------------
 
-if (0)                                                                          #  Print exports
+if (0)                                                                          # Print exports
  {my @e;
   for my $a(sort keys %Nasm::X86::)
    {next if $a =~ m(DATA|confirmHasCommandLineCommand|currentDirectory|fff|fileSize|findFiles|fpe|fpf|genHash|lll|owf|pad|readFile);
