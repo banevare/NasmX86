@@ -964,7 +964,7 @@ defined($n) or confess"No n";
   Call $$sub{start};                                                            # Call the sub routine
 
   for my $p(keys $sub->out->%*)                                                 # Load output parameters
-   {confess q(Missing output parameter: "$p") unless my $v = $p{$p};
+   {confess qq(Missing output parameter: "$p") unless my $v = $p{$p};
     $v->copy($sub->variables->{$p});
    }
  }
@@ -3512,6 +3512,32 @@ sub BlockString::dump($)                                                        
   $s->call($blockString->address, $blockString->first);
  }
 
+sub BlockString::len($$)                                                        # Find the length of a block string
+ {my ($blockString, $size) = @_;                                                # Block string descriptor, size variable
+  @_ == 2 or confess;
+
+  my $s = Subroutine
+   {my ($p) = @_;                                                               # Parameters
+    Comment "Length of a block string";
+    PushR my @save = (zmm31);
+    my $block  = $$p{first};                                                    # The first block
+                 $blockString->getBlock($$p{bs}, $block, 31);                   # The first block in zmm31
+    my $length = $blockString->getBlockLengthInZmm(31);                         # Length of block
+
+    ForEver                                                                     # Each block in string
+     {my ($start, $end) = @_;                                                   #
+      my ($next, $prev) = $blockString->getNextAndPrevBlockOffsetFromZmm(31);   # Get links from current block
+      If ($next == $block, sub{Jmp $end});                                      # Next block is the first block so we have printed the block string
+      $blockString->getBlock($$p{bs}, $next, 31);                               # Next block in zmm
+      $length += $blockString->getBlockLengthInZmm(31);                         # Add length of block
+     };
+    $$p{size}->copy($length);
+    PopR @save;
+   } in => {bs => 3, first => 3}, out => {size => 3};
+
+  $s->call($blockString->address, $blockString->first, $size);
+ }
+
 sub BlockString::append($@)                                                     # Append the specified content in memory to the specified block string
  {my ($blockString, @variables) = @_;                                           # Block string descriptor, variables
   @_ >= 3 or confess;
@@ -3570,177 +3596,6 @@ PrintErrNL;
       $blockString->putBlock($B, $last, 31);                                    # Put the modified last block
       $blockString->putBlock($B, $new,  30);                                    # Put the modified new block
      };
-    PopR @save;
-   }  in => {bs => 3, first => 3, source => 3, size => 3};
-
-  $s->call($blockString->address, $blockString->first, @variables);
- }
-
-sub BlockString::append2($@)                                                    # Append the specified content in memory to the specified block string
- {my ($blockString, @variables) = @_;                                           # Block string descriptor, variables
-  @_ >= 3 or confess;
-
-  my $s = Subroutine
-   {my ($p) = @_;                                                               # Parameters
-    my $success = Label;                                                        # Append completed successfully
-    my $L = Vq(size, $blockString->length);                                     # Length of a full block
-
-    PushR my @save = (zmm29, zmm30, zmm31);
-    $blockString->getBlock($$p{bs}, $$p{first}, 29);                            # Get the first block
-    my ($second, $last) = $blockString->getNextAndPrevBlockOffsetFromZmm(29);   # Get the offsets of the second and last blocks
-    my $mode = Vq(mode, 0);
-
-    if (1)                                                                      # Fill a partially full first block in a string that only has one block
-     {If ($last == $$p{first}, sub                                              # String only has one block
-       {my $lengthFirst = $blockString->getBlockLengthInZmm(29);                # Length of the first block
-        my $spaceFirst  = $L - $lengthFirst;                                    # Space in first block
-
-        If ($spaceFirst >= $$p{size}, sub                                       # Enough space in first block
-         {$$p{source}->setZmm(29, $lengthFirst + 1, $$p{size});                 # Append bytes
-          $blockString->setBlockLengthInZmm($lengthFirst + $$p{size}, 29);      # Set the length
-          $blockString->putBlock($$p{bs}, $$p{first}, 29);                      # Put the block
-          Jmp $success;
-         },
-        sub                                                                     # Completely fill first block
-         {If ($spaceFirst >= 0, sub                                             # Some space in first block
-           {$$p{source}->setZmm(29, $lengthFirst + 1, $spaceFirst);             # Append bytes to fill first block
-            $blockString->setBlockLengthInZmm($L, 29);                          # Set the length
-            $$p{source} += $spaceFirst;
-            $$p{size}   -= $spaceFirst;
-           });
-####
-          $mode->copy(Vq(mode, 1));
-          Vmovdqa64 zmm31, zmm29;                                               # Place the first block which is also the last block into the last block
-         }),
-       },
-      sub                                                                       # Fill partially full last block
-       {$blockString->getBlock($$p{bs}, $last, 31);                             # Get the last block now known not to be the first block
-PrintOutStringNL "JJJ11";
-#$last     ->dump("Last  :");
-#PrintOutRegisterInHex zmm31;
-        my $lengthLast = $blockString->getBlockLengthInZmm(31);                 # Length of the last block
-        my $spaceLast  = $L - $lengthLast;                                      # Space in last block
-        If ($spaceLast >= $$p{size}, sub                                        # Enough space in last block
-         {$$p{source}->setZmm(31, $lengthLast + 1, $$p{size});                  # Append bytes
-          $blockString->setBlockLengthInZmm($lengthLast + $$p{size}, 31);       # Set the length
-          $blockString->putBlock($$p{bs}, $last, 31);                           # Put the block
-#PrintOutStringNL "JJJ22";
-#PrintOutRegisterInHex zmm31;
-          Jmp $success;
-         },
-        sub                                                                     # Completely fill last block
-         {If ($spaceLast >= 0, sub                                              # Some space in last block
-           {$$p{source}->setZmm(31, $lengthLast + 1, $spaceLast);               # Append bytes to fill last block
-            $blockString->setBlockLengthInZmm($L, 31);                          # Set the length
-            $blockString->putBlock($$p{bs}, $last, 31);                         # Put the block
-            $$p{source} += $spaceLast;
-            $$p{size} -= $spaceLast;
-#PrintOutStringNL "JJJ333";
-#$last     ->dump("Last  :");
-#PrintOutRegisterInHex zmm31;
-           });
-          $mode->copy(Vq(mode, 2));
-         }),
-       });
-     }
-
-    if (1)                                                                      # Add new blocks and fill them
-     {ForEver                                                                   # Fill any more blocks needed
-       {my ($start, $end) = @_;                                                 # Start and end of loop
-
-        $blockString->allocBlock($$p{bs}, my $new = Vq(offset));                # Allocate new block that we will insert next
-        $blockString->getBlock($$p{bs}, $new, 30);                              # Get the new block which will have been properly formatted
-PrintOutStringNL "NEWWW";
-$mode->dump("mode :");
-$new->dump("New :");
-
-        my ($next, $prev) = $blockString->getNextAndPrevBlockOffsetFromZmm(31); # Link new block
-        If ($$p{first} == $last, sub                                            # Connect first block to new block in string of one block
-         {$blockString->putNextandPrevBlockOffsetIntoZmm(31, $new,  $new);
-          $blockString->putNextandPrevBlockOffsetIntoZmm(30, $last, $last);
-          Vmovdqa64 zmm29, zmm31;                                               # The string had one block which becomes the first block
-###11
-#PrintOutStringNL "AAAA";
-#$$p{first}->dump("First :");
-#$last     ->dump("Last  :");
-#$prev     ->dump("Prev  :");
-#$next     ->dump("Next  :");
-#$new      ->dump("New   :");
-#$second   ->dump("Second:");
-#PrintOutRegisterInHex zmm31, zmm30;
-         },
-        sub                                                                     # Connect last block to new block in string of two or more blocks
-         {$blockString->putNextandPrevBlockOffsetIntoZmm(31, $new,    $prev);   # From last block
-          $blockString->putNextandPrevBlockOffsetIntoZmm(30, $next,   $last);   # From new block
-          $blockString->putNextandPrevBlockOffsetIntoZmm(29, undef,   $new);    # From first block
-PrintOutStringNL "BBBB";
-#$$p{first}->dump("First :");
-#$last     ->dump("Last  :");
-#PrintOutRegisterInHex zmm31;
-#$prev     ->dump("Prev  :");
-#$next     ->dump("Next  :");
-#$new      ->dump("New   :");
-#$second   ->dump("Second:");
-#PrintOutRegisterInHex zmm29, zmm31, zmm30;
-###22
-#PrintOutStringNL "BBBB";
-         });
-
-        If ($L >= $$p{size}, sub                                                # Enough space in last block to complete move
-         {$$p{source}->setZmm(30, Vq('one', 1), $$p{size});                     # Append remaining bytes from position 1 after the length field
-          $blockString->setBlockLengthInZmm($$p{size}, 30);                     # Set the length
-          $blockString->putNextandPrevBlockOffsetIntoZmm(30, undef,   $prev);   # From new block
-          If ($mode == Vq(mode, 1), sub
-           {$blockString->putBlock($$p{bs}, $new, 30);                          # Put the new block
-           },
-          sub
-           {$blockString->putBlock($$p{bs}, $last, 30);                         # Put the last block
-           });
-####3
-PrintOutStringNL "CCCC";
-$mode     ->dump("Mode  :");
-$last     ->dump("Last  :");
-#$new      ->dump("New   :");
-#$prev     ->dump("Prev  :");
-#PrintOutRegisterInHex zmm30;
-          Jmp $end;
-         });
-
-        $$p{source}->setZmm(31, Vq('one', 1), $L);                              # Append full block starting at position 1 after the length field
-        $blockString->setBlockLengthInZmm($L, 31);                              # Set the length
-
-PrintOutStringNL "DDDD";
-        $blockString->putBlock($$p{bs}, $last, 31);                             # Only write the block if it is not the first block as the first block will be written later
-#$$p{first}    ->dump("First :");
-#$last     ->dump("Last  :");
-#PrintOutRegisterInHex zmm31;
-        $$p{source} += $L;
-        $$p{size}   -= $L;
-#$$p{source}->dump("Source");
-
-        Vmovdqa64 zmm31, zmm30;                                                 # New block is now the last block
-#PrintOutStringNL "EEEE";
-        $last->copy($new);                                                      # Make last equal to new for the next iteration
-       };
-     }
-
-    If ($$p{first} == $last, sub                                                # Save first  block if there is more than two blocks in the string
-     {PrintOutStringNL "FFFF";
-      #$last     ->dump("Last  :");
-      #PrintOutRegisterInHex zmm31;
-
-       $blockString->putBlock($$p{bs}, $last, 31);                               # Only write the block if it is not the first block as the first block will be written later
-     },
-    sub
-     {PrintOutStringNL "GGGG";
-      #$$p{first}    ->dump("First  :");
-      #$last    ->dump("Last   :");
-      #PrintOutRegisterInHex zmm29;
-       $blockString->putNextandPrevBlockOffsetIntoZmm(29, undef,  $last);       # From new block
-       $blockString->putBlock($$p{bs}, $$p{first}, 29);                         # Put the first block back
-     });
-
-    SetLabel $success;                                                          # The move is now complete
     PopR @save;
    }  in => {bs => 3, first => 3, source => 3, size => 3};
 
@@ -11668,14 +11523,22 @@ if (1) {
   my $B = CreateByteString;
   my $b = $B->CreateBlockString;
 
-  $b->append(source=>Vq(source, $s), Vq(size, 256)); $b->clear;
+  $b->append(source=>Vq(source, $s), Vq(size, 256));
+  $b->len(my $size = Vq(size));
+  $size->outNL;
+  $b->clear;
+
   $b->append(Vq(source, $s), size => Vq(size,  16)); $b->dump;
+  $b->len(my $size2 = Vq(size));
+  $size2->outNL;
 
   is_deeply Assemble, <<END;
+size: 0000 0000 0000 0100
 Block String Dump
 Offset: 0000 0000 0000 0018   Length: 0000 0000 0000 0010
  zmm31: 0000 0018 0000 0018   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 000F   0E0D 0C0B 0A09 0807   0605 0403 0201 0010
 
+size: 0000 0000 0000 0010
 END
  }
 
