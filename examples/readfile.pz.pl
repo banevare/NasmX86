@@ -8,15 +8,18 @@ Pop rax; #address to string of program being run
 Pop rbx; #address of first argument to the program
 Cmp rdx, 2;
 IfEq{
-	Mov rax, rbx;
-	ReadFile; #rax = addr, rdi = length
-	PrintOutMemory;
+  Mov rax, rbx;
+  ReadFile(Vq(file, rax), (my $size = Vq(size)), my $addr = Vq(address));
+  KeepFree rax,rdi;
+  $addr->setReg(rax);
+  $size->setReg(rdi);
+  PrintOutMemory;
 } sub {
-	KeepFree rax, rdi;
-	my $string = "'Supply a filename to display',10,0";
-	Mov rax, Db $string;
-	Mov rdi, length($string)-4;
-	PrintOutMemory;	
+  KeepFree rax, rdi;
+  my $string = "'Supply a filename to display',10,0";
+  Mov rax, Db $string;
+  Mov rdi, length($string)-4;
+  PrintOutMemory;	
 };
 Assemble keep => 'readfile';
 
