@@ -3419,7 +3419,9 @@ sub BlockString::getBlock($$$$)                                                 
  {my ($blockString, $bsa, $block, $zmm) = @_;                                   # Block string descriptor, byte string variable, offset of the block as a variable, number of zmm register to contain block
   @_ == 4 or confess;
   PushR my @save = (r14, r15);                                                  # Result register
+  defined($bsa) or confess;
   $bsa->setReg(r15);                                                            # Byte string address
+  defined($block) or confess;
   $block->setReg(r14);                                                          # Offset of block in byte string
   Vmovdqu64 "zmm$zmm", "[r15+r14]";                                             # Read from memory
   PopR @save;                                                                   # Restore registers
@@ -3427,9 +3429,12 @@ sub BlockString::getBlock($$$$)                                                 
 
 sub BlockString::putBlock($$$$)                                                 # Write the numbered zmm to the block at the specified offset in the specified byte string
  {my ($blockString, $bsa, $block, $zmm) = @_;                                   # Block string descriptor, byte string variable, block in byte string, content variable
-  @_ == 4 or confess;
+  @_ >= 4 or confess;
   PushR my @save = (r14, r15);                                                  # Work registers
-  $bsa->setReg(r15);                                                            # Byte string address
+  defined($bsa) or confess;
+  eval {$bsa->setReg(r15)};                                                            # Byte string address
+  $@ and confess $@;
+  defined($block) or confess;
   $block->setReg(r14);                                                          # Offset of block in byte string
   Vmovdqu64 "[r15+r14]", "zmm$zmm";                                             # Write to memory
   PopR @save;                                                                   # Restore registers
@@ -3538,32 +3543,56 @@ sub BlockString::len($$)                                                        
   $s->call($blockString->address, $blockString->first, $size);
  }
 
-#sub BlockString::concatenate($$) ###NEXT###                                     # Concatenate two block strings
-# {my ($target, $source) = @_;                                                   # Target block string, source block string
-#  @_ == 2 or confess;
-#
-#  my $s = Subroutine
-#   {my ($p) = @_;                                                               # Parameters
-#    Comment "Concatenate block strings";
-#    PushR my @save = (zmm31);
-#    my $block  = $$p{sFirst};                                                    # The first block
-#                 $blockString->getBlock($$p{bs}, $block, 31);                   # The first block in zmm31
-#    my $length = $blockString->getBlockLengthInZmm(31);                         # Length of block
-#
-#    ForEver                                                                     # Each block in string
-#     {my ($start, $end) = @_;                                                   #
-#      my ($next, $prev) = $blockString->getNextAndPrevBlockOffsetFromZmm(31);   # Get links from current block
-#      If ($next == $block, sub{Jmp $end});                                      # Next block is the first block so we have printed the block string
-#      $blockString->getBlock($$p{bs}, $next, 31);                               # Next block in zmm
-#      $length += $blockString->getBlockLengthInZmm(31);                         # Add length of block
-#     };
-#    $$p{size}->copy($length);
-#    PopR @save;
-#   } in => {sBs => 3, sFirst => 3, tBs => 3, tFirst => 3};
-#
-#  $s->call(sbs => $source->bs, sFirst => $source->first,
-#           tbs => $target->bs, tFirst => $target->first);
-# }
+sub BlockString::concatenate($$)                                                # Concatenate two block strings by appending a copy of the source to the target block string.
+ {my ($target, $source) = @_;                                                   # Target block string, source block string
+  @_ == 2 or confess;
+
+  my $s = Subroutine
+   {my ($p) = @_;                                                               # Parameters
+    Comment "Concatenate block strings";
+    PushR my @save = (zmm29, zmm30, zmm31);
+    my $sb = $$p{sBs};                                                          # The byte string underlying the source
+    my $sf = $$p{sFirst};                                                       # The first block in the source
+    my $tb = $$p{tBs};                                                          # The byte string underlying the target
+    my $tf = $$p{tFirst};                                                       # The first block in the target
+    $source->getBlock($sb, $sf, 31);                                            # The first source block
+    $target->getBlock($tb, $tf, 30);                                            # The first target block
+    my ($ss, $sl) = $source->getNextAndPrevBlockOffsetFromZmm(31);              # Source second and last
+    my ($ts, $tl) = $target->getNextAndPrevBlockOffsetFromZmm(30);              # Target second and last
+    $target->getBlock($tb, $tl, 30);                                            # The last target block to which we will append
+
+    ForEver                                                                     # Each block in source string
+     {my ($start, $end) = @_;                                                   #
+
+      $target->allocBlock(bs=>$tb, my $new = Vq(offset));                       # Allocate new block
+      Vmovdqu8 zmm29, zmm31;                                                    # Load new target block from source
+      my ($next, $prev) = $target->getNextAndPrevBlockOffsetFromZmm(30);        # Linkage from last target block
+
+      $target->putNextandPrevBlockOffsetIntoZmm(30, $new,    $prev);            # From last block
+      $target->putNextandPrevBlockOffsetIntoZmm(29, $tf,     $tl);              # From new block
+      $target->putBlock($tb, $tl, 30);                                          # Put the modified last target block
+      $tl->copy($new);                                                          # New last target block
+      $target->putBlock($tb, $tl, 29);                                          # Put the modified new last target block
+      Vmovdqu8 zmm30, zmm29;                                                    # Last target block
+
+      my ($sn, $sp) = $source->getNextAndPrevBlockOffsetFromZmm(31);            # Get links from current source block
+      If ($sn == $sf, sub                                                       # Last source block
+       {$source->getBlock($tb, $tf, 30);                                        # The first target block
+        $source->putNextandPrevBlockOffsetIntoZmm(30, undef, $new);             # Update end of block chain
+        $source->putBlock($tb, $tf, 30);                                        # Save modified first target block
+
+        Jmp $end
+       });
+
+      $source->getBlock($sb, $sn, 31);                                          # Next source block
+     };
+
+    PopR @save;
+   } in => {sBs => 3, sFirst => 3, tBs => 3, tFirst => 3};
+
+  $s->call(sBs => $source->bs->bs, sFirst => $source->first,
+           tBs => $target->bs->bs, tFirst => $target->first);
+ }
 
 sub BlockString::append($@)                                                     # Append the specified content in memory to the specified block string
  {my ($blockString, @variables) = @_;                                           # Block string descriptor, variables
@@ -3603,7 +3632,6 @@ $toCopy->err('toCopy ');   PrintErrString " ";
 $spaceLast->err('spacelast ');   PrintErrString " ";
 $size->err;
 PrintErrNL;
-
 
       $blockString->allocBlock($B, my $new = Vq(offset));                       # Allocate new block
       $blockString->getBlock  ($B, $new, 30);                                   # Load the new block
@@ -10069,7 +10097,7 @@ Test::More->builder->output("/dev/null") if $localTest;                         
 
 if ($^O =~ m(bsd|linux)i)                                                       # Supported systems
  {if (confirmHasCommandLineCommand(q(nasm)) and LocateIntelEmulator)            # Network assembler and Intel Software Development emulator
-   {plan tests => 96;
+   {plan tests => 97;
    }
   else
    {plan skip_all =>qq(Nasm or Intel 64 emulator not available);
@@ -11566,6 +11594,33 @@ Offset: 0000 0000 0000 0018   Length: 0000 0000 0000 0010
  zmm31: 0000 0018 0000 0018   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 000F   0E0D 0C0B 0A09 0807   0605 0403 0201 0010
 
 size: 0000 0000 0000 0010
+END
+ }
+
+if (1) {
+  my $c = Rb(0..255);
+  my $S = CreateByteString;   my $s = $S->CreateBlockString;
+  my $T = CreateByteString;   my $t = $T->CreateBlockString;
+
+  $s->append(source=>Vq(source, $c), Vq(size, 256));
+  $t->concatenate($s);
+  $t->dump;
+
+  ok Assemble(debug => 0, eq => <<END);
+Block String Dump
+Offset: 0000 0000 0000 0058   Length: 0000 0000 0000 0000
+ zmm31: 0000 0198 0000 0298   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+Offset: 0000 0000 0000 0198   Length: 0000 0000 0000 0037
+ zmm31: 0000 01D8 0000 0058   3635 3433 3231 302F   2E2D 2C2B 2A29 2827   2625 2423 2221 201F   1E1D 1C1B 1A19 1817   1615 1413 1211 100F   0E0D 0C0B 0A09 0807   0605 0403 0201 0037
+Offset: 0000 0000 0000 01D8   Length: 0000 0000 0000 0037
+ zmm31: 0000 0218 0000 0198   6D6C 6B6A 6968 6766   6564 6362 6160 5F5E   5D5C 5B5A 5958 5756   5554 5352 5150 4F4E   4D4C 4B4A 4948 4746   4544 4342 4140 3F3E   3D3C 3B3A 3938 3737
+Offset: 0000 0000 0000 0218   Length: 0000 0000 0000 0037
+ zmm31: 0000 0258 0000 01D8   A4A3 A2A1 A09F 9E9D   9C9B 9A99 9897 9695   9493 9291 908F 8E8D   8C8B 8A89 8887 8685   8483 8281 807F 7E7D   7C7B 7A79 7877 7675   7473 7271 706F 6E37
+Offset: 0000 0000 0000 0258   Length: 0000 0000 0000 0037
+ zmm31: 0000 0298 0000 0218   DBDA D9D8 D7D6 D5D4   D3D2 D1D0 CFCE CDCC   CBCA C9C8 C7C6 C5C4   C3C2 C1C0 BFBE BDBC   BBBA B9B8 B7B6 B5B4   B3B2 B1B0 AFAE ADAC   ABAA A9A8 A7A6 A537
+Offset: 0000 0000 0000 0298   Length: 0000 0000 0000 0024
+ zmm31: 0000 0058 0000 0258   0000 0000 0000 0000   0000 0000 0000 0000   0000 00FF FEFD FCFB   FAF9 F8F7 F6F5 F4F3   F2F1 F0EF EEED ECEB   EAE9 E8E7 E6E5 E4E3   E2E1 E0DF DEDD DC24
+
 END
  }
 
