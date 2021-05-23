@@ -11680,8 +11680,8 @@ Offset: 0000 0000 0000 0298   Length: 0000 0000 0000 0024
 END
  }
 
-latest:;
-if (1) {
+#latest:;
+if (0) {
   my $c = Rb(0..255);
   my $S = CreateByteString;   my $s = $S->CreateBlockString;
 
