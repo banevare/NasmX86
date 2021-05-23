@@ -3,6 +3,7 @@
 # Generate X86 assembler code using Perl as a macro pre-processor.
 # Philip R Brenan at appaapps dot com, Appa Apps Ltd Inc., 2021
 #-------------------------------------------------------------------------------
+
 # podDocumentation
 package Nasm::X86;
 our $VERSION = "20210521";
@@ -933,7 +934,7 @@ sub Nasm::X86::Sub::call($%)                                                    
   while(@parameters)                                                            # Namify parameters supplied by the caller
    {my $p = shift @parameters;                                                  # Check parameters provided by caller
     my $n = ref($p) ? $p->name : $p;
-defined($n) or confess"No n";
+    defined($n) or confess "No name or variable";
     my $v = ref($p) ? $p       : shift @parameters;
     unless ($sub->in->{$n} or $sub->out->{$n} or $sub->io->{$n})
      {my @t;
@@ -3562,7 +3563,7 @@ sub BlockString::concatenate($$)                                                
     $target->getBlock($tb, $tl, 30);                                            # The last target block to which we will append
 
     ForEver                                                                     # Each block in source string
-     {my ($start, $end) = @_;                                                   #
+     {my ($start, $end) = @_;                                                   # Start and end labels
 
       $target->allocBlock(bs=>$tb, my $new = Vq(offset));                       # Allocate new block
       Vmovdqu8 zmm29, zmm31;                                                    # Load new target block from source
@@ -3592,6 +3593,59 @@ sub BlockString::concatenate($$)                                                
 
   $s->call(sBs => $source->bs->bs, sFirst => $source->first,
            tBs => $target->bs->bs, tFirst => $target->first);
+ }
+
+sub BlockString::insertChar($$$)                                                # Insert a character into a block string
+ {my ($blockString, $character, $position) = @_;                                # Block string, variable containing character, variable containing position of insertion point numbered from zero
+  @_ == 3 or confess;
+
+  my $s = Subroutine
+   {my ($p) = @_;                                                               # Parameters
+    Comment "Insert character into a block string";
+    PushR my @save = (k7, r15, zmm31);
+    my $B = $$p{bs};                                                            # The byte string underlying the block string
+    my $F = $$p{first};                                                         # The first block in block string
+    my $c = $$p{character};                                                     # The character to insert
+    my $P = $$p{position};                                                      # The position in the block string at which we want to insert the character
+    $blockString->getBlock($B, $F, 31);                                         # The first source block
+    my $C = Vq('Current character position', 0);                                # Current character position
+    my $L = $blockString->getBlockLengthInZmm(31);                              # Length of last block
+    my $M = Vq('block length', $blockString->length);                           # Maximum length of a block
+    my ($second, $last) = $blockString->getNextAndPrevBlockOffsetFromZmm(31);   # Get links from first block
+    my $current = $F;                                                           # Current position in scan of block chain
+
+    ForEver                                                                     # Each block in source string
+     {my ($start, $end) = @_;                                                   # Start and end labels
+
+      If ((($P >= $C) & ($P <= $C + $L)), sub                                   # Position is in current block
+       {If ($L < $M, sub                                                        # Current block has space
+         {my $O = $P - $C;                                                      # Offset in current block
+          $c->setReg(r15);                                                      # Character to insert
+          PushRR zmm31;                                                         # Stack block
+          Mov "[rsp+$O]", r15b;                                                 # Place character
+          $P->setMask($C + $L - $P, k7);                                        # Set mask for reload
+          Vmovdqu8 "zmm31{k7}", "[rsp-1]";                                      # Reload
+          $blockString->putBlock($B, $F, 31);                                   # Save the modified bloxk
+          PopR zmm31;                                                           # Restore stack
+          Jmp $end;                                                             # Character successfully inserted
+         });
+       });
+
+      my ($next, $prev) = $blockString->getNextAndPrevBlockOffsetFromZmm(31);   # Get links from current source block
+      If ($next == $F, sub                                                      # Last source block
+       {Jmp $end; #  Append character if we go beyond limit
+       });
+
+      $current->copy($next);
+      $current->getBlock($B, $current, 31);                                     # Next block
+      $L = $blockString->getBlockLengthInZmm(31);                               # Length of block
+     };
+
+    PopR @save;
+   } in => {bs => 3, first => 3, character => 3, position => 3};
+
+  $s->call($blockString->bs->bs, first => $blockString->first,
+    character => $character,  position => $position);
  }
 
 sub BlockString::append($@)                                                     # Append the specified content in memory to the specified block string
@@ -4018,7 +4072,8 @@ sub totalBytesAssembled                                                         
 if (0)                                                                          # Print exports
  {my @e;
   for my $a(sort keys %Nasm::X86::)
-   {next if $a =~ m(DATA|confirmHasCommandLineCommand|currentDirectory|fff|fileSize|findFiles|fpe|fpf|genHash|lll|owf|pad|readFile);
+   {next if $a =~ m(DATA|confirmHasCommandLineCommand|currentDirectory|fff|fileMd5Sum|fileSize|findFiles|firstNChars|formatTable|fpe|fpf|genHash|lll|owf|pad|readFile|stringsAreNotEqual|stringMd5Sum|temporaryFile);
+    next if $a =~ m(\AEXPORT);
     next if $a !~ m(\A[A-Z]) and !$Registers{$a};
     push @e, $a if $Nasm::X86::{$a} =~ m(\*Nasm::X86::);
    }
@@ -4033,7 +4088,8 @@ use vars qw(@ISA @EXPORT @EXPORT_OK %EXPORT_TAGS);
 @ISA          = qw(Exporter);
 @EXPORT       = qw();
 @EXPORT_OK    = qw(Add All8Structure AllocateAll8OnStack AllocateMemory And Assemble BAIL_OUT BEGIN Bswap Bt Btc Btr Bts Bzhi Call ClearMemory ClearRegisters ClearZF CloseFile Cmova Cmovae Cmovb Cmovbe Cmovc Cmove Cmovg Cmovge Cmovl Cmovle Cmovna Cmovnae Cmovnb Cmp Comment ConcatenateShortStrings Copy CopyMemory CreateByteString Cstrlen DComment Db Dbwdq Dd Dec Decrement Dq Ds Dw EXPORT EXPORT_OK EXPORT_TAGS Exit Float32 Float64 For ForEver ForIn Fork FreeMemory GenTree GetLengthOfShortString GetPPid GetPid GetPidInHex GetUid Hash ISA Idiv If IfEq IfGe IfGt IfLe IfLt IfNe IfNz Imul Inc Increment InsertIntoXyz Isa Ja Jae Jb Jbe Jc Jcxz Je Jecxz Jg Jge Jl Jle Jmp Jna Jnae Jnb Jnbe Jnc Jne Jng Jnge Jnl Jnle Jno Jnp Jns Jnz Jo Jp Jpe Jpo Jrcxz Js Jz Kaddb Kaddd Kaddq Kaddw Kandb Kandd Kandnb Kandnd Kandnq Kandnw Kandq Kandw Keep KeepFree KeepPop KeepPush KeepReturn KeepSet Kmovb Kmovd Kmovq Kmovw Knotb Knotd Knotq Knotw Korb Kord Korq Kortestb Kortestd Kortestq Kortestw Korw Kshiftlb Kshiftld Kshiftlq Kshiftlw Kshiftrb Kshiftrd Kshiftrq Kshiftrw Ktestb Ktestd Ktestq Ktestw Kunpckb Kunpckd Kunpckq Kunpckw Kxnorb Kxnord Kxnorq Kxnorw Kxorb Kxord Kxorq Kxorw Label Lea LoadShortStringFromMemoryToZmm LoadShortStringFromMemoryToZmm2 LoadTargetZmmFromSourceZmm LoadZmmFromMemory LocalData LocateIntelEmulator Lzcnt Macro MaximumOfTwoRegisters MinimumOfTwoRegisters Minus Mov Movdqa Mulpd Neg Not OpenRead OpenWrite Or PeekR Pextrb Pextrd Pextrq Pextrw Pi32 Pi64 Pinsrb Pinsrd Pinsrq Pinsrw Plus Pop PopR PopRR Popfq PrintErrMemory PrintErrMemoryInHex PrintErrMemoryInHexNL PrintErrMemoryNL PrintErrNL PrintErrRaxInHex PrintErrRegisterInHex PrintErrString PrintErrStringNL PrintMemory PrintMemoryInHex PrintNL PrintOutMemory PrintOutMemoryInHex PrintOutMemoryInHexNL PrintOutMemoryNL PrintOutNL PrintOutRaxInHex PrintOutRaxInReverseInHex PrintOutRegisterInHex PrintOutRegistersInHex PrintOutRflagsInHex PrintOutRipInHex PrintOutString PrintOutStringNL PrintOutZF PrintRaxInHex PrintRegisterInHex PrintString Pslldq Psrldq Push PushR PushRR Pushfq RComment Rb Rbwdq Rd Rdtsc ReadFile ReadTimeStampCounter RegisterSize ReorderSyscallRegisters ReorderXmmRegisters RestoreFirstFour RestoreFirstFourExceptRax RestoreFirstFourExceptRaxAndRdi RestoreFirstSeven RestoreFirstSevenExceptRax RestoreFirstSevenExceptRaxAndRdi Ret Rq Rs Rw SaveFirstFour SaveFirstSeven Scope ScopeEnd SetLabel SetLengthOfShortString SetMaskRegister SetRegisterToMinusOne SetZF Seta Setae Setb Setbe Setc Sete Setg Setge Setl Setle Setna Setnae Setnb Setnbe Setnc Setne Setng Setnge Setnl Setno Setnp Setns Setnz Seto Setp Setpe Setpo Sets Setz Shl Shr Start StatSize Structure Sub Sub:: Subroutine Syscall TODO Test Tzcnt UnReorderSyscallRegisters UnReorderXmmRegisters VERSION Vaddd Vaddpd Variable Variable:: Vb Vcvtudq2pd Vcvtudq2ps Vcvtuqq2pd Vd Vdpps Vgetmantps Vmovd Vmovdqa32 Vmovdqa64 Vmovdqu Vmovdqu32 Vmovdqu64 Vmovdqu8 Vmovq Vmulpd Vpbroadcastb Vpbroadcastd Vpbroadcastq Vpbroadcastw Vpcmpub Vpcmpud Vpcmpuq Vpcmpuw Vpcompressd Vpcompressq Vpexpandd Vpexpandq Vpextrb Vpextrd Vpextrq Vpextrw Vpinsrb Vpinsrd Vpinsrq Vpinsrw Vpmullb Vpmulld Vpmullq Vpmullw Vprolq Vpsubb Vpsubd Vpsubq Vpsubw Vpxorq Vq Vr Vsqrtpd Vw Vx VxyzInit Vy Vz WaitPid Xchg Xor ah al ax bh bl bp bpl bx ch cl cs cx dh di dil dl ds dx eax ebp ebx ecx edi edx es esi esp fs gs k0 k1 k2 k3 k4 k5 k6 k7 mm0 mm1 mm2 mm3 mm4 mm5 mm6 mm7 r10 r10b r10d r10l r10w r11 r11b r11d r11l r11w r12 r12b r12d r12l r12w r13 r13b r13d r13l r13w r14 r14b r14d r14l r14w r15 r15b r15d r15l r15w r8 r8b r8d r8l r8w r9 r9b r9d r9l r9w rax rbp rbx rcx rdi rdx rflags rip rsi rsp si sil sp spl ss st0 st1 st2 st3 st4 st5 st6 st7 xmm0 xmm1 xmm10 xmm11 xmm12 xmm13 xmm14 xmm15 xmm16 xmm17 xmm18 xmm19 xmm2 xmm20 xmm21 xmm22 xmm23 xmm24 xmm25 xmm26 xmm27 xmm28 xmm29 xmm3 xmm30 xmm31 xmm4 xmm5 xmm6 xmm7 xmm8 xmm9 ymm0 ymm1 ymm10 ymm11 ymm12 ymm13 ymm14 ymm15 ymm16 ymm17 ymm18 ymm19 ymm2 ymm20 ymm21 ymm22 ymm23 ymm24 ymm25 ymm26 ymm27 ymm28 ymm29 ymm3 ymm30 ymm31 ymm4 ymm5 ymm6 ymm7 ymm8 ymm9 zmm0 zmm1 zmm10 zmm11 zmm12 zmm13 zmm14 zmm15 zmm16 zmm17 zmm18 zmm19 zmm2 zmm20 zmm21 zmm22 zmm23 zmm24 zmm25 zmm26 zmm27 zmm28 zmm29 zmm3 zmm30 zmm31 zmm4 zmm5 zmm6 zmm7 zmm8 zmm9);
-%EXPORT_TAGS = (all => [@EXPORT, @EXPORT_OK]);
+%EXPORT_TAGS  = (all => [@EXPORT, @EXPORT_OK]);
+
 # podDocumentation
 =pod
 
@@ -11620,6 +11676,25 @@ Offset: 0000 0000 0000 0258   Length: 0000 0000 0000 0037
  zmm31: 0000 0298 0000 0218   DBDA D9D8 D7D6 D5D4   D3D2 D1D0 CFCE CDCC   CBCA C9C8 C7C6 C5C4   C3C2 C1C0 BFBE BDBC   BBBA B9B8 B7B6 B5B4   B3B2 B1B0 AFAE ADAC   ABAA A9A8 A7A6 A537
 Offset: 0000 0000 0000 0298   Length: 0000 0000 0000 0024
  zmm31: 0000 0058 0000 0258   0000 0000 0000 0000   0000 0000 0000 0000   0000 00FF FEFD FCFB   FAF9 F8F7 F6F5 F4F3   F2F1 F0EF EEED ECEB   EAE9 E8E7 E6E5 E4E3   E2E1 E0DF DEDD DC24
+
+END
+ }
+
+latest:;
+if (1) {
+  my $c = Rb(0..255);
+  my $S = CreateByteString;   my $s = $S->CreateBlockString;
+
+  $s->append(source=>Vq(source, $c), Vq(size, 3));
+  $s->dump;
+
+  $s->insertChar(character=>Vq(source, 0x04), position => Vq(size, 2));
+  $s->dump;
+
+  ok Assemble(debug => 0, eq => <<END);
+Block String Dump
+Offset: 0000 0000 0000 0018   Length: 0000 0000 0000 0003
+ zmm31: 0000 0018 0000 0018   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0201 0003
 
 END
  }
