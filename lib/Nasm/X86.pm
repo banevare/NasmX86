@@ -10100,11 +10100,11 @@ if ($^O =~ m(bsd|linux)i)                                                       
    {plan tests => 97;
    }
   else
-   {plan skip_all =>qq(Nasm or Intel 64 emulator not available);
+   {plan skip_all => qq(Nasm or Intel 64 emulator not available);
    }
  }
 else
- {plan skip_all =>qq(Not supported on: $^O);
+ {plan skip_all => qq(Not supported on: $^O);
  }
 
 my $start = time;                                                               # Tests
