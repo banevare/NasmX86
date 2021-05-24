@@ -1965,7 +1965,7 @@ sub getBwdqFromMmAsVariable($$$)                                                
   PushRR $mm;                                                                   # Push source register
 
   if ($size !~ m(q))                                                            # Clear the register if necessary
-   {ClearRegisters r15; KeepFree r15;                                             # Clear the register if necessary
+   {ClearRegisters r15; KeepFree r15;
    }
 
   Mov r15b, "[rsp+$offset]" if $size =~ m(b);                                   # Load byte register from offset
