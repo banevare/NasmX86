@@ -25,6 +25,7 @@ jobs:
           packages: make perl nasm tree wget cpan md5deep md5deep-dev binutils perl-Digest-SHA1
 
       - name: Initial cpan configuration
+        shell: C:\tools\cygwin\bin\bash.exe --login --norc -eo pipefail -o igncr '{0}'
         run: |
           ls -la
           perl -V
