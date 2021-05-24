@@ -26,7 +26,5 @@ jobs:
 
       - name: Initial cpan configuration
         run: |
-          cpan
-      - name: Install Data::Table::Text
-        run: |
-           cpan install -T Data::Table::Text
+          ls -la
+          perl -V
