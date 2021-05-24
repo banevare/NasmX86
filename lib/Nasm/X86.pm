@@ -1169,7 +1169,7 @@ sub PrintRegisterInHex($@)                                                      
       elsif ($r =~ m(\Ay))    {printReg qw(rax rbx rcx rdx)}                    # ymm*
       elsif ($r =~ m(\Az))    {printReg qw(rax rbx rcx rdx r8 r9 r10 r11)}      # zmm*
 
-      PrintOutNL;
+      PrintNL($channel);
      } name => "PrintOutRegister${r}InHexOn$channel";                           # One routine per register printed
    }
  }
@@ -3610,9 +3610,9 @@ sub BlockString::insertChar($$$)                                                
     my $P = $$p{position};                                                      # The position in the block string at which we want to insert the character
     $blockString->getBlock($B, $F, 31);                                         # The first source block
     my $C = Vq('Current character position', 0);                                # Current character position
-    my $O = Vq('One', 1);                                                       # One
     my $L = $blockString->getBlockLengthInZmm(31);                              # Length of last block
     my $M = Vq('block length', $blockString->length);                           # Maximum length of a block
+    my $One = Vq('One', 1);                                                     # Literal one
     my ($second, $last) = $blockString->getNextAndPrevBlockOffsetFromZmm(31);   # Get links from first block
     my $current = $F;                                                           # Current position in scan of block chain
 
@@ -3640,10 +3640,10 @@ sub BlockString::insertChar($$$)                                                
           $O->setReg(r14);                                                      # Offset of character in block
           $c->setReg(r15);                                                      # Character to insert
           Mov "[rsp+r14]", r15b;                                                # Place character after skipping length field
-          ($O)->setMask($C + $L - $P + 1, k7);                                  # Set mask for reload
-          Vmovdqu8 "zmm30{k7}", "[rsp-1]";                                      # Reload
-          $blockString->setBlockLengthInZmm($O,      31);                       # New shorter length of original block
-          $blockString->setBlockLengthInZmm($L - $O, 30);                       # Set length of  remainder plus inserted char in the new block
+          $One->setMask($C + $L - $P + 2, k7);                                  # Set mask for reload
+          Vmovdqu8 "zmm30{k7}", "[rsp+r14-1]";                                  # Reload
+          $blockString->setBlockLengthInZmm($O,          31);                   # New shorter length of original block
+          $blockString->setBlockLengthInZmm($L - $O + 1, 30);                   # Set length of  remainder plus inserted char in the new block
 
           $blockString->allocBlock($B, my $new = Vq(offset));                   # Allocate new block
           my ($next, $prev) = $blockString->getNextAndPrevBlockOffsetFromZmm(31); # Linkage from last block
@@ -10187,7 +10187,7 @@ Test::More->builder->output("/dev/null") if $localTest;                         
 
 if ($^O =~ m(bsd|linux)i)                                                       # Supported systems
  {if (confirmHasCommandLineCommand(q(nasm)) and LocateIntelEmulator)            # Network assembler and Intel Software Development emulator
-   {plan tests => 98;
+   {plan tests => 100;
    }
   else
    {plan skip_all => qq(Nasm or Intel 64 emulator not available);
@@ -11741,6 +11741,72 @@ Block String Dump
 Offset: 0000 0000 0000 0018   Length: 0000 0000 0000 0005
  zmm31: 0000 0018 0000 0018   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0244 8801 0005
 
+END
+ }
+
+if (1) {
+  my $c = Rb(0..255);
+  my $S = CreateByteString;   my $s = $S->CreateBlockString;
+
+  $s->append(source=>Vq(source, $c), Vq(size, 58));
+  $s->dump;
+
+  $s->insertChar(character=>Vq(source, 0x44), position => Vq(size, 2));
+  $s->dump;
+
+  $s->insertChar(character=>Vq(source, 0x88), position => Vq(size, 2));
+  $s->dump;
+
+  ok Assemble(debug => 0, eq => <<END);
+Block String Dump
+Offset: 0000 0000 0000 0018   Length: 0000 0000 0000 0037
+ zmm31: 0000 0058 0000 0058   3635 3433 3231 302F   2E2D 2C2B 2A29 2827   2625 2423 2221 201F   1E1D 1C1B 1A19 1817   1615 1413 1211 100F   0E0D 0C0B 0A09 0807   0605 0403 0201 0037
+Offset: 0000 0000 0000 0058   Length: 0000 0000 0000 0003
+ zmm31: 0000 0018 0000 0018   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 3938 3703
+
+Block String Dump
+Offset: 0000 0000 0000 0018   Length: 0000 0000 0000 0002
+ zmm31: 0000 0098 0000 0098   3635 3433 3231 302F   2E2D 2C2B 2A29 2827   2625 2423 2221 201F   1E1D 1C1B 1A19 1817   1615 1413 1211 100F   0E0D 0C0B 0A09 0807   0605 0403 0201 0002
+Offset: 0000 0000 0000 0098   Length: 0000 0000 0000 0036
+ zmm31: 0000 0058 0000 0058   5836 3534 3332 3130   2F2E 2D2C 2B2A 2928   2726 2524 2322 2120   1F1E 1D1C 1B1A 1918   1716 1514 1312 1110   0F0E 0D0C 0B0A 0908   0706 0504 0302 4436
+Offset: 0000 0000 0000 0058   Length: 0000 0000 0000 0003
+ zmm31: 0000 0018 0000 0018   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 3938 3703
+
+Block String Dump
+Offset: 0000 0000 0000 0018   Length: 0000 0000 0000 0003
+ zmm31: 0000 0098 0000 0098   3635 3433 3231 302F   2E2D 2C2B 2A29 2827   2625 2423 2221 201F   1E1D 1C1B 1A19 1817   1615 1413 1211 100F   0E0D 0C0B 0A09 0807   0605 0403 8801 0003
+Offset: 0000 0000 0000 0098   Length: 0000 0000 0000 0036
+ zmm31: 0000 0058 0000 0058   5836 3534 3332 3130   2F2E 2D2C 2B2A 2928   2726 2524 2322 2120   1F1E 1D1C 1B1A 1918   1716 1514 1312 1110   0F0E 0D0C 0B0A 0908   0706 0504 0302 4436
+Offset: 0000 0000 0000 0058   Length: 0000 0000 0000 0003
+ zmm31: 0000 0018 0000 0018   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 3938 3703
+
+END
+ }
+
+if (1) {
+  my $z = Vq('zero', 0);
+  my $o = Vq('one',  1);
+  my $t = Vq('two',  2);
+  $z->setMask($o,       k7); PrintOutRegisterInHex k7;
+  $z->setMask($t,       k6); PrintOutRegisterInHex k6;
+  $z->setMask($o+$t,    k5); PrintOutRegisterInHex k5;
+  $o->setMask($o,       k4); PrintOutRegisterInHex k4;
+  $o->setMask($t,       k3); PrintOutRegisterInHex k3;
+  $o->setMask($o+$t,    k2); PrintOutRegisterInHex k2;
+
+  $t->setMask($o,       k1); PrintOutRegisterInHex k1;
+  $t->setMask($t,       k0); PrintOutRegisterInHex k0;
+
+
+  ok Assemble(debug => 0, eq => <<END);
+    k7: 0000 0000 0000 0001
+    k6: 0000 0000 0000 0003
+    k5: 0000 0000 0000 0007
+    k4: 0000 0000 0000 0002
+    k3: 0000 0000 0000 0006
+    k2: 0000 0000 0000 000E
+    k1: 0000 0000 0000 0004
+    k0: 0000 0000 0000 000C
 END
  }
 
