@@ -3591,8 +3591,8 @@ sub BlockString::concatenate($$)                                                
     PopR @save;
    } in => {sBs => 3, sFirst => 3, tBs => 3, tFirst => 3};
 
-  $s->call(sBs => $source->bs->bs, sFirst => $source->first,
-           tBs => $target->bs->bs, tFirst => $target->first);
+  $s->call(sBs => $source->address, sFirst => $source->first,
+           tBs => $target->address, tFirst => $target->first);
  }
 
 sub BlockString::insertChar($@)                                                 # Insert a character into a block string
@@ -3674,7 +3674,7 @@ sub BlockString::insertChar($@)                                                 
     PopR @save;
    } in => {bs => 3, first => 3, character => 3, position => 3};
 
-  $s->call($blockString->bs->bs, first => $blockString->first, @variables)
+  $s->call($blockString->address, first => $blockString->first, @variables)
  }
 
 sub BlockString::deleteChar($@)                                                 # Delete a character in a block string
@@ -3717,7 +3717,7 @@ sub BlockString::deleteChar($@)                                                 
     PopR @save;
    } in => {bs => 3, first => 3, position => 3};
 
-  $s->call($blockString->bs->bs, first => $blockString->first, @variables)
+  $s->call($blockString->address, first => $blockString->first, @variables)
  }
 
 sub BlockString::getCharacter($@)                                               # Get a character from a block string
@@ -3758,7 +3758,7 @@ sub BlockString::getCharacter($@)                                               
     PopR @save;
    } in => {bs => 3, first => 3, position => 3}, out => {out => 3};
 
-  $s->call($blockString->bs->bs, first => $blockString->first, @variables)
+  $s->call($blockString->address, first => $blockString->first, @variables)
  }
 
 sub BlockString::append($@)                                                     # Append the specified content in memory to the specified block string
@@ -3793,12 +3793,6 @@ sub BlockString::append($@)                                                     
 
       $source += $toCopy;                                                       # Remaining source
       $size   -= $toCopy;                                                       # Remaining source length
-PrintErrString "AAAA ";
-$source->err;              PrintErrString " ";
-$toCopy->err('toCopy ');   PrintErrString " ";
-$spaceLast->err('spacelast ');   PrintErrString " ";
-$size->err;
-PrintErrNL;
 
       $blockString->allocBlock($B, my $new = Vq(offset));                       # Allocate new block
       $blockString->getBlock  ($B, $new, 30);                                   # Load the new block
