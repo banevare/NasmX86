@@ -4025,7 +4025,7 @@ sub Exit(;$)                                                                    
 my $LocateIntelEmulator;                                                        # Location of Intel Software Development Emulator
 
 sub LocateIntelEmulator()                                                       # Assemble the generated code
- {my @locations = qw(/var/isde/sde64 sde/sde64 ./sde64);                        # Locations at which we might find the emulator
+ {my @locations = qw(/var/isde/sde64 sde/sde64 ./sde64 sde/sde.exe);            # Locations at which we might find the emulator
 
   return $LocateIntelEmulator if defined $LocateIntelEmulator;                  # Location has already been discovered
 
