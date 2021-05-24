@@ -45,12 +45,13 @@ jobs:
       - name: Install Intel Sde
         run: |
           tar -xf sde.tar.bz2 && sleep 10 && mv sde-external-8.63.0-2021-01-18-win/ sde/ && tree
+      - name: Tree
+        run: |
+            cd /cygdrive/d/a/NasmX86/NasmX86 
+            tree
       - name: Test
         run: |
-            perl -V
-            ls -la
             cd /cygdrive/d/a/NasmX86/NasmX86 
-            pwd
             perl lib/Nasm/X86.pm
           
       - name: Prove
