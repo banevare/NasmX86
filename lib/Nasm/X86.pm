@@ -1137,7 +1137,7 @@ sub PrintOutRaxInReverseInHex                                                   
  }
 
 sub PrintRegisterInHex($@)                                                      # Print the named registers as hex strings
- {my ($channel, @r) = @_;                                                       # Names of the registers to print
+ {my ($channel, @r) = @_;                                                       # Channel to print on, names of the registers to print
   @_ >= 2 or confess;
 
   for my $r(@r)                                                                 # Each register to print
@@ -3596,7 +3596,7 @@ sub BlockString::concatenate($$)                                                
            tBs => $target->bs->bs, tFirst => $target->first);
  }
 
-sub BlockString::insertChar($$$)                                                # Insert a character into a block string
+sub BlockString::insertChar($@)                                                 # Insert a character into a block string
  {my ($blockString, @variables) = @_;                                           # Block string, variables
   @_ >= 3 or confess;
 
@@ -3679,7 +3679,7 @@ sub BlockString::insertChar($$$)                                                
   $s->call($blockString->bs->bs, first => $blockString->first, @variables)
  }
 
-sub BlockString::deleteChar($$$)                                                # Delete a character in a block string
+sub BlockString::deleteChar($@)                                                 # Delete a character in a block string
  {my ($blockString, @variables) = @_;                                           # Block string, variables
   @_ >= 2 or confess;
 
@@ -3721,6 +3721,51 @@ sub BlockString::deleteChar($$$)                                                
 
     PopR @save;
    } in => {bs => 3, first => 3, position => 3};
+
+  $s->call($blockString->bs->bs, first => $blockString->first, @variables)
+ }
+
+sub BlockString::getCharacter($@)                                               # Get a character from a block string
+ {my ($blockString, @variables) = @_;                                           # Block string, variables
+  @_ >= 3 or confess;
+
+  my $s = Subroutine
+   {my ($p) = @_;                                                               # Parameters
+    Comment "Get a character from a block string";
+    PushR my @save = (r15, zmm31);
+    my $B = $$p{bs};                                                            # The byte string underlying the block string
+    my $F = $$p{first};                                                         # The first block in block string
+    my $c = $$p{character};                                                     # The character to insert
+    my $P = $$p{position};                                                      # The position in the block string at which we want to insert the character
+    $blockString->getBlock($B, $F, 31);                                         # The first source block
+    my $C = Vq('Current character position', 0);                                # Current character position
+    my $L = $blockString->getBlockLengthInZmm(31);                              # Length of last block
+    my ($second, $last) = $blockString->getNextAndPrevBlockOffsetFromZmm(31);   # Get links from first block
+    my $current = $F;                                                           # Current position in scan of block chain
+
+    ForEver                                                                     # Each block in source string
+     {my ($start, $end) = @_;                                                   # Start and end labels
+
+      If ((($P >= $C) & ($P <= $C + $L)), sub                                   # Position is in current block
+       {my $O = $P - $C;                                                        # Offset in current block
+        PushRR zmm31;                                                           # Stack block
+        ($O+1)  ->setReg(r15);                                                  # Character to get
+        KeepFree r15;
+        Mov r15b, "[rsp+r15]";                                                  # Reload
+        $$p{out}->getReg(r15);                                                  # Save character
+        PopRR zmm31;                                                            # Stack block
+        Jmp $end;                                                               # Character successfully inserted
+       });
+
+      my ($next, $prev) = $blockString->getNextAndPrevBlockOffsetFromZmm(31);   # Get links from current source block
+      $blockString->getBlock($B, $next, 31);                                    # Next block
+      $current->copy($next);
+      $L = $blockString->getBlockLengthInZmm(31);                               # Length of block
+      $C += $L;                                                                 # Current character position at the start of this block
+     };
+
+    PopR @save;
+   } in => {bs => 3, first => 3, position => 3}, out => {out => 3};
 
   $s->call($blockString->bs->bs, first => $blockString->first, @variables)
  }
@@ -4368,7 +4413,7 @@ B<Example:>
     PrintOutRegisterInHex rax, rdi;
     RestoreFirstFour;
     PrintOutRegisterInHex rax, rdi;
-
+  
     SaveFirstFour;
     Mov rax, 2;
     Mov rdi, 2;
@@ -4380,7 +4425,7 @@ B<Example:>
     PrintOutRegisterInHex rax, rdi;
     RestoreFirstFourExceptRax;
     PrintOutRegisterInHex rax, rdi;
-
+  
     SaveFirstFour;
     Mov rax, 2;
     Mov rdi, 2;
@@ -4392,16 +4437,16 @@ B<Example:>
     PrintOutRegisterInHex rax, rdi;
     RestoreFirstFourExceptRaxAndRdi;
     PrintOutRegisterInHex rax, rdi;
-
+  
     Bswap rax;
     PrintOutRegisterInHex rax;
-
+  
     my $l = Label;
     Jmp $l;
-
+  
     SetLabel $l;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-
+  
     is_deeply Assemble, <<END;
      rax: 0000 0000 0000 0003
      rdi: 0000 0000 0000 0004
@@ -4423,9 +4468,9 @@ B<Example:>
      rdi: 0000 0000 0000 0004
      rax: 0300 0000 0000 0000
   END
-
+  
     ok 8 == RegisterSize rax;
-
+  
 
 =head2 Ds(@d)
 
@@ -4438,7 +4483,7 @@ B<Example:>
 
 
     my $q = Rs('a'..'z');
-
+  
     Mov rax, Ds('0'x64);                                                          # Output area  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     Vmovdqu32(xmm0, "[$q]");                                                      # Load
@@ -4446,9 +4491,9 @@ B<Example:>
     Vmovdqu32("[rax]", xmm0);                                                     # Save
     Mov rdi, 16;
     PrintOutMemory;
-
+  
     ok Assemble =~ m(efghabcdmnopijkl)s;
-
+  
 
 =head2 Rs(@d)
 
@@ -4462,15 +4507,15 @@ B<Example:>
 
     Comment "Print a string from memory";
     my $s = "Hello World";
-
+  
     Mov rax, Rs($s);  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     Mov rdi, length $s;
     PrintOutMemory;
-
+  
     ok Assemble =~ m(Hello World);
-
-
+  
+  
     my $q = Rs('abababab');  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     Mov(rax, 1);
@@ -4480,11 +4525,11 @@ B<Example:>
     Mov(r8,  5);
     Lea r9,  "[rax+rbx]";
     PrintOutRegistersInHex;
-
+  
     my $r = Assemble;
     ok $r =~ m( r8: 0000 0000 0000 0005.* r9: 0000 0000 0000 0003.*rax: 0000 0000 0000 0001)s;
     ok $r =~ m(rbx: 0000 0000 0000 0002.*rcx: 0000 0000 0000 0003.*rdx: 0000 0000 0000 0004)s;
-
+  
 
 =head2 Db(@bytes)
 
@@ -4497,27 +4542,27 @@ B<Example:>
 
 
     my $s = Rb 0; Rb 1; Rw 2; Rd 3;  Rq 4;
-
+  
     my $t = Db 0; Db 1; Dw 2; Dd 3;  Dq 4;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-
+  
     Vmovdqu8 xmm0, "[$s]";
     Vmovdqu8 xmm1, "[$t]";
     PrintOutRegisterInHex xmm0;
     PrintOutRegisterInHex xmm1;
     Sub rsp, 16;
-
+  
     Mov rax, rsp;                                                                 # Copy memory, the target is addressed by rax, the length is in rdi, the source is addressed by rsi
     Mov rdi, 16;
     Mov rsi, $s;
     CopyMemory(Vq(source, rsi), Vq(target, rax), Vq(size, rdi));
     PrintOutMemoryInHex;
-
+  
     my $r = Assemble;
     ok $r =~ m(xmm0: 0000 0000 0000 0004   0000 0003 0002 0100);
     ok $r =~ m(xmm1: 0000 0000 0000 0004   0000 0003 0002 0100);
     ok $r =~ m(0001 0200 0300 00000400 0000 0000 0000);
-
+  
 
 =head2 Dw(@words)
 
@@ -4530,27 +4575,27 @@ B<Example:>
 
 
     my $s = Rb 0; Rb 1; Rw 2; Rd 3;  Rq 4;
-
+  
     my $t = Db 0; Db 1; Dw 2; Dd 3;  Dq 4;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-
+  
     Vmovdqu8 xmm0, "[$s]";
     Vmovdqu8 xmm1, "[$t]";
     PrintOutRegisterInHex xmm0;
     PrintOutRegisterInHex xmm1;
     Sub rsp, 16;
-
+  
     Mov rax, rsp;                                                                 # Copy memory, the target is addressed by rax, the length is in rdi, the source is addressed by rsi
     Mov rdi, 16;
     Mov rsi, $s;
     CopyMemory(Vq(source, rsi), Vq(target, rax), Vq(size, rdi));
     PrintOutMemoryInHex;
-
+  
     my $r = Assemble;
     ok $r =~ m(xmm0: 0000 0000 0000 0004   0000 0003 0002 0100);
     ok $r =~ m(xmm1: 0000 0000 0000 0004   0000 0003 0002 0100);
     ok $r =~ m(0001 0200 0300 00000400 0000 0000 0000);
-
+  
 
 =head2 Dd(@dwords)
 
@@ -4563,27 +4608,27 @@ B<Example:>
 
 
     my $s = Rb 0; Rb 1; Rw 2; Rd 3;  Rq 4;
-
+  
     my $t = Db 0; Db 1; Dw 2; Dd 3;  Dq 4;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-
+  
     Vmovdqu8 xmm0, "[$s]";
     Vmovdqu8 xmm1, "[$t]";
     PrintOutRegisterInHex xmm0;
     PrintOutRegisterInHex xmm1;
     Sub rsp, 16;
-
+  
     Mov rax, rsp;                                                                 # Copy memory, the target is addressed by rax, the length is in rdi, the source is addressed by rsi
     Mov rdi, 16;
     Mov rsi, $s;
     CopyMemory(Vq(source, rsi), Vq(target, rax), Vq(size, rdi));
     PrintOutMemoryInHex;
-
+  
     my $r = Assemble;
     ok $r =~ m(xmm0: 0000 0000 0000 0004   0000 0003 0002 0100);
     ok $r =~ m(xmm1: 0000 0000 0000 0004   0000 0003 0002 0100);
     ok $r =~ m(0001 0200 0300 00000400 0000 0000 0000);
-
+  
 
 =head2 Dq(@qwords)
 
@@ -4596,27 +4641,27 @@ B<Example:>
 
 
     my $s = Rb 0; Rb 1; Rw 2; Rd 3;  Rq 4;
-
+  
     my $t = Db 0; Db 1; Dw 2; Dd 3;  Dq 4;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-
+  
     Vmovdqu8 xmm0, "[$s]";
     Vmovdqu8 xmm1, "[$t]";
     PrintOutRegisterInHex xmm0;
     PrintOutRegisterInHex xmm1;
     Sub rsp, 16;
-
+  
     Mov rax, rsp;                                                                 # Copy memory, the target is addressed by rax, the length is in rdi, the source is addressed by rsi
     Mov rdi, 16;
     Mov rsi, $s;
     CopyMemory(Vq(source, rsi), Vq(target, rax), Vq(size, rdi));
     PrintOutMemoryInHex;
-
+  
     my $r = Assemble;
     ok $r =~ m(xmm0: 0000 0000 0000 0004   0000 0003 0002 0100);
     ok $r =~ m(xmm1: 0000 0000 0000 0004   0000 0003 0002 0100);
     ok $r =~ m(0001 0200 0300 00000400 0000 0000 0000);
-
+  
 
 =head2 Rb(@bytes)
 
@@ -4628,28 +4673,28 @@ Layout bytes in the data segment and return their label
 B<Example:>
 
 
-
+  
     my $s = Rb 0; Rb 1; Rw 2; Rd 3;  Rq 4;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     my $t = Db 0; Db 1; Dw 2; Dd 3;  Dq 4;
-
+  
     Vmovdqu8 xmm0, "[$s]";
     Vmovdqu8 xmm1, "[$t]";
     PrintOutRegisterInHex xmm0;
     PrintOutRegisterInHex xmm1;
     Sub rsp, 16;
-
+  
     Mov rax, rsp;                                                                 # Copy memory, the target is addressed by rax, the length is in rdi, the source is addressed by rsi
     Mov rdi, 16;
     Mov rsi, $s;
     CopyMemory(Vq(source, rsi), Vq(target, rax), Vq(size, rdi));
     PrintOutMemoryInHex;
-
+  
     my $r = Assemble;
     ok $r =~ m(xmm0: 0000 0000 0000 0004   0000 0003 0002 0100);
     ok $r =~ m(xmm1: 0000 0000 0000 0004   0000 0003 0002 0100);
     ok $r =~ m(0001 0200 0300 00000400 0000 0000 0000);
-
+  
 
 =head2 Rw(@words)
 
@@ -4661,28 +4706,28 @@ Layout words in the data segment and return their label
 B<Example:>
 
 
-
+  
     my $s = Rb 0; Rb 1; Rw 2; Rd 3;  Rq 4;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     my $t = Db 0; Db 1; Dw 2; Dd 3;  Dq 4;
-
+  
     Vmovdqu8 xmm0, "[$s]";
     Vmovdqu8 xmm1, "[$t]";
     PrintOutRegisterInHex xmm0;
     PrintOutRegisterInHex xmm1;
     Sub rsp, 16;
-
+  
     Mov rax, rsp;                                                                 # Copy memory, the target is addressed by rax, the length is in rdi, the source is addressed by rsi
     Mov rdi, 16;
     Mov rsi, $s;
     CopyMemory(Vq(source, rsi), Vq(target, rax), Vq(size, rdi));
     PrintOutMemoryInHex;
-
+  
     my $r = Assemble;
     ok $r =~ m(xmm0: 0000 0000 0000 0004   0000 0003 0002 0100);
     ok $r =~ m(xmm1: 0000 0000 0000 0004   0000 0003 0002 0100);
     ok $r =~ m(0001 0200 0300 00000400 0000 0000 0000);
-
+  
 
 =head2 Rd(@dwords)
 
@@ -4694,28 +4739,28 @@ Layout double words in the data segment and return their label
 B<Example:>
 
 
-
+  
     my $s = Rb 0; Rb 1; Rw 2; Rd 3;  Rq 4;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     my $t = Db 0; Db 1; Dw 2; Dd 3;  Dq 4;
-
+  
     Vmovdqu8 xmm0, "[$s]";
     Vmovdqu8 xmm1, "[$t]";
     PrintOutRegisterInHex xmm0;
     PrintOutRegisterInHex xmm1;
     Sub rsp, 16;
-
+  
     Mov rax, rsp;                                                                 # Copy memory, the target is addressed by rax, the length is in rdi, the source is addressed by rsi
     Mov rdi, 16;
     Mov rsi, $s;
     CopyMemory(Vq(source, rsi), Vq(target, rax), Vq(size, rdi));
     PrintOutMemoryInHex;
-
+  
     my $r = Assemble;
     ok $r =~ m(xmm0: 0000 0000 0000 0004   0000 0003 0002 0100);
     ok $r =~ m(xmm1: 0000 0000 0000 0004   0000 0003 0002 0100);
     ok $r =~ m(0001 0200 0300 00000400 0000 0000 0000);
-
+  
 
 =head2 Rq(@qwords)
 
@@ -4727,28 +4772,28 @@ Layout quad words in the data segment and return their label
 B<Example:>
 
 
-
+  
     my $s = Rb 0; Rb 1; Rw 2; Rd 3;  Rq 4;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     my $t = Db 0; Db 1; Dw 2; Dd 3;  Dq 4;
-
+  
     Vmovdqu8 xmm0, "[$s]";
     Vmovdqu8 xmm1, "[$t]";
     PrintOutRegisterInHex xmm0;
     PrintOutRegisterInHex xmm1;
     Sub rsp, 16;
-
+  
     Mov rax, rsp;                                                                 # Copy memory, the target is addressed by rax, the length is in rdi, the source is addressed by rsi
     Mov rdi, 16;
     Mov rsi, $s;
     CopyMemory(Vq(source, rsi), Vq(target, rax), Vq(size, rdi));
     PrintOutMemoryInHex;
-
+  
     my $r = Assemble;
     ok $r =~ m(xmm0: 0000 0000 0000 0004   0000 0003 0002 0100);
     ok $r =~ m(xmm1: 0000 0000 0000 0004   0000 0003 0002 0100);
     ok $r =~ m(0001 0200 0300 00000400 0000 0000 0000);
-
+  
 
 =head2 Float32($float)
 
@@ -4784,7 +4829,7 @@ B<Example:>
 
     Mov rax, 1;
     Mov rdi, 1;
-
+  
     SaveFirstFour;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     Mov rax, 2;
@@ -4797,8 +4842,8 @@ B<Example:>
     PrintOutRegisterInHex rax, rdi;
     RestoreFirstFour;
     PrintOutRegisterInHex rax, rdi;
-
-
+  
+  
     SaveFirstFour;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     Mov rax, 2;
@@ -4811,8 +4856,8 @@ B<Example:>
     PrintOutRegisterInHex rax, rdi;
     RestoreFirstFourExceptRax;
     PrintOutRegisterInHex rax, rdi;
-
-
+  
+  
     SaveFirstFour;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     Mov rax, 2;
@@ -4825,14 +4870,14 @@ B<Example:>
     PrintOutRegisterInHex rax, rdi;
     RestoreFirstFourExceptRaxAndRdi;
     PrintOutRegisterInHex rax, rdi;
-
+  
     Bswap rax;
     PrintOutRegisterInHex rax;
-
+  
     my $l = Label;
     Jmp $l;
     SetLabel $l;
-
+  
     is_deeply Assemble, <<END;
      rax: 0000 0000 0000 0003
      rdi: 0000 0000 0000 0004
@@ -4854,9 +4899,9 @@ B<Example:>
      rdi: 0000 0000 0000 0004
      rax: 0300 0000 0000 0000
   END
-
+  
     ok 8 == RegisterSize rax;
-
+  
 
 =head3 RestoreFirstFour()
 
@@ -4877,11 +4922,11 @@ B<Example:>
     PrintOutRegisterInHex rax, rdi;
     RestoreFirstSeven;
     PrintOutRegisterInHex rax, rdi;
-
+  
     RestoreFirstFour;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutRegisterInHex rax, rdi;
-
+  
     SaveFirstFour;
     Mov rax, 2;
     Mov rdi, 2;
@@ -4893,7 +4938,7 @@ B<Example:>
     PrintOutRegisterInHex rax, rdi;
     RestoreFirstFourExceptRax;
     PrintOutRegisterInHex rax, rdi;
-
+  
     SaveFirstFour;
     Mov rax, 2;
     Mov rdi, 2;
@@ -4905,14 +4950,14 @@ B<Example:>
     PrintOutRegisterInHex rax, rdi;
     RestoreFirstFourExceptRaxAndRdi;
     PrintOutRegisterInHex rax, rdi;
-
+  
     Bswap rax;
     PrintOutRegisterInHex rax;
-
+  
     my $l = Label;
     Jmp $l;
     SetLabel $l;
-
+  
     is_deeply Assemble, <<END;
      rax: 0000 0000 0000 0003
      rdi: 0000 0000 0000 0004
@@ -4934,9 +4979,9 @@ B<Example:>
      rdi: 0000 0000 0000 0004
      rax: 0300 0000 0000 0000
   END
-
+  
     ok 8 == RegisterSize rax;
-
+  
 
 =head3 RestoreFirstFourExceptRax()
 
@@ -4959,7 +5004,7 @@ B<Example:>
     PrintOutRegisterInHex rax, rdi;
     RestoreFirstFour;
     PrintOutRegisterInHex rax, rdi;
-
+  
     SaveFirstFour;
     Mov rax, 2;
     Mov rdi, 2;
@@ -4969,11 +5014,11 @@ B<Example:>
     PrintOutRegisterInHex rax, rdi;
     RestoreFirstSevenExceptRax;
     PrintOutRegisterInHex rax, rdi;
-
+  
     RestoreFirstFourExceptRax;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutRegisterInHex rax, rdi;
-
+  
     SaveFirstFour;
     Mov rax, 2;
     Mov rdi, 2;
@@ -4985,14 +5030,14 @@ B<Example:>
     PrintOutRegisterInHex rax, rdi;
     RestoreFirstFourExceptRaxAndRdi;
     PrintOutRegisterInHex rax, rdi;
-
+  
     Bswap rax;
     PrintOutRegisterInHex rax;
-
+  
     my $l = Label;
     Jmp $l;
     SetLabel $l;
-
+  
     is_deeply Assemble, <<END;
      rax: 0000 0000 0000 0003
      rdi: 0000 0000 0000 0004
@@ -5014,9 +5059,9 @@ B<Example:>
      rdi: 0000 0000 0000 0004
      rax: 0300 0000 0000 0000
   END
-
+  
     ok 8 == RegisterSize rax;
-
+  
 
 =head3 RestoreFirstFourExceptRaxAndRdi()
 
@@ -5039,7 +5084,7 @@ B<Example:>
     PrintOutRegisterInHex rax, rdi;
     RestoreFirstFour;
     PrintOutRegisterInHex rax, rdi;
-
+  
     SaveFirstFour;
     Mov rax, 2;
     Mov rdi, 2;
@@ -5051,7 +5096,7 @@ B<Example:>
     PrintOutRegisterInHex rax, rdi;
     RestoreFirstFourExceptRax;
     PrintOutRegisterInHex rax, rdi;
-
+  
     SaveFirstFour;
     Mov rax, 2;
     Mov rdi, 2;
@@ -5061,18 +5106,18 @@ B<Example:>
     PrintOutRegisterInHex rax, rdi;
     RestoreFirstSevenExceptRaxAndRdi;
     PrintOutRegisterInHex rax, rdi;
-
+  
     RestoreFirstFourExceptRaxAndRdi;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutRegisterInHex rax, rdi;
-
+  
     Bswap rax;
     PrintOutRegisterInHex rax;
-
+  
     my $l = Label;
     Jmp $l;
     SetLabel $l;
-
+  
     is_deeply Assemble, <<END;
      rax: 0000 0000 0000 0003
      rdi: 0000 0000 0000 0004
@@ -5094,9 +5139,9 @@ B<Example:>
      rdi: 0000 0000 0000 0004
      rax: 0300 0000 0000 0000
   END
-
+  
     ok 8 == RegisterSize rax;
-
+  
 
 =head3 SaveFirstSeven()
 
@@ -5111,7 +5156,7 @@ B<Example:>
     SaveFirstFour;
     Mov rax, 2;
     Mov rdi, 2;
-
+  
     SaveFirstSeven;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     Mov rax, 3;
@@ -5121,11 +5166,11 @@ B<Example:>
     PrintOutRegisterInHex rax, rdi;
     RestoreFirstFour;
     PrintOutRegisterInHex rax, rdi;
-
+  
     SaveFirstFour;
     Mov rax, 2;
     Mov rdi, 2;
-
+  
     SaveFirstSeven;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     Mov rax, 3;
@@ -5135,11 +5180,11 @@ B<Example:>
     PrintOutRegisterInHex rax, rdi;
     RestoreFirstFourExceptRax;
     PrintOutRegisterInHex rax, rdi;
-
+  
     SaveFirstFour;
     Mov rax, 2;
     Mov rdi, 2;
-
+  
     SaveFirstSeven;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     Mov rax, 3;
@@ -5149,14 +5194,14 @@ B<Example:>
     PrintOutRegisterInHex rax, rdi;
     RestoreFirstFourExceptRaxAndRdi;
     PrintOutRegisterInHex rax, rdi;
-
+  
     Bswap rax;
     PrintOutRegisterInHex rax;
-
+  
     my $l = Label;
     Jmp $l;
     SetLabel $l;
-
+  
     is_deeply Assemble, <<END;
      rax: 0000 0000 0000 0003
      rdi: 0000 0000 0000 0004
@@ -5178,9 +5223,9 @@ B<Example:>
      rdi: 0000 0000 0000 0004
      rax: 0300 0000 0000 0000
   END
-
+  
     ok 8 == RegisterSize rax;
-
+  
 
 =head3 RestoreFirstSeven()
 
@@ -5199,13 +5244,13 @@ B<Example:>
     Mov rax, 3;
     Mov rdi, 4;
     PrintOutRegisterInHex rax, rdi;
-
+  
     RestoreFirstSeven;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutRegisterInHex rax, rdi;
     RestoreFirstFour;
     PrintOutRegisterInHex rax, rdi;
-
+  
     SaveFirstFour;
     Mov rax, 2;
     Mov rdi, 2;
@@ -5217,7 +5262,7 @@ B<Example:>
     PrintOutRegisterInHex rax, rdi;
     RestoreFirstFourExceptRax;
     PrintOutRegisterInHex rax, rdi;
-
+  
     SaveFirstFour;
     Mov rax, 2;
     Mov rdi, 2;
@@ -5229,14 +5274,14 @@ B<Example:>
     PrintOutRegisterInHex rax, rdi;
     RestoreFirstFourExceptRaxAndRdi;
     PrintOutRegisterInHex rax, rdi;
-
+  
     Bswap rax;
     PrintOutRegisterInHex rax;
-
+  
     my $l = Label;
     Jmp $l;
     SetLabel $l;
-
+  
     is_deeply Assemble, <<END;
      rax: 0000 0000 0000 0003
      rdi: 0000 0000 0000 0004
@@ -5258,9 +5303,9 @@ B<Example:>
      rdi: 0000 0000 0000 0004
      rax: 0300 0000 0000 0000
   END
-
+  
     ok 8 == RegisterSize rax;
-
+  
 
 =head3 RestoreFirstSevenExceptRax()
 
@@ -5283,7 +5328,7 @@ B<Example:>
     PrintOutRegisterInHex rax, rdi;
     RestoreFirstFour;
     PrintOutRegisterInHex rax, rdi;
-
+  
     SaveFirstFour;
     Mov rax, 2;
     Mov rdi, 2;
@@ -5291,13 +5336,13 @@ B<Example:>
     Mov rax, 3;
     Mov rdi, 4;
     PrintOutRegisterInHex rax, rdi;
-
+  
     RestoreFirstSevenExceptRax;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutRegisterInHex rax, rdi;
     RestoreFirstFourExceptRax;
     PrintOutRegisterInHex rax, rdi;
-
+  
     SaveFirstFour;
     Mov rax, 2;
     Mov rdi, 2;
@@ -5309,14 +5354,14 @@ B<Example:>
     PrintOutRegisterInHex rax, rdi;
     RestoreFirstFourExceptRaxAndRdi;
     PrintOutRegisterInHex rax, rdi;
-
+  
     Bswap rax;
     PrintOutRegisterInHex rax;
-
+  
     my $l = Label;
     Jmp $l;
     SetLabel $l;
-
+  
     is_deeply Assemble, <<END;
      rax: 0000 0000 0000 0003
      rdi: 0000 0000 0000 0004
@@ -5338,9 +5383,9 @@ B<Example:>
      rdi: 0000 0000 0000 0004
      rax: 0300 0000 0000 0000
   END
-
+  
     ok 8 == RegisterSize rax;
-
+  
 
 =head3 RestoreFirstSevenExceptRaxAndRdi()
 
@@ -5363,7 +5408,7 @@ B<Example:>
     PrintOutRegisterInHex rax, rdi;
     RestoreFirstFour;
     PrintOutRegisterInHex rax, rdi;
-
+  
     SaveFirstFour;
     Mov rax, 2;
     Mov rdi, 2;
@@ -5375,7 +5420,7 @@ B<Example:>
     PrintOutRegisterInHex rax, rdi;
     RestoreFirstFourExceptRax;
     PrintOutRegisterInHex rax, rdi;
-
+  
     SaveFirstFour;
     Mov rax, 2;
     Mov rdi, 2;
@@ -5383,20 +5428,20 @@ B<Example:>
     Mov rax, 3;
     Mov rdi, 4;
     PrintOutRegisterInHex rax, rdi;
-
+  
     RestoreFirstSevenExceptRaxAndRdi;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutRegisterInHex rax, rdi;
     RestoreFirstFourExceptRaxAndRdi;
     PrintOutRegisterInHex rax, rdi;
-
+  
     Bswap rax;
     PrintOutRegisterInHex rax;
-
+  
     my $l = Label;
     Jmp $l;
     SetLabel $l;
-
+  
     is_deeply Assemble, <<END;
      rax: 0000 0000 0000 0003
      rdi: 0000 0000 0000 0004
@@ -5418,9 +5463,9 @@ B<Example:>
      rdi: 0000 0000 0000 0004
      rax: 0300 0000 0000 0000
   END
-
+  
     ok 8 == RegisterSize rax;
-
+  
 
 =head3 ReorderSyscallRegisters(@registers)
 
@@ -5434,19 +5479,19 @@ B<Example:>
 
     Mov rax, 1;  Mov rdi, 2;  Mov rsi,  3;  Mov rdx,  4;
     Mov r8,  8;  Mov r9,  9;  Mov r10, 10;  Mov r11, 11;
-
-
+  
+  
     ReorderSyscallRegisters   r8,r9;                                              # Reorder the registers for syscall  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutRegisterInHex rax;
     PrintOutRegisterInHex rdi;
-
+  
     UnReorderSyscallRegisters r8,r9;                                              # Unreorder the registers to recover their original values
     PrintOutRegisterInHex rax;
     PrintOutRegisterInHex rdi;
-
+  
     ok Assemble =~ m(rax:.*08.*rdi:.*9.*rax:.*1.*rdi:.*2.*)s;
-
+  
 
 =head3 UnReorderSyscallRegisters(@registers)
 
@@ -5460,19 +5505,19 @@ B<Example:>
 
     Mov rax, 1;  Mov rdi, 2;  Mov rsi,  3;  Mov rdx,  4;
     Mov r8,  8;  Mov r9,  9;  Mov r10, 10;  Mov r11, 11;
-
+  
     ReorderSyscallRegisters   r8,r9;                                              # Reorder the registers for syscall
     PrintOutRegisterInHex rax;
     PrintOutRegisterInHex rdi;
-
-
+  
+  
     UnReorderSyscallRegisters r8,r9;                                              # Unreorder the registers to recover their original values  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutRegisterInHex rax;
     PrintOutRegisterInHex rdi;
-
+  
     ok Assemble =~ m(rax:.*08.*rdi:.*9.*rax:.*1.*rdi:.*2.*)s;
-
+  
 
 =head3 ReorderXmmRegisters(@registers) = map {"xmm$_"} @_;)
 
@@ -5487,35 +5532,35 @@ B<Example:>
     my $t = GenTree(2,2);                                                         # Tree description
     $t->node->();                                                                 # Root
     Movdqa xmm1, xmm0;                                                            # Root is in xmm1
-
+  
     if (1)                                                                        # New left node
      {$t->node->();                                                               # Node in xmm0
       Movdqa xmm2, xmm0;                                                          # Left is in xmm2
-
+  
       cxr {$t->insertLeft->()} 1,2;                                               # Insert left under root
       cxr {$t->dump->("Left")} 2;                                                 # Left node after insertion
      }
-
+  
     if (1)                                                                        # New right node in xmm0
      {$t->node->();
       Movdqa xmm3, xmm0;                                                          # Right is in xmm3
-
+  
       cxr {$t->insertRight->()} 1,3;                                              # Insert left under root
       cxr {$t->dump->("Right")} 3;                                                # Right node after insertion
      }
-
+  
     cxr
      {$t->dump->("Root");                                                         # Root node after insertions
       $t->isRoot->();
       IfNz {PrintOutStringNL "root"} sub {PrintOutStringNL "NOT root"};
      } 1;
-
+  
     PushRR xmm0;                                                                  # Dump underlying  byte string
     PopRR rdi, rax;
     $t->byteString->dump;
-
+  
     Exit;                                                                         # Return to operating system
-
+  
     is_deeply Assemble, <<END;                                                    # Test tree so produced
   Left
   ArenaTreeNode at: 0000 0000 0000 00B0
@@ -5537,7 +5582,7 @@ B<Example:>
     Size: 0000 0000 0000 1000
     Used: 0000 0000 0000 01E0
   END
-
+  
 
 =head3 UnReorderXmmRegisters(@registers)
 
@@ -5552,35 +5597,35 @@ B<Example:>
     my $t = GenTree(2,2);                                                         # Tree description
     $t->node->();                                                                 # Root
     Movdqa xmm1, xmm0;                                                            # Root is in xmm1
-
+  
     if (1)                                                                        # New left node
      {$t->node->();                                                               # Node in xmm0
       Movdqa xmm2, xmm0;                                                          # Left is in xmm2
-
+  
       cxr {$t->insertLeft->()} 1,2;                                               # Insert left under root
       cxr {$t->dump->("Left")} 2;                                                 # Left node after insertion
      }
-
+  
     if (1)                                                                        # New right node in xmm0
      {$t->node->();
       Movdqa xmm3, xmm0;                                                          # Right is in xmm3
-
+  
       cxr {$t->insertRight->()} 1,3;                                              # Insert left under root
       cxr {$t->dump->("Right")} 3;                                                # Right node after insertion
      }
-
+  
     cxr
      {$t->dump->("Root");                                                         # Root node after insertions
       $t->isRoot->();
       IfNz {PrintOutStringNL "root"} sub {PrintOutStringNL "NOT root"};
      } 1;
-
+  
     PushRR xmm0;                                                                  # Dump underlying  byte string
     PopRR rdi, rax;
     $t->byteString->dump;
-
+  
     Exit;                                                                         # Return to operating system
-
+  
     is_deeply Assemble, <<END;                                                    # Test tree so produced
   Left
   ArenaTreeNode at: 0000 0000 0000 00B0
@@ -5602,7 +5647,7 @@ B<Example:>
     Size: 0000 0000 0000 1000
     Used: 0000 0000 0000 01E0
   END
-
+  
 
 =head3 RegisterSize($r)
 
@@ -5627,7 +5672,7 @@ B<Example:>
     PrintOutRegisterInHex rax, rdi;
     RestoreFirstFour;
     PrintOutRegisterInHex rax, rdi;
-
+  
     SaveFirstFour;
     Mov rax, 2;
     Mov rdi, 2;
@@ -5639,7 +5684,7 @@ B<Example:>
     PrintOutRegisterInHex rax, rdi;
     RestoreFirstFourExceptRax;
     PrintOutRegisterInHex rax, rdi;
-
+  
     SaveFirstFour;
     Mov rax, 2;
     Mov rdi, 2;
@@ -5651,14 +5696,14 @@ B<Example:>
     PrintOutRegisterInHex rax, rdi;
     RestoreFirstFourExceptRaxAndRdi;
     PrintOutRegisterInHex rax, rdi;
-
+  
     Bswap rax;
     PrintOutRegisterInHex rax;
-
+  
     my $l = Label;
     Jmp $l;
     SetLabel $l;
-
+  
     is_deeply Assemble, <<END;
      rax: 0000 0000 0000 0003
      rdi: 0000 0000 0000 0004
@@ -5680,11 +5725,11 @@ B<Example:>
      rdi: 0000 0000 0000 0004
      rax: 0300 0000 0000 0000
   END
-
-
+  
+  
     ok 8 == RegisterSize rax;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-
+  
 
 =head3 ClearRegisters(@registers)
 
@@ -5703,16 +5748,16 @@ B<Example:>
     Kaddb k0,  k0, k0;
     Kmovq rax, k0;
     PushR k0;
-
+  
     ClearRegisters k0;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     Kmovq k1, k0;
     PopR  k0;
     PrintOutRegisterInHex k0;
     PrintOutRegisterInHex k1;
-
+  
     ok Assemble =~ m(k0: 0000 0000 0000 0008.*k1: 0000 0000 0000 0000)s;
-
+  
 
 =head3 SetRegisterToMinusOne($register)
 
@@ -5724,13 +5769,13 @@ Set the specified register to -1
 B<Example:>
 
 
-
+  
     SetRegisterToMinusOne rax;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutRegisterInHex rax;
-
+  
     ok Assemble =~ m(rax: FFFF FFFF FFFF FFFF);
-
+  
 
 =head3 SetMaskRegister($mask, $start, $length)
 
@@ -5746,31 +5791,31 @@ B<Example:>
 
     Mov rax, 8;
     Mov rsi, -1;
-
+  
     Inc rsi; SetMaskRegister(k0, rax, rsi); PrintOutRegisterInHex k0;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-
+  
     Inc rsi; SetMaskRegister(k1, rax, rsi); PrintOutRegisterInHex k1;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-
+  
     Inc rsi; SetMaskRegister(k2, rax, rsi); PrintOutRegisterInHex k2;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-
+  
     Inc rsi; SetMaskRegister(k3, rax, rsi); PrintOutRegisterInHex k3;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-
+  
     Inc rsi; SetMaskRegister(k4, rax, rsi); PrintOutRegisterInHex k4;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-
+  
     Inc rsi; SetMaskRegister(k5, rax, rsi); PrintOutRegisterInHex k5;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-
+  
     Inc rsi; SetMaskRegister(k6, rax, rsi); PrintOutRegisterInHex k6;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-
+  
     Inc rsi; SetMaskRegister(k7, rax, rsi); PrintOutRegisterInHex k7;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-
+  
     is_deeply Assemble, <<END;
       k0: 0000 0000 0000 0000
       k1: 0000 0000 0000 0100
@@ -5781,7 +5826,7 @@ B<Example:>
       k6: 0000 0000 0000 3F00
       k7: 0000 0000 0000 7F00
   END
-
+  
 
 =head3 SetZF()
 
@@ -5791,25 +5836,25 @@ Set the zero flag
 B<Example:>
 
 
-
+  
     SetZF;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutZF;
     ClearZF;
     PrintOutZF;
-
+  
     SetZF;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutZF;
-
+  
     SetZF;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutZF;
     ClearZF;
     PrintOutZF;
-
+  
     ok Assemble =~ m(ZF=1.*ZF=0.*ZF=1.*ZF=1.*ZF=0)s;
-
+  
 
 =head3 ClearZF()
 
@@ -5821,7 +5866,7 @@ B<Example:>
 
     SetZF;
     PrintOutZF;
-
+  
     ClearZF;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutZF;
@@ -5829,13 +5874,13 @@ B<Example:>
     PrintOutZF;
     SetZF;
     PrintOutZF;
-
+  
     ClearZF;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutZF;
-
+  
     ok Assemble =~ m(ZF=1.*ZF=0.*ZF=1.*ZF=1.*ZF=0)s;
-
+  
 
 =head2 Tracking
 
@@ -5903,29 +5948,29 @@ B<Example:>
     my $source = rax;                                                             # Address to load from
     my $start  = rsi;                                                             # Start position in the zmm register
     my $length = rdi;                                                             # Length of copy
-
-
+  
+  
     Copy $source, $s;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     LoadShortStringFromMemoryToZmm 0, $s;                                         # Load a sample string
     KeepFree $source;
     PrintOutRegisterInHex xmm0;
-
-
+  
+  
     LoadZmmFromMemory 0, Increment(GetLengthOfShortString($start, 0)), Copy($length, 1), Copy($source, $t);  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutRegisterInHex xmm0;
-
+  
     LoadZmmFromMemory 0, $start, $length, $source;
     PrintOutRegisterInHex xmm0;
-
+  
     KeepFree $length;
-
+  
     LoadZmmFromMemory 0, $start, Minus($length, Copy(r13, 56), $start), $source;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     SetLengthOfShortString 0, sil;                                                # Set current length of zmm0
     PrintOutRegisterInHex xmm0, zmm0;
-
+  
     is_deeply Assemble, <<END;
     xmm0: 0000 0D0C 0B0A 0908   0706 0504 0302 010D
     xmm0: 0001 0D0C 0B0A 0908   0706 0504 0302 010D
@@ -5933,7 +5978,7 @@ B<Example:>
     xmm0: 0201 0D0C 0B0A 0908   0706 0504 0302 0138
     zmm0: 0000 0000 0000 0000   2A29 2827 2625 2423   2221 201F 1E1D 1C1B   1A19 1817 1615 1413   1211 100F 0E0D 0C0B   0A09 0807 0605 0403   0201 0D0C 0B0A 0908   0706 0504 0302 0138
   END
-
+  
 
 =head3 MaximumOfTwoRegisters($result, $first, $second)
 
@@ -5949,16 +5994,16 @@ B<Example:>
 
     Mov rax, 1;
     Mov rdi, 2;
-
+  
     PrintOutRegisterInHex MaximumOfTwoRegisters r15, rax, rdi;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutRegisterInHex MinimumOfTwoRegisters r14, rax, rdi;
-
+  
     is_deeply Assemble, <<END;
      r15: 0000 0000 0000 0002
      r14: 0000 0000 0000 0001
   END
-
+  
 
 =head3 MinimumOfTwoRegisters($result, $first, $second)
 
@@ -5975,15 +6020,15 @@ B<Example:>
     Mov rax, 1;
     Mov rdi, 2;
     PrintOutRegisterInHex MaximumOfTwoRegisters r15, rax, rdi;
-
+  
     PrintOutRegisterInHex MinimumOfTwoRegisters r14, rax, rdi;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-
+  
     is_deeply Assemble, <<END;
      r15: 0000 0000 0000 0002
      r14: 0000 0000 0000 0001
   END
-
+  
 
 =head3 Increment($target, $amount)
 
@@ -6015,19 +6060,19 @@ B<Example:>
     Copy r15, 2;
     Copy r14, 3;
     KeepFree r15;
-
+  
     Plus(r15, r15, r14);  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutRegisterInHex r15;
     Copy r13, 4;
     Minus(r12, r15, r13);
     PrintOutRegisterInHex r12;
-
+  
     is_deeply Assemble, <<END;
      r15: 0000 0000 0000 0005
      r12: 0000 0000 0000 0001
   END
-
+  
 
 =head3 Minus($target, $s1, $s2)
 
@@ -6047,16 +6092,16 @@ B<Example:>
     Plus(r15, r15, r14);
     PrintOutRegisterInHex r15;
     Copy r13, 4;
-
+  
     Minus(r12, r15, r13);  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutRegisterInHex r12;
-
+  
     is_deeply Assemble, <<END;
      r15: 0000 0000 0000 0005
      r12: 0000 0000 0000 0001
   END
-
+  
 
 =head2 Zmm
 
@@ -6079,34 +6124,34 @@ B<Example:>
     Vmovdqu8 ymm1,"[$s]";
     Vmovdqu8 zmm2,"[$s]";
     Vmovdqu8 zmm3,"[$s]";
-
+  
     SetRegisterToMinusOne rax;                                                    # Insert some ones
-
+  
     InsertIntoXyz xmm0, 2, 4;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-
+  
     InsertIntoXyz ymm1, 4, 5;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-
+  
     InsertIntoXyz zmm2, 8, 6;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-
+  
     PrintOutRegisterInHex xmm0;                                                   # Print the insertions
     PrintOutRegisterInHex ymm1;
     PrintOutRegisterInHex zmm2;
-
+  
     ClearRegisters xmm0;                                                          # Insert some zeroes
-
+  
     InsertIntoXyz zmm3, 16, 2;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutRegisterInHex zmm3;
-
+  
     my $r = Assemble;
     ok $r =~ m(xmm0: 0D0C 0B0A 0908 FFFF   0706 0504 0302 0100);
     ok $r =~ m(ymm1: 1B1A 1918 1716 1514   FFFF FFFF 1312 1110   0F0E 0D0C 0B0A 0908   0706 0504 0302 0100);
     ok $r =~ m(zmm2: 3736 3534 3332 3130   FFFF FFFF FFFF FFFF   2F2E 2D2C 2B2A 2928   2726 2524 2322 2120   1F1E 1D1C 1B1A 1918   1716 1514 1312 1110   0F0E 0D0C 0B0A 0908   0706 0504 0302 0100);
     ok $r =~ m(zmm3: 2F2E 2D2C 2B2A 2928   2726 2524 2322 2120   0000 0000 0000 0000   0000 0000 0000 0000   1F1E 1D1C 1B1A 1918   1716 1514 1312 1110   0F0E 0D0C 0B0A 0908   0706 0504 0302 0100);
-
+  
 
 =head3 LoadTargetZmmFromSourceZmm($target, $targetOffset, $source, $sourceOffset, $length)
 
@@ -6126,26 +6171,26 @@ B<Example:>
     LoadShortStringFromMemoryToZmm 0, $s;                                         # Load a sample string
     Keep zmm0;
     PrintOutRegisterInHex xmm0;
-
+  
     LoadTargetZmmFromSourceZmm 1, Copy(rdi, 3), 0, Copy(rdx, 8), Copy(rsi, 2);  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutRegisterInHex xmm1;
     KeepFree rdi;
-
-
+  
+  
     LoadTargetZmmFromSourceZmm 2, Copy(rdi, 4), 0, rdx, rsi;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutRegisterInHex xmm2;
-
+  
     Copy(zmm3, zmm0);
     PrintOutRegisterInHex xmm3;
-
+  
     ClearRegisters zmm4;
     Lea rax, "[$s+4]";
     LoadZmmFromMemory 4, rdx, rsi, rax;
     Sub rax, 4;
     PrintOutRegisterInHex xmm4;
-
+  
     is_deeply Assemble, <<END;
     xmm0: 0F0E 0D0C 0B0A 0908   0706 0504 0302 0111
     xmm1: 0000 0000 0000 0000   0000 0009 0800 0000
@@ -6153,29 +6198,29 @@ B<Example:>
     xmm3: 0F0E 0D0C 0B0A 0908   0706 0504 0302 0111
     xmm4: 0000 0000 0000 0504   0000 0000 0000 0000
   END
-
+  
     my $s = Rb(13, 1..13);
     my $t = Rb(1..64);
     my $source = rax;                                                             # Address to load from
     my $start  = rsi;                                                             # Start position in the zmm register
     my $length = rdi;                                                             # Length of copy
-
+  
     Copy $source, $s;
     LoadShortStringFromMemoryToZmm 0, $s;                                         # Load a sample string
     KeepFree $source;
     PrintOutRegisterInHex xmm0;
-
+  
     LoadZmmFromMemory 0, Increment(GetLengthOfShortString($start, 0)), Copy($length, 1), Copy($source, $t);
     PrintOutRegisterInHex xmm0;
-
+  
     LoadZmmFromMemory 0, $start, $length, $source;
     PrintOutRegisterInHex xmm0;
-
+  
     KeepFree $length;
     LoadZmmFromMemory 0, $start, Minus($length, Copy(r13, 56), $start), $source;
     SetLengthOfShortString 0, sil;                                                # Set current length of zmm0
     PrintOutRegisterInHex xmm0, zmm0;
-
+  
     is_deeply Assemble, <<END;
     xmm0: 0000 0D0C 0B0A 0908   0706 0504 0302 010D
     xmm0: 0001 0D0C 0B0A 0908   0706 0504 0302 010D
@@ -6183,7 +6228,7 @@ B<Example:>
     xmm0: 0201 0D0C 0B0A 0908   0706 0504 0302 0138
     zmm0: 0000 0000 0000 0000   2A29 2827 2625 2423   2221 201F 1E1D 1C1B   1A19 1817 1615 1413   1211 100F 0E0D 0C0B   0A09 0807 0605 0403   0201 0D0C 0B0A 0908   0706 0504 0302 0138
   END
-
+  
 
 =head3 LoadZmmFromMemory($target, $targetOffset, $length, $source)
 
@@ -6226,9 +6271,9 @@ B<Example:>
      } sub
      {PrintOutRegisterInHex rdx;
      };
-
+  
     ok Assemble =~ m(rbx.*rcx)s;
-
+  
 
 =head2 IfEq($then, $else)
 
@@ -6299,16 +6344,16 @@ For - iterate the body as long as register is less than limit incrementing by in
 B<Example:>
 
 
-
+  
     For  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
      {PrintOutRegisterInHex rax
      } rax, 16, 1;
-
+  
     my $r = Assemble;
     ok $r =~ m(( 0000){3} 0000)i;
     ok $r =~ m(( 0000){3} 000F)i;
-
+  
 
 =head2 ForIn($full, $last, $register, $limit, $increment)
 
@@ -6374,45 +6419,45 @@ B<Example:>
     my $t = GenTree(2,2);                                                         # Tree description
     $t->node->();                                                                 # Root
     Movdqa xmm1, xmm0;                                                            # Root is in xmm1
-
+  
     if (1)                                                                        # New left node
      {$t->node->();                                                               # Node in xmm0
       Movdqa xmm2, xmm0;                                                          # Left is in xmm2
-
-
+  
+  
       cxr {$t->insertLeft->()} 1,2;                                               # Insert left under root  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-
+  
       cxr {$t->dump->("Left")} 2;                                                 # Left node after insertion  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
      }
-
+  
     if (1)                                                                        # New right node in xmm0
      {$t->node->();
       Movdqa xmm3, xmm0;                                                          # Right is in xmm3
-
-
+  
+  
       cxr {$t->insertRight->()} 1,3;                                              # Insert left under root  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-
+  
       cxr {$t->dump->("Right")} 3;                                                # Right node after insertion  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
      }
-
-
+  
+  
     cxr  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
      {$t->dump->("Root");                                                         # Root node after insertions
       $t->isRoot->();
       IfNz {PrintOutStringNL "root"} sub {PrintOutStringNL "NOT root"};
      } 1;
-
+  
     PushRR xmm0;                                                                  # Dump underlying  byte string
     PopRR rdi, rax;
     $t->byteString->dump;
-
+  
     Exit;                                                                         # Return to operating system
-
+  
     is_deeply Assemble, <<END;                                                    # Test tree so produced
   Left
   ArenaTreeNode at: 0000 0000 0000 00B0
@@ -6434,7 +6479,7 @@ B<Example:>
     Size: 0000 0000 0000 1000
     Used: 0000 0000 0000 01E0
   END
-
+  
 
 =head2 Comment(@comment)
 
@@ -6446,16 +6491,16 @@ Insert a comment into the assembly code
 B<Example:>
 
 
-
+  
     Comment "Print a string from memory";  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     my $s = "Hello World";
     Mov rax, Rs($s);
     Mov rdi, length $s;
     PrintOutMemory;
-
+  
     ok Assemble =~ m(Hello World);
-
+  
 
 =head2 DComment(@comment)
 
@@ -6475,42 +6520,21 @@ Insert a comment into the read only data segment
 
 Print
 
+=head2 PrintNL($channel)
+
+Print a new line to stdout  or stderr
+
+     Parameter  Description
+  1  $channel   Channel to write on
+
 =head2 PrintErrNL()
 
 Print a new line to stderr
 
 
-=head2 PrintErrString($string)
-
-Print a constant string to stderr.
-
-     Parameter  Description
-  1  $string    String
-
-=head2 PrintErrStringNL($string)
-
-Print a new line to stderr
-
-     Parameter  Description
-  1  $string    String
-
-B<Example:>
-
-
-    PrintOutStringNL "Hello World";
-
-    PrintErrStringNL "Hello World";  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
-
-
-    is_deeply Assemble, <<END;
-  Hello World
-  Hello World
-  END
-
-
 =head2 PrintOutNL()
 
-Print a new line to stdout
+Print a new line to stderr
 
 
 B<Example:>
@@ -6520,80 +6544,114 @@ B<Example:>
     Mov(rax, "[$q]");
     PrintOutString "rax: ";
     PrintOutRaxInHex;
-
+  
     PrintOutNL;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     Xor rax, rax;
     PrintOutString "rax: ";
     PrintOutRaxInHex;
-
+  
     PrintOutNL;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-
+  
     ok Assemble =~ m(rax: 6261 6261 6261 6261.*rax: 0000 0000 0000 0000)s;
+  
 
+=head2 PrintString($channel, @string)
 
-=head2 PrintOutString($string)
-
-Print a constant string to sysout.
-
-     Parameter  Description
-  1  $string    String
-
-=head2 PrintOutStringNL($string)
-
-Print a constant string to sysout followed by new line
+Print a constant string to the specified channel
 
      Parameter  Description
-  1  $string    String
+  1  $channel   Channel
+  2  @string    Strings
+
+=head2 PrintErrString(@string)
+
+Print a constant string to stderr.
+
+     Parameter  Description
+  1  @string    String
+
+=head2 PrintOutString(@string)
+
+Print a constant string to stdout.
+
+     Parameter  Description
+  1  @string    String
+
+=head2 PrintErrStringNL(@string)
+
+Print a constant string followed by a new line to stderr
+
+     Parameter  Description
+  1  @string    Strings
 
 B<Example:>
 
 
+    PrintOutStringNL "Hello World";
+  
+    PrintErrStringNL "Hello World";  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
+  
+    is_deeply Assemble,  <<END;
+  Hello World
+  END
+  
+
+=head2 PrintOutStringNL(@string)
+
+Print a constant string followed by a new line to stdout
+
+     Parameter  Description
+  1  @string    Strings
+
+B<Example:>
+
+
+  
     PrintOutStringNL "Hello World";  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintErrStringNL "Hello World";
-
-    is_deeply Assemble, <<END;
-  Hello World
+  
+    is_deeply Assemble,  <<END;
   Hello World
   END
-
+  
     my $t = GenTree(2,2);                                                         # Tree description
     $t->node->();                                                                 # Root
     Movdqa xmm1, xmm0;                                                            # Root is in xmm1
-
+  
     if (1)                                                                        # New left node
      {$t->node->();                                                               # Node in xmm0
       Movdqa xmm2, xmm0;                                                          # Left is in xmm2
-
+  
       cxr {$t->insertLeft->()} 1,2;                                               # Insert left under root
       cxr {$t->dump->("Left")} 2;                                                 # Left node after insertion
      }
-
+  
     if (1)                                                                        # New right node in xmm0
      {$t->node->();
       Movdqa xmm3, xmm0;                                                          # Right is in xmm3
-
+  
       cxr {$t->insertRight->()} 1,3;                                              # Insert left under root
       cxr {$t->dump->("Right")} 3;                                                # Right node after insertion
      }
-
+  
     cxr
      {$t->dump->("Root");                                                         # Root node after insertions
       $t->isRoot->();
-
+  
       IfNz {PrintOutStringNL "root"} sub {PrintOutStringNL "NOT root"};  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
      } 1;
-
+  
     PushRR xmm0;                                                                  # Dump underlying  byte string
     PopRR rdi, rax;
     $t->byteString->dump;
-
+  
     Exit;                                                                         # Return to operating system
-
+  
     is_deeply Assemble, <<END;                                                    # Test tree so produced
   Left
   ArenaTreeNode at: 0000 0000 0000 00B0
@@ -6615,11 +6673,23 @@ B<Example:>
     Size: 0000 0000 0000 1000
     Used: 0000 0000 0000 01E0
   END
+  
+
+=head2 PrintRaxInHex($channel)
+
+Write the content of register rax in hexadecimal in big endian notation to the specified channel
+
+     Parameter  Description
+  1  $channel   Channel
+
+=head2 PrintErrRaxInHex()
+
+Write the content of register rax in hexadecimal in big endian notation to stderr
 
 
 =head2 PrintOutRaxInHex()
 
-Write the content of register rax to stderr in hexadecimal in big endian notation
+Write the content of register rax in hexadecimal in big endian notation to stderr
 
 
 B<Example:>
@@ -6628,19 +6698,19 @@ B<Example:>
     my $q = Rs('abababab');
     Mov(rax, "[$q]");
     PrintOutString "rax: ";
-
+  
     PrintOutRaxInHex;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutNL;
     Xor rax, rax;
     PrintOutString "rax: ";
-
+  
     PrintOutRaxInHex;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutNL;
-
+  
     ok Assemble =~ m(rax: 6261 6261 6261 6261.*rax: 0000 0000 0000 0000)s;
-
+  
 
 =head2 PrintOutRaxInReverseInHex()
 
@@ -6654,22 +6724,22 @@ B<Example:>
     Shl rax, 32;
     Or  rax, 0x07654321;
     PushR rax;
-
+  
     PrintOutRaxInHex;
     PrintOutNL;
-
+  
     PrintOutRaxInReverseInHex;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutNL;
     KeepFree rax;
-
+  
     Mov rax, rsp;
     Mov rdi, 8;
     PrintOutMemoryInHex;
     PrintOutNL;
     PopR rax;
     KeepFree rax, rdi;
-
+  
     Mov rax, 4096;
     PushR rax;
     Mov rax, rsp;
@@ -6677,33 +6747,48 @@ B<Example:>
     PrintOutMemoryInHex;
     PrintOutNL;
     PopR rax;
-
+  
     is_deeply Assemble, <<END;
   0765 4321 0765 4321
   2143 6507 2143 6507
   2143 6507 2143 6507
   0010 0000 0000 0000
   END
+  
 
+=head2 PrintRegisterInHex($channel, @r)
+
+Print the named registers as hex strings
+
+     Parameter  Description
+  1  $channel   Channel to print on
+  2  @r         Names of the registers to print
+
+=head2 PrintErrRegisterInHex(@r)
+
+Print the named registers as hex strings on stderr
+
+     Parameter  Description
+  1  @r         Names of the registers to print
 
 =head2 PrintOutRegisterInHex(@r)
 
-Print any register as a hex string
+Print the named registers as hex strings on stdout
 
      Parameter  Description
-  1  @r         Name of the register to print
+  1  @r         Names of the registers to print
 
 B<Example:>
 
 
     my $q = Rs(('a'..'p')x4);
     Mov r8,"[$q]";
-
+  
     PrintOutRegisterInHex r8;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-
+  
     ok Assemble =~ m(r8: 6867 6665 6463 6261)s;
-
+  
 
 =head2 PrintOutRegistersInHex()
 
@@ -6720,14 +6805,14 @@ B<Example:>
     Mov(rdx, 4);
     Mov(r8,  5);
     Lea r9,  "[rax+rbx]";
-
+  
     PrintOutRegistersInHex;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-
+  
     my $r = Assemble;
     ok $r =~ m( r8: 0000 0000 0000 0005.* r9: 0000 0000 0000 0003.*rax: 0000 0000 0000 0001)s;
     ok $r =~ m(rbx: 0000 0000 0000 0002.*rcx: 0000 0000 0000 0003.*rdx: 0000 0000 0000 0004)s;
-
+  
 
 =head2 PrintOutZF()
 
@@ -6738,28 +6823,28 @@ B<Example:>
 
 
     SetZF;
-
+  
     PrintOutZF;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     ClearZF;
-
+  
     PrintOutZF;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     SetZF;
-
+  
     PrintOutZF;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     SetZF;
-
+  
     PrintOutZF;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     ClearZF;
-
+  
     PrintOutZF;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-
+  
     ok Assemble =~ m(ZF=1.*ZF=0.*ZF=1.*ZF=1.*ZF=0)s;
-
+  
 
 =head1 Variables
 
@@ -6779,44 +6864,44 @@ Create and stack a new scope and continue with it as the current scope
 B<Example:>
 
 
-  if (1)
-
+  if (1)                                                                              
+  
    {my $start = Scope(start);  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-
+  
     my $s1    = Scope(s1);  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-
+  
     my $s2    = Scope(s2);  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     is_deeply $s2->depth, 2;
     is_deeply $s2->name,  q(s2);
     ScopeEnd;
-
-
+  
+  
     my $t1    = Scope(t1);  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-
+  
     my $t2    = Scope(t2);  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     is_deeply $t1->depth, 2;
     is_deeply $t1->name,  q(t1);
     is_deeply $t2->depth, 3;
     is_deeply $t2->name,  q(t2);
-
+  
     ok  $s1->currentlyVisible;
     ok !$s2->currentlyVisible;
-
+  
     ok  $s1->contains($t2);
     ok !$s2->contains($t2);
-
+  
     ScopeEnd;
-
+  
     is_deeply $s1->depth, 1;
     is_deeply $s1->name,  q(s1);
     ScopeEnd;
    }
-
+  
 
 =head3 ScopeEnd()
 
@@ -6826,40 +6911,40 @@ End the current scope and continue with the containing parent scope
 B<Example:>
 
 
-  if (1)
+  if (1)                                                                              
    {my $start = Scope(start);
     my $s1    = Scope(s1);
     my $s2    = Scope(s2);
     is_deeply $s2->depth, 2;
     is_deeply $s2->name,  q(s2);
-
+  
     ScopeEnd;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-
+  
     my $t1    = Scope(t1);
     my $t2    = Scope(t2);
     is_deeply $t1->depth, 2;
     is_deeply $t1->name,  q(t1);
     is_deeply $t2->depth, 3;
     is_deeply $t2->name,  q(t2);
-
+  
     ok  $s1->currentlyVisible;
     ok !$s2->currentlyVisible;
-
+  
     ok  $s1->contains($t2);
     ok !$s2->contains($t2);
-
-
+  
+  
     ScopeEnd;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-
+  
     is_deeply $s1->depth, 1;
     is_deeply $s1->name,  q(s1);
-
+  
     ScopeEnd;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
    }
-
+  
 
 =head3 Scope::contains($parent, $child)
 
@@ -6872,34 +6957,34 @@ Check that the named parent scope contains the specified child scope. If no chil
 B<Example:>
 
 
-  if (1)
+  if (1)                                                                              
    {my $start = Scope(start);
     my $s1    = Scope(s1);
     my $s2    = Scope(s2);
     is_deeply $s2->depth, 2;
     is_deeply $s2->name,  q(s2);
     ScopeEnd;
-
+  
     my $t1    = Scope(t1);
     my $t2    = Scope(t2);
     is_deeply $t1->depth, 2;
     is_deeply $t1->name,  q(t1);
     is_deeply $t2->depth, 3;
     is_deeply $t2->name,  q(t2);
-
+  
     ok  $s1->currentlyVisible;
     ok !$s2->currentlyVisible;
-
+  
     ok  $s1->contains($t2);
     ok !$s2->contains($t2);
-
+  
     ScopeEnd;
-
+  
     is_deeply $s1->depth, 1;
     is_deeply $s1->name,  q(s1);
     ScopeEnd;
    }
-
+  
 
 =head3 Scope::currentlyVisible($scope)
 
@@ -6911,34 +6996,34 @@ Check that the named parent scope is currently visible
 B<Example:>
 
 
-  if (1)
+  if (1)                                                                              
    {my $start = Scope(start);
     my $s1    = Scope(s1);
     my $s2    = Scope(s2);
     is_deeply $s2->depth, 2;
     is_deeply $s2->name,  q(s2);
     ScopeEnd;
-
+  
     my $t1    = Scope(t1);
     my $t2    = Scope(t2);
     is_deeply $t1->depth, 2;
     is_deeply $t1->name,  q(t1);
     is_deeply $t2->depth, 3;
     is_deeply $t2->name,  q(t2);
-
+  
     ok  $s1->currentlyVisible;
     ok !$s2->currentlyVisible;
-
+  
     ok  $s1->contains($t2);
     ok !$s2->contains($t2);
-
+  
     ScopeEnd;
-
+  
     is_deeply $s1->depth, 1;
     is_deeply $s1->name,  q(s1);
     ScopeEnd;
    }
-
+  
 
 =head2 Definitions
 
@@ -6988,7 +7073,7 @@ Define a quad variable
 B<Example:>
 
 
-
+  
     my $a = Vq(a, 3);   $a->print;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     my $c = $a +  2;    $c->print;
@@ -6998,9 +7083,9 @@ B<Example:>
     my $g = $a *  2;    $g->print;
     my $h = $g /  2;    $h->print;
     my $i = $a %  2;    $i->print;
-
+  
     If ($a == 3, sub{PrintOutStringNL "a == 3"});
-
+  
     is_deeply Assemble, <<END;
   0300 0000 0000 0000
   0500 0000 0000 0000
@@ -7012,7 +7097,7 @@ B<Example:>
   0100 0000 0000 0000
   a == 3
   END
-
+  
 
 =head3 VxyzInit($var, @expr)
 
@@ -7248,9 +7333,43 @@ Write the value of a variable on stdout
      Parameter  Description
   1  $left      Left variable
 
-=head3 Nasm::X86::Variable::dump($left, $title)
+=head3 Nasm::X86::Variable::dump($left, $channel, $newLine, $title)
+
+Dump the value of a variable to the specified channel adding an optional title and new line if requested
+
+     Parameter  Description
+  1  $left      Left variable
+  2  $channel   Channel
+  3  $newLine   New line required
+  4  $title     Optional title
+
+=head3 Nasm::X86::Variable::err($left, $title)
+
+Dump the value of a variable on stderr
+
+     Parameter  Description
+  1  $left      Left variable
+  2  $title     Optional title
+
+=head3 Nasm::X86::Variable::out($left, $title)
 
 Dump the value of a variable on stdout
+
+     Parameter  Description
+  1  $left      Left variable
+  2  $title     Optional title
+
+=head3 Nasm::X86::Variable::errNL($left, $title)
+
+Dump the value of a variable on stderr and append a new line
+
+     Parameter  Description
+  1  $left      Left variable
+  2  $title     Optional title
+
+=head3 Nasm::X86::Variable::outNL($left, $title)
+
+Dump the value of a variable on stdout and append a new line
 
      Parameter  Description
   1  $left      Left variable
@@ -7358,6 +7477,35 @@ Set the mask register to ones starting at the specified position for the specifi
   2  $length    Variable containing length of mask
   3  $mask      Mask register
 
+B<Example:>
+
+
+    my $z = Vq('zero', 0);
+    my $o = Vq('one',  1);
+    my $t = Vq('two',  2);
+    $z->setMask($o,       k7); PrintOutRegisterInHex k7;
+    $z->setMask($t,       k6); PrintOutRegisterInHex k6;
+    $z->setMask($o+$t,    k5); PrintOutRegisterInHex k5;
+    $o->setMask($o,       k4); PrintOutRegisterInHex k4;
+    $o->setMask($t,       k3); PrintOutRegisterInHex k3;
+    $o->setMask($o+$t,    k2); PrintOutRegisterInHex k2;
+  
+    $t->setMask($o,       k1); PrintOutRegisterInHex k1;
+    $t->setMask($t,       k0); PrintOutRegisterInHex k0;
+  
+  
+    ok Assemble(debug => 0, eq => <<END);
+      k7: 0000 0000 0000 0001
+      k6: 0000 0000 0000 0003
+      k5: 0000 0000 0000 0007
+      k4: 0000 0000 0000 0002
+      k3: 0000 0000 0000 0006
+      k2: 0000 0000 0000 000E
+      k1: 0000 0000 0000 0004
+      k0: 0000 0000 0000 000C
+  END
+  
+
 =head3 Nasm::X86::Variable::setZmm($source, $zmm, $offset, $length)
 
 Load bytes from the memory addressed by specified source variable into the numbered zmm register at the offset in the specified offset moving the number of bytes in the specified variable
@@ -7459,13 +7607,13 @@ B<Example:>
        $c->putDIntoZmm(0, 10);
        $c->putQIntoZmm(0, 16);
     PrintOutRegisterInHex zmm0;
-    getBFromZmmAsVariable(0, 12)->dump;
-    getWFromZmmAsVariable(0, 12)->dump;
+    getBFromZmmAsVariable(0, 12)->outNL;
+    getWFromZmmAsVariable(0, 12)->outNL;
+  
+    getDFromZmmAsVariable(0, 12)->outNL;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-    getDFromZmmAsVariable(0, 12)->dump;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
-
-    getQFromZmmAsVariable(0, 12)->dump;
-
+    getQFromZmmAsVariable(0, 12)->outNL;
+  
     is_deeply Assemble, <<END;
     zmm0: 0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0706 0504 0302 0100   0000 0302 0100 0000   0100 0000 0000 0000
   b at offset 12 in zmm0: 0000 0000 0000 0002
@@ -7473,7 +7621,7 @@ B<Example:>
   d at offset 12 in zmm0: 0000 0000 0000 0302
   q at offset 12 in zmm0: 0302 0100 0000 0302
   END
-
+  
 
 =head3 getQFromZmmAsVariable($zmm, $offset)
 
@@ -7614,10 +7762,10 @@ Fork
 B<Example:>
 
 
-
+  
     Fork;                                                                         # Fork  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-
+  
     Test rax,rax;
     IfNz                                                                          # Parent
      {Mov rbx, rax;
@@ -7641,23 +7789,23 @@ B<Example:>
       Mov r10,rax;
       PrintOutRegisterInHex r10;
      };
-
+  
     my $r = Assemble;
-
+  
   #    r8: 0000 0000 0000 0000   #1 Return from fork as seen by child
   #    r9: 0000 0000 0003 0C63   #2 Pid of child
   #   r10: 0000 0000 0003 0C60   #3 Pid of parent from child
   #   rax: 0000 0000 0003 0C63   #4 Return from fork as seen by parent
   #   rbx: 0000 0000 0003 0C63   #5 Wait for child pid result
   #   rcx: 0000 0000 0003 0C60   #6 Pid of parent
-
+  
     if ($r =~ m(r8:( 0000){4}.*r9:(.*)\s{5,}r10:(.*)\s{5,}rax:(.*)\s{5,}rbx:(.*)\s{5,}rcx:(.*)\s{2,})s)
      {ok $2 eq $4;
       ok $2 eq $5;
       ok $3 eq $6;
       ok $2 gt $6;
      }
-
+  
 
 =head2 GetPid()
 
@@ -7668,7 +7816,7 @@ B<Example:>
 
 
     Fork;                                                                         # Fork
-
+  
     Test rax,rax;
     IfNz                                                                          # Parent
      {Mov rbx, rax;
@@ -7676,7 +7824,7 @@ B<Example:>
       PrintOutRegisterInHex rax;
       PrintOutRegisterInHex rbx;
       KeepFree rax;
-
+  
       GetPid;                                                                     # Pid of parent as seen in parent  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
       Mov rcx,rax;
@@ -7686,7 +7834,7 @@ B<Example:>
      {Mov r8,rax;
       PrintOutRegisterInHex r8;
       KeepFree rax;
-
+  
       GetPid;                                                                     # Child pid as seen in child  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
       Mov r9,rax;
@@ -7696,23 +7844,23 @@ B<Example:>
       Mov r10,rax;
       PrintOutRegisterInHex r10;
      };
-
+  
     my $r = Assemble;
-
+  
   #    r8: 0000 0000 0000 0000   #1 Return from fork as seen by child
   #    r9: 0000 0000 0003 0C63   #2 Pid of child
   #   r10: 0000 0000 0003 0C60   #3 Pid of parent from child
   #   rax: 0000 0000 0003 0C63   #4 Return from fork as seen by parent
   #   rbx: 0000 0000 0003 0C63   #5 Wait for child pid result
   #   rcx: 0000 0000 0003 0C60   #6 Pid of parent
-
+  
     if ($r =~ m(r8:( 0000){4}.*r9:(.*)\s{5,}r10:(.*)\s{5,}rax:(.*)\s{5,}rbx:(.*)\s{5,}rcx:(.*)\s{2,})s)
      {ok $2 eq $4;
       ok $2 eq $5;
       ok $3 eq $6;
       ok $2 gt $6;
      }
-
+  
 
 =head2 GetPidInHex()
 
@@ -7722,13 +7870,13 @@ Get process identifier in hex as 8 zero terminated bytes in rax
 B<Example:>
 
 
-
+  
     GetPidInHex;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutRegisterInHex rax;
-
+  
     ok Assemble =~ m(rax: 00);
-
+  
 
 =head2 GetPPid()
 
@@ -7739,7 +7887,7 @@ B<Example:>
 
 
     Fork;                                                                         # Fork
-
+  
     Test rax,rax;
     IfNz                                                                          # Parent
      {Mov rbx, rax;
@@ -7759,29 +7907,29 @@ B<Example:>
       Mov r9,rax;
       PrintOutRegisterInHex r9;
       KeepFree rax;
-
+  
       GetPPid;                                                                    # Parent pid as seen in child  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
       Mov r10,rax;
       PrintOutRegisterInHex r10;
      };
-
+  
     my $r = Assemble;
-
+  
   #    r8: 0000 0000 0000 0000   #1 Return from fork as seen by child
   #    r9: 0000 0000 0003 0C63   #2 Pid of child
   #   r10: 0000 0000 0003 0C60   #3 Pid of parent from child
   #   rax: 0000 0000 0003 0C63   #4 Return from fork as seen by parent
   #   rbx: 0000 0000 0003 0C63   #5 Wait for child pid result
   #   rcx: 0000 0000 0003 0C60   #6 Pid of parent
-
+  
     if ($r =~ m(r8:( 0000){4}.*r9:(.*)\s{5,}r10:(.*)\s{5,}rax:(.*)\s{5,}rbx:(.*)\s{5,}rcx:(.*)\s{2,})s)
      {ok $2 eq $4;
       ok $2 eq $5;
       ok $3 eq $6;
       ok $2 gt $6;
      }
-
+  
 
 =head2 GetUid()
 
@@ -7791,14 +7939,14 @@ Get userid of current process
 B<Example:>
 
 
-
+  
     GetUid;                                                                       # Userid  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutRegisterInHex rax;
-
+  
     my $r = Assemble;
     ok $r =~ m(rax:( 0000){3});
-
+  
 
 =head2 WaitPid()
 
@@ -7809,11 +7957,11 @@ B<Example:>
 
 
     Fork;                                                                         # Fork
-
+  
     Test rax,rax;
     IfNz                                                                          # Parent
      {Mov rbx, rax;
-
+  
       WaitPid;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
       PrintOutRegisterInHex rax;
@@ -7835,23 +7983,23 @@ B<Example:>
       Mov r10,rax;
       PrintOutRegisterInHex r10;
      };
-
+  
     my $r = Assemble;
-
+  
   #    r8: 0000 0000 0000 0000   #1 Return from fork as seen by child
   #    r9: 0000 0000 0003 0C63   #2 Pid of child
   #   r10: 0000 0000 0003 0C60   #3 Pid of parent from child
   #   rax: 0000 0000 0003 0C63   #4 Return from fork as seen by parent
   #   rbx: 0000 0000 0003 0C63   #5 Wait for child pid result
   #   rcx: 0000 0000 0003 0C60   #6 Pid of parent
-
+  
     if ($r =~ m(r8:( 0000){4}.*r9:(.*)\s{5,}r10:(.*)\s{5,}rax:(.*)\s{5,}rbx:(.*)\s{5,}rcx:(.*)\s{2,})s)
      {ok $2 eq $4;
       ok $2 eq $5;
       ok $3 eq $6;
       ok $2 gt $6;
      }
-
+  
 
 =head2 ReadTimeStampCounter()
 
@@ -7862,17 +8010,17 @@ B<Example:>
 
 
     for(1..10)
-
+  
      {ReadTimeStampCounter;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
       PrintOutRegisterInHex rax;
      }
-
+  
     my @s = split /
 /, Assemble;
     my @S = sort @s;
     is_deeply \@s, \@S;
-
+  
 
 =head1 Stack
 
@@ -7901,19 +8049,19 @@ B<Example:>
 
     Mov rax, 0x11111111;
     Mov rbx, 0x22222222;
-
+  
     PushR my @save = (rax, rbx);  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     Mov rax, 0x33333333;
     PopR @save;
     PrintOutRegisterInHex rax;
     PrintOutRegisterInHex rbx;
-
+  
     is_deeply Assemble,<<END;
      rax: 0000 0000 1111 1111
      rbx: 0000 0000 2222 2222
   END
-
+  
 
 =head3 PopRR(@r)
 
@@ -7936,17 +8084,17 @@ B<Example:>
     Mov rbx, 0x22222222;
     PushR my @save = (rax, rbx);
     Mov rax, 0x33333333;
-
+  
     PopR @save;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutRegisterInHex rax;
     PrintOutRegisterInHex rbx;
-
+  
     is_deeply Assemble,<<END;
      rax: 0000 0000 1111 1111
      rbx: 0000 0000 2222 2222
   END
-
+  
 
 =head3 PeekR($r)
 
@@ -8050,9 +8198,21 @@ Create a local data descriptor consisting of the specified number of 8 byte loca
 
 Allocate and print memory
 
+=head2 PrintMemoryInHex($channel)
+
+Dump memory from the address in rax for the length in rdi on the specified channel
+
+     Parameter  Description
+  1  $channel   Channel
+
+=head2 PrintErrMemoryInHex()
+
+Dump memory from the address in rax for the length in rdi on stderr
+
+
 =head2 PrintOutMemoryInHex()
 
-Dump memory from the address in rax for the length in rdi
+Dump memory from the address in rax for the length in rdi on stdout
 
 
 B<Example:>
@@ -8062,38 +8222,43 @@ B<Example:>
     Shl rax, 32;
     Or  rax, 0x07654321;
     PushR rax;
-
+  
     PrintOutRaxInHex;
     PrintOutNL;
     PrintOutRaxInReverseInHex;
     PrintOutNL;
     KeepFree rax;
-
+  
     Mov rax, rsp;
     Mov rdi, 8;
-
+  
     PrintOutMemoryInHex;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutNL;
     PopR rax;
     KeepFree rax, rdi;
-
+  
     Mov rax, 4096;
     PushR rax;
     Mov rax, rsp;
     Mov rdi, 8;
-
+  
     PrintOutMemoryInHex;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutNL;
     PopR rax;
-
+  
     is_deeply Assemble, <<END;
   0765 4321 0765 4321
   2143 6507 2143 6507
   2143 6507 2143 6507
   0010 0000 0000 0000
   END
+  
+
+=head2 PrintErrMemoryInHexNL()
+
+Dump memory from the address in rax for the length in rdi and then print a new line
 
 
 =head2 PrintOutMemoryInHexNL()
@@ -8101,9 +8266,31 @@ B<Example:>
 Dump memory from the address in rax for the length in rdi and then print a new line
 
 
+=head2 PrintMemory()
+
+Print the memory addressed by rax for a length of rdi on the specified channel
+
+
+B<Example:>
+
+
+    ReadFile(Vq(file, Rs($0)), (my $s = Vq(size)), my $a = Vq(address));          # Read file
+    $a->setReg(rax);                                                              # Address of file in memory
+    $s->setReg(rdi);                                                              # Length  of file in memory
+    PrintOutMemory;                                                               # Print contents of memory to stdout
+  
+    my $r = Assemble;                                                             # Assemble and execute
+    ok stringMd5Sum($r) eq fileMd5Sum($0);                                          # Output contains this file
+  
+
+=head2 PrintErrMemory()
+
+Print the memory addressed by rax for a length of rdi on sterr
+
+
 =head2 PrintOutMemory()
 
-Print the memory addressed by rax for a length of rdi::
+Print the memory addressed by rax for a length of rdi on stdout
 
 
 B<Example:>
@@ -8113,16 +8300,21 @@ B<Example:>
     my $s = "Hello World";
     Mov rax, Rs($s);
     Mov rdi, length $s;
-
+  
     PrintOutMemory;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-
+  
     ok Assemble =~ m(Hello World);
+  
+
+=head2 PrintErrMemoryNL()
+
+Print the memory addressed by rax for a length of rdi followed by a new line on stderr
 
 
 =head2 PrintOutMemoryNL()
 
-Print the memory addressed by rax for a length of rdi followed by a new line
+Print the memory addressed by rax for a length of rdi followed by a new line on stdout
 
 
 =head2 AllocateMemory(@variables)
@@ -8137,62 +8329,61 @@ B<Example:>
 
     my $N = Vq(size, 2048);
     my $q = Rs('a'..'p');
-
+  
     AllocateMemory($N, my $address = Vq(address));  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-    $address->dump;
-
+  
     Vmovdqu8 xmm0, "[$q]";
     $address->setReg(rax);
     Vmovdqu8 "[rax]", xmm0;
     Mov rdi, 16;
     PrintOutMemory;
     PrintOutNL;
-
+  
     FreeMemory(address => $address, size=> $N);
-
-    ok Assemble =~ m(address: 0000.*abcdefghijklmnop)s;
-
+  
+    ok Assemble(eq => <<END);
+  abcdefghijklmnop
+  END
+  
     my $N = Vq(size, 4096);                                                       # Size of the initial allocation which should be one or more pages
-
-
+  
+  
     AllocateMemory($N, my $A = Vq(address));  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-    $A->dump;
-
+  
     ClearMemory($N, $A);
-
+  
     $A->setReg(rax);
     $N->setReg(rdi);
-    PrintOutMemoryInHex;
-
+    PrintOutMemoryInHexNL;
+  
     FreeMemory($N, $A);
-
-    my $r = Assemble;
-    if ($r =~ m((0000.*0000))s)
-     {is_deeply length($1), 9748;
-     }
-
+  
+    ok Assemble(eq => <<END);
+  0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+  END
+  
     my $N = 256;
     my $s = Rb 0..$N-1;
-
+  
     AllocateMemory(Vq(size, $N), my $a = Vq(address));  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     CopyMemory(Vq(source, $s), Vq(size, $N), target => $a);
-
-
+  
+  
     AllocateMemory(Vq(size, $N), my $b = Vq(address));  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     CopyMemory(source => $a, target => $b, Vq(size, $N));
-
+  
     $b->setReg(rax);
     Mov rdi, $N;
     PrintOutMemoryInHexNL;
-
+  
     is_deeply Assemble, <<END;
   0001 0203 0405 06070809 0A0B 0C0D 0E0F1011 1213 1415 16171819 1A1B 1C1D 1E1F2021 2223 2425 26272829 2A2B 2C2D 2E2F3031 3233 3435 36373839 3A3B 3C3D 3E3F4041 4243 4445 46474849 4A4B 4C4D 4E4F5051 5253 5455 56575859 5A5B 5C5D 5E5F6061 6263 6465 66676869 6A6B 6C6D 6E6F7071 7273 7475 76777879 7A7B 7C7D 7E7F8081 8283 8485 86878889 8A8B 8C8D 8E8F9091 9293 9495 96979899 9A9B 9C9D 9E9FA0A1 A2A3 A4A5 A6A7A8A9 AAAB ACAD AEAFB0B1 B2B3 B4B5 B6B7B8B9 BABB BCBD BEBFC0C1 C2C3 C4C5 C6C7C8C9 CACB CCCD CECFD0D1 D2D3 D4D5 D6D7D8D9 DADB DCDD DEDFE0E1 E2E3 E4E5 E6E7E8E9 EAEB ECED EEEFF0F1 F2F3 F4F5 F6F7F8F9 FAFB FCFD FEFF
   END
-
+  
 
 =head2 FreeMemory(@variables)
 
@@ -8205,25 +8396,23 @@ B<Example:>
 
 
     my $N = Vq(size, 4096);                                                       # Size of the initial allocation which should be one or more pages
-
+  
     AllocateMemory($N, my $A = Vq(address));
-    $A->dump;
-
+  
     ClearMemory($N, $A);
-
+  
     $A->setReg(rax);
     $N->setReg(rdi);
-    PrintOutMemoryInHex;
-
-
+    PrintOutMemoryInHexNL;
+  
+  
     FreeMemory($N, $A);  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-
-    my $r = Assemble;
-    if ($r =~ m((0000.*0000))s)
-     {is_deeply length($1), 9748;
-     }
-
+  
+    ok Assemble(eq => <<END);
+  0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+  END
+  
 
 =head2 ClearMemory(@variables)
 
@@ -8236,25 +8425,23 @@ B<Example:>
 
 
     my $N = Vq(size, 4096);                                                       # Size of the initial allocation which should be one or more pages
-
+  
     AllocateMemory($N, my $A = Vq(address));
-    $A->dump;
-
-
+  
+  
     ClearMemory($N, $A);  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-
+  
     $A->setReg(rax);
     $N->setReg(rdi);
-    PrintOutMemoryInHex;
-
+    PrintOutMemoryInHexNL;
+  
     FreeMemory($N, $A);
-
-    my $r = Assemble;
-    if ($r =~ m((0000.*0000))s)
-     {is_deeply length($1), 9748;
-     }
-
+  
+    ok Assemble(eq => <<END);
+  0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+  END
+  
 
 =head2 CopyMemory(@variables)
 
@@ -8268,26 +8455,26 @@ B<Example:>
 
     my $s = Rb 0; Rb 1; Rw 2; Rd 3;  Rq 4;
     my $t = Db 0; Db 1; Dw 2; Dd 3;  Dq 4;
-
+  
     Vmovdqu8 xmm0, "[$s]";
     Vmovdqu8 xmm1, "[$t]";
     PrintOutRegisterInHex xmm0;
     PrintOutRegisterInHex xmm1;
     Sub rsp, 16;
-
+  
     Mov rax, rsp;                                                                 # Copy memory, the target is addressed by rax, the length is in rdi, the source is addressed by rsi
     Mov rdi, 16;
     Mov rsi, $s;
-
+  
     CopyMemory(Vq(source, rsi), Vq(target, rax), Vq(size, rdi));  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutMemoryInHex;
-
+  
     my $r = Assemble;
     ok $r =~ m(xmm0: 0000 0000 0000 0004   0000 0003 0002 0100);
     ok $r =~ m(xmm1: 0000 0000 0000 0004   0000 0003 0002 0100);
     ok $r =~ m(0001 0200 0300 00000400 0000 0000 0000);
-
+  
 
 =head1 Files
 
@@ -8302,25 +8489,25 @@ B<Example:>
 
 
     Mov rax, Rs($0);                                                              # File to read
-
+  
     OpenRead;                                                                     # Open file  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutRegisterInHex rax;
     CloseFile;                                                                    # Close file
     PrintOutRegisterInHex rax;
     KeepFree rax, rdi;
-
+  
     Mov rax, Rs(my $f = "zzzTemporaryFile.txt");                                  # File to write
     OpenWrite;                                                                    # Open file
     CloseFile;                                                                    # Close file
-
+  
     is_deeply Assemble, <<END;
      rax: 0000 0000 0000 0003
      rax: 0000 0000 0000 0000
   END
     ok -e $f;                                                                     # Created file
     unlink $f;
-
+  
 
 =head2 OpenWrite()
 
@@ -8336,20 +8523,20 @@ B<Example:>
     CloseFile;                                                                    # Close file
     PrintOutRegisterInHex rax;
     KeepFree rax, rdi;
-
+  
     Mov rax, Rs(my $f = "zzzTemporaryFile.txt");                                  # File to write
-
+  
     OpenWrite;                                                                    # Open file  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     CloseFile;                                                                    # Close file
-
+  
     is_deeply Assemble, <<END;
      rax: 0000 0000 0000 0003
      rax: 0000 0000 0000 0000
   END
     ok -e $f;                                                                     # Created file
     unlink $f;
-
+  
 
 =head2 CloseFile()
 
@@ -8362,25 +8549,25 @@ B<Example:>
     Mov rax, Rs($0);                                                              # File to read
     OpenRead;                                                                     # Open file
     PrintOutRegisterInHex rax;
-
+  
     CloseFile;                                                                    # Close file  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutRegisterInHex rax;
     KeepFree rax, rdi;
-
+  
     Mov rax, Rs(my $f = "zzzTemporaryFile.txt");                                  # File to write
     OpenWrite;                                                                    # Open file
-
+  
     CloseFile;                                                                    # Close file  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-
+  
     is_deeply Assemble, <<END;
      rax: 0000 0000 0000 0003
      rax: 0000 0000 0000 0000
   END
     ok -e $f;                                                                     # Created file
     unlink $f;
-
+  
 
 =head2 StatSize()
 
@@ -8391,16 +8578,16 @@ B<Example:>
 
 
     Mov rax, Rs($0);                                                              # File to stat
-
+  
     StatSize;                                                                     # Stat the file  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutRegisterInHex rax;
-
+  
     my $r = Assemble =~ s( ) ()gsr;
     if ($r =~ m(rax:([0-9a-f]{16}))is)                                            # Compare file size obtained with that from fileSize()
      {is_deeply $1, sprintf("%016X", fileSize($0));
      }
-
+  
 
 =head2 ReadFile(@variables)
 
@@ -8412,16 +8599,16 @@ Read a file whose name is addressed by rax into memory.  The address of the mapp
 B<Example:>
 
 
-
+  
     ReadFile(Vq(file, Rs($0)), (my $s = Vq(size)), my $a = Vq(address));          # Read file  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     $a->setReg(rax);                                                              # Address of file in memory
     $s->setReg(rdi);                                                              # Length  of file in memory
     PrintOutMemory;                                                               # Print contents of memory to stdout
-
-    my $r = Assemble(1 => (my $f = temporaryFile));                               # Assemble and execute
-    ok fileMd5Sum($f) eq fileMd5Sum($0);                                          # Output contains this file
-
+  
+    my $r = Assemble;                                                             # Assemble and execute
+    ok stringMd5Sum($r) eq fileMd5Sum($0);                                          # Output contains this file
+  
 
 =head1 Short Strings
 
@@ -8447,21 +8634,21 @@ B<Example:>
 
     my $s = Rb(3, 0x01, 0x02, 0x03);
     my $t = Rb(7, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a);
-
-
+  
+  
     LoadShortStringFromMemoryToZmm 0, $s;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-
+  
     LoadShortStringFromMemoryToZmm 1, $t;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     ConcatenateShortStrings(0, 1);
     PrintOutRegisterInHex xmm0;
     PrintOutRegisterInHex xmm1;
-
+  
     my $r = Assemble;
     ok $r =~ m(xmm0: 0000 0000 000A 0908   0706 0504 0302 010A);
     ok $r =~ m(xmm1: 0000 0000 0000 0000   0A09 0807 0605 0407);
-
+  
 
 =head2 GetLengthOfShortString($reg, $zmm)
 
@@ -8502,23 +8689,22 @@ B<Example:>
     Mov rax, "[rbp+24]";
     Cstrlen;                                                                      # Length of string to hash
     Mov rdi, r15;
-
+  
     Hash();                                                                       # Hash string  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-
+  
     PrintOutRegisterInHex r15;
-
+  
     my $e = Assemble keep=>'hash';                                                # Assemble to the specified file name
-
     ok qx($e "")  =~ m(r15: 0000 3F80 0000 3F80);                                 # Test well known hashes
     ok qx($e "a") =~ m(r15: 0000 3F80 C000 45B2);
-
-
+  
+  
     if (0 and $develop)                                                           # Hash various strings  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
      {my %r; my %f; my $count = 0;
       my $N = RegisterSize zmm0;
-
+  
       if (1)                                                                      # Fixed blocks
        {for my $l(qw(a ab abc abcd), 'a a', 'a  a')
          {for my $i(1..$N)
@@ -8535,7 +8721,7 @@ B<Example:>
            }
          }
        }
-
+  
       if (1)                                                                      # Variable blocks
        {for my $l(qw(a ab abc abcd), '', 'a a', 'a  a')
          {for my $i(1..$N)
@@ -8553,12 +8739,12 @@ B<Example:>
       for my $r(keys %r)
        {delete $r{$r} if $r{$r}->@* < 2;
        }
-
+  
       say STDERR dump(\%r);
       say STDERR "Keys hashed: ", $count;
       confess "Duplicates : ",  scalar keys(%r);
      }
-
+  
 
 =head1 Byte Strings
 
@@ -8574,12 +8760,12 @@ B<Example:>
 
     my $s = Rs("abcd");
     Mov rax, $s;
-
+  
     Cstrlen;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutRegisterInHex r15;
     ok Assemble =~ m(r15: 0000 0000 0000 0004);
-
+  
 
 =head2 CreateByteString(%options)
 
@@ -8591,7 +8777,7 @@ Create an relocatable string of bytes in an arena and returns its address in rax
 B<Example:>
 
 
-
+  
     my $a = CreateByteString;                                                     # Create a string  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     $a->q('aa');
@@ -8600,11 +8786,11 @@ B<Example:>
     is_deeply Assemble, <<END;                                                    # Assemble and execute
   aa
   END
-
-
+  
+  
     my $a = CreateByteString;                                                     # Create a string  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-
+  
     my $b = CreateByteString;                                                     # Create a string  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     $a->q('aa');
@@ -8617,11 +8803,11 @@ B<Example:>
   aa
   bb
   END
-
-
+  
+  
     my $a = CreateByteString;                                                     # Create a string  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-
+  
     my $b = CreateByteString;                                                     # Create a string  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     $a->q('aa');
@@ -8631,11 +8817,11 @@ B<Example:>
     is_deeply Assemble, <<END;                                                    # Assemble and execute
   aaAA
   END
-
-
+  
+  
     my $a = CreateByteString;                                                     # Create a string  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-
+  
     my $b = CreateByteString;                                                     # Create a string  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     $a->q('aa');
@@ -8650,12 +8836,12 @@ B<Example:>
     is_deeply Assemble, <<END;                                                    # Assemble and execute
   aaAAaabbBBbb
   END
-
-
+  
+  
     my $a = CreateByteString;                                                     # Create a string  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     $a->q('ab');
-
+  
     my $b = CreateByteString;                                                     # Create target byte string  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     $a->bs(r15);
@@ -8668,16 +8854,16 @@ B<Example:>
     $b->append(source=>$a->bs);
     $b->append(source=>$a->bs);
     $b->append(source=>$a->bs);
-
-
+  
+  
     $a->out;   PrintOutNL;                                                        # Print byte string
     $b->out;   PrintOutNL;                                                        # Print byte string
-    $a->length(my $sa = Vq(size)); $sa->dump;
-    $b->length(my $sb = Vq(size)); $sb->dump;
+    $a->length(my $sa = Vq(size)); $sa->outNL;
+    $b->length(my $sb = Vq(size)); $sb->outNL;
     $a->clear;
-    $a->length(my $sA = Vq(size)); $sA->dump;
-    $b->length(my $sB = Vq(size)); $sB->dump;
-
+    $a->length(my $sA = Vq(size)); $sA->outNL;
+    $b->length(my $sB = Vq(size)); $sB->outNL;
+  
     is_deeply Assemble, <<END;                                                    # Assemble and execute
   abababababababab
   ababababababababababababababababababababababababababababababababababababab
@@ -8686,7 +8872,7 @@ B<Example:>
   size: 0000 0000 0000 0000
   size: 0000 0000 0000 004A
   END
-
+  
 
 =head2 ByteString::length($byteString, @variables)
 
@@ -8712,9 +8898,9 @@ B<Example:>
     $s->makeWriteable;                                                            # Make byte string writable again
     $s->q(" World");                                                              # Try to write to byte string
     $s->out;
-
+  
     ok Assemble =~ m(Hello World);
-
+  
 
 =head2 ByteString::makeWriteable($byteString)
 
@@ -8732,9 +8918,9 @@ B<Example:>
     $s->makeWriteable;                                                            # Make byte string writable again
     $s->q(" World");                                                              # Try to write to byte string
     $s->out;
-
+  
     ok Assemble =~ m(Hello World);
-
+  
 
 =head2 ByteString::allocate($byteString, @variables)
 
@@ -8751,16 +8937,16 @@ B<Example:>
     $s->allocate(Vq(size, 0x20), my $o1 = Vq(offset));                            # Allocate space wanted
     $s->allocate(Vq(size, 0x30), my $o2 = Vq(offset));
     $s->allocate(Vq(size, 0x10), my $o3 = Vq(offset));
-    $o1->dump;
-    $o2->dump;
-    $o3->dump;
-
+    $o1->outNL;
+    $o2->outNL;
+    $o3->outNL;
+  
     is_deeply Assemble, <<END;
   offset: 0000 0000 0000 0018
   offset: 0000 0000 0000 0038
   offset: 0000 0000 0000 0068
   END
-
+  
 
 =head2 ByteString::m($byteString, @variables)
 
@@ -8784,11 +8970,10 @@ B<Example:>
     my $s = CreateByteString;                                                     # Create a string
     $s->read(Vq(file, Rs($0)));
     $s->out;
-
-    my $r = Assemble(1 => my $f = temporaryFile);
-    is_deeply fileMd5Sum($f), fileMd5Sum($0);                                     # Output contains this file
-    unlink $f;
-
+  
+    my $r = Assemble;
+    is_deeply stringMd5Sum($r), fileMd5Sum($0);                                   # Output contains this file
+  
 
 =head2 ByteString::ql($byteString, $const)
 
@@ -8811,10 +8996,10 @@ B<Example:>
     $s->write         (my $f = Vq('file', Rs("zzz.sh")));                         # Write code to a file
     executeFileViaBash($f);                                                       # Execute the file
     unlinkFile        ($f);                                                       # Delete the file
-
+  
     my $u = qx(whoami); chomp($u);
     ok Assemble(emulator=>0) =~ m($u);                                            # The Intel Software Development Emulator is way too slow on these operations.
-
+  
 
 =head2 ByteString::char($byteString, $char)
 
@@ -8841,7 +9026,7 @@ B<Example:>
     is_deeply Assemble, <<END;                                                    # Assemble and execute
   aa
   END
-
+  
     my $a = CreateByteString;                                                     # Create a string
     my $b = CreateByteString;                                                     # Create a string
     $a->q('aa');
@@ -8854,7 +9039,7 @@ B<Example:>
   aa
   bb
   END
-
+  
     my $a = CreateByteString;                                                     # Create a string
     my $b = CreateByteString;                                                     # Create a string
     $a->q('aa');
@@ -8864,7 +9049,7 @@ B<Example:>
     is_deeply Assemble, <<END;                                                    # Assemble and execute
   aaAA
   END
-
+  
     my $a = CreateByteString;                                                     # Create a string
     my $b = CreateByteString;                                                     # Create a string
     $a->q('aa');
@@ -8879,7 +9064,7 @@ B<Example:>
     is_deeply Assemble, <<END;                                                    # Assemble and execute
   aaAAaabbBBbb
   END
-
+  
     my $a = CreateByteString;                                                     # Create a string
     $a->q('ab');
     my $b = CreateByteString;                                                     # Create target byte string
@@ -8893,16 +9078,16 @@ B<Example:>
     $b->append(source=>$a->bs);
     $b->append(source=>$a->bs);
     $b->append(source=>$a->bs);
-
-
+  
+  
     $a->out;   PrintOutNL;                                                        # Print byte string
     $b->out;   PrintOutNL;                                                        # Print byte string
-    $a->length(my $sa = Vq(size)); $sa->dump;
-    $b->length(my $sb = Vq(size)); $sb->dump;
+    $a->length(my $sa = Vq(size)); $sa->outNL;
+    $b->length(my $sb = Vq(size)); $sb->outNL;
     $a->clear;
-    $a->length(my $sA = Vq(size)); $sA->dump;
-    $b->length(my $sB = Vq(size)); $sB->dump;
-
+    $a->length(my $sA = Vq(size)); $sA->outNL;
+    $b->length(my $sB = Vq(size)); $sB->outNL;
+  
     is_deeply Assemble, <<END;                                                    # Assemble and execute
   abababababababab
   ababababababababababababababababababababababababababababababababababababab
@@ -8911,19 +9096,19 @@ B<Example:>
   size: 0000 0000 0000 0000
   size: 0000 0000 0000 004A
   END
-
+  
     my $s = CreateByteString;
     $s->q("A");
     $s->nl;
     $s->q("B");
     $s->out;
     PrintOutNL;
-
+  
     is_deeply Assemble, <<END;
   A
   B
   END
-
+  
 
 =head2 ByteString::z($byteString)
 
@@ -8938,11 +9123,10 @@ B<Example:>
     my $s = CreateByteString;                                                     # Create a string
     $s->read(Vq(file, Rs($0)));
     $s->out;
-
-    my $r = Assemble(1 => my $f = temporaryFile);
-    is_deeply fileMd5Sum($f), fileMd5Sum($0);                                     # Output contains this file
-    unlink $f;
-
+  
+    my $r = Assemble;
+    is_deeply stringMd5Sum($r), fileMd5Sum($0);                                   # Output contains this file
+  
 
 =head2 ByteString::rdiInHex()
 
@@ -8956,12 +9140,12 @@ B<Example:>
     Mov rdi, 0x88776655;
     Shl rdi, 32;
     Or  rdi, 0x44332211;
-
+  
     $s->rdiInHex;                                                                 # Append a constant to the byte string
     $s->out;
-
+  
     ok Assemble =~ m(8877665544332211);
-
+  
 
 =head2 ByteString::append($byteString, @variables)
 
@@ -8988,7 +9172,7 @@ B<Example:>
     is_deeply Assemble, <<END;                                                    # Assemble and execute
   aa
   END
-
+  
     my $a = CreateByteString;                                                     # Create a string
     my $b = CreateByteString;                                                     # Create a string
     $a->q('aa');
@@ -9001,7 +9185,7 @@ B<Example:>
   aa
   bb
   END
-
+  
     my $a = CreateByteString;                                                     # Create a string
     my $b = CreateByteString;                                                     # Create a string
     $a->q('aa');
@@ -9011,7 +9195,7 @@ B<Example:>
     is_deeply Assemble, <<END;                                                    # Assemble and execute
   aaAA
   END
-
+  
     my $a = CreateByteString;                                                     # Create a string
     my $b = CreateByteString;                                                     # Create a string
     $a->q('aa');
@@ -9026,7 +9210,7 @@ B<Example:>
     is_deeply Assemble, <<END;                                                    # Assemble and execute
   aaAAaabbBBbb
   END
-
+  
     my $a = CreateByteString;                                                     # Create a string
     $a->q('ab');
     my $b = CreateByteString;                                                     # Create target byte string
@@ -9040,16 +9224,16 @@ B<Example:>
     $b->append(source=>$a->bs);
     $b->append(source=>$a->bs);
     $b->append(source=>$a->bs);
-
-
+  
+  
     $a->out;   PrintOutNL;                                                        # Print byte string
     $b->out;   PrintOutNL;                                                        # Print byte string
-    $a->length(my $sa = Vq(size)); $sa->dump;
-    $b->length(my $sb = Vq(size)); $sb->dump;
+    $a->length(my $sa = Vq(size)); $sa->outNL;
+    $b->length(my $sb = Vq(size)); $sb->outNL;
     $a->clear;
-    $a->length(my $sA = Vq(size)); $sA->dump;
-    $b->length(my $sB = Vq(size)); $sB->dump;
-
+    $a->length(my $sA = Vq(size)); $sA->outNL;
+    $b->length(my $sB = Vq(size)); $sB->outNL;
+  
     is_deeply Assemble, <<END;                                                    # Assemble and execute
   abababababababab
   ababababababababababababababababababababababababababababababababababababab
@@ -9058,7 +9242,7 @@ B<Example:>
   size: 0000 0000 0000 0000
   size: 0000 0000 0000 004A
   END
-
+  
 
 =head2 ByteString::write($byteString, @variables)
 
@@ -9081,10 +9265,10 @@ B<Example:>
     $s->write         (my $f = Vq('file', Rs("zzz.sh")));                         # Write code to a file
     executeFileViaBash($f);                                                       # Execute the file
     unlinkFile        ($f);                                                       # Delete the file
-
+  
     my $u = qx(whoami); chomp($u);
     ok Assemble(emulator=>0) =~ m($u);                                            # The Intel Software Development Emulator is way too slow on these operations.
-
+  
 
 =head2 ByteString::read($byteString, @variables)
 
@@ -9100,11 +9284,10 @@ B<Example:>
     my $s = CreateByteString;                                                     # Create a string
     $s->read(Vq(file, Rs($0)));
     $s->out;
-
-    my $r = Assemble(1 => my $f = temporaryFile);
-    is_deeply fileMd5Sum($f), fileMd5Sum($0);                                     # Output contains this file
-    unlink $f;
-
+  
+    my $r = Assemble;
+    is_deeply stringMd5Sum($r), fileMd5Sum($0);                                   # Output contains this file
+  
 
 =head2 ByteString::out($byteString)
 
@@ -9123,7 +9306,7 @@ B<Example:>
     is_deeply Assemble, <<END;                                                    # Assemble and execute
   aa
   END
-
+  
     my $a = CreateByteString;                                                     # Create a string
     my $b = CreateByteString;                                                     # Create a string
     $a->q('aa');
@@ -9136,7 +9319,7 @@ B<Example:>
   aa
   bb
   END
-
+  
     my $a = CreateByteString;                                                     # Create a string
     my $b = CreateByteString;                                                     # Create a string
     $a->q('aa');
@@ -9146,7 +9329,7 @@ B<Example:>
     is_deeply Assemble, <<END;                                                    # Assemble and execute
   aaAA
   END
-
+  
     my $a = CreateByteString;                                                     # Create a string
     my $b = CreateByteString;                                                     # Create a string
     $a->q('aa');
@@ -9161,7 +9344,7 @@ B<Example:>
     is_deeply Assemble, <<END;                                                    # Assemble and execute
   aaAAaabbBBbb
   END
-
+  
     my $a = CreateByteString;                                                     # Create a string
     $a->q('ab');
     my $b = CreateByteString;                                                     # Create target byte string
@@ -9175,16 +9358,16 @@ B<Example:>
     $b->append(source=>$a->bs);
     $b->append(source=>$a->bs);
     $b->append(source=>$a->bs);
-
-
+  
+  
     $a->out;   PrintOutNL;                                                        # Print byte string
     $b->out;   PrintOutNL;                                                        # Print byte string
-    $a->length(my $sa = Vq(size)); $sa->dump;
-    $b->length(my $sb = Vq(size)); $sb->dump;
+    $a->length(my $sa = Vq(size)); $sa->outNL;
+    $b->length(my $sb = Vq(size)); $sb->outNL;
     $a->clear;
-    $a->length(my $sA = Vq(size)); $sA->dump;
-    $b->length(my $sB = Vq(size)); $sB->dump;
-
+    $a->length(my $sA = Vq(size)); $sA->outNL;
+    $b->length(my $sB = Vq(size)); $sB->outNL;
+  
     is_deeply Assemble, <<END;                                                    # Assemble and execute
   abababababababab
   ababababababababababababababababababababababababababababababababababababab
@@ -9193,7 +9376,7 @@ B<Example:>
   size: 0000 0000 0000 0000
   size: 0000 0000 0000 004A
   END
-
+  
     my $s = CreateByteString;                                                     # Create a string
     $s->ql(<<END);                                                                # Write code to execute
   #!/usr/bin/bash
@@ -9204,10 +9387,10 @@ B<Example:>
     $s->write         (my $f = Vq('file', Rs("zzz.sh")));                         # Write code to a file
     executeFileViaBash($f);                                                       # Execute the file
     unlinkFile        ($f);                                                       # Delete the file
-
+  
     my $u = qx(whoami); chomp($u);
     ok Assemble(emulator=>0) =~ m($u);                                            # The Intel Software Development Emulator is way too slow on these operations.
-
+  
 
 =head2 executeFileViaBash(@variables)
 
@@ -9236,35 +9419,35 @@ B<Example:>
     my $t = GenTree(2,2);                                                         # Tree description
     $t->node->();                                                                 # Root
     Movdqa xmm1, xmm0;                                                            # Root is in xmm1
-
+  
     if (1)                                                                        # New left node
      {$t->node->();                                                               # Node in xmm0
       Movdqa xmm2, xmm0;                                                          # Left is in xmm2
-
+  
       cxr {$t->insertLeft->()} 1,2;                                               # Insert left under root
       cxr {$t->dump->("Left")} 2;                                                 # Left node after insertion
      }
-
+  
     if (1)                                                                        # New right node in xmm0
      {$t->node->();
       Movdqa xmm3, xmm0;                                                          # Right is in xmm3
-
+  
       cxr {$t->insertRight->()} 1,3;                                              # Insert left under root
       cxr {$t->dump->("Right")} 3;                                                # Right node after insertion
      }
-
+  
     cxr
      {$t->dump->("Root");                                                         # Root node after insertions
       $t->isRoot->();
       IfNz {PrintOutStringNL "root"} sub {PrintOutStringNL "NOT root"};
      } 1;
-
+  
     PushRR xmm0;                                                                  # Dump underlying  byte string
     PopRR rdi, rax;
     $t->byteString->dump;
-
+  
     Exit;                                                                         # Return to operating system
-
+  
     is_deeply Assemble, <<END;                                                    # Test tree so produced
   Left
   ArenaTreeNode at: 0000 0000 0000 00B0
@@ -9286,7 +9469,7 @@ B<Example:>
     Size: 0000 0000 0000 1000
     Used: 0000 0000 0000 01E0
   END
-
+  
 
 =head1 Block Strings
 
@@ -9376,6 +9559,75 @@ Dump a block string  to sysout
      Parameter     Description
   1  $blockString  Block string descriptor
 
+=head2 BlockString::len($blockString, $size)
+
+Find the length of a block string
+
+     Parameter     Description
+  1  $blockString  Block string descriptor
+  2  $size         Size variable
+
+=head2 BlockString::concatenate($target, $source)
+
+Concatenate two block strings by appending a copy of the source to the target block string.
+
+     Parameter  Description
+  1  $target    Target block string
+  2  $source    Source block string
+
+=head2 BlockString::insertChar($blockString, @variables)
+
+Insert a character into a block string
+
+     Parameter     Description
+  1  $blockString  Block string
+  2  @variables    Variables
+
+=head2 BlockString::deleteChar($blockString, @variables)
+
+Delete a character in a block string
+
+     Parameter     Description
+  1  $blockString  Block string
+  2  @variables    Variables
+
+B<Example:>
+
+
+    my $c = Rb(0..255);
+    my $S = CreateByteString;   my $s = $S->CreateBlockString;
+  
+    $s->append(source=>Vq(source, $c),  Vq(size, 165)); $s->dump;
+    $s->deleteChar(Vq(position, 0x44));                 $s->dump;
+  
+    ok Assemble(debug => 0, eq => <<END);
+  Block String Dump
+  Offset: 0000 0000 0000 0018   Length: 0000 0000 0000 0037
+   zmm31: 0000 0058 0000 0098   3635 3433 3231 302F   2E2D 2C2B 2A29 2827   2625 2423 2221 201F   1E1D 1C1B 1A19 1817   1615 1413 1211 100F   0E0D 0C0B 0A09 0807   0605 0403 0201 0037
+  Offset: 0000 0000 0000 0058   Length: 0000 0000 0000 0037
+   zmm31: 0000 0098 0000 0018   6D6C 6B6A 6968 6766   6564 6362 6160 5F5E   5D5C 5B5A 5958 5756   5554 5352 5150 4F4E   4D4C 4B4A 4948 4746   4544 4342 4140 3F3E   3D3C 3B3A 3938 3737
+  Offset: 0000 0000 0000 0098   Length: 0000 0000 0000 0037
+   zmm31: 0000 0018 0000 0058   A4A3 A2A1 A09F 9E9D   9C9B 9A99 9897 9695   9493 9291 908F 8E8D   8C8B 8A89 8887 8685   8483 8281 807F 7E7D   7C7B 7A79 7877 7675   7473 7271 706F 6E37
+  
+  Block String Dump
+  Offset: 0000 0000 0000 0018   Length: 0000 0000 0000 0037
+   zmm31: 0000 0058 0000 0098   3635 3433 3231 302F   2E2D 2C2B 2A29 2827   2625 2423 2221 201F   1E1D 1C1B 1A19 1817   1615 1413 1211 100F   0E0D 0C0B 0A09 0807   0605 0403 0201 0037
+  Offset: 0000 0000 0000 0058   Length: 0000 0000 0000 0036
+   zmm31: 0000 0098 0000 0018   186D 6C6B 6A69 6867   6665 6463 6261 605F   5E5D 5C5B 5A59 5857   5655 5453 5251 504F   4E4D 4C4B 4A49 4847   4645 4342 4140 3F3E   3D3C 3B3A 3938 3736
+  Offset: 0000 0000 0000 0098   Length: 0000 0000 0000 0037
+   zmm31: 0000 0018 0000 0058   A4A3 A2A1 A09F 9E9D   9C9B 9A99 9897 9695   9493 9291 908F 8E8D   8C8B 8A89 8887 8685   8483 8281 807F 7E7D   7C7B 7A79 7877 7675   7473 7271 706F 6E37
+  
+  END
+  
+
+=head2 BlockString::getCharacter($blockString, @variables)
+
+Get a character from a block string
+
+     Parameter     Description
+  1  $blockString  Block string
+  2  @variables    Variables
+
 =head2 BlockString::append($blockString, @variables)
 
 Append the specified content in memory to the specified block string
@@ -9383,6 +9635,13 @@ Append the specified content in memory to the specified block string
      Parameter     Description
   1  $blockString  Block string descriptor
   2  @variables    Variables
+
+=head2 BlockString::clear($blockString)
+
+Clear the block by freeing all but the first block
+
+     Parameter     Description
+  1  $blockString  Block string descriptor
 
 =head1 Tree
 
@@ -9399,40 +9658,40 @@ Generate a set of routines to manage a tree held in a byte string with key and d
 B<Example:>
 
 
-
+  
     my $t = GenTree(2,2);                                                         # Tree description  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     $t->node->();                                                                 # Root
     Movdqa xmm1, xmm0;                                                            # Root is in xmm1
-
+  
     if (1)                                                                        # New left node
      {$t->node->();                                                               # Node in xmm0
       Movdqa xmm2, xmm0;                                                          # Left is in xmm2
-
+  
       cxr {$t->insertLeft->()} 1,2;                                               # Insert left under root
       cxr {$t->dump->("Left")} 2;                                                 # Left node after insertion
      }
-
+  
     if (1)                                                                        # New right node in xmm0
      {$t->node->();
       Movdqa xmm3, xmm0;                                                          # Right is in xmm3
-
+  
       cxr {$t->insertRight->()} 1,3;                                              # Insert left under root
       cxr {$t->dump->("Right")} 3;                                                # Right node after insertion
      }
-
+  
     cxr
      {$t->dump->("Root");                                                         # Root node after insertions
       $t->isRoot->();
       IfNz {PrintOutStringNL "root"} sub {PrintOutStringNL "NOT root"};
      } 1;
-
+  
     PushRR xmm0;                                                                  # Dump underlying  byte string
     PopRR rdi, rax;
     $t->byteString->dump;
-
+  
     Exit;                                                                         # Return to operating system
-
+  
     is_deeply Assemble, <<END;                                                    # Test tree so produced
   Left
   ArenaTreeNode at: 0000 0000 0000 00B0
@@ -9454,7 +9713,7 @@ B<Example:>
     Size: 0000 0000 0000 1000
     Used: 0000 0000 0000 01E0
   END
-
+  
 
 =head1 Assemble
 
@@ -9489,14 +9748,13 @@ B<Example:>
 
     PrintOutStringNL "Hello World";
     PrintErrStringNL "Hello World";
+  
+  
+    is_deeply Assemble,  <<END;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-
-    is_deeply Assemble, <<END;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
-
-  Hello World
   Hello World
   END
-
+  
 
 
 =head2 BlockString Definition
@@ -9604,7 +9862,7 @@ default value supplied for this attribute by this package.
 =head2 Replaceable Attribute List
 
 
-Pi32 Pi64
+Pi32 Pi64 
 
 
 =head2 Pi32
@@ -9704,477 +9962,521 @@ Total size in bytes of all files assembled during testing
 
 7 L<BlockString::append|/BlockString::append> - Append the specified content in memory to the specified block string
 
-8 L<BlockString::dump|/BlockString::dump> - Dump a block string  to sysout
+8 L<BlockString::clear|/BlockString::clear> - Clear the block by freeing all but the first block
 
-9 L<BlockString::getBlock|/BlockString::getBlock> - Get the block with the specified offset in the specified block string and return it in the numbered zmm
+9 L<BlockString::concatenate|/BlockString::concatenate> - Concatenate two block strings by appending a copy of the source to the target block string.
 
-10 L<BlockString::getBlockLengthInZmm|/BlockString::getBlockLengthInZmm> - Get the block length of the numbered zmm and return it in a variable
+10 L<BlockString::deleteChar|/BlockString::deleteChar> - Delete a character in a block string
 
-11 L<BlockString::getNextAndPrevBlockOffsetFromZmm|/BlockString::getNextAndPrevBlockOffsetFromZmm> - Get the offsets of the next and previous blocks as variables from the specified zmm
+11 L<BlockString::dump|/BlockString::dump> - Dump a block string  to sysout
 
-12 L<BlockString::putBlock|/BlockString::putBlock> - Write the numbered zmm to the block at the specified offset in the specified byte string
+12 L<BlockString::getBlock|/BlockString::getBlock> - Get the block with the specified offset in the specified block string and return it in the numbered zmm
 
-13 L<BlockString::putNextandPrevBlockOffsetIntoZmm|/BlockString::putNextandPrevBlockOffsetIntoZmm> - Save next and prev offsets into a zmm representing a block
+13 L<BlockString::getBlockLengthInZmm|/BlockString::getBlockLengthInZmm> - Get the block length of the numbered zmm and return it in a variable
 
-14 L<BlockString::setBlockLengthInZmm|/BlockString::setBlockLengthInZmm> - Set the block length of the numbered zmm to the specified length
+14 L<BlockString::getCharacter|/BlockString::getCharacter> - Get a character from a block string
 
-15 L<ByteString::allocate|/ByteString::allocate> - Allocate the amount of space indicated in rdi in the byte string addressed by rax and return the offset of the allocation in the arena in rdi
+15 L<BlockString::getNextAndPrevBlockOffsetFromZmm|/BlockString::getNextAndPrevBlockOffsetFromZmm> - Get the offsets of the next and previous blocks as variables from the specified zmm
 
-16 L<ByteString::append|/ByteString::append> - Append one byte string to another
+16 L<BlockString::insertChar|/BlockString::insertChar> - Insert a character into a block string
 
-17 L<ByteString::char|/ByteString::char> - Append a character expressed as a decimal number to the byte string addressed by rax
+17 L<BlockString::len|/BlockString::len> - Find the length of a block string
 
-18 L<ByteString::clear|/ByteString::clear> - Clear the byte string addressed by rax
+18 L<BlockString::putBlock|/BlockString::putBlock> - Write the numbered zmm to the block at the specified offset in the specified byte string
 
-19 L<ByteString::CreateBlockString|/ByteString::CreateBlockString> - Create a string from a doubly link linked list of 64 byte blocks linked via 4 byte offsets in the byte string addressed by rax and return its descriptor
+19 L<BlockString::putNextandPrevBlockOffsetIntoZmm|/BlockString::putNextandPrevBlockOffsetIntoZmm> - Save next and prev offsets into a zmm representing a block
 
-20 L<ByteString::dump|/ByteString::dump> - Dump details of a byte string
+20 L<BlockString::setBlockLengthInZmm|/BlockString::setBlockLengthInZmm> - Set the block length of the numbered zmm to the specified length
 
-21 L<ByteString::length|/ByteString::length> - Get the length of a byte string
+21 L<ByteString::allocate|/ByteString::allocate> - Allocate the amount of space indicated in rdi in the byte string addressed by rax and return the offset of the allocation in the arena in rdi
 
-22 L<ByteString::m|/ByteString::m> - Append the content with length rdi addressed by rsi to the byte string addressed by rax
+22 L<ByteString::append|/ByteString::append> - Append one byte string to another
 
-23 L<ByteString::makeReadOnly|/ByteString::makeReadOnly> - Make a byte string read only
+23 L<ByteString::char|/ByteString::char> - Append a character expressed as a decimal number to the byte string addressed by rax
 
-24 L<ByteString::makeWriteable|/ByteString::makeWriteable> - Make a byte string writable
+24 L<ByteString::clear|/ByteString::clear> - Clear the byte string addressed by rax
 
-25 L<ByteString::nl|/ByteString::nl> - Append a new line to the byte string addressed by rax
+25 L<ByteString::CreateBlockString|/ByteString::CreateBlockString> - Create a string from a doubly link linked list of 64 byte blocks linked via 4 byte offsets in the byte string addressed by rax and return its descriptor
 
-26 L<ByteString::out|/ByteString::out> - Print the specified byte string addressed by rax on sysout
+26 L<ByteString::dump|/ByteString::dump> - Dump details of a byte string
 
-27 L<ByteString::q|/ByteString::q> - Append a constant string to the byte string
+27 L<ByteString::length|/ByteString::length> - Get the length of a byte string
 
-28 L<ByteString::ql|/ByteString::ql> - Append a quoted string containing new line characters to the byte string addressed by rax
+28 L<ByteString::m|/ByteString::m> - Append the content with length rdi addressed by rsi to the byte string addressed by rax
 
-29 L<ByteString::rdiInHex|/ByteString::rdiInHex> - Add the content of register rdi in hexadecimal in big endian notation to a byte string
+29 L<ByteString::makeReadOnly|/ByteString::makeReadOnly> - Make a byte string read only
 
-30 L<ByteString::read|/ByteString::read> - Read the named file (terminated with a zero byte) and place it into the named byte string.
+30 L<ByteString::makeWriteable|/ByteString::makeWriteable> - Make a byte string writable
 
-31 L<ByteString::updateSpace|/ByteString::updateSpace> - Make sure that the byte string addressed by rax has enough space to accommodate content of length rdi
+31 L<ByteString::nl|/ByteString::nl> - Append a new line to the byte string addressed by rax
 
-32 L<ByteString::write|/ByteString::write> - Write the content in a byte string addressed by rax to a temporary file and replace the byte string content with the name of the  temporary file
+32 L<ByteString::out|/ByteString::out> - Print the specified byte string addressed by rax on sysout
 
-33 L<ByteString::z|/ByteString::z> - Append a trailing zero to the byte string addressed by rax
+33 L<ByteString::q|/ByteString::q> - Append a constant string to the byte string
 
-34 L<ClearMemory|/ClearMemory> - Clear memory - the address of the memory is in rax, the length in rdi
+34 L<ByteString::ql|/ByteString::ql> - Append a quoted string containing new line characters to the byte string addressed by rax
 
-35 L<ClearRegisters|/ClearRegisters> - Clear registers by setting them to zero
+35 L<ByteString::rdiInHex|/ByteString::rdiInHex> - Add the content of register rdi in hexadecimal in big endian notation to a byte string
 
-36 L<ClearZF|/ClearZF> - Clear the zero flag
+36 L<ByteString::read|/ByteString::read> - Read the named file (terminated with a zero byte) and place it into the named byte string.
 
-37 L<CloseFile|/CloseFile> - Close the file whose descriptor is in rax
+37 L<ByteString::updateSpace|/ByteString::updateSpace> - Make sure that the byte string addressed by rax has enough space to accommodate content of length rdi
 
-38 L<Comment|/Comment> - Insert a comment into the assembly code
+38 L<ByteString::write|/ByteString::write> - Write the content in a byte string addressed by rax to a temporary file and replace the byte string content with the name of the  temporary file
 
-39 L<ConcatenateShortStrings|/ConcatenateShortStrings> - Concatenate the numbered source zmm containing a short string with the short string in the numbered target zmm.
+39 L<ByteString::z|/ByteString::z> - Append a trailing zero to the byte string addressed by rax
 
-40 L<Copy|/Copy> - Copy the source to the target register
+40 L<ClearMemory|/ClearMemory> - Clear memory - the address of the memory is in rax, the length in rdi
 
-41 L<CopyMemory|/CopyMemory> - Copy memory, the target is addressed by rax, the length is in rdi, the source is addressed by rsi
+41 L<ClearRegisters|/ClearRegisters> - Clear registers by setting them to zero
 
-42 L<cr|/cr> - Call a subroutine with a reordering of the registers.
+42 L<ClearZF|/ClearZF> - Clear the zero flag
 
-43 L<CreateByteString|/CreateByteString> - Create an relocatable string of bytes in an arena and returns its address in rax.
+43 L<CloseFile|/CloseFile> - Close the file whose descriptor is in rax
 
-44 L<Cstrlen|/Cstrlen> - Length of the C style string addressed by rax returning the length in r15
+44 L<Comment|/Comment> - Insert a comment into the assembly code
 
-45 L<cxr|/cxr> - Call a subroutine with a reordering of the xmm registers.
+45 L<ConcatenateShortStrings|/ConcatenateShortStrings> - Concatenate the numbered source zmm containing a short string with the short string in the numbered target zmm.
 
-46 L<Db|/Db> - Layout bytes in the data segment and return their label
+46 L<Copy|/Copy> - Copy the source to the target register
 
-47 L<Dbwdq|/Dbwdq> - Layout data
+47 L<CopyMemory|/CopyMemory> - Copy memory, the target is addressed by rax, the length is in rdi, the source is addressed by rsi
 
-48 L<DComment|/DComment> - Insert a comment into the data segment
+48 L<cr|/cr> - Call a subroutine with a reordering of the registers.
 
-49 L<Dd|/Dd> - Layout double words in the data segment and return their label
+49 L<CreateByteString|/CreateByteString> - Create an relocatable string of bytes in an arena and returns its address in rax.
 
-50 L<Decrement|/Decrement> - Decrement the specified register
+50 L<Cstrlen|/Cstrlen> - Length of the C style string addressed by rax returning the length in r15
 
-51 L<Dq|/Dq> - Layout quad words in the data segment and return their label
+51 L<cxr|/cxr> - Call a subroutine with a reordering of the xmm registers.
 
-52 L<Ds|/Ds> - Layout bytes in memory and return their label
+52 L<Db|/Db> - Layout bytes in the data segment and return their label
 
-53 L<Dw|/Dw> - Layout words in the data segment and return their label
+53 L<Dbwdq|/Dbwdq> - Layout data
 
-54 L<executeFileViaBash|/executeFileViaBash> - Execute the file named in the byte string addressed by rax with bash
+54 L<DComment|/DComment> - Insert a comment into the data segment
 
-55 L<Exit|/Exit> - Exit with the specified return code or zero if no return code supplied.
+55 L<Dd|/Dd> - Layout double words in the data segment and return their label
 
-56 L<Float32|/Float32> - 32 bit float
+56 L<Decrement|/Decrement> - Decrement the specified register
 
-57 L<Float64|/Float64> - 64 bit float
+57 L<Dq|/Dq> - Layout quad words in the data segment and return their label
 
-58 L<For|/For> - For - iterate the body as long as register is less than limit incrementing by increment each time
+58 L<Ds|/Ds> - Layout bytes in memory and return their label
 
-59 L<ForEver|/ForEver> - Iterate for ever
+59 L<Dw|/Dw> - Layout words in the data segment and return their label
 
-60 L<ForIn|/ForIn> - For - iterate the body as long as register plus increment is less than than limit incrementing by increment each time
+60 L<executeFileViaBash|/executeFileViaBash> - Execute the file named in the byte string addressed by rax with bash
 
-61 L<Fork|/Fork> - Fork
+61 L<Exit|/Exit> - Exit with the specified return code or zero if no return code supplied.
 
-62 L<FreeMemory|/FreeMemory> - Free memory
+62 L<Float32|/Float32> - 32 bit float
 
-63 L<GenTree|/GenTree> - Generate a set of routines to manage a tree held in a byte string with key and data fields of specified widths.
+63 L<Float64|/Float64> - 64 bit float
 
-64 L<getBFromXmmAsVariable|/getBFromXmmAsVariable> - Get the byte from the numbered xmm register and return it in a variable
+64 L<For|/For> - For - iterate the body as long as register is less than limit incrementing by increment each time
 
-65 L<getBFromZmmAsVariable|/getBFromZmmAsVariable> - Get the byte from the numbered zmm register and return it in a variable
+65 L<ForEver|/ForEver> - Iterate for ever
 
-66 L<getBwdqFromMmAsVariable|/getBwdqFromMmAsVariable> - Get the numbered byte|word|double word|quad word from the numbered zmm register and return it in a variable
+66 L<ForIn|/ForIn> - For - iterate the body as long as register plus increment is less than than limit incrementing by increment each time
 
-67 L<getDFromXmmAsVariable|/getDFromXmmAsVariable> - Get the double word from the numbered xmm register and return it in a variable
+67 L<Fork|/Fork> - Fork
 
-68 L<getDFromZmmAsVariable|/getDFromZmmAsVariable> - Get the double word from the numbered zmm register and return it in a variable
+68 L<FreeMemory|/FreeMemory> - Free memory
 
-69 L<GetLengthOfShortString|/GetLengthOfShortString> - Get the length of the short string held in the numbered zmm register into the specified register
+69 L<GenTree|/GenTree> - Generate a set of routines to manage a tree held in a byte string with key and data fields of specified widths.
 
-70 L<GetPid|/GetPid> - Get process identifier
+70 L<getBFromXmmAsVariable|/getBFromXmmAsVariable> - Get the byte from the numbered xmm register and return it in a variable
 
-71 L<GetPidInHex|/GetPidInHex> - Get process identifier in hex as 8 zero terminated bytes in rax
+71 L<getBFromZmmAsVariable|/getBFromZmmAsVariable> - Get the byte from the numbered zmm register and return it in a variable
 
-72 L<GetPPid|/GetPPid> - Get parent process identifier
+72 L<getBwdqFromMmAsVariable|/getBwdqFromMmAsVariable> - Get the numbered byte|word|double word|quad word from the numbered zmm register and return it in a variable
 
-73 L<getQFromXmmAsVariable|/getQFromXmmAsVariable> - Get the quad word from the numbered xmm register and return it in a variable
+73 L<getDFromXmmAsVariable|/getDFromXmmAsVariable> - Get the double word from the numbered xmm register and return it in a variable
 
-74 L<getQFromZmmAsVariable|/getQFromZmmAsVariable> - Get the quad word from the numbered zmm register and return it in a variable
+74 L<getDFromZmmAsVariable|/getDFromZmmAsVariable> - Get the double word from the numbered zmm register and return it in a variable
 
-75 L<GetUid|/GetUid> - Get userid of current process
+75 L<GetLengthOfShortString|/GetLengthOfShortString> - Get the length of the short string held in the numbered zmm register into the specified register
 
-76 L<getWFromXmmAsVariable|/getWFromXmmAsVariable> - Get the word from the numbered xmm register and return it in a variable
+76 L<GetPid|/GetPid> - Get process identifier
 
-77 L<getWFromZmmAsVariable|/getWFromZmmAsVariable> - Get the word from the numbered zmm register and return it in a variable
+77 L<GetPidInHex|/GetPidInHex> - Get process identifier in hex as 8 zero terminated bytes in rax
 
-78 L<Hash|/Hash> - Hash a string addressed by rax with length held in rdi and return the hash code in r15
+78 L<GetPPid|/GetPPid> - Get parent process identifier
 
-79 L<hexTranslateTable|/hexTranslateTable> - Create/address a hex translate table and return its label
+79 L<getQFromXmmAsVariable|/getQFromXmmAsVariable> - Get the quad word from the numbered xmm register and return it in a variable
 
-80 L<If|/If> - If
+80 L<getQFromZmmAsVariable|/getQFromZmmAsVariable> - Get the quad word from the numbered zmm register and return it in a variable
 
-81 L<IfEq|/IfEq> - If equal execute the then body else the else body
+81 L<GetUid|/GetUid> - Get userid of current process
 
-82 L<IfGe|/IfGe> - If greater than or equal execute the then body else the else body
+82 L<getWFromXmmAsVariable|/getWFromXmmAsVariable> - Get the word from the numbered xmm register and return it in a variable
 
-83 L<IfGt|/IfGt> - If greater than execute the then body else the else body
+83 L<getWFromZmmAsVariable|/getWFromZmmAsVariable> - Get the word from the numbered zmm register and return it in a variable
 
-84 L<IfLe|/IfLe> - If less than or equal execute the then body else the else body
+84 L<Hash|/Hash> - Hash a string addressed by rax with length held in rdi and return the hash code in r15
 
-85 L<IfLt|/IfLt> - If less than execute the then body else the else body
+85 L<hexTranslateTable|/hexTranslateTable> - Create/address a hex translate table and return its label
 
-86 L<IfNe|/IfNe> - If not equal execute the then body else the else body
+86 L<If|/If> - If
 
-87 L<IfNz|/IfNz> - If not zero execute the then body else the else body
+87 L<IfEq|/IfEq> - If equal execute the then body else the else body
 
-88 L<Increment|/Increment> - Increment the specified register
+88 L<IfGe|/IfGe> - If greater than or equal execute the then body else the else body
 
-89 L<InsertIntoXyz|/InsertIntoXyz> - Shift and insert the specified word, double, quad from rax or the contents of xmm0 into the specified xyz register at the specified position shifting data above it to the left towards higher order bytes.
+89 L<IfGt|/IfGt> - If greater than execute the then body else the else body
 
-90 L<Keep|/Keep> - Mark free registers so that they are not updated until we Free them or complain if the register is already in use.
+90 L<IfLe|/IfLe> - If less than or equal execute the then body else the else body
 
-91 L<KeepFree|/KeepFree> - Free registers so that they can be reused
+91 L<IfLt|/IfLt> - If less than execute the then body else the else body
 
-92 L<KeepPop|/KeepPop> - Reset the status of the specified registers to the status quo ante the last push
+92 L<IfNe|/IfNe> - If not equal execute the then body else the else body
 
-93 L<KeepPush|/KeepPush> - Push the current status of the specified registers and then mark them as free
+93 L<IfNz|/IfNz> - If not zero execute the then body else the else body
 
-94 L<KeepReturn|/KeepReturn> - Pop the specified register and mark it as in use to effect a subroutine return with this register.
+94 L<Increment|/Increment> - Increment the specified register
 
-95 L<KeepSet|/KeepSet> - Confirm that the specified registers are in use
+95 L<InsertIntoXyz|/InsertIntoXyz> - Shift and insert the specified word, double, quad from rax or the contents of xmm0 into the specified xyz register at the specified position shifting data above it to the left towards higher order bytes.
 
-96 L<Label|/Label> - Create a unique label
+96 L<Keep|/Keep> - Mark free registers so that they are not updated until we Free them or complain if the register is already in use.
 
-97 L<LoadShortStringFromMemoryToZmm|/LoadShortStringFromMemoryToZmm> - Load the short string addressed by rax into the zmm register with the specified number
+97 L<KeepFree|/KeepFree> - Free registers so that they can be reused
 
-98 L<LoadShortStringFromMemoryToZmm2|/LoadShortStringFromMemoryToZmm2> - Load the short string addressed by rax into the zmm register with the specified number
+98 L<KeepPop|/KeepPop> - Reset the status of the specified registers to the status quo ante the last push
 
-99 L<LoadTargetZmmFromSourceZmm|/LoadTargetZmmFromSourceZmm> - Load bytes into the numbered target zmm register at a register specified offset with source bytes from a numbered source zmm register at a specified register offset for a specified register length.
+99 L<KeepPush|/KeepPush> - Push the current status of the specified registers and then mark them as free
 
-100 L<LoadZmmFromMemory|/LoadZmmFromMemory> - Load bytes into the numbered target zmm register at a register specified offset with source bytes from memory addressed by a specified register for a specified register length from memory addressed by a specified register.
+100 L<KeepReturn|/KeepReturn> - Pop the specified register and mark it as in use to effect a subroutine return with this register.
 
-101 L<LocalData|/LocalData> - Map local data
+101 L<KeepSet|/KeepSet> - Confirm that the specified registers are in use
 
-102 L<LocalData::allocate8|/LocalData::allocate8> - Add some 8 byte local variables and return an array of variable definitions
+102 L<Label|/Label> - Create a unique label
 
-103 L<LocalData::free|/LocalData::free> - Free a local data area on the stack
+103 L<LoadShortStringFromMemoryToZmm|/LoadShortStringFromMemoryToZmm> - Load the short string addressed by rax into the zmm register with the specified number
 
-104 L<LocalData::start|/LocalData::start> - Start a local data area on the stack
+104 L<LoadShortStringFromMemoryToZmm2|/LoadShortStringFromMemoryToZmm2> - Load the short string addressed by rax into the zmm register with the specified number
 
-105 L<LocalData::variable|/LocalData::variable> - Add a local variable
+105 L<LoadTargetZmmFromSourceZmm|/LoadTargetZmmFromSourceZmm> - Load bytes into the numbered target zmm register at a register specified offset with source bytes from a numbered source zmm register at a specified register offset for a specified register length.
 
-106 L<LocalVariable::stack|/LocalVariable::stack> - Address a local variable on the stack
+106 L<LoadZmmFromMemory|/LoadZmmFromMemory> - Load bytes into the numbered target zmm register at a register specified offset with source bytes from memory addressed by a specified register for a specified register length from memory addressed by a specified register.
 
-107 L<LocateIntelEmulator|/LocateIntelEmulator> - Assemble the generated code
+107 L<LocalData|/LocalData> - Map local data
 
-108 L<Macro|/Macro> - Create a sub with optional parameters name=> the name of the subroutine so it can be reused rather than regenerated, comment=> a comment describing the sub
+108 L<LocalData::allocate8|/LocalData::allocate8> - Add some 8 byte local variables and return an array of variable definitions
 
-109 L<MaximumOfTwoRegisters|/MaximumOfTwoRegisters> - Return in the specified register the value in the second register if it is greater than the value in the first register
+109 L<LocalData::free|/LocalData::free> - Free a local data area on the stack
 
-110 L<MinimumOfTwoRegisters|/MinimumOfTwoRegisters> - Return in the specified register the value in the second register if it is less than the value in the first register
+110 L<LocalData::start|/LocalData::start> - Start a local data area on the stack
 
-111 L<Minus|/Minus> - Subtract the third operand from the second operand and place the result in the first operand
+111 L<LocalData::variable|/LocalData::variable> - Add a local variable
 
-112 L<Nasm::X86::Sub::call|/Nasm::X86::Sub::call> - Call a sub passing it some parameters
+112 L<LocalVariable::stack|/LocalVariable::stack> - Address a local variable on the stack
 
-113 L<Nasm::X86::Variable::add|/Nasm::X86::Variable::add> - Add the right hand variable to the left hand variable and return the result as a new variable
+113 L<LocateIntelEmulator|/LocateIntelEmulator> - Assemble the generated code
 
-114 L<Nasm::X86::Variable::address|/Nasm::X86::Variable::address> - Get the address of a variable with an optional offset
+114 L<Macro|/Macro> - Create a sub with optional parameters name=> the name of the subroutine so it can be reused rather than regenerated, comment=> a comment describing the sub
 
-115 L<Nasm::X86::Variable::and|/Nasm::X86::Variable::and> - And two variables
+115 L<MaximumOfTwoRegisters|/MaximumOfTwoRegisters> - Return in the specified register the value in the second register if it is greater than the value in the first register
 
-116 L<Nasm::X86::Variable::arithmetic|/Nasm::X86::Variable::arithmetic> - Return a variable containing the result of an arithmetic operation on the left hand and right hand side variables
+116 L<MinimumOfTwoRegisters|/MinimumOfTwoRegisters> - Return in the specified register the value in the second register if it is less than the value in the first register
 
-117 L<Nasm::X86::Variable::assign|/Nasm::X86::Variable::assign> - Assign to the left hand side the value of the right hand side
+117 L<Minus|/Minus> - Subtract the third operand from the second operand and place the result in the first operand
 
-118 L<Nasm::X86::Variable::boolean|/Nasm::X86::Variable::boolean> - Combine the left hand variable with the right hand variable via a boolean operator
+118 L<Nasm::X86::Sub::call|/Nasm::X86::Sub::call> - Call a sub passing it some parameters
 
-119 L<Nasm::X86::Variable::clearMemory|/Nasm::X86::Variable::clearMemory> - Clear the memory described in this variable
+119 L<Nasm::X86::Variable::add|/Nasm::X86::Variable::add> - Add the right hand variable to the left hand variable and return the result as a new variable
 
-120 L<Nasm::X86::Variable::confirmIsMemory|/Nasm::X86::Variable::confirmIsMemory> - Check that variable describes allocated memory and optionally load registers with its length and size
+120 L<Nasm::X86::Variable::address|/Nasm::X86::Variable::address> - Get the address of a variable with an optional offset
 
-121 L<Nasm::X86::Variable::copy|/Nasm::X86::Variable::copy> - Copy one variable into another
+121 L<Nasm::X86::Variable::and|/Nasm::X86::Variable::and> - And two variables
 
-122 L<Nasm::X86::Variable::copyAddress|/Nasm::X86::Variable::copyAddress> - Copy a reference to a variable
+122 L<Nasm::X86::Variable::arithmetic|/Nasm::X86::Variable::arithmetic> - Return a variable containing the result of an arithmetic operation on the left hand and right hand side variables
 
-123 L<Nasm::X86::Variable::copyMemoryFrom|/Nasm::X86::Variable::copyMemoryFrom> - Copy from one block of memory to another
+123 L<Nasm::X86::Variable::assign|/Nasm::X86::Variable::assign> - Assign to the left hand side the value of the right hand side
 
-124 L<Nasm::X86::Variable::copyRef|/Nasm::X86::Variable::copyRef> - Copy one variable into an referenced variable
+124 L<Nasm::X86::Variable::boolean|/Nasm::X86::Variable::boolean> - Combine the left hand variable with the right hand variable via a boolean operator
 
-125 L<Nasm::X86::Variable::debug|/Nasm::X86::Variable::debug> - Dump the value of a variable on stdout with an indication of where the dump came from
+125 L<Nasm::X86::Variable::clearMemory|/Nasm::X86::Variable::clearMemory> - Clear the memory described in this variable
 
-126 L<Nasm::X86::Variable::dec|/Nasm::X86::Variable::dec> - Decrement a variable
+126 L<Nasm::X86::Variable::confirmIsMemory|/Nasm::X86::Variable::confirmIsMemory> - Check that variable describes allocated memory and optionally load registers with its length and size
 
-127 L<Nasm::X86::Variable::divide|/Nasm::X86::Variable::divide> - Divide the left hand variable by the right hand variable and return the result as a new variable
+127 L<Nasm::X86::Variable::copy|/Nasm::X86::Variable::copy> - Copy one variable into another
 
-128 L<Nasm::X86::Variable::division|/Nasm::X86::Variable::division> - Return a variable containing the result or the remainder that occurs when the left hand side is divided by the right hand side
+128 L<Nasm::X86::Variable::copyAddress|/Nasm::X86::Variable::copyAddress> - Copy a reference to a variable
 
-129 L<Nasm::X86::Variable::dump|/Nasm::X86::Variable::dump> - Dump the value of a variable on stdout
+129 L<Nasm::X86::Variable::copyMemoryFrom|/Nasm::X86::Variable::copyMemoryFrom> - Copy from one block of memory to another
 
-130 L<Nasm::X86::Variable::eq|/Nasm::X86::Variable::eq> - Check whether the left hand variable is equal to the right hand variable
+130 L<Nasm::X86::Variable::copyRef|/Nasm::X86::Variable::copyRef> - Copy one variable into an referenced variable
 
-131 L<Nasm::X86::Variable::equals|/Nasm::X86::Variable::equals> - Equals operator
+131 L<Nasm::X86::Variable::debug|/Nasm::X86::Variable::debug> - Dump the value of a variable on stdout with an indication of where the dump came from
 
-132 L<Nasm::X86::Variable::for|/Nasm::X86::Variable::for> - Iterate the body from 0 limit times.
+132 L<Nasm::X86::Variable::dec|/Nasm::X86::Variable::dec> - Decrement a variable
 
-133 L<Nasm::X86::Variable::freeMemory|/Nasm::X86::Variable::freeMemory> - Free the memory described in this variable
+133 L<Nasm::X86::Variable::divide|/Nasm::X86::Variable::divide> - Divide the left hand variable by the right hand variable and return the result as a new variable
 
-134 L<Nasm::X86::Variable::ge|/Nasm::X86::Variable::ge> - Check whether the left hand variable is greater than or equal to the right hand variable
+134 L<Nasm::X86::Variable::division|/Nasm::X86::Variable::division> - Return a variable containing the result or the remainder that occurs when the left hand side is divided by the right hand side
 
-135 L<Nasm::X86::Variable::getReg|/Nasm::X86::Variable::getReg> - Load the variable from the named registers
+135 L<Nasm::X86::Variable::dump|/Nasm::X86::Variable::dump> - Dump the value of a variable to the specified channel adding an optional title and new line if requested
 
-136 L<Nasm::X86::Variable::gt|/Nasm::X86::Variable::gt> - Check whether the left hand variable is greater than the right hand variable
+136 L<Nasm::X86::Variable::eq|/Nasm::X86::Variable::eq> - Check whether the left hand variable is equal to the right hand variable
 
-137 L<Nasm::X86::Variable::inc|/Nasm::X86::Variable::inc> - Increment a variable
+137 L<Nasm::X86::Variable::equals|/Nasm::X86::Variable::equals> - Equals operator
 
-138 L<Nasm::X86::Variable::incDec|/Nasm::X86::Variable::incDec> - Increment or decrement a variable
+138 L<Nasm::X86::Variable::err|/Nasm::X86::Variable::err> - Dump the value of a variable on stderr
 
-139 L<Nasm::X86::Variable::isRef|/Nasm::X86::Variable::isRef> - Check whether the specified  variable is a reference to another variable
+139 L<Nasm::X86::Variable::errNL|/Nasm::X86::Variable::errNL> - Dump the value of a variable on stderr and append a new line
 
-140 L<Nasm::X86::Variable::le|/Nasm::X86::Variable::le> - Check whether the left hand variable is less than or equal to the right hand variable
+140 L<Nasm::X86::Variable::for|/Nasm::X86::Variable::for> - Iterate the body from 0 limit times.
 
-141 L<Nasm::X86::Variable::loadZmm|/Nasm::X86::Variable::loadZmm> - Load bytes from the memory addressed by the specified source variable into the numbered zmm register.
+141 L<Nasm::X86::Variable::freeMemory|/Nasm::X86::Variable::freeMemory> - Free the memory described in this variable
 
-142 L<Nasm::X86::Variable::lt|/Nasm::X86::Variable::lt> - Check whether the left hand variable is less than the right hand variable
+142 L<Nasm::X86::Variable::ge|/Nasm::X86::Variable::ge> - Check whether the left hand variable is greater than or equal to the right hand variable
 
-143 L<Nasm::X86::Variable::max|/Nasm::X86::Variable::max> - Maximum of two variables
+143 L<Nasm::X86::Variable::getReg|/Nasm::X86::Variable::getReg> - Load the variable from the named registers
 
-144 L<Nasm::X86::Variable::min|/Nasm::X86::Variable::min> - Minimum of two variables
+144 L<Nasm::X86::Variable::gt|/Nasm::X86::Variable::gt> - Check whether the left hand variable is greater than the right hand variable
 
-145 L<Nasm::X86::Variable::minusAssign|/Nasm::X86::Variable::minusAssign> - Implement minus and assign
+145 L<Nasm::X86::Variable::inc|/Nasm::X86::Variable::inc> - Increment a variable
 
-146 L<Nasm::X86::Variable::mod|/Nasm::X86::Variable::mod> - Divide the left hand variable by the right hand variable and return the remainder as a new variable
+146 L<Nasm::X86::Variable::incDec|/Nasm::X86::Variable::incDec> - Increment or decrement a variable
 
-147 L<Nasm::X86::Variable::ne|/Nasm::X86::Variable::ne> - Check whether the left hand variable is not equal to the right hand variable
+147 L<Nasm::X86::Variable::isRef|/Nasm::X86::Variable::isRef> - Check whether the specified  variable is a reference to another variable
 
-148 L<Nasm::X86::Variable::or|/Nasm::X86::Variable::or> - Or two variables
+148 L<Nasm::X86::Variable::le|/Nasm::X86::Variable::le> - Check whether the left hand variable is less than or equal to the right hand variable
 
-149 L<Nasm::X86::Variable::plusAssign|/Nasm::X86::Variable::plusAssign> - Implement plus and assign
+149 L<Nasm::X86::Variable::loadZmm|/Nasm::X86::Variable::loadZmm> - Load bytes from the memory addressed by the specified source variable into the numbered zmm register.
 
-150 L<Nasm::X86::Variable::print|/Nasm::X86::Variable::print> - Write the value of a variable on stdout
+150 L<Nasm::X86::Variable::lt|/Nasm::X86::Variable::lt> - Check whether the left hand variable is less than the right hand variable
 
-151 L<Nasm::X86::Variable::printOutMemoryInHex|/Nasm::X86::Variable::printOutMemoryInHex> - Print allocated memory in hex
+151 L<Nasm::X86::Variable::max|/Nasm::X86::Variable::max> - Maximum of two variables
 
-152 L<Nasm::X86::Variable::putBIntoXmm|/Nasm::X86::Variable::putBIntoXmm> - Place the value of the content variable at the byte in the numbered xmm register
+152 L<Nasm::X86::Variable::min|/Nasm::X86::Variable::min> - Minimum of two variables
 
-153 L<Nasm::X86::Variable::putBIntoZmm|/Nasm::X86::Variable::putBIntoZmm> - Place the value of the content variable at the byte in the numbered zmm register
+153 L<Nasm::X86::Variable::minusAssign|/Nasm::X86::Variable::minusAssign> - Implement minus and assign
 
-154 L<Nasm::X86::Variable::putBwdqIntoMm|/Nasm::X86::Variable::putBwdqIntoMm> - Place the value of the content variable at the byte|word|double word|quad word in the numbered zmm register
+154 L<Nasm::X86::Variable::mod|/Nasm::X86::Variable::mod> - Divide the left hand variable by the right hand variable and return the remainder as a new variable
 
-155 L<Nasm::X86::Variable::putDIntoXmm|/Nasm::X86::Variable::putDIntoXmm> - Place the value of the content variable at the double word in the numbered xmm register
+155 L<Nasm::X86::Variable::ne|/Nasm::X86::Variable::ne> - Check whether the left hand variable is not equal to the right hand variable
 
-156 L<Nasm::X86::Variable::putDIntoZmm|/Nasm::X86::Variable::putDIntoZmm> - Place the value of the content variable at the double word in the numbered zmm register
+156 L<Nasm::X86::Variable::or|/Nasm::X86::Variable::or> - Or two variables
 
-157 L<Nasm::X86::Variable::putQIntoXmm|/Nasm::X86::Variable::putQIntoXmm> - Place the value of the content variable at the quad word in the numbered xmm register
+157 L<Nasm::X86::Variable::out|/Nasm::X86::Variable::out> - Dump the value of a variable on stdout
 
-158 L<Nasm::X86::Variable::putQIntoZmm|/Nasm::X86::Variable::putQIntoZmm> - Place the value of the content variable at the quad word in the numbered zmm register
+158 L<Nasm::X86::Variable::outNL|/Nasm::X86::Variable::outNL> - Dump the value of a variable on stdout and append a new line
 
-159 L<Nasm::X86::Variable::putWIntoXmm|/Nasm::X86::Variable::putWIntoXmm> - Place the value of the content variable at the word in the numbered xmm register
+159 L<Nasm::X86::Variable::plusAssign|/Nasm::X86::Variable::plusAssign> - Implement plus and assign
 
-160 L<Nasm::X86::Variable::putWIntoZmm|/Nasm::X86::Variable::putWIntoZmm> - Place the value of the content variable at the word in the numbered zmm register
+160 L<Nasm::X86::Variable::print|/Nasm::X86::Variable::print> - Write the value of a variable on stdout
 
-161 L<Nasm::X86::Variable::saveZmm|/Nasm::X86::Variable::saveZmm> - Save bytes into the memory addressed by the target variable from the numbered zmm register.
+161 L<Nasm::X86::Variable::printOutMemoryInHex|/Nasm::X86::Variable::printOutMemoryInHex> - Print allocated memory in hex
 
-162 L<Nasm::X86::Variable::setMask|/Nasm::X86::Variable::setMask> - Set the mask register to ones starting at the specified position for the specified length and zeroes elsewhere
+162 L<Nasm::X86::Variable::putBIntoXmm|/Nasm::X86::Variable::putBIntoXmm> - Place the value of the content variable at the byte in the numbered xmm register
 
-163 L<Nasm::X86::Variable::setReg|/Nasm::X86::Variable::setReg> - Set the named registers from the content of the variable
+163 L<Nasm::X86::Variable::putBIntoZmm|/Nasm::X86::Variable::putBIntoZmm> - Place the value of the content variable at the byte in the numbered zmm register
 
-164 L<Nasm::X86::Variable::setZmm|/Nasm::X86::Variable::setZmm> - Load bytes from the memory addressed by specified source variable into the numbered zmm register at the offset in the specified offset moving the number of bytes in the specified variable
+164 L<Nasm::X86::Variable::putBwdqIntoMm|/Nasm::X86::Variable::putBwdqIntoMm> - Place the value of the content variable at the byte|word|double word|quad word in the numbered zmm register
 
-165 L<Nasm::X86::Variable::str|/Nasm::X86::Variable::str> - The name of the variable
+165 L<Nasm::X86::Variable::putDIntoXmm|/Nasm::X86::Variable::putDIntoXmm> - Place the value of the content variable at the double word in the numbered xmm register
 
-166 L<Nasm::X86::Variable::sub|/Nasm::X86::Variable::sub> - Subtract the right hand variable from the left hand variable and return the result as a new variable
+166 L<Nasm::X86::Variable::putDIntoZmm|/Nasm::X86::Variable::putDIntoZmm> - Place the value of the content variable at the double word in the numbered zmm register
 
-167 L<Nasm::X86::Variable::times|/Nasm::X86::Variable::times> - Multiply the left hand variable by the right hand variable and return the result as a new variable
+167 L<Nasm::X86::Variable::putQIntoXmm|/Nasm::X86::Variable::putQIntoXmm> - Place the value of the content variable at the quad word in the numbered xmm register
 
-168 L<OpenRead|/OpenRead> - Open a file, whose name is addressed by rax, for read and return the file descriptor in rax
+168 L<Nasm::X86::Variable::putQIntoZmm|/Nasm::X86::Variable::putQIntoZmm> - Place the value of the content variable at the quad word in the numbered zmm register
 
-169 L<OpenWrite|/OpenWrite> - Create the file named by the terminated string addressed by rax for write
+169 L<Nasm::X86::Variable::putWIntoXmm|/Nasm::X86::Variable::putWIntoXmm> - Place the value of the content variable at the word in the numbered xmm register
 
-170 L<PeekR|/PeekR> - Peek at register on stack
+170 L<Nasm::X86::Variable::putWIntoZmm|/Nasm::X86::Variable::putWIntoZmm> - Place the value of the content variable at the word in the numbered zmm register
 
-171 L<Plus|/Plus> - Add the last operands and place the result in the first operand
+171 L<Nasm::X86::Variable::saveZmm|/Nasm::X86::Variable::saveZmm> - Save bytes into the memory addressed by the target variable from the numbered zmm register.
 
-172 L<PopR|/PopR> - Pop registers from the stack
+172 L<Nasm::X86::Variable::setMask|/Nasm::X86::Variable::setMask> - Set the mask register to ones starting at the specified position for the specified length and zeroes elsewhere
 
-173 L<PopRR|/PopRR> - Pop registers from the stack without tracking
+173 L<Nasm::X86::Variable::setReg|/Nasm::X86::Variable::setReg> - Set the named registers from the content of the variable
 
-174 L<PrintErrNL|/PrintErrNL> - Print a new line to stderr
+174 L<Nasm::X86::Variable::setZmm|/Nasm::X86::Variable::setZmm> - Load bytes from the memory addressed by specified source variable into the numbered zmm register at the offset in the specified offset moving the number of bytes in the specified variable
 
-175 L<PrintErrString|/PrintErrString> - Print a constant string to stderr.
+175 L<Nasm::X86::Variable::str|/Nasm::X86::Variable::str> - The name of the variable
 
-176 L<PrintErrStringNL|/PrintErrStringNL> - Print a new line to stderr
+176 L<Nasm::X86::Variable::sub|/Nasm::X86::Variable::sub> - Subtract the right hand variable from the left hand variable and return the result as a new variable
 
-177 L<PrintOutMemory|/PrintOutMemory> - Print the memory addressed by rax for a length of rdi::
+177 L<Nasm::X86::Variable::times|/Nasm::X86::Variable::times> - Multiply the left hand variable by the right hand variable and return the result as a new variable
 
-178 L<PrintOutMemoryInHex|/PrintOutMemoryInHex> - Dump memory from the address in rax for the length in rdi
+178 L<OpenRead|/OpenRead> - Open a file, whose name is addressed by rax, for read and return the file descriptor in rax
 
-179 L<PrintOutMemoryInHexNL|/PrintOutMemoryInHexNL> - Dump memory from the address in rax for the length in rdi and then print a new line
+179 L<OpenWrite|/OpenWrite> - Create the file named by the terminated string addressed by rax for write
 
-180 L<PrintOutMemoryNL|/PrintOutMemoryNL> - Print the memory addressed by rax for a length of rdi followed by a new line
+180 L<PeekR|/PeekR> - Peek at register on stack
 
-181 L<PrintOutNL|/PrintOutNL> - Print a new line to stdout
+181 L<Plus|/Plus> - Add the last operands and place the result in the first operand
 
-182 L<PrintOutRaxInHex|/PrintOutRaxInHex> - Write the content of register rax to stderr in hexadecimal in big endian notation
+182 L<PopR|/PopR> - Pop registers from the stack
 
-183 L<PrintOutRaxInReverseInHex|/PrintOutRaxInReverseInHex> - Write the content of register rax to stderr in hexadecimal in little endian notation
+183 L<PopRR|/PopRR> - Pop registers from the stack without tracking
 
-184 L<PrintOutRegisterInHex|/PrintOutRegisterInHex> - Print any register as a hex string
+184 L<PrintErrMemory|/PrintErrMemory> - Print the memory addressed by rax for a length of rdi on sterr
 
-185 L<PrintOutRegistersInHex|/PrintOutRegistersInHex> - Print the general purpose registers in hex
+185 L<PrintErrMemoryInHex|/PrintErrMemoryInHex> - Dump memory from the address in rax for the length in rdi on stderr
 
-186 L<PrintOutRflagsInHex|/PrintOutRflagsInHex> - Print the flags register in hex
+186 L<PrintErrMemoryInHexNL|/PrintErrMemoryInHexNL> - Dump memory from the address in rax for the length in rdi and then print a new line
 
-187 L<PrintOutRipInHex|/PrintOutRipInHex> - Print the instruction pointer in hex
+187 L<PrintErrMemoryNL|/PrintErrMemoryNL> - Print the memory addressed by rax for a length of rdi followed by a new line on stderr
 
-188 L<PrintOutString|/PrintOutString> - Print a constant string to sysout.
+188 L<PrintErrNL|/PrintErrNL> - Print a new line to stderr
 
-189 L<PrintOutStringNL|/PrintOutStringNL> - Print a constant string to sysout followed by new line
+189 L<PrintErrRaxInHex|/PrintErrRaxInHex> - Write the content of register rax in hexadecimal in big endian notation to stderr
 
-190 L<PrintOutZF|/PrintOutZF> - Print the zero flag without disturbing it
+190 L<PrintErrRegisterInHex|/PrintErrRegisterInHex> - Print the named registers as hex strings on stderr
 
-191 L<PushR|/PushR> - Push registers onto the stack
+191 L<PrintErrString|/PrintErrString> - Print a constant string to stderr.
 
-192 L<PushRR|/PushRR> - Push registers onto the stack without tracking
+192 L<PrintErrStringNL|/PrintErrStringNL> - Print a constant string followed by a new line to stderr
 
-193 L<Rb|/Rb> - Layout bytes in the data segment and return their label
+193 L<PrintMemory|/PrintMemory> - Print the memory addressed by rax for a length of rdi on the specified channel
 
-194 L<Rbwdq|/Rbwdq> - Layout data
+194 L<PrintMemoryInHex|/PrintMemoryInHex> - Dump memory from the address in rax for the length in rdi on the specified channel
 
-195 L<RComment|/RComment> - Insert a comment into the read only data segment
+195 L<PrintNL|/PrintNL> - Print a new line to stdout  or stderr
 
-196 L<Rd|/Rd> - Layout double words in the data segment and return their label
+196 L<PrintOutMemory|/PrintOutMemory> - Print the memory addressed by rax for a length of rdi on stdout
 
-197 L<ReadFile|/ReadFile> - Read a file whose name is addressed by rax into memory.
+197 L<PrintOutMemoryInHex|/PrintOutMemoryInHex> - Dump memory from the address in rax for the length in rdi on stdout
 
-198 L<ReadTimeStampCounter|/ReadTimeStampCounter> - Read the time stamp counter and return the time in nanoseconds in rax
+198 L<PrintOutMemoryInHexNL|/PrintOutMemoryInHexNL> - Dump memory from the address in rax for the length in rdi and then print a new line
 
-199 L<RegisterSize|/RegisterSize> - Return the size of a register
+199 L<PrintOutMemoryNL|/PrintOutMemoryNL> - Print the memory addressed by rax for a length of rdi followed by a new line on stdout
 
-200 L<removeNonAsciiChars|/removeNonAsciiChars> - Return a copy of the specified string with all the non ascii characters removed
+200 L<PrintOutNL|/PrintOutNL> - Print a new line to stderr
 
-201 L<ReorderSyscallRegisters|/ReorderSyscallRegisters> - Map the list of registers provided to the 64 bit system call sequence
+201 L<PrintOutRaxInHex|/PrintOutRaxInHex> - Write the content of register rax in hexadecimal in big endian notation to stderr
 
-202 L<ReorderXmmRegisters|/ReorderXmmRegisters> - Map the list of xmm registers provided to 0-31
+202 L<PrintOutRaxInReverseInHex|/PrintOutRaxInReverseInHex> - Write the content of register rax to stderr in hexadecimal in little endian notation
 
-203 L<RestoreFirstFour|/RestoreFirstFour> - Restore the first 4 parameter registers
+203 L<PrintOutRegisterInHex|/PrintOutRegisterInHex> - Print the named registers as hex strings on stdout
 
-204 L<RestoreFirstFourExceptRax|/RestoreFirstFourExceptRax> - Restore the first 4 parameter registers except rax so it can return its value
+204 L<PrintOutRegistersInHex|/PrintOutRegistersInHex> - Print the general purpose registers in hex
 
-205 L<RestoreFirstFourExceptRaxAndRdi|/RestoreFirstFourExceptRaxAndRdi> - Restore the first 4 parameter registers except rax  and rdi so we can return a pair of values
+205 L<PrintOutRflagsInHex|/PrintOutRflagsInHex> - Print the flags register in hex
 
-206 L<RestoreFirstSeven|/RestoreFirstSeven> - Restore the first 7 parameter registers
+206 L<PrintOutRipInHex|/PrintOutRipInHex> - Print the instruction pointer in hex
 
-207 L<RestoreFirstSevenExceptRax|/RestoreFirstSevenExceptRax> - Restore the first 7 parameter registers except rax which is being used to return the result
+207 L<PrintOutString|/PrintOutString> - Print a constant string to stdout.
 
-208 L<RestoreFirstSevenExceptRaxAndRdi|/RestoreFirstSevenExceptRaxAndRdi> - Restore the first 7 parameter registers except rax and rdi which are being used to return the results
+208 L<PrintOutStringNL|/PrintOutStringNL> - Print a constant string followed by a new line to stdout
 
-209 L<Rq|/Rq> - Layout quad words in the data segment and return their label
+209 L<PrintOutZF|/PrintOutZF> - Print the zero flag without disturbing it
 
-210 L<Rs|/Rs> - Layout bytes in read only memory and return their label
+210 L<PrintRaxInHex|/PrintRaxInHex> - Write the content of register rax in hexadecimal in big endian notation to the specified channel
 
-211 L<Rw|/Rw> - Layout words in the data segment and return their label
+211 L<PrintRegisterInHex|/PrintRegisterInHex> - Print the named registers as hex strings
 
-212 L<SaveFirstFour|/SaveFirstFour> - Save the first 4 parameter registers making any parameter registers read only
+212 L<PrintString|/PrintString> - Print a constant string to the specified channel
 
-213 L<SaveFirstSeven|/SaveFirstSeven> - Save the first 7 parameter registers
+213 L<PushR|/PushR> - Push registers onto the stack
 
-214 L<Scope|/Scope> - Create and stack a new scope and continue with it as the current scope
+214 L<PushRR|/PushRR> - Push registers onto the stack without tracking
 
-215 L<Scope::contains|/Scope::contains> - Check that the named parent scope contains the specified child scope.
+215 L<Rb|/Rb> - Layout bytes in the data segment and return their label
 
-216 L<Scope::currentlyVisible|/Scope::currentlyVisible> - Check that the named parent scope is currently visible
+216 L<Rbwdq|/Rbwdq> - Layout data
 
-217 L<ScopeEnd|/ScopeEnd> - End the current scope and continue with the containing parent scope
+217 L<RComment|/RComment> - Insert a comment into the read only data segment
 
-218 L<SetLabel|/SetLabel> - Set a label in the code section
+218 L<Rd|/Rd> - Layout double words in the data segment and return their label
 
-219 L<SetLengthOfShortString|/SetLengthOfShortString> - Set the length of the short string held in the numbered zmm register into the specified register
+219 L<ReadFile|/ReadFile> - Read a file whose name is addressed by rax into memory.
 
-220 L<SetMaskRegister|/SetMaskRegister> - Set the mask register to ones starting at the specified position for the specified length and zeroes elsewhere
+220 L<ReadTimeStampCounter|/ReadTimeStampCounter> - Read the time stamp counter and return the time in nanoseconds in rax
 
-221 L<SetRegisterToMinusOne|/SetRegisterToMinusOne> - Set the specified register to -1
+221 L<RegisterSize|/RegisterSize> - Return the size of a register
 
-222 L<SetZF|/SetZF> - Set the zero flag
+222 L<removeNonAsciiChars|/removeNonAsciiChars> - Return a copy of the specified string with all the non ascii characters removed
 
-223 L<Start|/Start> - Initialize the assembler
+223 L<ReorderSyscallRegisters|/ReorderSyscallRegisters> - Map the list of registers provided to the 64 bit system call sequence
 
-224 L<StatSize|/StatSize> - Stat a file whose name is addressed by rax to get its size in rax
+224 L<ReorderXmmRegisters|/ReorderXmmRegisters> - Map the list of xmm registers provided to 0-31
 
-225 L<Structure|/Structure> - Create a structure addressed by a register
+225 L<RestoreFirstFour|/RestoreFirstFour> - Restore the first 4 parameter registers
 
-226 L<Structure::field|/Structure::field> - Add a field of the specified length with an optional comment
+226 L<RestoreFirstFourExceptRax|/RestoreFirstFourExceptRax> - Restore the first 4 parameter registers except rax so it can return its value
 
-227 L<StructureField::addr|/StructureField::addr> - Address a field in a structure by either the default register or the named register
+227 L<RestoreFirstFourExceptRaxAndRdi|/RestoreFirstFourExceptRaxAndRdi> - Restore the first 4 parameter registers except rax  and rdi so we can return a pair of values
 
-228 L<Subroutine|/Subroutine> - Create a subroutine that can be called in assembler code
+228 L<RestoreFirstSeven|/RestoreFirstSeven> - Restore the first 7 parameter registers
 
-229 L<totalBytesAssembled|/totalBytesAssembled> - Total size in bytes of all files assembled during testing
+229 L<RestoreFirstSevenExceptRax|/RestoreFirstSevenExceptRax> - Restore the first 7 parameter registers except rax which is being used to return the result
 
-230 L<unlinkFile|/unlinkFile> - Unlink the named file
+230 L<RestoreFirstSevenExceptRaxAndRdi|/RestoreFirstSevenExceptRaxAndRdi> - Restore the first 7 parameter registers except rax and rdi which are being used to return the results
 
-231 L<UnReorderSyscallRegisters|/UnReorderSyscallRegisters> - Recover the initial values in registers that were reordered
+231 L<Rq|/Rq> - Layout quad words in the data segment and return their label
 
-232 L<UnReorderXmmRegisters|/UnReorderXmmRegisters> - Recover the initial values in the xmm registers that were reordered
+232 L<Rs|/Rs> - Layout bytes in read only memory and return their label
 
-233 L<Variable|/Variable> - Create a new variable with the specified size and name initialized via an expression
+233 L<Rw|/Rw> - Layout words in the data segment and return their label
 
-234 L<Vb|/Vb> - Define a byte variable
+234 L<SaveFirstFour|/SaveFirstFour> - Save the first 4 parameter registers making any parameter registers read only
 
-235 L<Vd|/Vd> - Define a double word variable
+235 L<SaveFirstSeven|/SaveFirstSeven> - Save the first 7 parameter registers
 
-236 L<Vq|/Vq> - Define a quad variable
+236 L<Scope|/Scope> - Create and stack a new scope and continue with it as the current scope
 
-237 L<Vr|/Vr> - Define a reference variable
+237 L<Scope::contains|/Scope::contains> - Check that the named parent scope contains the specified child scope.
 
-238 L<Vw|/Vw> - Define a word variable
+238 L<Scope::currentlyVisible|/Scope::currentlyVisible> - Check that the named parent scope is currently visible
 
-239 L<Vx|/Vx> - Define an xmm variable
+239 L<ScopeEnd|/ScopeEnd> - End the current scope and continue with the containing parent scope
 
-240 L<VxyzInit|/VxyzInit> - Initialize an xyz register from general purpose registers
+240 L<SetLabel|/SetLabel> - Set a label in the code section
 
-241 L<Vy|/Vy> - Define an ymm variable
+241 L<SetLengthOfShortString|/SetLengthOfShortString> - Set the length of the short string held in the numbered zmm register into the specified register
 
-242 L<Vz|/Vz> - Define an zmm variable
+242 L<SetMaskRegister|/SetMaskRegister> - Set the mask register to ones starting at the specified position for the specified length and zeroes elsewhere
 
-243 L<WaitPid|/WaitPid> - Wait for the pid in rax to complete
+243 L<SetRegisterToMinusOne|/SetRegisterToMinusOne> - Set the specified register to -1
+
+244 L<SetZF|/SetZF> - Set the zero flag
+
+245 L<Start|/Start> - Initialize the assembler
+
+246 L<StatSize|/StatSize> - Stat a file whose name is addressed by rax to get its size in rax
+
+247 L<Structure|/Structure> - Create a structure addressed by a register
+
+248 L<Structure::field|/Structure::field> - Add a field of the specified length with an optional comment
+
+249 L<StructureField::addr|/StructureField::addr> - Address a field in a structure by either the default register or the named register
+
+250 L<Subroutine|/Subroutine> - Create a subroutine that can be called in assembler code
+
+251 L<totalBytesAssembled|/totalBytesAssembled> - Total size in bytes of all files assembled during testing
+
+252 L<unlinkFile|/unlinkFile> - Unlink the named file
+
+253 L<UnReorderSyscallRegisters|/UnReorderSyscallRegisters> - Recover the initial values in registers that were reordered
+
+254 L<UnReorderXmmRegisters|/UnReorderXmmRegisters> - Recover the initial values in the xmm registers that were reordered
+
+255 L<Variable|/Variable> - Create a new variable with the specified size and name initialized via an expression
+
+256 L<Vb|/Vb> - Define a byte variable
+
+257 L<Vd|/Vd> - Define a double word variable
+
+258 L<Vq|/Vq> - Define a quad variable
+
+259 L<Vr|/Vr> - Define a reference variable
+
+260 L<Vw|/Vw> - Define a word variable
+
+261 L<Vx|/Vx> - Define an xmm variable
+
+262 L<VxyzInit|/VxyzInit> - Initialize an xyz register from general purpose registers
+
+263 L<Vy|/Vy> - Define an ymm variable
+
+264 L<Vz|/Vz> - Define an zmm variable
+
+265 L<WaitPid|/WaitPid> - Wait for the pid in rax to complete
 
 =head1 Installation
 
@@ -11924,6 +12226,26 @@ Offset: 0000 0000 0000 0058   Length: 0000 0000 0000 0036
 Offset: 0000 0000 0000 0098   Length: 0000 0000 0000 0037
  zmm31: 0000 0018 0000 0058   A4A3 A2A1 A09F 9E9D   9C9B 9A99 9897 9695   9493 9291 908F 8E8D   8C8B 8A89 8887 8685   8483 8281 807F 7E7D   7C7B 7A79 7877 7675   7473 7271 706F 6E37
 
+END
+ }
+
+latest:;
+
+if (1) {                                                                        #TBlockString::getChar
+  my $c = Rb(0..255);
+  my $S = CreateByteString;   my $s = $S->CreateBlockString;
+
+  $s->append(source=>Vq(source, $c),  Vq(size, 110)); $s->dump;
+  $s->getCharacter(Vq(position, 0x44), my $out = Vq(out)); $out->outNL;
+
+  ok Assemble(debug => 0, eq => <<END);
+Block String Dump
+Offset: 0000 0000 0000 0018   Length: 0000 0000 0000 0037
+ zmm31: 0000 0058 0000 0058   3635 3433 3231 302F   2E2D 2C2B 2A29 2827   2625 2423 2221 201F   1E1D 1C1B 1A19 1817   1615 1413 1211 100F   0E0D 0C0B 0A09 0807   0605 0403 0201 0037
+Offset: 0000 0000 0000 0058   Length: 0000 0000 0000 0037
+ zmm31: 0000 0018 0000 0018   6D6C 6B6A 6968 6766   6564 6362 6160 5F5E   5D5C 5B5A 5958 5756   5554 5352 5150 4F4E   4D4C 4B4A 4948 4746   4544 4342 4140 3F3E   3D3C 3B3A 3938 3737
+
+out: 0000 0000 0000 0044
 END
  }
 
