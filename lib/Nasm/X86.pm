@@ -3611,7 +3611,7 @@ sub BlockString::insertChar($$$)                                                
     $blockString->getBlock($B, $F, 31);                                         # The first source block
     my $C = Vq('Current character position', 0);                                # Current character position
     my $L = $blockString->getBlockLengthInZmm(31);                              # Length of last block
-    my $M = Vq('block length', $blockString->length);                           # Maximum length of a block
+    my $M   = Vq('Block length', $blockString->length);                         # Maximum length of a block
     my $One = Vq('One', 1);                                                     # Literal one
     my ($second, $last) = $blockString->getNextAndPrevBlockOffsetFromZmm(31);   # Get links from first block
     my $current = $F;                                                           # Current position in scan of block chain
@@ -3675,6 +3675,52 @@ sub BlockString::insertChar($$$)                                                
 
     PopR @save;
    } in => {bs => 3, first => 3, character => 3, position => 3};
+
+  $s->call($blockString->bs->bs, first => $blockString->first, @variables)
+ }
+
+sub BlockString::deleteChar($$$)                                                # Delete a character in a block string
+ {my ($blockString, @variables) = @_;                                           # Block string, variables
+  @_ >= 2 or confess;
+
+  my $s = Subroutine
+   {my ($p) = @_;                                                               # Parameters
+    Comment "Delete a character in a block string";
+    PushR my @save = (k7, r15, zmm31);
+    my $B = $$p{bs};                                                            # The byte string underlying the block string
+    my $F = $$p{first};                                                         # The first block in block string
+    my $c = $$p{character};                                                     # The character to insert
+    my $P = $$p{position};                                                      # The position in the block string at which we want to insert the character
+    $blockString->getBlock($B, $F, 31);                                         # The first source block
+    my $C = Vq('Current character position', 0);                                # Current character position
+    my $L = $blockString->getBlockLengthInZmm(31);                              # Length of last block
+    my $M = Vq('Block length', $blockString->length);                           # Maximum length of a block
+    my ($second, $last) = $blockString->getNextAndPrevBlockOffsetFromZmm(31);   # Get links from first block
+    my $current = $F;                                                           # Current position in scan of block chain
+
+    ForEver                                                                     # Each block in source string
+     {my ($start, $end) = @_;                                                   # Start and end labels
+
+      If ((($P >= $C) & ($P <= $C + $L)), sub                                   # Position is in current block
+       {my $O = $P - $C;                                                        # Offset in current block
+        PushRR zmm31;                                                           # Stack block
+        ($O+1)->setMask($L - $O, k7);                                           # Set mask for reload
+        Vmovdqu8 "zmm31{k7}", "[rsp+1]";                                        # Reload
+        $blockString->setBlockLengthInZmm($L-1, 31);                            # Length of block
+        $blockString->putBlock($B, $current, 31);                               # Save the modified block
+        PopRR zmm31;                                                            # Stack block
+        Jmp $end;                                                               # Character successfully inserted
+       });
+
+      my ($next, $prev) = $blockString->getNextAndPrevBlockOffsetFromZmm(31);   # Get links from current source block
+      $blockString->getBlock($B, $next, 31);                                    # Next block
+      $current->copy($next);
+      $L = $blockString->getBlockLengthInZmm(31);                               # Length of block
+      $C += $L;                                                                 # Current character position at the start of this block
+     };
+
+    PopR @save;
+   } in => {bs => 3, first => 3, position => 3};
 
   $s->call($blockString->bs->bs, first => $blockString->first, @variables)
  }
@@ -10184,7 +10230,7 @@ Test::More->builder->output("/dev/null") if $localTest;                         
 
 if ($^O =~ m(bsd|linux)i)                                                       # Supported systems
  {if (confirmHasCommandLineCommand(q(nasm)) and LocateIntelEmulator)            # Network assembler and Intel Software Development emulator
-   {plan tests => 102;
+   {plan tests => 103;
    }
   else
    {plan skip_all => qq(Nasm or Intel 64 emulator not available);
@@ -11741,7 +11787,7 @@ Offset: 0000 0000 0000 0018   Length: 0000 0000 0000 0005
 END
  }
 
-latest:;
+#latest:;
 
 if (1) {                                                                        # Insert char in a multi block string at position 22
   my $c = Rb(0..255);
@@ -11782,7 +11828,7 @@ Offset: 0000 0000 0000 0058   Length: 0000 0000 0000 0003
 END
  }
 
-if (1) {                                                                        # Insert char in a multi block string
+if (1) {                                                                        #BlockString::insertChar
   my $c = Rb(0..255);
   my $S = CreateByteString;   my $s = $S->CreateBlockString;
 
@@ -11850,6 +11896,33 @@ Offset: 0000 0000 0000 0018   Length: 0000 0000 0000 0003
 Block String Dump
 Offset: 0000 0000 0000 0018   Length: 0000 0000 0000 0004
  zmm31: 0000 0018 0000 0018   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0044 0201 0004
+
+END
+ }
+
+if (1) {                                                                        #TBlockString::deleteChar
+  my $c = Rb(0..255);
+  my $S = CreateByteString;   my $s = $S->CreateBlockString;
+
+  $s->append(source=>Vq(source, $c),  Vq(size, 165)); $s->dump;
+  $s->deleteChar(Vq(position, 0x44));                 $s->dump;
+
+  ok Assemble(debug => 0, eq => <<END);
+Block String Dump
+Offset: 0000 0000 0000 0018   Length: 0000 0000 0000 0037
+ zmm31: 0000 0058 0000 0098   3635 3433 3231 302F   2E2D 2C2B 2A29 2827   2625 2423 2221 201F   1E1D 1C1B 1A19 1817   1615 1413 1211 100F   0E0D 0C0B 0A09 0807   0605 0403 0201 0037
+Offset: 0000 0000 0000 0058   Length: 0000 0000 0000 0037
+ zmm31: 0000 0098 0000 0018   6D6C 6B6A 6968 6766   6564 6362 6160 5F5E   5D5C 5B5A 5958 5756   5554 5352 5150 4F4E   4D4C 4B4A 4948 4746   4544 4342 4140 3F3E   3D3C 3B3A 3938 3737
+Offset: 0000 0000 0000 0098   Length: 0000 0000 0000 0037
+ zmm31: 0000 0018 0000 0058   A4A3 A2A1 A09F 9E9D   9C9B 9A99 9897 9695   9493 9291 908F 8E8D   8C8B 8A89 8887 8685   8483 8281 807F 7E7D   7C7B 7A79 7877 7675   7473 7271 706F 6E37
+
+Block String Dump
+Offset: 0000 0000 0000 0018   Length: 0000 0000 0000 0037
+ zmm31: 0000 0058 0000 0098   3635 3433 3231 302F   2E2D 2C2B 2A29 2827   2625 2423 2221 201F   1E1D 1C1B 1A19 1817   1615 1413 1211 100F   0E0D 0C0B 0A09 0807   0605 0403 0201 0037
+Offset: 0000 0000 0000 0058   Length: 0000 0000 0000 0036
+ zmm31: 0000 0098 0000 0018   186D 6C6B 6A69 6867   6665 6463 6261 605F   5E5D 5C5B 5A59 5857   5655 5453 5251 504F   4E4D 4C4B 4A49 4847   4645 4342 4140 3F3E   3D3C 3B3A 3938 3736
+Offset: 0000 0000 0000 0098   Length: 0000 0000 0000 0037
+ zmm31: 0000 0018 0000 0058   A4A3 A2A1 A09F 9E9D   9C9B 9A99 9897 9695   9493 9291 908F 8E8D   8C8B 8A89 8887 8685   8483 8281 807F 7E7D   7C7B 7A79 7877 7675   7473 7271 706F 6E37
 
 END
  }
