@@ -1,9 +1,11 @@
-name: Windows test
+# Windows test
 
-on: [push]
+name: Windows-test
+
+on:
+  push
 
 jobs:
-
   test-windows-platform:
 
     runs-on: windows-latest
