@@ -4215,7 +4215,7 @@ Nasm::X86 - Generate X86 assembler code using Perl as a macro pre-processor.
 
 =head1 Synopsis
 
-Write and execute x64 instructions using perl as a macro assembler as shown in
+Write and execute x64 instructions using Perl as a macro assembler as shown in
 the following examples.
 
 =head2 Avx512 instructions
@@ -4252,7 +4252,7 @@ Use avx512 instructions to do 64 comparisons in parallel:
     k5: 0000 FFFF FFFF FFFF
     k6: 0000 7FFF FFFF FFFF
     k7: FFFF FFFF FFFF FFFF
-   rax: 0000 0000 0000 00$P
+   rax: 0000 0000 0000 002F
 END
 
 =head2 Dynamic string held in an arena
@@ -4340,8 +4340,19 @@ L<https://github.com/philiprbrenan/NasmX86/blob/main/.github/workflows/main.yml>
 
 =head2 Execution Options
 
-The L<Assemble(%options)> function takes the following keywords to control
-assembly and execution of the assembled code:
+The L<Assemble(%options)> function takes the keywords described below to
+control assembly and execution of the assembled code:
+
+L<Assemble(%options)> runs the generated program after a successful assembly
+unless the B<keep> option is specified. The output on B<stdout> is captured in
+file B<zzzOut.txt> and that on B<stderr> is captured in file B<zzzErr.txt>.
+
+The amount of output displayed is controlled by the B<debug> keyword.
+
+The B<eq> keyword can be used to test that the output by the run.
+
+The output produced by the program execution is returned as the result of the
+L<Assemble(%options)> function.
 
 =head3 Keep
 
@@ -4356,14 +4367,53 @@ emulator, which is used by default if it is present, specify:
 
  emulator=>0
 
+=head3 eq
 
-=head3 Redirecting stdout or stderr
+The B<eq> keyword supplies the expected output from the execution of the
+assembled program.  If the expected output is not obtained on B<stdout> then we
+confess and stop further testing. Output on B<stderr> is ignored for test
+purposes.
 
-To redirect the output on B<stdout> or B<stderr> use the 1 => fileName or 2 =>
-fileName parameters:
+The point at which the wanted output diverges from the output actually got is
+displayed to assist debugging as in:
 
- 1 => (my $o = temporaryFile),
- 2 => (my $o = temporaryFile),
+  Comparing wanted with got failed at line: 4, character: 22
+  Start:
+      k7: 0000 0000 0000 0001
+      k6: 0000 0000 0000 0003
+      k5: 0000 0000 0000 0007
+      k4: 0000 0000 000
+  Want ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+  1 0002
+      k3: 0000 0000 0000 0006
+      k2: 0000 0000 0000 000E
+      k1: 0000 0000
+  Got  ________________________________________________________________________________
+  0 0002
+      k3: 0000 0000 0000 0006
+      k2: 0000 0000 0000 000E
+      k1: 0000 0000
+
+
+=head3 Debug
+
+The debug keyword controls how much output is printed after each assemble and
+run.
+
+  debug => 0
+
+produces no output unless the B<eq> keyword was specified and the actual output
+fails to match the expected output. If such a test fails we L<confess>.
+
+  debug => 1
+
+shows all the output produces and conducts the test specified by the B<eq> is
+present. If the test fails we L<confess>.
+
+  debug => 2
+
+shows all the output produces and conducts the test specified by the B<eq> is
+present. If the test fails we continue rather than calling L<confess>.
 
 =head1 Description
 
@@ -7490,7 +7540,7 @@ B<Example:>
       k7: 0000 0000 0000 0001
       k6: 0000 0000 0000 0003
       k5: 0000 0000 0000 0007
-      k4: 0000 0000 0000 0002
+      k4: 0000 0000 0001 0002
       k3: 0000 0000 0000 0006
       k2: 0000 0000 0000 000E
       k1: 0000 0000 0000 0004
@@ -12277,7 +12327,7 @@ Offset: 0000 0000 0000 0058   Length: 0000 0000 0000 0037
 out: 0000 0000 0000 0044
 END
  }
-
+latest:;
 if (1) {                                                                        #TNasm::X86::Variable::setMask
   my $z = Vq('zero', 0);
   my $o = Vq('one',  1);
