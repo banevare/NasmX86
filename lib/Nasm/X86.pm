@@ -1176,7 +1176,7 @@ sub PrintRegisterInHex($@)                                                      
 
 sub PrintErrRegisterInHex(@)                                                    # Print the named registers as hex strings on stderr
  {my (@r) = @_;                                                                 # Names of the registers to print
-  PrintRegisterInHex $stdout, @r;
+  PrintRegisterInHex $stderr, @r;
  }
 
 sub PrintOutRegisterInHex(@)                                                    # Print the named registers as hex strings on stdout
@@ -1808,11 +1808,11 @@ sub Nasm::X86::Variable::incDec($$)                                             
  {my ($left, $op) = @_;                                                         # Left variable operator, address of operator to perform inc or dec
   my $l = $left ->address;
   if ($left->size == 3)
-   {PushRR r15;
+   {PushR r15;
     Mov r15, $l;
     &$op(r15);
     Mov $l, r15;
-    PopRR r15;
+    PopR r15;
     return $left;
    }
   confess "Need more code";
@@ -1861,25 +1861,26 @@ sub Nasm::X86::Variable::max($$)                                                
 
 sub Nasm::X86::Variable::and($$)                                                # And two variables
  {my ($left, $right) = @_;                                                      # Left variable, right variable
-  PushRR my @save = (r14, r15);
+  PushR my @save = (r14, r15);
   Mov r14, 0;
   $left->setReg(r15);
   Cmp r15, 0;
+  KeepFree r15;
   &IfNe (
     sub
      {$right->setReg(r15);
       Cmp r15, 0;
-      &IfNe(sub {Mov r14, 1});
+      &IfNe(sub {Add r14, 1});
      }
    );
   my $r = Vq("And(".$left->name.", ".$right->name.")", r14);
-  PopRR @save;
+  PopR @save;
   $r
  }
 
 sub Nasm::X86::Variable::or($$)                                                 # Or two variables
  {my ($left, $right) = @_;                                                      # Left variable, right variable
-  PushRR my @save = (r14, r15);
+  PushR my @save = (r14, r15);
   Mov r14, 1;
   $left->setReg(r15);
   Cmp r15, 0;
@@ -1891,7 +1892,7 @@ sub Nasm::X86::Variable::or($$)                                                 
      }
    );
   my $r = Vq("Or(".$left->name.", ".$right->name.")", r14);
-  PopRR @save;
+  PopR @save;
   $r
  }
 
@@ -3596,19 +3597,20 @@ sub BlockString::concatenate($$)                                                
  }
 
 sub BlockString::insertChar($$$)                                                # Insert a character into a block string
- {my ($blockString, $character, $position) = @_;                                # Block string, variable containing character, variable containing position of insertion point numbered from zero
-  @_ == 3 or confess;
+ {my ($blockString, @variables) = @_;                                           # Block string, variables
+  @_ >= 3 or confess;
 
   my $s = Subroutine
    {my ($p) = @_;                                                               # Parameters
     Comment "Insert character into a block string";
-    PushR my @save = (k7, r15, zmm31);
+    PushR my @save = (k7, r15, zmm30, zmm31);
     my $B = $$p{bs};                                                            # The byte string underlying the block string
     my $F = $$p{first};                                                         # The first block in block string
     my $c = $$p{character};                                                     # The character to insert
     my $P = $$p{position};                                                      # The position in the block string at which we want to insert the character
     $blockString->getBlock($B, $F, 31);                                         # The first source block
     my $C = Vq('Current character position', 0);                                # Current character position
+    my $O = Vq('One', 1);                                                       # One
     my $L = $blockString->getBlockLengthInZmm(31);                              # Length of last block
     my $M = Vq('block length', $blockString->length);                           # Maximum length of a block
     my ($second, $last) = $blockString->getNextAndPrevBlockOffsetFromZmm(31);   # Get links from first block
@@ -3620,13 +3622,45 @@ sub BlockString::insertChar($$$)                                                
       If ((($P >= $C) & ($P <= $C + $L)), sub                                   # Position is in current block
        {If ($L < $M, sub                                                        # Current block has space
          {my $O = $P - $C;                                                      # Offset in current block
-          $c->setReg(r15);                                                      # Character to insert
           PushRR zmm31;                                                         # Stack block
-          Mov "[rsp+$O]", r15b;                                                 # Place character
-          $P->setMask($C + $L - $P, k7);                                        # Set mask for reload
+          $O->setReg(r14);                                                      # Offset of character in block
+          $c->setReg(r15);                                                      # Character to insert
+          Mov "[rsp+r14]", r15b;                                                # Place character after skipping length field
+          ($P+1)->setMask($C + $L - $P + 1, k7);                                # Set mask for reload
           Vmovdqu8 "zmm31{k7}", "[rsp-1]";                                      # Reload
-          $blockString->putBlock($B, $F, 31);                                   # Save the modified bloxk
-          PopR zmm31;                                                           # Restore stack
+          $blockString->setBlockLengthInZmm($L + 1, 31);                        # Length of block
+          $blockString->putBlock($B, $current, 31);                             # Save the modified current block
+          PopRR zmm31;                                                          # Restore stack
+          KeepFree r14, r15;
+          Jmp $end;                                                             # Character successfully inserted
+         },
+        sub                                                                     # In the current block but no space so split the block
+         {my $O = $P - $C;                                                      # Offset in current block
+          PushRR zmm31;                                                         # Stack block
+          $O->setReg(r14);                                                      # Offset of character in block
+          $c->setReg(r15);                                                      # Character to insert
+          Mov "[rsp+r14]", r15b;                                                # Place character after skipping length field
+          ($O)->setMask($C + $L - $P + 1, k7);                                  # Set mask for reload
+          Vmovdqu8 "zmm30{k7}", "[rsp-1]";                                      # Reload
+          $blockString->setBlockLengthInZmm($O,      31);                       # New shorter length of original block
+          $blockString->setBlockLengthInZmm($L - $O, 30);                       # Set length of  remainder plus inserted char in the new block
+
+          $blockString->allocBlock($B, my $new = Vq(offset));                   # Allocate new block
+          my ($next, $prev) = $blockString->getNextAndPrevBlockOffsetFromZmm(31); # Linkage from last block
+
+          If ($next == $prev, sub                                               # The existing string has one block, add new as the second block
+           {$blockString->putNextandPrevBlockOffsetIntoZmm(31, $new,  $new);
+            $blockString->putNextandPrevBlockOffsetIntoZmm(30, $next, $prev);
+           },
+          sub                                                                   # The existing string has two or more blocks
+           {$blockString->putNextandPrevBlockOffsetIntoZmm(31, $new,    $prev); # From last block
+            $blockString->putNextandPrevBlockOffsetIntoZmm(30, $next,   $current); # From new block
+           });
+
+          $blockString->putBlock($B, $new, 30);                                 # Save the modified block
+          $blockString->putBlock($B, $current, 31);                             # Save the modified block
+          PopRR zmm31;                                                          # Restore stack
+          KeepFree r14, r15;
           Jmp $end;                                                             # Character successfully inserted
          });
        });
@@ -3637,15 +3671,15 @@ sub BlockString::insertChar($$$)                                                
        });
 
       $current->copy($next);
-      $current->getBlock($B, $current, 31);                                     # Next block
+      $blockString->getBlock($B, $current, 31);                                 # Next block
       $L = $blockString->getBlockLengthInZmm(31);                               # Length of block
+      $C += $L;                                                                 # Current character position at the start of this block
      };
 
     PopR @save;
    } in => {bs => 3, first => 3, character => 3, position => 3};
 
-  $s->call($blockString->bs->bs, first => $blockString->first,
-    character => $character,  position => $position);
+  $s->call($blockString->bs->bs, first => $blockString->first, @variables)
  }
 
 sub BlockString::append($@)                                                     # Append the specified content in memory to the specified block string
@@ -3932,7 +3966,7 @@ my $totalBytesAssembled = 0;                                                    
 sub Assemble(%)                                                                 # Assemble the generated code
  {my (%options) = @_;                                                           # Options
   Exit 0 unless @text > 4 and $text[-4] =~ m(Exit code:);                       # Exit with code 0 if no other exit has been taken
-  my $debug = $options{debug}//0;                                               # 0 - none, 1 - normal, 2 - failures
+  my $debug = $options{debug}//0;                                               # 0 - none (minimal output), 1 - normal (debug output and confess of failure), 2 - failures (debug output and no confess on failure) .
 
   my $k = $options{keep};                                                       # Keep the executable
   my $r = join "\n", map {s/\s+\Z//sr} @rodata;
@@ -4040,7 +4074,7 @@ END
       if (length($s))
        {my $line = 1 + length($s =~ s([^\n])  ()gsr);
         my $char = 1 + length($s =~ s(\A.*\n) ()sr);
-        say STDERR "Failed at line: $line, character: $char";
+        say STDERR "Comparing wanted with got failed at line: $line, character: $char";
         say STDERR "Start:\n$s";
        }
       my $b1 = '+' x 80;
@@ -10153,7 +10187,7 @@ Test::More->builder->output("/dev/null") if $localTest;                         
 
 if ($^O =~ m(bsd|linux)i)                                                       # Supported systems
  {if (confirmHasCommandLineCommand(q(nasm)) and LocateIntelEmulator)            # Network assembler and Intel Software Development emulator
-   {plan tests => 97;
+   {plan tests => 98;
    }
   else
    {plan skip_all => qq(Nasm or Intel 64 emulator not available);
@@ -11681,20 +11715,31 @@ END
  }
 
 #latest:;
-if (0) {
+if (1) {
   my $c = Rb(0..255);
   my $S = CreateByteString;   my $s = $S->CreateBlockString;
 
   $s->append(source=>Vq(source, $c), Vq(size, 3));
   $s->dump;
 
-  $s->insertChar(character=>Vq(source, 0x04), position => Vq(size, 2));
+  $s->insertChar(character=>Vq(source, 0x44), position => Vq(size, 2));
+  $s->dump;
+
+  $s->insertChar(character=>Vq(source, 0x88), position => Vq(size, 2));
   $s->dump;
 
   ok Assemble(debug => 0, eq => <<END);
 Block String Dump
 Offset: 0000 0000 0000 0018   Length: 0000 0000 0000 0003
  zmm31: 0000 0018 0000 0018   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0201 0003
+
+Block String Dump
+Offset: 0000 0000 0000 0018   Length: 0000 0000 0000 0004
+ zmm31: 0000 0018 0000 0018   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0002 4401 0004
+
+Block String Dump
+Offset: 0000 0000 0000 0018   Length: 0000 0000 0000 0005
+ zmm31: 0000 0018 0000 0018   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0244 8801 0005
 
 END
  }
