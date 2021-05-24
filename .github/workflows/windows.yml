@@ -13,7 +13,7 @@ jobs:
       SHELLOPTS: igncr
     defaults:
       run:
-        shell: C:	oolsgwininash.exe --login --norc -eo pipefail '{0}'
+        shell: C:/tools/cygwin/bin/bash.exe --login --norc -eo pipefail '{0}'
 
     steps:
       - uses: actions/checkout@v2
