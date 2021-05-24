@@ -1,0 +1,32 @@
+name: Windows-test
+
+on: [push]
+
+jobs:
+
+  test-windows-platform:
+
+    runs-on: windows-latest
+    env:
+      SHELLOPTS: igncr
+    defaults:
+      run:
+        shell: C:\tools\cygwin\bin\bash.exe --login --norc -eo pipefail '{0}'
+
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          ref:
+            'main'
+
+      - name: Install Cygwin
+        uses: egor-tensin/setup-cygwin@v3
+        with:
+          packages: make perl nasm tree wget cpan md5deep md5deep-dev binutils perl-Digest-SHA1
+
+      - name: Initial cpan configuration
+        run: |
+          cpan
+      - name: Install Data::Table::Text
+        run: |
+           cpan install -T Data::Table::Text
