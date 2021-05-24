@@ -3,10 +3,9 @@
 # Generate X86 assembler code using Perl as a macro pre-processor.
 # Philip R Brenan at appaapps dot com, Appa Apps Ltd Inc., 2021
 #-------------------------------------------------------------------------------
-
 # podDocumentation
 package Nasm::X86;
-our $VERSION = "20210521";
+our $VERSION = "20210524";
 use warnings FATAL => qw(all);
 use strict;
 use Carp qw(confess cluck);
