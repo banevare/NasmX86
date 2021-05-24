@@ -11,7 +11,7 @@ jobs:
       SHELLOPTS: igncr
     defaults:
       run:
-        shell: C:\tools\cygwin\bin\bash.exe --login --norc -eo pipefail '{0}'
+        shell: C:	oolsgwininash.exe --login --norc -eo pipefail '{0}'
 
     steps:
       - uses: actions/checkout@v2
@@ -47,17 +47,18 @@ jobs:
           tar -xf sde.tar.bz2 && sleep 10 && mv sde-external-8.63.0-2021-01-18-win/ sde/ && tree
       - name: Tree
         run: |
-            cd /cygdrive/d/a/NasmX86/NasmX86 
+            cd /cygdrive/d/a/NasmX86/NasmX86
             tree
       - name: Perl
         run: |
-            cd /cygdrive/d/a/NasmX86/NasmX86 
-            perl -V
+            cd /cygdrive/d/a/NasmX86/NasmX86
+            perl -V -e"print qq(Hello World
+);"
       - name: Test
         run: |
-            cd /cygdrive/d/a/NasmX86/NasmX86 
+            cd /cygdrive/d/a/NasmX86/NasmX86
             perl lib/Nasm/X86.pm
-          
+
       - name: Prove
         run: |
           #prove -Ilib
