@@ -49,6 +49,10 @@ jobs:
         run: |
             cd /cygdrive/d/a/NasmX86/NasmX86 
             tree
+      - name: Perl
+        run: |
+            cd /cygdrive/d/a/NasmX86/NasmX86 
+            perl -V
       - name: Test
         run: |
             cd /cygdrive/d/a/NasmX86/NasmX86 
