@@ -1,4 +1,4 @@
-name: Windows-test
+name: Windows test
 
 on: [push]
 
