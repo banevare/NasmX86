@@ -10199,7 +10199,7 @@ else
 
 my $start = time;                                                               # Tests
 
-eval {goto latest} unless caller(0);                                            # Go to latest test if specified
+eval {goto latest} if !caller(0) and -e "/home/phil";                           # Go to latest test if specified
 
 if (1) {                                                                        #TPrintOutStringNL #TPrintErrStringNL #TAssemble
   PrintOutStringNL "Hello World";
@@ -11715,7 +11715,7 @@ END
  }
 
 #latest:;
-if (1) {
+if (1) {                                                                        # Insert char in a one block string
   my $c = Rb(0..255);
   my $S = CreateByteString;   my $s = $S->CreateBlockString;
 
@@ -11744,17 +11744,19 @@ Offset: 0000 0000 0000 0018   Length: 0000 0000 0000 0005
 END
  }
 
-if (1) {
+latest:;
+
+if (1) {                                                                        # Insert char in a multi block string at position 22
   my $c = Rb(0..255);
   my $S = CreateByteString;   my $s = $S->CreateBlockString;
 
   $s->append(source=>Vq(source, $c), Vq(size, 58));
   $s->dump;
 
-  $s->insertChar(character=>Vq(source, 0x44), position => Vq(size, 2));
+  $s->insertChar(Vq(character, 0x44), Vq(position, 22));
   $s->dump;
 
-  $s->insertChar(character=>Vq(source, 0x88), position => Vq(size, 2));
+  $s->insertChar(Vq(character, 0x88), Vq(position, 22));
   $s->dump;
 
   ok Assemble(debug => 0, eq => <<END);
@@ -11765,25 +11767,25 @@ Offset: 0000 0000 0000 0058   Length: 0000 0000 0000 0003
  zmm31: 0000 0018 0000 0018   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 3938 3703
 
 Block String Dump
-Offset: 0000 0000 0000 0018   Length: 0000 0000 0000 0002
- zmm31: 0000 0098 0000 0098   3635 3433 3231 302F   2E2D 2C2B 2A29 2827   2625 2423 2221 201F   1E1D 1C1B 1A19 1817   1615 1413 1211 100F   0E0D 0C0B 0A09 0807   0605 0403 0201 0002
-Offset: 0000 0000 0000 0098   Length: 0000 0000 0000 0036
- zmm31: 0000 0058 0000 0058   5836 3534 3332 3130   2F2E 2D2C 2B2A 2928   2726 2524 2322 2120   1F1E 1D1C 1B1A 1918   1716 1514 1312 1110   0F0E 0D0C 0B0A 0908   0706 0504 0302 4436
+Offset: 0000 0000 0000 0018   Length: 0000 0000 0000 0016
+ zmm31: 0000 0098 0000 0098   3635 3433 3231 302F   2E2D 2C2B 2A29 2827   2625 2423 2221 201F   1E1D 1C1B 1A19 1817   1615 1413 1211 100F   0E0D 0C0B 0A09 0807   0605 0403 0201 0016
+Offset: 0000 0000 0000 0098   Length: 0000 0000 0000 0022
+ zmm31: 0000 0058 0000 0058   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 5836 3534   3332 3130 2F2E 2D2C   2B2A 2928 2726 2524   2322 2120 1F1E 1D1C   1B1A 1918 1716 4422
 Offset: 0000 0000 0000 0058   Length: 0000 0000 0000 0003
  zmm31: 0000 0018 0000 0018   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 3938 3703
 
 Block String Dump
-Offset: 0000 0000 0000 0018   Length: 0000 0000 0000 0003
- zmm31: 0000 0098 0000 0098   3635 3433 3231 302F   2E2D 2C2B 2A29 2827   2625 2423 2221 201F   1E1D 1C1B 1A19 1817   1615 1413 1211 100F   0E0D 0C0B 0A09 0807   0605 0403 8801 0003
-Offset: 0000 0000 0000 0098   Length: 0000 0000 0000 0036
- zmm31: 0000 0058 0000 0058   5836 3534 3332 3130   2F2E 2D2C 2B2A 2928   2726 2524 2322 2120   1F1E 1D1C 1B1A 1918   1716 1514 1312 1110   0F0E 0D0C 0B0A 0908   0706 0504 0302 4436
+Offset: 0000 0000 0000 0018   Length: 0000 0000 0000 0017
+ zmm31: 0000 0098 0000 0098   3635 3433 3231 302F   2E2D 2C2B 2A29 2827   2625 2423 2221 201F   1E1D 1C1B 1A19 1817   8815 1413 1211 100F   0E0D 0C0B 0A09 0807   0605 0403 0201 0017
+Offset: 0000 0000 0000 0098   Length: 0000 0000 0000 0022
+ zmm31: 0000 0058 0000 0058   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 5836 3534   3332 3130 2F2E 2D2C   2B2A 2928 2726 2524   2322 2120 1F1E 1D1C   1B1A 1918 1716 4422
 Offset: 0000 0000 0000 0058   Length: 0000 0000 0000 0003
  zmm31: 0000 0018 0000 0018   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 3938 3703
 
 END
  }
 
-if (1) {
+if (1) {                                                                        #TNasm::X86::Variable::setMask
   my $z = Vq('zero', 0);
   my $o = Vq('one',  1);
   my $t = Vq('two',  2);
