@@ -54,7 +54,7 @@ jobs:
       - name: Perl
         run: |
             cd /cygdrive/d/a/NasmX86/NasmX86
-            perl -V -e"print qq(Hello World\n);"
+            perl -V -e"print qq(Hello World from: $^O\n);"
       - name: Test
         run: |
             cd /cygdrive/d/a/NasmX86/NasmX86
