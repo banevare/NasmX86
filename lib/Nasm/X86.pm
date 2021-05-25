@@ -3985,9 +3985,9 @@ sub Exit(;$)                                                                    
   Syscall;
  }
 
-my $LocateIntelEmulator;                                                        # Location of Intel Software Development Emulator file
+my $LocateIntelEmulator;                                                        # Location of Intel Software Development Emulator
 
-sub LocateIntelEmulatorFile()                                                   #P Locate the Intel Software Development Emulator file
+sub LocateIntelEmulator()                                                       #P Locate the Intel Software Development Emulator
  {my @locations = qw(/var/isde/sde64 sde/sde64 ./sde64 sde/sde.exe);            # Locations at which we might find the emulator
 
   return $LocateIntelEmulator if defined $LocateIntelEmulator;                  # Location has already been discovered
@@ -4001,12 +4001,6 @@ sub LocateIntelEmulatorFile()                                                   
    }
 
   undef                                                                         # Emulator  not found
- }
-
-sub LocateIntelEmulator()                                                       # Locate the Intel Software Development Emulator
- {my $e = LocateIntelEmulatorFile;
-  say STDERR "AAAA ", dump([$^O, $e]);
-  $e
  }
 
 my $assembliesPerformed = 0;                                                    # Number of assemblies performed
@@ -4104,7 +4098,7 @@ END
     say STDERR readFile($o2);
    }
 
-  if (!$k and $debug < 2 and readFile($o2) =~ m(SDE ERROR:)s)                   # Emulator detected an error
+  if (!$k and $debug < 2 and -e $o2 and readFile($o2) =~ m(SDE ERROR:)s)        # Emulator detected an error
    {confess "SDE ERROR\n".readFile($o2);
    }
 
