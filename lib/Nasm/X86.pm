@@ -3893,13 +3893,12 @@ sub Nasm::X86::ByteString::CreateBlockArray($)                                  
     bs     => $byteString,                                                      # Bytes string definition
     width  => $o,                                                               # Width of each element
     first  => Vq('first'),                                                      # Variable addressing first block in block string
-    size   => $p,                                                               # Offset to array size in block
-    depth  => ($p += $o),                                                       # Offset to array depth in block
-    slots  => ($p += $o),                                                       # Data slots
-    slots1 => ($b - $p) / $o,                                                   # Number of slots in first block
+    size   => 0,                                                                # Offset to array size in block
+    depth  => $o,                                                               # Offset to array depth in block
+    slots  => $o * 2,                                                           # Data slots
+    slots1 => $b / $o - 2,                                                      # Number of slots in first block
     slots2 => $b / $o,                                                          # Number of slots in second and subsequent blocks
    );
-
   $s->slots2 == 16 or confess "Number of slots per block not 16";               # Slots per block
 
   $s->allocBlock(bs => $byteString->bs, my $first = Vq(offset));                # Allocate first block
@@ -3945,14 +3944,14 @@ sub Nasm::X86::BlockArray::push($@)                                             
     my $B = $$p{bs};                                                            # Byte string
     my $F = $$p{first};                                                         # First block
     $blockArray->bs->getBlock($B, $F, 31);                                      # Get the first block
-    my $size = getDFromZmmAsVariable(31, 0);                                    # Size of array
+    my $size = getDFromZmmAsVariable(31, $blockArray->size);                                    # Size of array
 
     If ($size < $blockArray->slots1, sub                                        # Room in the first block
      {PushR my @save = (r15);
       $size->setReg(r15);                                                       # Index
       my $s = $blockArray->slots;                                               # Position of slots in block
       $$p{element}->putDIntoZmm(31, "$s+r15*4");                                # Place element
-      ($size+1)   ->putDIntoZmm(31, $blockArray->size);                         # Update size
+      ($size+1)   ->putDIntoZmm(31, 0);                                         # Update size
       $blockArray ->bs->putBlock($B, $F, 31);                                   # Put the first block back into memory
       PopR @save;
      });
@@ -12322,7 +12321,7 @@ if (1) {                                                                        
 END
  }
 
-#latest:;
+latest:;
 
 if (1) {                                                                        #TCreateBlockArray
   my $c = Rb(0..255);
@@ -12336,7 +12335,7 @@ if (1) {                                                                        
 Byte String
   Size: 0000 0000 0000 1000
   Used: 0000 0000 0000 0058
-0010 0000 0000 00005800 0000 0000 00000000 0000 0000 00000000 0000 0000 00000100 0000 0100 00000200 0000 0300 00000400 0000 0500 00000600 0000 0700 0000
+0010 0000 0000 00005800 0000 0000 00000000 0000 0000 00000800 0000 0000 00000000 0000 0100 00000200 0000 0300 00000400 0000 0500 00000600 0000 0700 0000
 0800 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
 END
  }
