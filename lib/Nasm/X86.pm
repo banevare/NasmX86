@@ -3343,7 +3343,7 @@ sub Nasm::X86::ByteString::dump($)                                              
  {my ($byteString) = @_;                                                        # Byte string descriptor
   @_ == 1 or confess;
 
-  PushR rax;                                                                    # Get address of byte string
+  PushR my @save = (rax, r15);                                                  # Get address of byte string
   $byteString->bs->setReg(rax);
 
   Call Macro                                                                    # Bash string
@@ -3365,9 +3365,15 @@ sub Nasm::X86::ByteString::dump($)                                              
     PrintOutNL;
     PopR rax;
     RestoreFirstFour;
+
+    Mov rdi, 64;
+    PrintOutMemoryInHexNL;
+
+    Add rax, 64;
+    PrintOutMemoryInHexNL;
    } name => "Nasm::X86::ByteString::dump";
 
-  PopR rax;
+  PopR @save;
  }
 
 #D1 Block Strings                                                               # Strings made from zmm sized blocks of text
@@ -3885,6 +3891,7 @@ sub Nasm::X86::ByteString::CreateBlockArray($)                                  
   my $p = 0;                                                                    # Position in block
   my $s = genHash(__PACKAGE__."::BlockArray",                                   # Block string definition
     bs     => $byteString,                                                      # Bytes string definition
+    width  => $o,                                                               # Width of each element
     first  => Vq('first'),                                                      # Variable addressing first block in block string
     size   => $p,                                                               # Offset to array size in block
     depth  => ($p += $o),                                                       # Offset to array depth in block
@@ -3913,7 +3920,21 @@ sub Nasm::X86::BlockArray::allocBlock($@)                                       
   $blockArray->bs->allocBlock($blockArray->address, @variables);
  }
 
-=pod
+#sub Nasm::X86::BlockArray::getSizeAndDepth($$)                                  # Get the size and depth of a block array as variables
+# {my ($blockArray, $zmm) = @_;                                                  # Block array descriptor, numbered zmm
+#  @_ == 2 or confess;
+#  PushRR my @save = (r14, r15, "zmm$zmm");
+#  Mov r14, "[rsp]";
+#  Mov r15, r14;
+#  my $w = $blockArray->width * 8;
+#  Shl r14,  $w;  Shr r14, $w;                                                   # Position size in register
+#  Shr r15, r15;                                                                 # Position depth in register
+#  my $size  = Vq(size,  r14);
+#  my $depth = Vq(depth, r15);
+#  PopRR @save;
+#  ($size, $depth)                                                               # Return size and depth as variables
+# }
+
 sub Nasm::X86::BlockArray::push($@)                                             # Push an element onto the array
  {my ($blockArray, @variables) = @_;                                            # Block array descriptor, variables
   @_ >= 2 or confess;
@@ -3921,50 +3942,24 @@ sub Nasm::X86::BlockArray::push($@)                                             
   my $s = Subroutine
    {my ($p) = @_;                                                               # Parameters
 
-    PushR my @save = (r14, r15, zmm31);
-
     my $B = $$p{bs};                                                            # Byte string
     my $F = $$p{first};                                                         # First block
-    $blockString->getBlock($$p{bs}, $$p{first}, 29);                            # Get the first block
-    my ($second, $last) = $blockString->getNextAndPrevBlockOffsetFromZmm(29);   # Get the offsets of the second and last blocks
-    ClearRegisters zmm29;                                                       # Clear first block
-    $blockString->putNextandPrevBlockOffsetIntoZmm(29, $first, $first);         # Initialize block chain
-    $blockString->putBlock($$p{bs}, $first, 29);                                # Put the first block
+    $blockArray->bs->getBlock($B, $F, 31);                                      # Get the first block
+    my $size = getDFromZmmAsVariable(31, 0);                                    # Size of array
 
-    If ($last == $first, sub                                                    # String only has one block
-     {},
-    sub                                                                         # Two or more blocks on the chain
-     {$$p{bs}->setReg(rax);                                                     # Address underlying byte string
-      Lea r14, $blockString->bs->free->addr;                                    # Address of address of free chain
-      Mov r15, "[r14]";                                                         # Address of free chain
-      my $rfc = Vq('next', r15);                                                # Remainder of the free chain
-
-      If ($second == $last, sub                                                 # Two blocks on the chain
-       {ClearRegisters zmm30;                                                   # Second block
-        $blockString->putNextandPrevBlockOffsetIntoZmm(30, $rfc, undef);        # Put second block on head of the list
-        $blockString->putBlock($$p{bs}, $second, 30);                           # Put the second block
-       },
-      sub                                                                       # Three or more blocks on the chain
-       {my $z = Vq(zero, 0);                                                    # A variable with zero in it
-        $blockString->getBlock($$p{bs}, $second, 30);                           # Get the second block
-        $blockString->getBlock($$p{bs}, $last,   31);                           # Get the last block
-        $blockString->putNextandPrevBlockOffsetIntoZmm(30, undef, $z);          # Reset prev pointer in second block
-        $blockString->putNextandPrevBlockOffsetIntoZmm(31, $rfc, undef);        # Reset next pointer in last block to remainder of free chain
-        $blockString->putBlock($$p{bs}, $second, 30);                           # Put the second block
-        $blockString->putBlock($$p{bs}, $last, 31);                             # Put the last block
-       }),
-
-      KeepFree        r15;                                                      # Put the second block at the top of the free chain
-      $second->setReg(r15);
-      Mov  "[r14]",   r15;
+    If ($size < $blockArray->slots1, sub                                        # Room in the first block
+     {PushR my @save = (r15);
+      $size->setReg(r15);                                                       # Index
+      my $s = $blockArray->slots;                                               # Position of slots in block
+      $$p{element}->putDIntoZmm(31, "$s+r15*4");                                # Place element
+      ($size+1)   ->putDIntoZmm(31, $blockArray->size);                         # Update size
+      $blockArray ->bs->putBlock($B, $F, 31);                                   # Put the first block back into memory
+      PopR @save;
      });
-
-    PopR @save;
    }  in => {bs => 3, first => 3, element => 3};
 
-  $s->call($blockString->address, $blockString->first);
+  $s->call($blockArray->address, $blockArray->first, @variables);
  }
-=cut
 
 #D1 Assemble                                                                    # Assemble generated code
 
@@ -10577,7 +10572,7 @@ Test::More->builder->output("/dev/null") if $localTest;                         
 
 if ($^O =~ m(bsd|linux|cygwin)i)                                                # Supported systems
  {if (confirmHasCommandLineCommand(q(nasm)) and LocateIntelEmulator)            # Network assembler and Intel Software Development emulator
-   {plan tests => 104;
+   {plan tests => 105;
    }
   else
    {plan skip_all => qq(Nasm or Intel 64 emulator not available);
@@ -12329,15 +12324,20 @@ END
 
 #latest:;
 
-if (0) {                                                                        #TCreateBlockArray
+if (1) {                                                                        #TCreateBlockArray
   my $c = Rb(0..255);
   my $A = CreateByteString;  my $a = $A->CreateBlockArray;
 
-  $a->push(element => Vq($_, $_)) for 1..257;
+  $a->push(element => Vq($_, $_)) for 1..8;
 
-  $a->dump;
+  $A->dump;
 
   ok Assemble(debug => 0, eq => <<END);
+Byte String
+  Size: 0000 0000 0000 1000
+  Used: 0000 0000 0000 0058
+0010 0000 0000 00005800 0000 0000 00000000 0000 0000 00000000 0000 0000 00000100 0000 0100 00000200 0000 0300 00000400 0000 0500 00000600 0000 0700 0000
+0800 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
 END
  }
 
