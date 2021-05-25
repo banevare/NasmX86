@@ -3988,7 +3988,7 @@ sub Exit(;$)                                                                    
 my $LocateIntelEmulator;                                                        # Location of Intel Software Development Emulator
 
 sub LocateIntelEmulator()                                                       #P Locate the Intel Software Development Emulator
- {my @locations = qw(/var/isde/sde64 sde/sde64 ./sde64 sde/sde.exe);            # Locations at which we might find the emulator
+ {my @locations = qw(/var/isde/sde64 sde/sde64 ./sde64);                        # Locations at which we might find the emulator
 
   return $LocateIntelEmulator if defined $LocateIntelEmulator;                  # Location has already been discovered
 
@@ -10585,7 +10585,6 @@ my $start = time;                                                               
 
 eval {goto latest} if !caller(0) and -e "/home/phil";                           # Go to latest test if specified
 
-latest:;
 if (1) {                                                                        #TPrintOutStringNL #TPrintErrStringNL #TAssemble
   PrintOutStringNL "Hello World";
   PrintErrStringNL "Hello World";
@@ -10594,7 +10593,6 @@ if (1) {                                                                        
 Hello World
 END
  }
-exit;
 
 if (1) {                                                                        #TMov #TComment #TRs #TPrintOutMemory
   Comment "Print a string from memory";
@@ -12323,7 +12321,7 @@ if (1) {                                                                        
 END
  }
 
-latest:;
+#latest:;
 
 if (1) {                                                                        #TCreateBlockArray
   my $c = Rb(0..255);
