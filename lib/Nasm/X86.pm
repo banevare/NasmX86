@@ -3985,9 +3985,9 @@ sub Exit(;$)                                                                    
   Syscall;
  }
 
-my $LocateIntelEmulator;                                                        # Location of Intel Software Development Emulator
+my $LocateIntelEmulator;                                                        # Location of Intel Software Development Emulator file
 
-sub LocateIntelEmulator()                                                       # Assemble the generated code
+sub LocateIntelEmulatorFile()                                                   #P Locate the Intel Software Development Emulator file
  {my @locations = qw(/var/isde/sde64 sde/sde64 ./sde64 sde/sde.exe);            # Locations at which we might find the emulator
 
   return $LocateIntelEmulator if defined $LocateIntelEmulator;                  # Location has already been discovered
@@ -4001,6 +4001,12 @@ sub LocateIntelEmulator()                                                       
    }
 
   undef                                                                         # Emulator  not found
+ }
+
+sub LocateIntelEmulator()                                                       # Locate the Intel Software Development Emulator
+ {my $e = LocateIntelEmulatorFile;
+  say STDERR "AAAA ", dump([$^O, $e]);
+  $e
  }
 
 my $assembliesPerformed = 0;                                                    # Number of assemblies performed
