@@ -3358,8 +3358,6 @@ sub Nasm::X86::ByteString::CreateBlockString($)                                 
 
   my $s = genHash(__PACKAGE__."::BlockString",                                  # Block string definition
     bs      => $byteString,                                                     # Bytes string definition
-    size    => $b,                                                              # Size of a block == size of a zmm
-    offset  => $o,                                                              # Size of an offset is size of eax
     links   => $b - 2 * $o,                                                     # Location of links in bytes in zmm
     next    => $b - 1 * $o,                                                     # Location of next offset in block in bytes
     prev    => $b - 2 * $o,                                                     # Location of prev offset in block in bytes
@@ -3558,7 +3556,7 @@ sub Nasm::X86::BlockString::concatenate($$)                                     
     ForEver                                                                     # Each block in source string
      {my ($start, $end) = @_;                                                   # Start and end labels
 
-      $target->allocBlock(bs=>$tb, my $new = Vq(offset));                       # Allocate new block
+      $target->allocBlock(bs => $tb, my $new = Vq(offset));                     # Allocate new block
       Vmovdqu8 zmm29, zmm31;                                                    # Load new target block from source
       my ($next, $prev) = $target->getNextAndPrevBlockOffsetFromZmm(30);        # Linkage from last target block
 
@@ -3629,7 +3627,7 @@ sub Nasm::X86::BlockString::insertChar($@)                                      
           $blockString->setBlockLengthInZmm($L - $O + 1, 30);                   # Set length of  remainder plus inserted char in the new block
 
           $blockString->allocBlock($B, my $new = Vq(offset));                   # Allocate new block
-          my ($next, $prev) = $blockString->getNextAndPrevBlockOffsetFromZmm(31);# Linkage from last block
+          my ($next, $prev)=$blockString->getNextAndPrevBlockOffsetFromZmm(31); # Linkage from last block
 
           If ($next == $prev, sub                                               # The existing string has one block, add new as the second block
            {$blockString->putNextandPrevBlockOffsetIntoZmm(31, $new,  $new);
@@ -3897,8 +3895,8 @@ sub BlockArray($)                                                               
     Mov "[r15+r14+$pp]", r14d;
     PopR @save;
    }
-  $s                                                                            # Description of block string
 
+  $s                                                                            # Description of block string
  }
 
 #D1 Assemble                                                                    # Assemble generated code
