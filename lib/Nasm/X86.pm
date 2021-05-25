@@ -3061,6 +3061,19 @@ sub Nasm::X86::ByteString::allocate($@)                                         
   $s->call($byteString->bs, @variables);
  }
 
+sub Nasm::X86::ByteString::allocBlock($@)                                       # Allocate a block to hold a zmm register in the specified byte string and return the offset of the block in a variable
+ {my ($byteString, @variables) = @_;                                            # Byte string, variables
+  @_ >= 2 or confess;
+
+  my $s = Subroutine
+   {my ($p) = @_;                                                               # Parameters
+    Comment "Allocate a zmm block in a byte string";
+    $byteString->allocate(Vq(size, RegisterSize(zmm0)), $$p{offset});
+   } out => {offset => 3};
+
+  $s->call(@variables);
+ }
+
 sub Nasm::X86::ByteString::m($@)                                                # Append the content with length rdi addressed by rsi to the byte string addressed by rax
  {my ($byteString, @variables) = @_;                                            # Byte string descriptor, variables
   @_ >= 4 or confess;
@@ -3386,19 +3399,7 @@ sub Nasm::X86::BlockString::address($)                                          
 sub Nasm::X86::BlockString::allocBlock($@)                                      # Allocate a block to hold a zmm register in the specified byte string and return the offset of the block in a variable
  {my ($blockString, @variables) = @_;                                           # Block string descriptor, variables
   @_ >= 3 or confess;
-  my $byteString = $blockString->bs;
-
-  my $s = Subroutine
-   {my ($p) = @_;                                                               # Parameters
-    Comment "Allocate a block in a block string";
-
-    PushR my @regs = (rax, rdi, r14, r15);                                      # Save registers
-    $byteString->allocate(Vq(size, $blockString->size), $$p{offset});
-
-    PopR @regs;
-   } in => {bs => 3}, out => {offset => 3};
-
-  $s->call(@variables);
+  $blockString->bs->allocBlock(@variables);
  }
 
 sub Nasm::X86::BlockString::getBlockLengthInZmm($$)                             # Get the block length of the numbered zmm and return it in a variable
@@ -3868,6 +3869,8 @@ sub Nasm::X86::BlockString::clear($)                                            
  }
 
 #D1 Block Array                                                                 # Array constructed as a tree of blocks in a byte string
+
+#   length of array|depth of tree == nibble to start parsing at|first array element or pointer to first blade
 
 sub BlockArray($)                                                               # Create a block array
  {my ($byteString) = @_;                                                        # Byte string description
