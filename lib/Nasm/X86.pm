@@ -3064,14 +3064,7 @@ sub Nasm::X86::ByteString::allocate($@)                                         
 sub Nasm::X86::ByteString::allocBlock($@)                                       # Allocate a block to hold a zmm register in the specified byte string and return the offset of the block in a variable
  {my ($byteString, @variables) = @_;                                            # Byte string, variables
   @_ >= 2 or confess;
-
-  my $s = Subroutine
-   {my ($p) = @_;                                                               # Parameters
-    Comment "Allocate a zmm block in a byte string";
-    $byteString->allocate(Vq(size, RegisterSize(zmm0)), $$p{offset});
-   } out => {offset => 3};
-
-  $s->call(@variables);
+  $byteString->allocate(Vq(size, RegisterSize(zmm0)), @variables);
  }
 
 sub Nasm::X86::ByteString::m($@)                                                # Append the content with length rdi addressed by rsi to the byte string addressed by rax
@@ -3374,7 +3367,7 @@ sub Nasm::X86::ByteString::CreateBlockString($)                                 
     first   => Vq('first'),                                                     # Variable addressing first block in block string
    );
 
-  $s->allocBlock(bs => $byteString->bs, my $first = Vq(offset));                # Allocate first block
+  $s->allocBlock(my $first = Vq(offset));                                       # Allocate first block
   $s->first->copy($first);                                                      # Save first block
 
   if (1)                                                                        # Initialize circular list
@@ -3398,8 +3391,9 @@ sub Nasm::X86::BlockString::address($)                                          
 
 sub Nasm::X86::BlockString::allocBlock($@)                                      # Allocate a block to hold a zmm register in the specified byte string and return the offset of the block in a variable
  {my ($blockString, @variables) = @_;                                           # Block string descriptor, variables
-  @_ >= 3 or confess;
-  $blockString->bs->allocBlock(@variables);
+  @_ >= 2 or confess;
+
+  $blockString->bs->allocBlock($blockString->address, @variables);
  }
 
 sub Nasm::X86::BlockString::getBlockLengthInZmm($$)                             # Get the block length of the numbered zmm and return it in a variable
@@ -11886,7 +11880,7 @@ q at offset 12 in zmm0: 0302 0100 0000 0302
 END
  }
 
-# latest:;
+#latest:;
 
 if (1) {                                                                        #TCreateBlockString
   my $s = Rb(0..255);
@@ -12017,6 +12011,7 @@ size: 0000 0000 0000 0010
 END
  }
 
+#latest:;
 if (1) {
   my $c = Rb(0..255);
   my $S = CreateByteString;   my $s = $S->CreateBlockString;
@@ -12028,18 +12023,18 @@ if (1) {
 
   ok Assemble(debug => 0, eq => <<END);
 Block String Dump
-Offset: 0000 0000 0000 0058   Length: 0000 0000 0000 0000
- zmm31: 0000 0198 0000 0298   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
-Offset: 0000 0000 0000 0198   Length: 0000 0000 0000 0037
- zmm31: 0000 01D8 0000 0058   3635 3433 3231 302F   2E2D 2C2B 2A29 2827   2625 2423 2221 201F   1E1D 1C1B 1A19 1817   1615 1413 1211 100F   0E0D 0C0B 0A09 0807   0605 0403 0201 0037
-Offset: 0000 0000 0000 01D8   Length: 0000 0000 0000 0037
- zmm31: 0000 0218 0000 0198   6D6C 6B6A 6968 6766   6564 6362 6160 5F5E   5D5C 5B5A 5958 5756   5554 5352 5150 4F4E   4D4C 4B4A 4948 4746   4544 4342 4140 3F3E   3D3C 3B3A 3938 3737
-Offset: 0000 0000 0000 0218   Length: 0000 0000 0000 0037
- zmm31: 0000 0258 0000 01D8   A4A3 A2A1 A09F 9E9D   9C9B 9A99 9897 9695   9493 9291 908F 8E8D   8C8B 8A89 8887 8685   8483 8281 807F 7E7D   7C7B 7A79 7877 7675   7473 7271 706F 6E37
-Offset: 0000 0000 0000 0258   Length: 0000 0000 0000 0037
- zmm31: 0000 0298 0000 0218   DBDA D9D8 D7D6 D5D4   D3D2 D1D0 CFCE CDCC   CBCA C9C8 C7C6 C5C4   C3C2 C1C0 BFBE BDBC   BBBA B9B8 B7B6 B5B4   B3B2 B1B0 AFAE ADAC   ABAA A9A8 A7A6 A537
-Offset: 0000 0000 0000 0298   Length: 0000 0000 0000 0024
- zmm31: 0000 0058 0000 0258   0000 0000 0000 0000   0000 0000 0000 0000   0000 00FF FEFD FCFB   FAF9 F8F7 F6F5 F4F3   F2F1 F0EF EEED ECEB   EAE9 E8E7 E6E5 E4E3   E2E1 E0DF DEDD DC24
+Offset: 0000 0000 0000 0018   Length: 0000 0000 0000 0000
+ zmm31: 0000 0058 0000 0158   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+Offset: 0000 0000 0000 0058   Length: 0000 0000 0000 0037
+ zmm31: 0000 0098 0000 0018   3635 3433 3231 302F   2E2D 2C2B 2A29 2827   2625 2423 2221 201F   1E1D 1C1B 1A19 1817   1615 1413 1211 100F   0E0D 0C0B 0A09 0807   0605 0403 0201 0037
+Offset: 0000 0000 0000 0098   Length: 0000 0000 0000 0037
+ zmm31: 0000 00D8 0000 0058   6D6C 6B6A 6968 6766   6564 6362 6160 5F5E   5D5C 5B5A 5958 5756   5554 5352 5150 4F4E   4D4C 4B4A 4948 4746   4544 4342 4140 3F3E   3D3C 3B3A 3938 3737
+Offset: 0000 0000 0000 00D8   Length: 0000 0000 0000 0037
+ zmm31: 0000 0118 0000 0098   A4A3 A2A1 A09F 9E9D   9C9B 9A99 9897 9695   9493 9291 908F 8E8D   8C8B 8A89 8887 8685   8483 8281 807F 7E7D   7C7B 7A79 7877 7675   7473 7271 706F 6E37
+Offset: 0000 0000 0000 0118   Length: 0000 0000 0000 0037
+ zmm31: 0000 0158 0000 00D8   DBDA D9D8 D7D6 D5D4   D3D2 D1D0 CFCE CDCC   CBCA C9C8 C7C6 C5C4   C3C2 C1C0 BFBE BDBC   BBBA B9B8 B7B6 B5B4   B3B2 B1B0 AFAE ADAC   ABAA A9A8 A7A6 A537
+Offset: 0000 0000 0000 0158   Length: 0000 0000 0000 0024
+ zmm31: 0000 0018 0000 0118   0000 0000 0000 0000   0000 0000 0000 0000   0000 00FF FEFD FCFB   FAF9 F8F7 F6F5 F4F3   F2F1 F0EF EEED ECEB   EAE9 E8E7 E6E5 E4E3   E2E1 E0DF DEDD DC24
 
 END
  }
