@@ -10585,6 +10585,7 @@ my $start = time;                                                               
 
 eval {goto latest} if !caller(0) and -e "/home/phil";                           # Go to latest test if specified
 
+latest:;
 if (1) {                                                                        #TPrintOutStringNL #TPrintErrStringNL #TAssemble
   PrintOutStringNL "Hello World";
   PrintErrStringNL "Hello World";
@@ -10593,6 +10594,7 @@ if (1) {                                                                        
 Hello World
 END
  }
+exit;
 
 if (1) {                                                                        #TMov #TComment #TRs #TPrintOutMemory
   Comment "Print a string from memory";
