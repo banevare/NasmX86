@@ -7,14 +7,12 @@ on:
 
 jobs:
   test-windows-platform:
-
     runs-on: windows-latest
     env:
       SHELLOPTS: igncr
     defaults:
       run:
         shell: C:/tools/cygwin/bin/bash.exe --login --norc -eo pipefail '{0}'
-
     steps:
     - uses: actions/checkout@v2
 
@@ -54,17 +52,11 @@ jobs:
 
     - name: Tree
       run: |
-          cd /cygdrive/d/a/NasmX86/NasmX86
           tree
 
-    - name: Perl
-      run: |
-          cd /cygdrive/d/a/NasmX86/NasmX86
-          perl -V -e"print qq(Hello World from: $^O\n);"
     - name: Test
       run: |
-          cd /cygdrive/d/a/NasmX86/NasmX86
-          perl lib/Nasm/X86.pm
+          perl /cygdrive/d/a/NasmX86/NasmX86/lib/Nasm/X86.pm
 
     - name: Prove
       run: |
