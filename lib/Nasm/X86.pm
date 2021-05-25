@@ -255,7 +255,7 @@ sub PopRR(@);                                                                   
 sub PrintOutMemory;                                                             # Print the memory addressed by rax for a length of rdi
 sub PrintOutRegisterInHex(@);                                                   # Print any register as a hex string
 sub PrintOutStringNL(@);                                                        # Print a constant string to stdout followed by new line
-sub PrintString($@);                                                             # Print a constant string to the specified channel
+sub PrintString($@);                                                            # Print a constant string to the specified channel
 sub PushR(@);                                                                   # Push a list of registers onto the stack
 sub PushRR(@);                                                                  # Push a list of registers onto the stack without tracking
 sub Syscall();                                                                  # System call in linux 64 format
@@ -1265,7 +1265,7 @@ my $ScopeCurrent;                                                               
 sub Scope(*)                                                                    # Create and stack a new scope and continue with it as the current scope
  {my ($name) = @_;                                                              # Scope name
   my $N = $ScopeCurrent ? $ScopeCurrent->number+1 : 0;                          # Number of this scope
-  my $s = genHash('Scope',                                                      # Scope definition
+  my $s = genHash(__PACKAGE__."::Scope",                                        # Scope definition
     name   => $name,                                                            # Name of scope - usually the sub routine name
     number => $N,                                                               # Number of this scope
     depth  => undef,                                                            # Lexical depth of scope
@@ -1290,7 +1290,7 @@ sub ScopeEnd                                                                    
    }
  }
 
-sub Scope::contains($;$)                                                        # Check that the named parent scope contains the specified child scope. If no child scope is supplied we use the current scope to check that the parent scope is currently visible
+sub Nasm::X86::Scope::contains($;$)                                             # Check that the named parent scope contains the specified child scope. If no child scope is supplied we use the current scope to check that the parent scope is currently visible
  {my ($parent, $child) = @_;                                                    # Parent scope, child scope,
   for(my $c = $child//$ScopeCurrent; $c; $c = $c->parent)                       # Ascend scope tree looking for parent
    {return 1 if $c == $parent;                                                  # Found parent so child or current scope can see the parent
@@ -1298,7 +1298,7 @@ sub Scope::contains($;$)                                                        
   undef                                                                         # Parent not found so child is not contained by the parent scope
  }
 
-sub Scope::currentlyVisible($)                                                  # Check that the named parent scope is currently visible
+sub Nasm::X86::Scope::currentlyVisible($)                                       # Check that the named parent scope is currently visible
  {my ($scope) = @_;                                                             # Scope to check for visibility
   $scope->contains                                                              # Check that the named parent scope is currently visible
  }
@@ -2309,16 +2309,16 @@ sub PeekR($)                                                                    
 
 sub Structure()                                                                 # Create a structure addressed by a register
  {@_ == 0 or confess;
-  my $local = genHash("Structure",
+  my $local = genHash(__PACKAGE__."::Structure",
     size      => 0,
     variables => [],
    );
  }
 
-sub Structure::field($$;$)                                                      # Add a field of the specified length with an optional comment
+sub Nasm::X86::Structure::field($$;$)                                           # Add a field of the specified length with an optional comment
  {my ($structure, $length, $comment) = @_;                                      # Structure data descriptor, length of data, optional comment
   @_ >= 2 or confess;
-  my $variable = genHash("StructureField",
+  my $variable = genHash(__PACKAGE__."::StructureField",
     structure  => $structure,
     loc        => $structure->size,
     size       => $length,
@@ -2329,7 +2329,7 @@ sub Structure::field($$;$)                                                      
   $variable
  }
 
-sub StructureField::addr($;$)                                                   # Address a field in a structure by either the default register or the named register
+sub Nasm::X86::StructureField::addr($;$)                                        # Address a field in a structure by either the default register or the named register
  {my ($field, $register) = @_;                                                  # Field, optional address register else rax
   @_ <= 2 or confess;
   my $loc = $field->loc;                                                        # Offset of field in structure
@@ -2353,13 +2353,13 @@ sub All8Structure($)                                                            
 
 sub LocalData()                                                                 # Map local data
  {@_ == 0 or confess;
-  my $local = genHash("LocalData",
+  my $local = genHash(__PACKAGE__."::LocalData",
     size      => 0,
     variables => [],
    );
  }
 
-sub LocalData::start($)                                                         # Start a local data area on the stack
+sub Nasm::X86::LocalData::start($)                                              # Start a local data area on the stack
  {my ($local) = @_;                                                             # Local data descriptor
   @_ == 1 or confess;
   my $size = $local->size;                                                      # Size of local data
@@ -2368,17 +2368,17 @@ sub LocalData::start($)                                                         
   Sub rsp, $size;
  }
 
-sub LocalData::free($)                                                          # Free a local data area on the stack
+sub Nasm::X86::LocalData::free($)                                               # Free a local data area on the stack
  {my ($local) = @_;                                                             # Local data descriptor
   @_ == 1 or confess;
   Mov rsp,rbp;
   Pop rbp;
  }
 
-sub LocalData::variable($$;$)                                                   # Add a local variable
+sub Nasm::X86::LocalData::variable($$;$)                                        # Add a local variable
  {my ($local, $length, $comment) = @_;                                          # Local data descriptor, length of data, optional comment
   @_ >= 2 or confess;
-  my $variable = genHash("LocalVariable",
+  my $variable = genHash(__PACKAGE__."::LocalVariable",
     loc        => $local->size,
     size       => $length,
     comment    => $comment
@@ -2387,7 +2387,7 @@ sub LocalData::variable($$;$)                                                   
   $variable
  }
 
-sub LocalVariable::stack($)                                                     # Address a local variable on the stack
+sub Nasm::X86::LocalVariable::stack($)                                          # Address a local variable on the stack
  {my ($variable) = @_;                                                          # Variable
   @_ == 1 or confess;
   my $l = $variable->loc;                                                       # Location of variable on stack
@@ -2396,11 +2396,11 @@ sub LocalVariable::stack($)                                                     
   "${s}[rbp-$l]"                                                                # Address variable - offsets are negative per Tino
  }
 
-sub LocalData::allocate8($@)                                                    # Add some 8 byte local variables and return an array of variable definitions
+sub Nasm::X86::LocalData::allocate8($@)                                         # Add some 8 byte local variables and return an array of variable definitions
  {my ($local, @comments) = @_;                                                  # Local data descriptor, optional comment
   my @v;
   for my $c(@comments)
-   {push @v, LocalData::variable($local, 8, $c);
+   {push @v, Nasm::X86::LocalData::variable($local, 8, $c);
    }
   wantarray ? @v : $v[-1];                                                      # Avoid returning the number of elements accidently
  }
@@ -2925,7 +2925,7 @@ sub CreateByteString(%)                                                         
 
   $s->call(my $bs = Vq(bs));                                                    # Variable that holds the reference to the byte string
 
-  genHash("ByteString",                                                         # Definition of byte string
+  genHash(__PACKAGE__."::ByteString",                                           # Definition of byte string
     structure => $string,                                                       # Structure details
     size      => $size,                                                         # Size field details
     used      => $used,                                                         # Used field details
@@ -2935,7 +2935,7 @@ sub CreateByteString(%)                                                         
    );
  }
 
-sub ByteString::length($@)                                                      # Get the length of a byte string
+sub Nasm::X86::ByteString::length($@)                                           # Get the length of a byte string
  {my ($byteString, @variables) = @_;                                            # Byte string descriptor, variables
   @_ >= 2 or confess;
   my $size = $byteString->size->addr;
@@ -2955,7 +2955,7 @@ sub ByteString::length($@)                                                      
   $s->call($byteString->bs, @variables);
  }
 
-sub ByteString::updateSpace($@)                                                 #P Make sure that the byte string addressed by rax has enough space to accommodate content of length rdi
+sub Nasm::X86::ByteString::updateSpace($@)                                      #P Make sure that the byte string addressed by rax has enough space to accommodate content of length rdi
  {my ($byteString, @variables) = @_;                                            # Byte string descriptor, variables
 
   @_ >= 3 or confess;
@@ -2994,7 +2994,7 @@ sub ByteString::updateSpace($@)                                                 
   $s->call(@variables);
  } # updateSpace
 
-sub ByteString::makeReadOnly($)                                                 # Make a byte string read only
+sub Nasm::X86::ByteString::makeReadOnly($)                                      # Make a byte string read only
  {my ($byteString) = @_;                                                        # Byte string descriptor
   @_ == 1 or confess;
 
@@ -3016,7 +3016,7 @@ sub ByteString::makeReadOnly($)                                                 
   $s->call(bs => $byteString->bs);
  }
 
-sub ByteString::makeWriteable($)                                                # Make a byte string writable
+sub Nasm::X86::ByteString::makeWriteable($)                                     # Make a byte string writable
  {my ($byteString) = @_;                                                        # Byte string descriptor
   @_ == 1 or confess;
 
@@ -3037,7 +3037,7 @@ sub ByteString::makeWriteable($)                                                
   $s->call(bs => $byteString->bs);
  }
 
-sub ByteString::allocate($@)                                                    # Allocate the amount of space indicated in rdi in the byte string addressed by rax and return the offset of the allocation in the arena in rdi
+sub Nasm::X86::ByteString::allocate($@)                                         # Allocate the amount of space indicated in rdi in the byte string addressed by rax and return the offset of the allocation in the arena in rdi
  {my ($byteString, @variables) = @_;                                            # Byte string descriptor, variables
   @_ >= 3 or confess;
 
@@ -3061,7 +3061,7 @@ sub ByteString::allocate($@)                                                    
   $s->call($byteString->bs, @variables);
  }
 
-sub ByteString::m($@)                                                           # Append the content with length rdi addressed by rsi to the byte string addressed by rax
+sub Nasm::X86::ByteString::m($@)                                                # Append the content with length rdi addressed by rsi to the byte string addressed by rax
  {my ($byteString, @variables) = @_;                                            # Byte string descriptor, variables
   @_ >= 4 or confess;
   my $used = $byteString->used->addr;
@@ -3091,7 +3091,7 @@ sub ByteString::m($@)                                                           
   $s->call(@variables);
  }
 
-sub ByteString::q($$)                                                           # Append a constant string to the byte string
+sub Nasm::X86::ByteString::q($$)                                                # Append a constant string to the byte string
  {my ($byteString, $string) = @_;                                               # Byte string descriptor, string
   @_ == 2 or confess;
 
@@ -3103,7 +3103,7 @@ sub ByteString::q($$)                                                           
   $byteString->m($bs, $ad, $sz);
  }
 
-sub ByteString::ql($$)                                                          # Append a quoted string containing new line characters to the byte string addressed by rax
+sub Nasm::X86::ByteString::ql($$)                                               # Append a quoted string containing new line characters to the byte string addressed by rax
  {my ($byteString, $const) = @_;                                                # Byte string, constant
   @_ == 2 or confess;
   for my $l(split /\s*\n/, $const)
@@ -3112,26 +3112,26 @@ sub ByteString::ql($$)                                                          
    }
  }
 
-sub ByteString::char($$)                                                        # Append a character expressed as a decimal number to the byte string addressed by rax
+sub Nasm::X86::ByteString::char($$)                                             # Append a character expressed as a decimal number to the byte string addressed by rax
  {my ($byteString, $char) = @_;                                                 # Byte string descriptor, number of character to be appended
   @_ == 2 or confess;
   my $s = Rb(ord($char));
-  $byteString->m($byteString->bs, Vq(address, $s), Vq(size, 1));          # Move data
+  $byteString->m($byteString->bs, Vq(address, $s), Vq(size, 1));                # Move data
  }
 
-sub ByteString::nl($)                                                           # Append a new line to the byte string addressed by rax
+sub Nasm::X86::ByteString::nl($)                                                # Append a new line to the byte string addressed by rax
  {my ($byteString) = @_;                                                        # Byte string descriptor
   @_ == 1 or confess;
   $byteString->char("\n");
  }
 
-sub ByteString::z($)                                                            # Append a trailing zero to the byte string addressed by rax
+sub Nasm::X86::ByteString::z($)                                                 # Append a trailing zero to the byte string addressed by rax
  {my ($byteString) = @_;                                                        # Byte string descriptor
   @_ == 1 or confess;
   $byteString->char("\0");
  }
 
-sub ByteString::rdiInHex                                                        # Add the content of register rdi in hexadecimal in big endian notation to a byte string
+sub Nasm::X86::ByteString::rdiInHex                                             # Add the content of register rdi in hexadecimal in big endian notation to a byte string
  {my ($byteString) = @_;                                                        # Byte string descriptor
   @_ == 1 or confess;
 
@@ -3160,7 +3160,7 @@ sub ByteString::rdiInHex                                                        
   RestoreFirstSeven;
  }
 
-sub ByteString::append($@)                                                      # Append one byte string to another
+sub Nasm::X86::ByteString::append($@)                                           # Append one byte string to another
  {my ($byteString, @variables) = @_;                                            # Byte string descriptor, variables
   @_ >= 3 or confess;
 
@@ -3179,7 +3179,7 @@ sub ByteString::append($@)                                                      
   $s->call(target=>$byteString->bs, @variables);
  }
 
-sub ByteString::clear($)                                                        # Clear the byte string addressed by rax
+sub Nasm::X86::ByteString::clear($)                                             # Clear the byte string addressed by rax
  {my ($byteString) = @_;                                                        # Byte string descriptor
   @_ == 1 or confess;
 
@@ -3196,7 +3196,7 @@ sub ByteString::clear($)                                                        
   $s->call(bs => $byteString->bs);
  }
 
-sub ByteString::write($@)                                                       # Write the content in a byte string addressed by rax to a temporary file and replace the byte string content with the name of the  temporary file
+sub Nasm::X86::ByteString::write($@)                                            # Write the content in a byte string addressed by rax to a temporary file and replace the byte string content with the name of the  temporary file
  {my ($byteString, @variables) = @_;                                            # Byte string descriptor, variables
   @_ >= 2 or confess;
 
@@ -3229,7 +3229,7 @@ sub ByteString::write($@)                                                       
   $s->call(bs => $byteString->bs, @variables);
  }
 
-sub ByteString::read($@)                                                        # Read the named file (terminated with a zero byte) and place it into the named byte string.
+sub Nasm::X86::ByteString::read($@)                                             # Read the named file (terminated with a zero byte) and place it into the named byte string.
  {my ($byteString, @variables) = @_;                                            # Byte string descriptor, variables
   @_ >= 2 or confess;
 
@@ -3244,7 +3244,7 @@ sub ByteString::read($@)                                                        
   $s->call(bs => $byteString->bs, @variables);
  }
 
-sub ByteString::out($)                                                          # Print the specified byte string addressed by rax on sysout
+sub Nasm::X86::ByteString::out($)                                               # Print the specified byte string addressed by rax on sysout
  {my ($byteString) = @_;                                                        # Byte string descriptor
   @_ == 1 or confess;
 
@@ -3309,7 +3309,7 @@ sub unlinkFile(@)                                                               
   $s->call(@variables);
  }
 
-sub ByteString::dump($)                                                         # Dump details of a byte string
+sub Nasm::X86::ByteString::dump($)                                              # Dump details of a byte string
  {my ($byteString) = @_;                                                        # Byte string descriptor
   @_ == 1 or confess;
 
@@ -3335,14 +3335,14 @@ sub ByteString::dump($)                                                         
     PrintOutNL;
     PopR rax;
     RestoreFirstFour;
-   } name => "ByteString::dump";
+   } name => "Nasm::X86::ByteString::dump";
 
   PopR rax;
  }
 
 #D1 Block Strings                                                               # Strings made from zmm sized blocks of text
 
-sub ByteString::CreateBlockString($)                                            # Create a string from a doubly link linked list of 64 byte blocks linked via 4 byte offsets in the byte string addressed by rax and return its descriptor
+sub Nasm::X86::ByteString::CreateBlockString($)                                 # Create a string from a doubly link linked list of 64 byte blocks linked via 4 byte offsets in the byte string addressed by rax and return its descriptor
  {my ($byteString) = @_;                                                        # Byte string description
   @_ == 1 or confess;
   my $b = RegisterSize zmm0;                                                    # Size of a block == size of a zmm register
@@ -3350,7 +3350,7 @@ sub ByteString::CreateBlockString($)                                            
 
   Comment "Allocate a new block string in a byte string";
 
-  my $s = genHash(q(BlockString),                                               # Block string definition
+  my $s = genHash(__PACKAGE__."::BlockString",                                  # Block string definition
     bs      => $byteString,                                                     # Bytes string definition
     size    => $b,                                                              # Size of a block == size of a zmm
     offset  => $o,                                                              # Size of an offset is size of eax
@@ -3377,13 +3377,13 @@ sub ByteString::CreateBlockString($)                                            
   $s                                                                            # Description of block string
  }
 
-sub BlockString::address($)                                                     # Address of a block string
+sub Nasm::X86::BlockString::address($)                                          # Address of a block string
  {my ($blockString) = @_;                                                       # Block string descriptor
   @_ == 1 or confess;
   $blockString->bs->bs;
  }
 
-sub BlockString::allocBlock($@)                                                 # Allocate a block to hold a zmm register in the specified byte string and return the offset of the block in a variable
+sub Nasm::X86::BlockString::allocBlock($@)                                      # Allocate a block to hold a zmm register in the specified byte string and return the offset of the block in a variable
  {my ($blockString, @variables) = @_;                                           # Block string descriptor, variables
   @_ >= 3 or confess;
   my $byteString = $blockString->bs;
@@ -3401,13 +3401,13 @@ sub BlockString::allocBlock($@)                                                 
   $s->call(@variables);
  }
 
-sub BlockString::getBlockLengthInZmm($$)                                        # Get the block length of the numbered zmm and return it in a variable
+sub Nasm::X86::BlockString::getBlockLengthInZmm($$)                             # Get the block length of the numbered zmm and return it in a variable
  {my ($blockString, $zmm) = @_;                                                 # Block string descriptor, number of zmm register
   @_ == 2 or confess;
   getBFromZmmAsVariable $zmm, 0;                                                # Block length
  }
 
-sub BlockString::setBlockLengthInZmm($$$)                                       # Set the block length of the numbered zmm to the specified length
+sub Nasm::X86::BlockString::setBlockLengthInZmm($$$)                            # Set the block length of the numbered zmm to the specified length
  {my ($blockString, $length, $zmm) = @_;                                        # Block string descriptor, length as a variable, number of zmm register
   @_ == 3 or confess;
   PushR my @save = (r15);                                                       # Save work register
@@ -3416,7 +3416,7 @@ sub BlockString::setBlockLengthInZmm($$$)                                       
   PopR @save;                                                                   # Length of block is a byte
  }
 
-sub BlockString::getBlock($$$$)                                                 # Get the block with the specified offset in the specified block string and return it in the numbered zmm
+sub Nasm::X86::BlockString::getBlock($$$$)                                      # Get the block with the specified offset in the specified block string and return it in the numbered zmm
  {my ($blockString, $bsa, $block, $zmm) = @_;                                   # Block string descriptor, byte string variable, offset of the block as a variable, number of zmm register to contain block
   @_ == 4 or confess;
   PushR my @save = (r14, r15);                                                  # Result register
@@ -3428,12 +3428,12 @@ sub BlockString::getBlock($$$$)                                                 
   PopR @save;                                                                   # Restore registers
  }
 
-sub BlockString::putBlock($$$$)                                                 # Write the numbered zmm to the block at the specified offset in the specified byte string
+sub Nasm::X86::BlockString::putBlock($$$$)                                      # Write the numbered zmm to the block at the specified offset in the specified byte string
  {my ($blockString, $bsa, $block, $zmm) = @_;                                   # Block string descriptor, byte string variable, block in byte string, content variable
   @_ >= 4 or confess;
   PushR my @save = (r14, r15);                                                  # Work registers
   defined($bsa) or confess;
-  eval {$bsa->setReg(r15)};                                                            # Byte string address
+  eval {$bsa->setReg(r15)};                                                     # Byte string address
   $@ and confess $@;
   defined($block) or confess;
   $block->setReg(r14);                                                          # Offset of block in byte string
@@ -3441,7 +3441,7 @@ sub BlockString::putBlock($$$$)                                                 
   PopR @save;                                                                   # Restore registers
  }
 
-sub BlockString::getNextAndPrevBlockOffsetFromZmm($$)                           # Get the offsets of the next and previous blocks as variables from the specified zmm
+sub Nasm::X86::BlockString::getNextAndPrevBlockOffsetFromZmm($$)                # Get the offsets of the next and previous blocks as variables from the specified zmm
  {my ($blockString, $zmm) = @_;                                                 # Block string descriptor, zmm containing block
   @_ == 2 or confess;
   my $l = $blockString->links;                                                  # Location of links
@@ -3455,7 +3455,7 @@ sub BlockString::getNextAndPrevBlockOffsetFromZmm($$)                           
   @r;                                                                           # Return (next, prev)
  }
 
-sub BlockString::putNextandPrevBlockOffsetIntoZmm($$$$)                         # Save next and prev offsets into a zmm representing a block
+sub Nasm::X86::BlockString::putNextandPrevBlockOffsetIntoZmm($$$$)              # Save next and prev offsets into a zmm representing a block
  {my ($blockString, $zmm, $next, $prev) = @_;                                   # Block string descriptor, zmm containing block, next offset as a variable, prev offset as a variable
   @_ == 4 or confess;
   if ($next and $prev)                                                          # Set both previous and next
@@ -3484,7 +3484,7 @@ sub BlockString::putNextandPrevBlockOffsetIntoZmm($$$$)                         
    }
  }
 
-sub BlockString::dump($)                                                        # Dump a block string  to sysout
+sub Nasm::X86::BlockString::dump($)                                             # Dump a block string  to sysout
  {my ($blockString) = @_;                                                       # Block string descriptor
   @_ == 1 or confess;
 
@@ -3518,7 +3518,7 @@ sub BlockString::dump($)                                                        
   $s->call($blockString->address, $blockString->first);
  }
 
-sub BlockString::len($$)                                                        # Find the length of a block string
+sub Nasm::X86::BlockString::len($$)                                             # Find the length of a block string
  {my ($blockString, $size) = @_;                                                # Block string descriptor, size variable
   @_ == 2 or confess;
 
@@ -3544,7 +3544,7 @@ sub BlockString::len($$)                                                        
   $s->call($blockString->address, $blockString->first, $size);
  }
 
-sub BlockString::concatenate($$)                                                # Concatenate two block strings by appending a copy of the source to the target block string.
+sub Nasm::X86::BlockString::concatenate($$)                                     # Concatenate two block strings by appending a copy of the source to the target block string.
  {my ($target, $source) = @_;                                                   # Target block string, source block string
   @_ == 2 or confess;
 
@@ -3558,7 +3558,6 @@ sub BlockString::concatenate($$)                                                
     my $tf = $$p{tFirst};                                                       # The first block in the target
     $source->getBlock($sb, $sf, 31);                                            # The first source block
     $target->getBlock($tb, $tf, 30);                                            # The first target block
-#   my ($ss, $sl) = $source->getNextAndPrevBlockOffsetFromZmm(31);              # Source second and last
     my ($ts, $tl) = $target->getNextAndPrevBlockOffsetFromZmm(30);              # Target second and last
     $target->getBlock($tb, $tl, 30);                                            # The last target block to which we will append
 
@@ -3595,7 +3594,7 @@ sub BlockString::concatenate($$)                                                
            tBs => $target->address, tFirst => $target->first);
  }
 
-sub BlockString::insertChar($@)                                                 # Insert a character into a block string
+sub Nasm::X86::BlockString::insertChar($@)                                      # Insert a character into a block string
  {my ($blockString, @variables) = @_;                                           # Block string, variables
   @_ >= 3 or confess;
 
@@ -3677,7 +3676,7 @@ sub BlockString::insertChar($@)                                                 
   $s->call($blockString->address, first => $blockString->first, @variables)
  }
 
-sub BlockString::deleteChar($@)                                                 # Delete a character in a block string
+sub Nasm::X86::BlockString::deleteChar($@)                                      # Delete a character in a block string
  {my ($blockString, @variables) = @_;                                           # Block string, variables
   @_ >= 2 or confess;
 
@@ -3720,7 +3719,7 @@ sub BlockString::deleteChar($@)                                                 
   $s->call($blockString->address, first => $blockString->first, @variables)
  }
 
-sub BlockString::getCharacter($@)                                               # Get a character from a block string
+sub Nasm::X86::BlockString::getCharacter($@)                                    # Get a character from a block string
  {my ($blockString, @variables) = @_;                                           # Block string, variables
   @_ >= 3 or confess;
 
@@ -3761,7 +3760,7 @@ sub BlockString::getCharacter($@)                                               
   $s->call($blockString->address, first => $blockString->first, @variables)
  }
 
-sub BlockString::append($@)                                                     # Append the specified content in memory to the specified block string
+sub Nasm::X86::BlockString::append($@)                                          # Append the specified content in memory to the specified block string
  {my ($blockString, @variables) = @_;                                           # Block string descriptor, variables
   @_ >= 3 or confess;
 
@@ -3818,7 +3817,7 @@ sub BlockString::append($@)                                                     
   $s->call($blockString->address, $blockString->first, @variables);
  }
 
-sub BlockString::clear($)                                                       # Clear the block by freeing all but the first block
+sub Nasm::X86::BlockString::clear($)                                            # Clear the block by freeing all but the first block
  {my ($blockString) = @_;                                                       # Block string descriptor
   @_ == 1 or confess;
 
@@ -3868,127 +3867,42 @@ sub BlockString::clear($)                                                       
   $s->call($blockString->address, $blockString->first);
  }
 
-#D1 Tree                                                                        # Tree operations
+#D1 Block Array                                                                 # Array constructed as a tree of blocks in a byte string
 
-sub GenTree($$)                                                                 # Generate a set of routines to manage a tree held in a byte string with key and data fields of specified widths.  Allocate a byte string to contain the tree, return its address in xmm0=(0, tree).
- {my ($keyLength, $dataLength) = @_;                                            # Fixed key length in bytes, fixed data length in bytes
-  @_ == 2 or confess;
-  $keyLength  =~ m(\A2|4|8\Z) or confess;
-  $dataLength =~ m(\A2|4|8\Z) or confess;
+sub BlockArray($)                                                               # Create a block array
+ {my ($byteString) = @_;                                                        # Byte string description
+  @_ == 1 or confess;
+  my $b = RegisterSize zmm0;                                                    # Size of a block == size of a zmm register
+  my $o = RegisterSize eax;                                                     # Size of a double word
 
-  my ($structure, $up, $left, $right) = All8Structure 3;                        # Tree structure addressed by a register
-  my $height = $structure->field(4, "Height of the sub tree");
-  my $count  = $structure->field(4, "Number of entries active in this node");
+  Comment "Allocate a new block array in a byte string";
 
-  my $s = $structure->size;                                                     # Structure size
-  my $k = RegisterSize(zmm0) / $keyLength;                                      # Number of keys
-
-  PushR my @regs = (rax, rdi);                                                  # Allocate a byte string to contain the tree and return its address in xmm0
-  my $byteString = CreateByteString;                                            # Create a byte string to contain the tree
-  ClearRegisters rdi;                                                           # Zero
-  Push rdi;                                                                     # Format stack for xmm0
-  Push rax;
-  PopRR xmm0;                                                                   # Put result in xmm0
-  PopRR @regs;                                                                  # Restore stack
-
-  my $K = $k * $keyLength;
-  my $D = $k * $dataLength;
-
-  my $arenaTree = genHash("ArenaTree",                                          # A node in an arena tree
-    byteString  => $byteString,
-    dump        => undef,
-    node        => undef,
-    disLeft     => undef,
-    disRight    => undef,
-    insertLeft  => undef,
-    insertRight => undef,
-    isRoot      => undef,
-    find        => undef,
-    put         => undef,
-    get         => undef,
-    up          => $up,
-    left        => $left,
-    right       => $right,
-    structure   => $structure,
-    sizeBase    => $s,
-    sizeKeys    => $K,
-    sizeData    => $D,
-    size        => $s + $K + $D,
+  my $s = genHash(__PACKAGE__."::BlockArray",                                   # Block string definition
+    bs      => $byteString,                                                     # Bytes string definition
+    size    => $b,                                                              # Size of a block == size of a zmm
+    offset  => $o,                                                              # Size of an offset is size of eax
+    links   => $b - 2 * $o,                                                     # Location of links in bytes in zmm
+    next    => $b - 1 * $o,                                                     # Location of next offset in block in bytes
+    prev    => $b - 2 * $o,                                                     # Location of prev offset in block in bytes
+    length  => $b - 2 * $o - 1,                                                 # Maximum length in a block
+    first   => Vq('first'),                                                     # Variable addressing first block in block string
    );
 
-  $arenaTree->node = sub                                                        # Create a new node in the arena tree pointed to by xmm0=(*,tree) and return the offset of the new node in xmm0=(offset, tree)
-   {@_ == 0 or confess;
-    SaveFirstFour;
-    PushR xmm0;                                                                 # Parse xmm0
-    Mov rax, "[rsp]";                                                           # We want rax while keeping xmm0 on the stack
-    Mov rdi, $arenaTree->size;                                                  # Size of allocation
-    $arenaTree->byteString->allocate;
-    Mov "[rsp+8]", rdi;                                                         # Push into position on stack
-    PopR xmm0;                                                                  # Receive xmm0 with the node offset in the high quad
-    RestoreFirstFour;
-   };
+  $s->allocBlock(bs => $byteString->bs, my $first = Vq(offset));                # Allocate first block
+  $s->first->copy($first);                                                      # Save first block
 
-  $arenaTree->dump = sub                                                        # Dump a node
-   {my ($title) = @_;                                                           # Title
-    @_ <= 1 or confess;
-    my $s = $arenaTree->structure;
-    PrintOutStringNL($title) if $title;
-    PrintOutString("ArenaTreeNode at: ");
-
-    SaveFirstFour;
-    PushR xmm0;                                                                 # Parse xmm0
-    PopR  rdi, rax;                                                             # Address node
-
-    PushR my @regs = (rax, rdi);                                                # Print offset
-    Mov rax, rdi;
-    PrintOutRaxInHex;
-    PopR  @regs;
-    PrintOutNL;
-
-    for my $f(qw(up left right))                                                # Fields to print
-     {PrintOutString sprintf("%5s: ", $f);                                      # Field name
-      PushR my @regs = (rax, rdi);
-      Mov rax, $arenaTree->{$f}->addr("rax+rdi");
-      PrintOutRaxInHex;
-      PopR @regs;
-      PrintOutNL;
-     }
-    RestoreFirstFour;
-   };
-
-  $arenaTree->isRoot = sub                                                      # Clear the zero flag if the tree node addressed by xmm0 is a root node else set it.  This makes If takes the then clause if we are on a root  node.
-   {@_ == 0 or confess;
-    SaveFirstFour;
-    PushR xmm0;                                                                 # Parse xmm0
-    PopR rax, rdi;
-    Mov rsi, $arenaTree->up->addr("rax+rdi");                                   # Load up field
-    Test rsi, rsi;                                                              # Test up field
-    IfNz {SetZF} sub {ClearZF};
-    RestoreFirstFour;
-   };
-
-  for my $d(qw(left right))                                                     # Insert left or right
-   {my $s = <<'END';
-    $arenaTree->insertXXXX = sub                                                # Insert the node addressed by xmm1 left under the node addressed by xmm0
-     {@_ == 0 or confess;
-      SaveFirstFour;                                                            # A check that we are in the same tree would be a good idea here.
-      PushRR xmm0;                                                              # Parse xmm0
-      PopRR rdi, rax;
-      PushRR xmm1;                                                              # Parse xmm0
-      PopRR rsi, rdx;
-      Mov $arenaTree->xxxx->addr("rax+rdi"), rsi;                               # XXXX
-      Mov $arenaTree->up  ->addr("rdx+rsi"), rdi;                               # Up
-      RestoreFirstFour;
-     };
-END
-    my $u = ucfirst $d;
-       $s =~ s(XXXX) ($u)gs;
-       $s =~ s(xxxx) ($d)gs;
-    eval $s;
-    confess $@ if $@;
+  if (1)                                                                        # Initialize circular list
+   {my $nn = $s->next;
+    my $pp = $s->prev;
+    PushR my @save = (r14, r15);
+    $byteString->bs->setReg(r15);
+    $first         ->setReg(r14);
+    Mov "[r15+r14+$nn]", r14d;
+    Mov "[r15+r14+$pp]", r14d;
+    PopR @save;
    }
+  $s                                                                            # Description of block string
 
-  $arenaTree                                                                    # Description of this tree
  }
 
 #D1 Assemble                                                                    # Assemble generated code
@@ -5554,7 +5468,7 @@ B<Example:>
     ok Assemble =~ m(rax:.*08.*rdi:.*9.*rax:.*1.*rdi:.*2.*)s;
 
 
-=head3 ReorderXmmRegisters(@registers) = map {"xmm$_"} @_;)
+=head3 ReorderXmmRegisters(@registers) = map {"xmm$_"} _;)
 
 Map the list of xmm registers provided to 0-31
 
@@ -11969,7 +11883,7 @@ q at offset 12 in zmm0: 0302 0100 0000 0302
 END
  }
 
-latest:;
+# latest:;
 
 if (1) {                                                                        #TCreateBlockString
   my $s = Rb(0..255);
@@ -12320,7 +12234,9 @@ Offset: 0000 0000 0000 0058   Length: 0000 0000 0000 0037
 out: 0000 0000 0000 0044
 END
  }
-latest:;
+
+#latest:;
+
 if (1) {                                                                        #TNasm::X86::Variable::setMask
   my $z = Vq('zero', 0);
   my $o = Vq('one',  1);
