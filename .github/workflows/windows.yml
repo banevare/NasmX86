@@ -18,18 +18,6 @@ jobs:
     steps:
     - uses: actions/checkout@v2
 
-    - name: Download Intel Sde
-      run: |
-        curl https://software.intel.com/content/dam/develop/external/us/en/documents/downloads/sde-external-8.63.0-2021-01-18-lin.tar.bz2 > sde.tar.bz2
-        tree
-
-    - name: Install Intel Sde
-      run: |
-        tar -xf sde.tar.bz2
-        mv sde-external-8.63.0-2021-01-18-lin/ sde/
-        tree
-        sde/sde.exe -version
-
     - name: Install Cygwin
       uses:
         egor-tensin/setup-cygwin@v3
