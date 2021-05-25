@@ -3367,8 +3367,7 @@ sub Nasm::X86::ByteString::CreateBlockString($)                                 
     first   => Vq('first'),                                                     # Variable addressing first block in block string
    );
 
-  $s->allocBlock(my $first = Vq(offset));                                       # Allocate first block
-  $s->first->copy($first);                                                      # Save first block
+  $s->allocBlock(my $first = Vq(offset));  $s->first->copy($first);             # Allocate first block and save it in a variable named first not offset
 
   if (1)                                                                        # Initialize circular list
    {my $nn = $s->next;
