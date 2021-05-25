@@ -2054,21 +2054,25 @@ sub Nasm::X86::Variable::putQIntoXmm($$$)                                       
 
 sub Nasm::X86::Variable::putBIntoZmm($$$)                                       # Place the value of the content variable at the byte in the numbered zmm register
  {my ($content, $zmm, $offset) = @_;                                            # Variable with content, numbered zmm, offset in bytes
+  $zmm =~ m(\A(0|1|2|3|4|5|6|7|8|9|10|11|12|13|14|15|16|17|18|19|20|21|22|23|24|25|26|27|28|29|30|31)\Z) or confess;
   $content->putBwdqIntoMm('b', "zmm$zmm", $offset)                              # Place the value of the content variable at the word in the numbered zmm register
  }
 
 sub Nasm::X86::Variable::putWIntoZmm($$$)                                       # Place the value of the content variable at the word in the numbered zmm register
  {my ($content, $zmm, $offset) = @_;                                            # Variable with content, numbered zmm, offset in bytes
+  $zmm =~ m(\A(0|1|2|3|4|5|6|7|8|9|10|11|12|13|14|15|16|17|18|19|20|21|22|23|24|25|26|27|28|29|30|31)\Z) or confess;
   $content->putBwdqIntoMm('w', "zmm$zmm", $offset)                              # Place the value of the content variable at the byte|word|double word|quad word in the numbered zmm register
  }
 
 sub Nasm::X86::Variable::putDIntoZmm($$$)                                       # Place the value of the content variable at the double word in the numbered zmm register
  {my ($content, $zmm, $offset) = @_;                                            # Variable with content, numbered zmm, offset in bytes
+  $zmm =~ m(\A(0|1|2|3|4|5|6|7|8|9|10|11|12|13|14|15|16|17|18|19|20|21|22|23|24|25|26|27|28|29|30|31)\Z) or confess;
   $content->putBwdqIntoMm('d', "zmm$zmm", $offset)                              # Place the value of the content variable at the byte|word|double word|quad word in the numbered zmm register
  }
 
 sub Nasm::X86::Variable::putQIntoZmm($$$)                                       # Place the value of the content variable at the quad word in the numbered zmm register
  {my ($content, $zmm, $offset) = @_;                                            # Variable with content, numbered zmm, offset in bytes
+  $zmm =~ m(\A(0|1|2|3|4|5|6|7|8|9|10|11|12|13|14|15|16|17|18|19|20|21|22|23|24|25|26|27|28|29|30|31)\Z) or confess;
   $content->putBwdqIntoMm('q', "zmm$zmm", $offset)                              # Place the value of the content variable at the byte|word|double word|quad word in the numbered zmm register
  }
 
@@ -3061,6 +3065,11 @@ sub Nasm::X86::ByteString::allocate($@)                                         
   $s->call($byteString->bs, @variables);
  }
 
+sub Nasm::X86::ByteString::blockSize($)                                         # Size of a block
+ {my ($byteString) = @_;                                                        # Byte string
+  RegisterSize(zmm0)
+ }
+
 sub Nasm::X86::ByteString::allocBlock($@)                                       # Allocate a block to hold a zmm register in the specified byte string and return the offset of the block in a variable
  {my ($byteString, @variables) = @_;                                            # Byte string, variables
   @_ >= 2 or confess;
@@ -3367,9 +3376,15 @@ sub Nasm::X86::ByteString::dump($)                                              
     RestoreFirstFour;
 
     Mov rdi, 64;
+    PrintOutString("0000: ");
     PrintOutMemoryInHexNL;
 
     Add rax, 64;
+    PrintOutString("0040: ");
+    PrintOutMemoryInHexNL;
+
+    Add rax, 64;
+    PrintOutString("0080: ");
     PrintOutMemoryInHexNL;
    } name => "Nasm::X86::ByteString::dump";
 
@@ -3878,8 +3893,6 @@ sub Nasm::X86::BlockString::clear($)                                            
 
 #D1 Block Array                                                                 # Array constructed as a tree of blocks in a byte string
 
-#   length of array|depth of tree == nibble to start parsing at|first array element or pointer to first blade
-
 sub Nasm::X86::ByteString::CreateBlockArray($)                                  # Create a block array in a byte string
  {my ($byteString) = @_;                                                        # Byte string description
   @_ == 1 or confess;
@@ -3893,10 +3906,7 @@ sub Nasm::X86::ByteString::CreateBlockArray($)                                  
     bs     => $byteString,                                                      # Bytes string definition
     width  => $o,                                                               # Width of each element
     first  => Vq('first'),                                                      # Variable addressing first block in block string
-    size   => 0,                                                                # Offset to array size in block
-    depth  => $o,                                                               # Offset to array depth in block
-    slots  => $o * 2,                                                           # Data slots
-    slots1 => $b / $o - 2,                                                      # Number of slots in first block
+    slots1 => $b / $o - 1,                                                      # Number of slots in first block
     slots2 => $b / $o,                                                          # Number of slots in second and subsequent blocks
    );
   $s->slots2 == 16 or confess "Number of slots per block not 16";               # Slots per block
@@ -3919,42 +3929,62 @@ sub Nasm::X86::BlockArray::allocBlock($@)                                       
   $blockArray->bs->allocBlock($blockArray->address, @variables);
  }
 
-#sub Nasm::X86::BlockArray::getSizeAndDepth($$)                                  # Get the size and depth of a block array as variables
-# {my ($blockArray, $zmm) = @_;                                                  # Block array descriptor, numbered zmm
-#  @_ == 2 or confess;
-#  PushRR my @save = (r14, r15, "zmm$zmm");
-#  Mov r14, "[rsp]";
-#  Mov r15, r14;
-#  my $w = $blockArray->width * 8;
-#  Shl r14,  $w;  Shr r14, $w;                                                   # Position size in register
-#  Shr r15, r15;                                                                 # Position depth in register
-#  my $size  = Vq(size,  r14);
-#  my $depth = Vq(depth, r15);
-#  PopRR @save;
-#  ($size, $depth)                                                               # Return size and depth as variables
-# }
-
 sub Nasm::X86::BlockArray::push($@)                                             # Push an element onto the array
  {my ($blockArray, @variables) = @_;                                            # Block array descriptor, variables
   @_ >= 2 or confess;
+  my $W = RegisterSize zmm0;                                                    # The size of a block
+  my $w = $blockArray->width;                                                   # The size of an entry in a block
 
   my $s = Subroutine
    {my ($p) = @_;                                                               # Parameters
+    my $success = Label;                                                        # Short circuit if ladders by jumping directly to the end after a successful push
 
     my $B = $$p{bs};                                                            # Byte string
     my $F = $$p{first};                                                         # First block
+
+    PushR my @save = (zmm31);
     $blockArray->bs->getBlock($B, $F, 31);                                      # Get the first block
-    my $size = getDFromZmmAsVariable(31, $blockArray->size);                                    # Size of array
+    my $size = getDFromZmmAsVariable(31, 0);                                    # Size of array
 
     If ($size < $blockArray->slots1, sub                                        # Room in the first block
      {PushR my @save = (r15);
       $size->setReg(r15);                                                       # Index
-      my $s = $blockArray->slots;                                               # Position of slots in block
+      my $s = $blockArray->width;                                               # Position of slots in block
       $$p{element}->putDIntoZmm(31, "$s+r15*4");                                # Place element
       ($size+1)   ->putDIntoZmm(31, 0);                                         # Update size
       $blockArray ->bs->putBlock($B, $F, 31);                                   # Put the first block back into memory
       PopR @save;
+      Jmp $success;                                                             # Element successfully inserted in first block
      });
+
+    If ($size == $blockArray->slots1, sub                                       # Migrate the first block to the second block
+     {PushR my @save = (rax, k7, zmm30);
+      Mov rax, -2;                                                              # Load compression mask
+      Kmovq k7, rax;                                                            # Set  compression mask
+      Vpcompressq "zmm30{k7}{z}", zmm31;                                        # Compress first block into second block
+      ClearRegisters zmm31;                                                     # Clear first block
+      ($size+1)->putDIntoZmm(31, 0);                                            # Save new size in first block
+      $blockArray->bs->allocBlock(my $new = Vq(offset));                        # Allocate new block
+      $new ->putDIntoZmm(31, $w);                                               # Save offset of second block in first block
+      $$p{element}->putDIntoZmm(30, $W - 2 * $w);                               # Place new element
+      $blockArray->bs->putBlock($B, $new, 30);                                  # Put the second block back into memory
+      $blockArray->bs->putBlock($B, $F,   31);                                  # Put the first block back into memory
+      PopR @save;
+      Jmp $success;                                                             # Element successfully inserted in second block
+     });
+
+    If ($size == $blockArray->slots1 + 1, sub                                   # Load the last element of the second block
+     {PushR my @save = (zmm30);
+      my $S = getDFromZmmAsVariable(31, $w);                                    # Offset of second block
+      $blockArray->bs->getBlock($B, $S, 30);                                    # Get the second block
+      $$p{element}->putDIntoZmm(30, $W - $w);                                   # Place new element last in second  block
+      $blockArray->bs->putBlock($B, $S, 30);                                    # Put the second block back into memory
+      PopR @save;
+      Jmp $success;                                                             # Element successfully inserted in second block
+     });
+
+    SetLabel $success;
+    PopR @save;
    }  in => {bs => 3, first => 3, element => 3};
 
   $s->call($blockArray->address, $blockArray->first, @variables);
@@ -4092,6 +4122,8 @@ END
   $assembliesPerformed++;
   say STDERR qq($assembliesPerformed: $cmd);
   my $R    = qx($cmd);
+
+  confess "Failed $?" if $debug < 2 and $?;                                     # Check that the assembly succeeded
 
   if (!$k and $debug)
    {say STDERR readFile($o1);
@@ -12327,16 +12359,22 @@ if (1) {                                                                        
   my $c = Rb(0..255);
   my $A = CreateByteString;  my $a = $A->CreateBlockArray;
 
-  $a->push(element => Vq($_, $_)) for 1..8;
+  $a->push(element => Vq($_, $_)) for 1..15;  $A->dump;
+  $a->push(element => Vq($_, $_)) for 0xFF;   $A->dump;
 
-  $A->dump;
-
-  ok Assemble(debug => 0, eq => <<END);
+  ok Assemble(debug => 1, eq => <<END);
 Byte String
   Size: 0000 0000 0000 1000
   Used: 0000 0000 0000 0058
-0010 0000 0000 00005800 0000 0000 00000000 0000 0000 00000800 0000 0000 00000000 0000 0100 00000200 0000 0300 00000400 0000 0500 00000600 0000 0700 0000
-0800 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+0000: 0010 0000 0000 00005800 0000 0000 00000000 0000 0000 00000F00 0000 0000 00000100 0000 0200 00000300 0000 0400 00000500 0000 0600 00000700 0000 0800 0000
+0040: 0900 0000 0A00 00000B00 0000 0C00 00000D00 0000 0E00 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+0080: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+Byte String
+  Size: 0000 0000 0000 1000
+  Used: 0000 0000 0000 0098
+0000: 0010 0000 0000 00009800 0000 0000 00000000 0000 0000 00001000 0000 5800 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+0040: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000100 0000 0200 00000300 0000 0400 00000500 0000 0600 00000700 0000 0800 00000900 0000 0A00 0000
+0080: 0B00 0000 0C00 00000D00 0000 0E00 0000FF00 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
 END
  }
 
