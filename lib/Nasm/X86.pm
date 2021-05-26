@@ -290,7 +290,8 @@ sub Rs(@)                                                                       
  {my (@d) = @_;                                                                 # Data to be laid out
   my $d = join '', @_;
      $d =~ s(') (\')gs;
-  return $_ if $_ = $rodatas{$d};                                               # Data already exists so return it
+  my $D = $rodatas{$d};
+  return $D if defined $D;                                                      # Data already exists so return it
   my $l = Label;
   $rodatas{$d} = $l;                                                            # Record label
   push @rodata, <<END;                                                          # Define bytes
@@ -10698,7 +10699,7 @@ Test::More->builder->output("/dev/null") if $localTest;                         
 
 if ($^O =~ m(bsd|linux|cygwin)i)                                                # Supported systems
  {if (confirmHasCommandLineCommand(q(nasm)) and LocateIntelEmulator)            # Network assembler and Intel Software Development emulator
-   {plan tests => 105;
+   {plan tests => 106;
    }
   else
    {plan skip_all => qq(Nasm or Intel 64 emulator not available);
@@ -12499,7 +12500,7 @@ Byte String
 END
  }
 
-latest:;
+#latest:;
 
 if (1) {                                                                        #TCreateBlockArray  #TBlockArray::push
   my $c = Rb(0..255);
