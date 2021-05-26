@@ -21,6 +21,9 @@ my @rodata;                                                                     
 my @data;                                                                       # Data
 my @bss;                                                                        # Block started by symbol
 my @text;                                                                       # Code
+my @extern;                                                                     # External symbols imports for linking with C libraries
+my @link;                                                                       # Specify libraries which to link against in the final assembly stage
+my $interpreter = q(-I /usr/lib64/ld-linux-x86-64.so.2);                        # The ld command needs an interpreter if we are linking with C.
 
 my $stdin  = 0;                                                                 # File descriptor for standard input
 my $stdout = 1;                                                                 # File descriptor for standard output
@@ -4092,8 +4095,35 @@ sub Nasm::X86::BlockArray::get($@)                                              
 
 #D1 Assemble                                                                    # Assemble generated code
 
+sub CallC($@)                                                                   # Call a C subroutine
+ {my ($sub, @parameters) = @_;                                                  # Name of the sub to call, parameters
+  my @order = (rdi, rsi, rdx, rcx, r8, r9);
+  PushR @order;
+  for my $i(keys @parameters)
+   {Mov $order[$i], $parameters[$i];
+   }
+  if (ref($sub))                                                                # ?
+   {Call $sub->start;
+   }
+  else                                                                          # Call named subroutine
+   {Call $sub;
+   }
+  PopR @order;
+ }
+
+sub Extern(@)                                                                   # Name external references
+ {my (@externalReferences) = @_;                                                # External references
+  push @extern, @_;
+ }
+
+sub Link(@)                                                                     # Libraries to link with
+ {my (@libraries) = @_;                                                         # External references
+  push @link, @_;
+ }
+
 sub Start()                                                                     # Initialize the assembler
- {@bss = @data = @rodata = %rodata = %rodatas = %subroutines = @text = %Keep = %KeepStack = ();
+ {@bss = @data = @rodata = %rodata = %rodatas = %subroutines = @text = %Keep = %KeepStack = @extern = @link = ();
+
   $Labels = 0;
   $ScopeCurrent = undef;
  }
@@ -4142,10 +4172,12 @@ sub Assemble(%)                                                                 
   my $debug = $options{debug}//0;                                               # 0 - none (minimal output), 1 - normal (debug output and confess of failure), 2 - failures (debug output and no confess on failure) .
 
   my $k = $options{keep};                                                       # Keep the executable
-  my $r = join "\n", map {s/\s+\Z//sr} @rodata;
-  my $d = join "\n", map {s/\s+\Z//sr} @data;
-  my $b = join "\n", map {s/\s+\Z//sr} @bss;
-  my $t = join "\n", map {s/\s+\Z//sr} @text;
+  my $r = join "\n", map {s/\s+\Z//sr}   @rodata;
+  my $d = join "\n", map {s/\s+\Z//sr}   @data;
+  my $b = join "\n", map {s/\s+\Z//sr}   @bss;
+  my $t = join "\n", map {s/\s+\Z//sr}   @text;
+  my $x = join "\n", map {qq(extern $_)} @extern;
+  my $L = join " ",  map {qq(-l$_)}      @link;
   my $a = <<END;
 section .rodata
   $r
@@ -4154,6 +4186,7 @@ section .data
 section .bss
   $b
 section .text
+$x
 global _start, main
   _start:
   main:
@@ -4208,7 +4241,8 @@ END
     $emulator = 0;
    }
 
-  my $cmd  = qq(nasm -f elf64 -g -l $l -o $o $c && ld -o $e $o && chmod 744 $e);# Assemble
+  my $I = @link ? $interpreter : '';                                            # Interpreter only required if calling C
+  my $cmd  = qq(nasm -f elf64 -g -l $l -o $o $c && ld $I $L -o $e $o && chmod 744 $e);# Assemble
   my $o1 = 'zzzOut.txt';
   my $o2 = 'zzzErr.txt';
   my $out  = $k ? '' : "1>$o1";
@@ -10708,7 +10742,7 @@ Test::More->builder->output("/dev/null") if $localTest;                         
 
 if ($^O =~ m(bsd|linux|cygwin)i)                                                # Supported systems
  {if (confirmHasCommandLineCommand(q(nasm)) and LocateIntelEmulator)            # Network assembler and Intel Software Development emulator
-   {plan tests => 107;
+   {plan tests => 108;
    }
   else
    {plan skip_all => qq(Nasm or Intel 64 emulator not available);
@@ -12597,6 +12631,21 @@ if (1) {                                                                        
   ok Assemble(debug => 2, eq => <<END);
 Index out of bounds, Index: 0000 0000 0000 000F  Size: 0000 0000 0000 000F
 END
+ }
+
+#latest:;
+
+if (1) {                                                                        #TExtern #TLink
+  my $format_string   = Rs 'Printf call: %s';
+  my $printf_argument = Rs 'Success';
+
+  Extern qw(printf exit);
+  Link 'c';
+
+  Push 0xa1;
+  CallC 'printf', $format_string, $printf_argument;
+  CallC 'exit', 0;
+  ok Assemble =~ m(Printf call: Success);
  }
 
 if (0) {
