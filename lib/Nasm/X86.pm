@@ -296,9 +296,14 @@ sub Rs(@)                                                                       
   my $D = $rodatas{$d};
   return $D if defined $D;                                                      # Data already exists so return it
   my $l = Label;
-  $rodatas{$d} = $l;                                                            # Record label
+  my @e;
+  for my $e(split //, $d)
+   {if ($e =~ m(\A(\n|\t)\Z)) {push @e, ord($e)} else {push @e, qq('$e')}
+   }
+  my $e = join ', ', @e;
+  $rodatas{$e} = $l;                                                            # Record label
   push @rodata, <<END;                                                          # Define bytes
-  $l: db  '$d',0;
+  $l: db  $e, 0;
 END
   $l                                                                            # Return label
  }
@@ -10778,10 +10783,13 @@ eval {goto latest} if !caller(0) and -e "/home/phil";                           
 
 if (1) {                                                                        #TPrintOutStringNL #TPrintErrStringNL #TAssemble
   PrintOutStringNL "Hello World";
+  PrintOutStringNL "Hello\nWorld";
   PrintErrStringNL "Hello World";
 
-  is_deeply Assemble,  <<END;
+  ok Assemble(debug => 0, eq => <<END);
 Hello World
+Hello
+World
 END
  }
 
@@ -12653,10 +12661,10 @@ Index out of bounds, Index: 0000 0000 0000 000F  Size: 0000 0000 0000 000F
 END
  }
 
-latest:;
+#latest:;
 
 if (1) {                                                                        #TExtern #TLink #TCallC
-  my $format_string   = Rs 'Printf call: %s';
+  my $format_string   = Rs "Printf call: %s\n";
   my $printf_argument = Rs 'Success';
 
   Extern qw(printf exit);
