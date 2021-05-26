@@ -294,7 +294,8 @@ sub Rs(@)                                                                       
  {my (@d) = @_;                                                                 # Data to be laid out
   my $d = join '', @_;
      $d =~ s(') (\')gs;
-  return $_ if $_ = $rodatas{$d};                                               # Data already exists so return it
+  my $D = $rodatas{$d};
+  return $D if defined $D;                                                      # Data already exists so return it
   my $l = Label;
   $rodatas{$d} = $l;                                                            # Record label
   push @rodata, <<END;                                                          # Define bytes
@@ -4129,6 +4130,10 @@ sub Nasm::X86::BlockArray::get($@)                                              
        });
      });
 
+    PrintErrString "Index out of bounds, ";                                     # Array index out of bounds
+    $I->err("Index: "); PrintErrString "  "; $size->errNL("Size: ");
+    Exit(1);
+
     SetLabel $success;
     PopR @save;
    }  in => {bs => 3, first => 3, index => 3}, out => {element => 3};
@@ -4274,7 +4279,11 @@ END
   say STDERR qq($assembliesPerformed: $cmd);
   my $R    = qx($cmd);
 
-  if (!$k and $debug)
+  if (!$k and $debug == 0)                                                      # Print errors if not debugging
+   {say STDERR readFile($o2);
+   }
+
+  if (!$k and $debug == 1)                                                      # Print files if soft debugging
    {say STDERR readFile($o1);
     say STDERR readFile($o2);
    }
@@ -4291,11 +4300,10 @@ END
   $totalBytesAssembled += fileSize $c;                                          # Estimate the size of the output program
   Start;                                                                        # Clear work areas for next assembly
 
-  if ($k)                                                                       # Executable wanted
-   {return $exec;
-   }
+  return $exec if $k;                                                           # Executable wanted
+
   if (defined(my $e = $options{eq}))                                            # Diff against expected
-   {my $g = readFile($o1);
+   {my $g = readFile($debug < 2 ? $o1 : $o2);
     if ($g ne $e)
      {my ($s, $G, $E) = stringsAreNotEqual($g, $e);
       if (length($s))
@@ -4365,7 +4373,9 @@ Nasm::X86 - Generate X86 assembler code using Perl as a macro pre-processor.
 Write and execute x64 instructions using Perl as a macro assembler as shown in
 the following examples.
 
-=head2 Avx512 instructions
+=head2 Examples
+
+=head3 Avx512 instructions
 
 Use avx512 instructions to do 64 comparisons in parallel:
 
@@ -4402,7 +4412,7 @@ Use avx512 instructions to do 64 comparisons in parallel:
    rax: 0000 0000 0000 002F
 END
 
-=head2 Dynamic string held in an arena
+=head3 Dynamic string held in an arena
 
 Create a dynamic byte string, add some content to it, write the byte string to
 stdout:
@@ -4422,7 +4432,7 @@ stdout:
 aaAAaabbBBbb
 END
 
-=head2 Process management
+=head3 Process management
 
 Start a child process and wait for it, printing out the process identifiers of
 each process involved:
@@ -4459,7 +4469,7 @@ each process involved:
   #   rbx: 0000 0000 0003 0C63   #5 Wait for child pid result
   #   rcx: 0000 0000 0003 0C60   #6 Pid of parent
 
-=head2 Read a file
+=head3 Read a file
 
 Read this file:
 
@@ -10754,7 +10764,7 @@ Test::More->builder->output("/dev/null") if $localTest;                         
 
 if ($^O =~ m(bsd|linux|cygwin)i)                                                # Supported systems
  {if (confirmHasCommandLineCommand(q(nasm)) and LocateIntelEmulator)            # Network assembler and Intel Software Development emulator
-   {plan tests => 105;
+   {plan tests => 107;
    }
   else
    {plan skip_all => qq(Nasm or Intel 64 emulator not available);
@@ -12555,7 +12565,7 @@ Byte String
 END
  }
 
-latest:;
+#latest:;
 
 if (1) {                                                                        #TCreateBlockArray  #TBlockArray::push
   my $c = Rb(0..255);
@@ -12618,6 +12628,30 @@ index: 0000 0000 0000 0020  element: 0000 0000 0000 0021
 index: 0000 0000 0000 0021  element: 0000 0000 0000 0022
 index: 0000 0000 0000 0022  element: 0000 0000 0000 0023
 index: 0000 0000 0000 0023  element: 0000 0000 0000 0024
+END
+ }
+
+#latest:;
+
+if (1) {                                                                        #TCreateBlockArray  #TBlockArray::push
+  my $c = Rb(0..255);
+  my $A = CreateByteString;  my $a = $A->CreateBlockArray;
+
+  my sub put
+   {my ($e) = @_;
+    $a->push(element => Vq($e, $e));
+   };
+
+  my sub get
+   {my ($i) = @_;                                                              # Parameters
+    $a->get(my $v = Vq('index', $i), my $e = Vq(element));
+    $v->out; PrintOutString "  "; $e->outNL;
+   };
+
+  put($_) for 1..15;  get(15);
+
+  ok Assemble(debug => 2, eq => <<END);
+Index out of bounds, Index: 0000 0000 0000 000F  Size: 0000 0000 0000 000F
 END
  }
 
