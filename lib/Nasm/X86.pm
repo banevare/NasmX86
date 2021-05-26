@@ -4099,15 +4099,35 @@ sub CallC($@)                                                                   
  {my ($sub, @parameters) = @_;                                                  # Name of the sub to call, parameters
   my @order = (rdi, rsi, rdx, rcx, r8, r9);
   PushR @order;
-  for my $i(keys @parameters)
+
+  for my $i(keys @parameters)                                                   # Load paramters into designated registers
    {Mov $order[$i], $parameters[$i];
    }
+
+  Push rax;                                                                     # Align stack on 16 bytes
+  Mov rax, rsp;                                                                 # Move stack pointer
+  Shl rax, 60;                                                                  # Get lowest nibble
+  Shr rax, 60;
+  KeepFree rax;
+  IfEq                                                                          # If we are 16 byte aligned push two twos
+   {Mov rax, 2; Push rax; Push rax; KeepFree rax;
+   }
+  sub                                                                           # If we are not 16 byte aligned push one one.
+   {Mov rax, 1; Push rax; KeepFree rax;
+   };
+
   if (ref($sub))                                                                # ?
    {Call $sub->start;
    }
   else                                                                          # Call named subroutine
    {Call $sub;
    }
+
+  Pop rax;                                                                      # Decode and reset stack after 16 byte alignment
+  Cmp rax, 2;                                                                   # Check for double push
+  Pop rax;                                                                      # Single or double push
+  IfEq {Pop rax};                                                               # Double push
+
   PopR @order;
  }
 
@@ -12633,18 +12653,18 @@ Index out of bounds, Index: 0000 0000 0000 000F  Size: 0000 0000 0000 000F
 END
  }
 
-#latest:;
+latest:;
 
-if (1) {                                                                        #TExtern #TLink
+if (1) {                                                                        #TExtern #TLink #TCallC
   my $format_string   = Rs 'Printf call: %s';
   my $printf_argument = Rs 'Success';
 
   Extern qw(printf exit);
   Link 'c';
 
-  Push 0xa1;
   CallC 'printf', $format_string, $printf_argument;
   CallC 'exit', 0;
+
   ok Assemble =~ m(Printf call: Success);
  }
 
