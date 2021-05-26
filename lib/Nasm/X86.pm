@@ -1960,7 +1960,20 @@ sub Nasm::X86::Variable::saveZmm($$)                                            
 sub getBwdqFromMmAsVariable($$$)                                                # Get the numbered byte|word|double word|quad word from the numbered zmm register and return it in a variable
  {my ($size, $mm, $offset) = @_;                                                # Size of get, register, offset in bytes
   @_ == 3 or confess;
-  Comment "Get $size word from $offset in $mm";
+
+  my $o;                                                                        # The offset into the mm register
+  if (ref($offset))                                                             # The offset is being passed in a variable
+   {my $name = $offset->name;
+    Comment "Get $size at $name in $mm";
+    PushR $o = r14;
+    $offset->setReg($o);
+   }
+  else                                                                          # The offset is being passed as a register expression
+   {$o = $offset;
+    Comment "Get $size at $offset in $mm";
+    $offset =~ m(r15) and confess "Cannot pass offset: '$offset', in r15, choose another register";
+   }
+
   PushR r15;
   PushRR $mm;                                                                   # Push source register
 
@@ -1968,14 +1981,18 @@ sub getBwdqFromMmAsVariable($$$)                                                
    {ClearRegisters r15; KeepFree r15;
    }
 
-  Mov r15b, "[rsp+$offset]" if $size =~ m(b);                                   # Load byte register from offset
-  Mov r15w, "[rsp+$offset]" if $size =~ m(w);                                   # Load word register from offset
-  Mov r15d, "[rsp+$offset]" if $size =~ m(d);                                   # Load double word register from offset
-  Mov r15,  "[rsp+$offset]" if $size =~ m(q);                                   # Load register from offset
+  Mov r15b, "[rsp+$o]" if $size =~ m(b);                                        # Load byte register from offset
+  Mov r15w, "[rsp+$o]" if $size =~ m(w);                                        # Load word register from offset
+  Mov r15d, "[rsp+$o]" if $size =~ m(d);                                        # Load double word register from offset
+  Mov r15,  "[rsp+$o]" if $size =~ m(q);                                        # Load register from offset
   Add rsp, RegisterSize $mm;                                                    # Pop source register
+
   my $v = Vq("$size at offset $offset in $mm", r15);                            # Create variable
      $v->getReg(r15);                                                           # Load variable
   PopR r15;
+
+  PopR $o if ref($offset);                                                      # The offset is being passed in a variable
+
   $v                                                                            # Return variable
  }
 
@@ -2044,9 +2061,7 @@ sub Nasm::X86::Variable::putBwdqIntoMm($$$$)                                    
   Mov   "[rsp+$o]", r15  if $size =~ m(q);                                      # Write register
   PopR @save;
 
-  if (ref($offset))                                                             # The offset is being passed in a variable
-   {PopR $o;
-   }
+  PopR $o if ref($offset);                                                      # The offset is being passed in a variable
  }
 
 sub Nasm::X86::Variable::putBIntoXmm($$$)                                       # Place the value of the content variable at the byte in the numbered xmm register
