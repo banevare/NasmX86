@@ -1965,7 +1965,7 @@ sub getBwdqFromMmAsVariable($$$)                                                
   if (ref($offset))                                                             # The offset is being passed in a variable
    {my $name = $offset->name;
     Comment "Get $size at $name in $mm";
-    PushR $o = r14;
+    PushR ($o = r14);
     $offset->setReg($o);
    }
   else                                                                          # The offset is being passed as a register expression
@@ -2044,7 +2044,7 @@ sub Nasm::X86::Variable::putBwdqIntoMm($$$$)                                    
   if (ref($offset))                                                             # The offset is being passed in a variable
    {my $name = $offset->name;
     Comment "Put $size at $name in $mm";
-    PushR $o = r14;
+    PushR ($o = r14);
     $offset->setReg($o);
    }
   else                                                                          # The offset is being passed as a register expression
@@ -3985,12 +3985,9 @@ sub Nasm::X86::BlockArray::push($@)                                             
     my $size = getDFromZmmAsVariable(31, 0);                                    # Size of array
 
     If ($size < $blockArray->slots1, sub                                        # Room in the first block
-     {PushR my @save = (rax);
-      $size->setReg(rax);                                                       # Index
-      $$p{element}->putDIntoZmm(31, "$w*rax");                                  # Place element
+     {$$p{element}->putDIntoZmm(31, $size * $w);                                # Place element
       ($size+1)   ->putDIntoZmm(31, 0);                                         # Update size
       $b          ->putBlock($B, $F, 31);                                       # Put the first block back into memory
-      PopR @save;
       Jmp $success;                                                             # Element successfully inserted in first block
      });
 
@@ -4016,9 +4013,7 @@ sub Nasm::X86::BlockArray::push($@)                                             
         $b->allocBlock(my $new = Vq(offset));                                   # Allocate new block
         $$p{element}->putDIntoZmm(30, 0);                                       # Place new element last in new second block
         ($size+1)   ->putDIntoZmm(31, 0);                                       # Save new size in first block
-        my $loc = $size / $N + 1;                                               # Slot for second block in first block
-        $loc->setReg(rax);
-        $new->putDIntoZmm(31, "$w*rax");                                        # Address new second block from first block
+        $new->putDIntoZmm(31, ($size / $N + 1) * $w);                           # Address new second block from first block
         $b->putBlock($B, $new, 30);                                             # Put the second block back into memory
         $b->putBlock($B, $F,   31);                                             # Put the first  block back into memory
         PopR @save;
@@ -4027,15 +4022,10 @@ sub Nasm::X86::BlockArray::push($@)                                             
 
       if (1)                                                                    # Continue with existing secondary block
        {PushR my @save = (rax, r14, zmm30);
-        my $l1 = $size / $N + 1;                                                # Slot for second block in first block
-        $l1->setReg(rax);
-        my $s = $blockArray->width;                                             # Offset of slots in first block that point to slots in second block
-        my $S = getDFromZmmAsVariable(31, "$w*rax");                            # Offset of second block in first block
+        my $S = getDFromZmmAsVariable(31, ($size / $N + 1) * $w);               # Offset of second block in first block
         $b->getBlock($B, $S, 30);                                               # Get the second block
 
-        my $l2 = $size % $N;                                                    # Slot in second block
-        $l2->setReg(r14);
-        $$p{element}->putDIntoZmm(30, "$w*r14");                                # Place new element last in new second block
+        $$p{element}->putDIntoZmm(30, ($size % $N) * $w);                       # Place new element last in new second block
         ($size+1)   ->putDIntoZmm(31, 0);                                       # Save new size in first block
         $b->putBlock($B, $S, 30);                                               # Put the second block back into memory
         $b->putBlock($B, $F, 31);                                               # Put the first  block back into memory
@@ -4184,12 +4174,12 @@ END
   say STDERR qq($assembliesPerformed: $cmd);
   my $R    = qx($cmd);
 
-  confess "Failed $?" if $debug < 2 and $?;                                     # Check that the assembly succeeded
-
   if (!$k and $debug)
    {say STDERR readFile($o1);
     say STDERR readFile($o2);
    }
+
+  confess "Failed $?" if $debug < 2 and $?;                                     # Check that the assembly succeeded
 
   if (!$k and $debug < 2 and -e $o2 and readFile($o2) =~ m(SDE ERROR:)s)        # Emulator detected an error
    {confess "SDE ERROR\n".readFile($o2);
@@ -12414,7 +12404,7 @@ if (1) {                                                                        
 END
  }
 
-#latest:;
+latest:;
 
 if (1) {                                                                        #TCreateBlockArray
   my $c = Rb(0..255);
@@ -12426,7 +12416,7 @@ if (1) {                                                                        
   $a->push(element => Vq($_, $_)) for 0xee;   $A->dump;
   $a->push(element => Vq($_, $_)) for 33..36; $A->dump;
 
-  ok Assemble(debug => 0, eq => <<END);
+  ok Assemble(debug => 1, eq => <<END);
 Byte String
   Size: 0000 0000 0000 1000
   Used: 0000 0000 0000 0058
