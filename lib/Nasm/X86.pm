@@ -12416,7 +12416,7 @@ if (1) {                                                                        
   $a->push(element => Vq($_, $_)) for 0xee;   $A->dump;
   $a->push(element => Vq($_, $_)) for 33..36; $A->dump;
 
-  ok Assemble(debug => 1, eq => <<END);
+  ok Assemble(debug => 0, eq => <<END);
 Byte String
   Size: 0000 0000 0000 1000
   Used: 0000 0000 0000 0058
@@ -12456,7 +12456,7 @@ END
  }
 
 if (0) {
-  is_deeply Assemble, <<END;
+  is_deeply Assemble(debug=>1), <<END;
 END
  }
 
