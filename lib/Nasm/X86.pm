@@ -3979,15 +3979,16 @@ sub Nasm::X86::BlockArray::push($@)                                             
 
     my $B = $$p{bs};                                                            # Byte string
     my $F = $$p{first};                                                         # First block
+    my $E = $$p{element};                                                       # The element to be inserted
 
     PushR my @save = (zmm31);
     $b->getBlock($B, $F, 31);                                                   # Get the first block
     my $size = getDFromZmmAsVariable(31, 0);                                    # Size of array
 
     If ($size < $blockArray->slots1, sub                                        # Room in the first block
-     {$$p{element}->putDIntoZmm(31, $size * $w);                                # Place element
-      ($size+1)   ->putDIntoZmm(31, 0);                                         # Update size
-      $b          ->putBlock($B, $F, 31);                                       # Put the first block back into memory
+     {$E       ->putDIntoZmm(31, $size * $w);                                   # Place element
+      ($size+1)->putDIntoZmm(31, 0);                                            # Update size
+      $b       ->putBlock($B, $F, 31);                                          # Put the first block back into memory
       Jmp $success;                                                             # Element successfully inserted in first block
      });
 
@@ -3998,11 +3999,11 @@ sub Nasm::X86::BlockArray::push($@)                                             
       Vpcompressd "zmm30{k7}{z}", zmm31;                                        # Compress first block into second block
       ClearRegisters zmm31;                                                     # Clear first block
       ($size+1)->putDIntoZmm(31, 0);                                            # Save new size in first block
-      $b->allocBlock(my $new = Vq(offset));                                     # Allocate new block
-      $new ->putDIntoZmm(31, $w);                                               # Save offset of second block in first block
-      $$p{element}->putDIntoZmm(30, $W - 1 * $w);                               # Place new element
-      $b->putBlock($B, $new, 30);                                               # Put the second block back into memory
-      $b->putBlock($B, $F,   31);                                               # Put the first  block back into memory
+      $b  ->allocBlock(my $new = Vq(offset));                                   # Allocate new block
+      $new->putDIntoZmm(31, $w);                                                # Save offset of second block in first block
+      $E  ->putDIntoZmm(30, $W - 1 * $w);                                       # Place new element
+      $b  ->putBlock($B, $new, 30);                                             # Put the second block back into memory
+      $b  ->putBlock($B, $F,   31);                                             # Put the first  block back into memory
       PopR @save;
       Jmp $success;                                                             # Element successfully inserted in second block
      });
@@ -4011,9 +4012,9 @@ sub Nasm::X86::BlockArray::push($@)                                             
      {If ($size % $N == 0, sub                                                  # New secondary block needed
        {PushR my @save = (rax, zmm30);
         $b->allocBlock(my $new = Vq(offset));                                   # Allocate new block
-        $$p{element}->putDIntoZmm(30, 0);                                       # Place new element last in new second block
-        ($size+1)   ->putDIntoZmm(31, 0);                                       # Save new size in first block
-        $new->putDIntoZmm(31, ($size / $N + 1) * $w);                           # Address new second block from first block
+        $E       ->putDIntoZmm(30, 0);                                          # Place new element last in new second block
+        ($size+1)->putDIntoZmm(31, 0);                                          # Save new size in first block
+        $new     ->putDIntoZmm(31, ($size / $N + 1) * $w);                      # Address new second block from first block
         $b->putBlock($B, $new, 30);                                             # Put the second block back into memory
         $b->putBlock($B, $F,   31);                                             # Put the first  block back into memory
         PopR @save;
@@ -4025,10 +4026,10 @@ sub Nasm::X86::BlockArray::push($@)                                             
         my $S = getDFromZmmAsVariable(31, ($size / $N + 1) * $w);               # Offset of second block in first block
         $b->getBlock($B, $S, 30);                                               # Get the second block
 
-        $$p{element}->putDIntoZmm(30, ($size % $N) * $w);                       # Place new element last in new second block
-        ($size+1)   ->putDIntoZmm(31, 0);                                       # Save new size in first block
-        $b->putBlock($B, $S, 30);                                               # Put the second block back into memory
-        $b->putBlock($B, $F, 31);                                               # Put the first  block back into memory
+        $E       ->putDIntoZmm(30, ($size % $N) * $w);                          # Place new element last in new second block
+        ($size+1)->putDIntoZmm(31, 0);                                          # Save new size in first block
+        $b       ->putBlock($B, $S, 30);                                        # Put the second block back into memory
+        $b       ->putBlock($B, $F, 31);                                        # Put the first  block back into memory
         PopR @save;
         Jmp $success;                                                           # Element successfully inserted in second block
        }
