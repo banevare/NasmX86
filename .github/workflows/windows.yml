@@ -1,0 +1,69 @@
+# Windows test
+
+name: Windows-test
+
+on:
+  push
+
+jobs:
+  test-windows-platform:
+
+    runs-on: windows-latest
+    env:
+      SHELLOPTS: igncr
+    defaults:
+      run:
+        shell: C:/tools/cygwin/bin/bash.exe --login --norc -eo pipefail '{0}'
+
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          ref:
+            'main'
+
+      - name: Install Cygwin
+        uses: egor-tensin/setup-cygwin@v3
+        with:
+          packages: make perl nasm tree wget cpan md5deep md5deep-dev binutils perl-Digest-SHA1
+
+      - name: Set PATH
+        run: echo "$HOME/sde/" >> $GITHUB_PATH
+
+      - name: Initial cpan configuration
+        run: |
+          cpan
+      - name: Install Data::Table::Text
+        run: |
+           cpan install -T Data::Table::Text
+      - name: Install Asm::C
+        run: |
+           cpan install -T Asm::C
+      - name: Install Test::Most
+        run: |
+           cpan install -T Test::Most
+      - name: Install Data::Dump
+        run: |
+           cpan install -T Data::Dump
+      - name: Download Intel Sde
+        run: |
+          wget -q https://software.intel.com/content/dam/develop/external/us/en/documents/downloads/sde-external-8.63.0-2021-01-18-win.tar.bz2 -O sde.tar.bz2
+      - name: Install Intel Sde
+        run: |
+          tar -xf sde.tar.bz2 && mv sde-external-8.63.0-2021-01-18-win/ sde/ && pwd && tree
+          mv sde/sde.exe sde/sde64.exe
+      - name: Tree
+        run: |
+            cd /cygdrive/d/a/NasmX86/NasmX86
+            tree
+      - name: Perl
+        run: |
+            cd /cygdrive/d/a/NasmX86/NasmX86
+            perl -V -e"print qq(Hello World from: $^O\n);"
+      - name: Test
+        run: |
+            cd /cygdrive/d/a/NasmX86/NasmX86
+            perl lib/Nasm/X86.pm
+
+      - name: Prove
+        run: |
+          #prove -Ilib

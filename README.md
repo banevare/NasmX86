@@ -44,29 +44,25 @@ Please feel free to join in.
 
 # Avx512 instructions
 
-
-Use [Advanced Vector Extensions](https://en.wikipedia.org/wiki/AVX-512) instructions to reorder data using 512 bit zmm registers:
-
+Use [Advanced Vector Extensions](https://en.wikipedia.org/wiki/AVX-512) instructions to add and subtract bytes using 512 bit zmm registers:
 
 ```
-  use Nasm::X86 qw(:all);
+  my $a = Vz a, Rb((map {"0x${_}0"} 0..9, 'a'..'f')x4);
+  my $b = Vz b, Rb((map {"0x0${_}"} 0..9, 'a'..'f')x4);
 
-  my $q = Rs my $s = join '', ('a'..'p')x4;      # Sample string
-  Mov rax, Ds('0'x128);
+   $a      ->loadZmm(0);                                                        # Show variable in zmm0
+   $b      ->loadZmm(1);                                                        # Show variable in zmm1
 
-  Vmovdqu64 zmm0, "[$q]";                        # Load zmm0 with sample string
-  Vprolq    zmm1, zmm0, 32;                      # Rotate left 32 bits in lanes
-  Vmovdqu64 "[rax]", zmm1;                       # Save results
+  ($a + $b)->loadZmm(2);                                                        # Add bytes      and show in zmm2
+  ($a - $b)->loadZmm(3);                                                        # Subtract bytes and show in zmm3
 
-  Mov rdi, length $s;                            # Print results
-  PrintOutMemoryNL;
+  PrintOutRegisterInHex "zmm$_" for 0..3;
 
-  is_deeply "$s\n", <<END;                       # Initial string
-abcdefghijklmnopabcdefghijklmnopabcdefghijklmnopabcdefghijklmnop
-END
-
-  is_deeply Assemble, <<END;                     # Assemble and run
-efghabcdmnopijklefghabcdmnopijklefghabcdmnopijklefghabcdmnopijkl
+  is_deeply Assemble, <<END;
+  zmm0: F0E0 D0C0 B0A0 9080   7060 5040 3020 1000   F0E0 D0C0 B0A0 9080   7060 5040 3020 1000   F0E0 D0C0 B0A0 9080   7060 5040 3020 1000   F0E0 D0C0 B0A0 9080   7060 5040 3020 1000
+  zmm1: 0F0E 0D0C 0B0A 0908   0706 0504 0302 0100   0F0E 0D0C 0B0A 0908   0706 0504 0302 0100   0F0E 0D0C 0B0A 0908   0706 0504 0302 0100   0F0E 0D0C 0B0A 0908   0706 0504 0302 0100
+  zmm2: FFEE DDCC BBAA 9988   7766 5544 3322 1100   FFEE DDCC BBAA 9988   7766 5544 3322 1100   FFEE DDCC BBAA 9988   7766 5544 3322 1100   FFEE DDCC BBAA 9988   7766 5544 3322 1100
+  zmm3: E1D2 C3B4 A596 8778   695A 4B3C 2D1E 0F00   E1D2 C3B4 A596 8778   695A 4B3C 2D1E 0F00   E1D2 C3B4 A596 8778   695A 4B3C 2D1E 0F00   E1D2 C3B4 A596 8778   695A 4B3C 2D1E 0F00
 END
 ```
 
