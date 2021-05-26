@@ -4079,6 +4079,10 @@ sub Nasm::X86::BlockArray::get($@)                                              
        });
      });
 
+    PrintErrString "Index out of bounds, ";                                     # Array index out of bounds
+    $I->err("Index: "); PrintErrString "  "; $size->errNL("Size: ");
+    Exit(1);
+
     SetLabel $success;
     PopR @save;
    }  in => {bs => 3, first => 3, index => 3}, out => {element => 3};
@@ -4240,7 +4244,7 @@ END
    {return $exec;
    }
   if (defined(my $e = $options{eq}))                                            # Diff against expected
-   {my $g = readFile($o1);
+   {my $g = readFile($debug < 2 ? $o1 : $o2);
     if ($g ne $e)
      {my ($s, $G, $E) = stringsAreNotEqual($g, $e);
       if (length($s))
@@ -10699,7 +10703,7 @@ Test::More->builder->output("/dev/null") if $localTest;                         
 
 if ($^O =~ m(bsd|linux|cygwin)i)                                                # Supported systems
  {if (confirmHasCommandLineCommand(q(nasm)) and LocateIntelEmulator)            # Network assembler and Intel Software Development emulator
-   {plan tests => 106;
+   {plan tests => 107;
    }
   else
    {plan skip_all => qq(Nasm or Intel 64 emulator not available);
@@ -12563,6 +12567,30 @@ index: 0000 0000 0000 0020  element: 0000 0000 0000 0021
 index: 0000 0000 0000 0021  element: 0000 0000 0000 0022
 index: 0000 0000 0000 0022  element: 0000 0000 0000 0023
 index: 0000 0000 0000 0023  element: 0000 0000 0000 0024
+END
+ }
+
+#latest:;
+
+if (1) {                                                                        #TCreateBlockArray  #TBlockArray::push
+  my $c = Rb(0..255);
+  my $A = CreateByteString;  my $a = $A->CreateBlockArray;
+
+  my sub put
+   {my ($e) = @_;
+    $a->push(element => Vq($e, $e));
+   };
+
+  my sub get
+   {my ($i) = @_;                                                              # Parameters
+    $a->get(my $v = Vq('index', $i), my $e = Vq(element));
+    $v->out; PrintOutString "  "; $e->outNL;
+   };
+
+  put($_) for 1..15;  get(15);
+
+  ok Assemble(debug => 2, eq => <<END);
+Index out of bounds, Index: 0000 0000 0000 000F  Size: 0000 0000 0000 000F
 END
  }
 
