@@ -3971,6 +3971,7 @@ sub Nasm::X86::BlockArray::push($@)                                             
   my $b = $blockArray->bs;                                                      # Underlying byte string
   my $W = RegisterSize zmm0;                                                    # The size of a block
   my $w = $blockArray->width;                                                   # The size of an entry in a block
+  my $n = $blockArray->slots1;                                                  # The number of slots per block
   my $N = $blockArray->slots2;                                                  # The number of slots per block
 
   my $s = Subroutine
@@ -3985,14 +3986,14 @@ sub Nasm::X86::BlockArray::push($@)                                             
     $b->getBlock($B, $F, 31);                                                   # Get the first block
     my $size = getDFromZmmAsVariable(31, 0);                                    # Size of array
 
-    If ($size < $blockArray->slots1, sub                                        # Room in the first block
-     {$E       ->putDIntoZmm(31, $size * $w);                                   # Place element
+    If ($size < $n, sub                                                         # Room in the first block
+     {$E       ->putDIntoZmm(31, ($size + 1) * $w);                             # Place element
       ($size+1)->putDIntoZmm(31, 0);                                            # Update size
       $b       ->putBlock($B, $F, 31);                                          # Put the first block back into memory
       Jmp $success;                                                             # Element successfully inserted in first block
      });
 
-    If ($size == $blockArray->slots1, sub                                       # Migrate the first block to the second block and fill in the last slot
+    If ($size == $n, sub                                                        # Migrate the first block to the second block and fill in the last slot
      {PushR my @save = (rax, k7, zmm30);
       Mov rax, -2;                                                              # Load compression mask
       Kmovq k7, rax;                                                            # Set  compression mask
@@ -4015,8 +4016,8 @@ sub Nasm::X86::BlockArray::push($@)                                             
         $E       ->putDIntoZmm(30, 0);                                          # Place new element last in new second block
         ($size+1)->putDIntoZmm(31, 0);                                          # Save new size in first block
         $new     ->putDIntoZmm(31, ($size / $N + 1) * $w);                      # Address new second block from first block
-        $b->putBlock($B, $new, 30);                                             # Put the second block back into memory
-        $b->putBlock($B, $F,   31);                                             # Put the first  block back into memory
+        $b       ->putBlock($B, $new, 30);                                      # Put the second block back into memory
+        $b       ->putBlock($B, $F,   31);                                      # Put the first  block back into memory
         PopR @save;
         Jmp $success;                                                           # Element successfully inserted in second block
        });
@@ -4024,8 +4025,7 @@ sub Nasm::X86::BlockArray::push($@)                                             
       if (1)                                                                    # Continue with existing secondary block
        {PushR my @save = (rax, r14, zmm30);
         my $S = getDFromZmmAsVariable(31, ($size / $N + 1) * $w);               # Offset of second block in first block
-        $b->getBlock($B, $S, 30);                                               # Get the second block
-
+        $b       ->getBlock($B, $S, 30);                                        # Get the second block
         $E       ->putDIntoZmm(30, ($size % $N) * $w);                          # Place new element last in new second block
         ($size+1)->putDIntoZmm(31, 0);                                          # Save new size in first block
         $b       ->putBlock($B, $S, 30);                                        # Put the second block back into memory
@@ -4038,6 +4038,49 @@ sub Nasm::X86::BlockArray::push($@)                                             
     SetLabel $success;
     PopR @save;
    }  in => {bs => 3, first => 3, element => 3};
+
+  $s->call($blockArray->address, $blockArray->first, @variables);
+ }
+
+sub Nasm::X86::BlockArray::get($@)                                              # Get an element from the array
+ {my ($blockArray, @variables) = @_;                                            # Block array descriptor, variables
+  @_ >= 3 or confess;
+  my $b = $blockArray->bs;                                                      # Underlying byte string
+  my $W = RegisterSize zmm0;                                                    # The size of a block
+  my $w = $blockArray->width;                                                   # The size of an entry in a block
+  my $n = $blockArray->slots1;                                                  # The number of slots in the first block
+  my $N = $blockArray->slots2;                                                  # The number of slots in the secondary blocks
+
+  my $s = Subroutine
+   {my ($p) = @_;                                                               # Parameters
+    my $success = Label;                                                        # Short circuit if ladders by jumping directly to the end after a successful push
+
+    my $B = $$p{bs};                                                            # Byte string
+    my $F = $$p{first};                                                         # First block
+    my $E = $$p{element};                                                       # The element to be returned
+    my $I = $$p{index};                                                         # Index of the element to be returned
+
+    PushR my @save = (zmm31);
+    $b->getBlock($B, $F, 31);                                                   # Get the first block
+    my $size = getDFromZmmAsVariable(31, 0);                                    # Size of array
+
+    If ($I < $size, sub                                                         # Index is in array
+     {If ($size <= $n, sub                                                      # Element is in the first block
+       {$E->copy(getDFromZmmAsVariable(31, ($I + 1) * $w));                      # Get element
+        Jmp $success;                                                           # Element successfully inserted in first block
+       });
+
+      If ($size <= $N * ($N - 1), sub                                           # Still within two levels
+       {my $S = getDFromZmmAsVariable(31, ($I / $N + 1) * $w);                  # Offset of second block in first block
+        $b->getBlock($B, $S, 31);                                               # Get the second block
+        $E->copy(getDFromZmmAsVariable(31, ($I % $N) * $w));                    # Offset of second block in first block
+        Jmp $success;                                                           # Element successfully inserted in second block
+       });
+     });
+
+    SetLabel $success;
+    PopR @save;
+   }  in => {bs => 3, first => 3, index => 3}, out => {element => 3};
 
   $s->call($blockArray->address, $blockArray->first, @variables);
  }
@@ -12405,9 +12448,9 @@ if (1) {                                                                        
 END
  }
 
-latest:;
+#latest:;
 
-if (1) {                                                                        #TCreateBlockArray
+if (1) {                                                                        #TCreateBlockArray  #TBlockArray::push
   my $c = Rb(0..255);
   my $A = CreateByteString;  my $a = $A->CreateBlockArray;
 
@@ -12421,38 +12464,104 @@ if (1) {                                                                        
 Byte String
   Size: 0000 0000 0000 1000
   Used: 0000 0000 0000 0058
-0000: 0010 0000 0000 00005800 0000 0000 00000000 0000 0000 00000F00 0000 0200 00000300 0000 0400 00000500 0000 0600 00000700 0000 0800 00000900 0000 0A00 0000
-0040: 0B00 0000 0C00 00000D00 0000 0E00 00000F00 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+0000: 0010 0000 0000 00005800 0000 0000 00000000 0000 0000 00000F00 0000 0100 00000200 0000 0300 00000400 0000 0500 00000600 0000 0700 00000800 0000 0900 0000
+0040: 0A00 0000 0B00 00000C00 0000 0D00 00000E00 0000 0F00 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
 0080: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
 00C0: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
 Byte String
   Size: 0000 0000 0000 1000
   Used: 0000 0000 0000 0098
 0000: 0010 0000 0000 00009800 0000 0000 00000000 0000 0000 00001000 0000 5800 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
-0040: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000200 0000 0300 00000400 0000 0500 00000600 0000 0700 00000800 0000 0900 00000A00 0000 0B00 0000
-0080: 0C00 0000 0D00 00000E00 0000 0F00 00000000 0000 FF00 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+0040: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000100 0000 0200 00000300 0000 0400 00000500 0000 0600 00000700 0000 0800 00000900 0000 0A00 0000
+0080: 0B00 0000 0C00 00000D00 0000 0E00 00000F00 0000 FF00 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
 00C0: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
 Byte String
   Size: 0000 0000 0000 1000
   Used: 0000 0000 0000 00D8
 0000: 0010 0000 0000 0000D800 0000 0000 00000000 0000 0000 00001F00 0000 5800 00009800 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
-0040: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000200 0000 0300 00000400 0000 0500 00000600 0000 0700 00000800 0000 0900 00000A00 0000 0B00 0000
-0080: 0C00 0000 0D00 00000E00 0000 0F00 00000000 0000 FF00 00001100 0000 1200 00001300 0000 1400 00001500 0000 1600 00001700 0000 1800 00001900 0000 1A00 0000
+0040: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000100 0000 0200 00000300 0000 0400 00000500 0000 0600 00000700 0000 0800 00000900 0000 0A00 0000
+0080: 0B00 0000 0C00 00000D00 0000 0E00 00000F00 0000 FF00 00001100 0000 1200 00001300 0000 1400 00001500 0000 1600 00001700 0000 1800 00001900 0000 1A00 0000
 00C0: 1B00 0000 1C00 00001D00 0000 1E00 00001F00 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
 Byte String
   Size: 0000 0000 0000 1000
   Used: 0000 0000 0000 00D8
 0000: 0010 0000 0000 0000D800 0000 0000 00000000 0000 0000 00002000 0000 5800 00009800 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
-0040: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000200 0000 0300 00000400 0000 0500 00000600 0000 0700 00000800 0000 0900 00000A00 0000 0B00 0000
-0080: 0C00 0000 0D00 00000E00 0000 0F00 00000000 0000 FF00 00001100 0000 1200 00001300 0000 1400 00001500 0000 1600 00001700 0000 1800 00001900 0000 1A00 0000
+0040: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000100 0000 0200 00000300 0000 0400 00000500 0000 0600 00000700 0000 0800 00000900 0000 0A00 0000
+0080: 0B00 0000 0C00 00000D00 0000 0E00 00000F00 0000 FF00 00001100 0000 1200 00001300 0000 1400 00001500 0000 1600 00001700 0000 1800 00001900 0000 1A00 0000
 00C0: 1B00 0000 1C00 00001D00 0000 1E00 00001F00 0000 EE00 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
 Byte String
   Size: 0000 0000 0000 1000
   Used: 0000 0000 0000 0118
 0000: 0010 0000 0000 00001801 0000 0000 00000000 0000 0000 00002400 0000 5800 00009800 0000 D800 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
-0040: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000200 0000 0300 00000400 0000 0500 00000600 0000 0700 00000800 0000 0900 00000A00 0000 0B00 0000
-0080: 0C00 0000 0D00 00000E00 0000 0F00 00000000 0000 FF00 00001100 0000 1200 00001300 0000 1400 00001500 0000 1600 00001700 0000 1800 00001900 0000 1A00 0000
+0040: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000100 0000 0200 00000300 0000 0400 00000500 0000 0600 00000700 0000 0800 00000900 0000 0A00 0000
+0080: 0B00 0000 0C00 00000D00 0000 0E00 00000F00 0000 FF00 00001100 0000 1200 00001300 0000 1400 00001500 0000 1600 00001700 0000 1800 00001900 0000 1A00 0000
 00C0: 1B00 0000 1C00 00001D00 0000 1E00 00001F00 0000 EE00 00002100 0000 2200 00002300 0000 2400 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+END
+ }
+
+latest:;
+
+if (1) {                                                                        #TCreateBlockArray  #TBlockArray::push
+  my $c = Rb(0..255);
+  my $A = CreateByteString;  my $a = $A->CreateBlockArray;
+
+  my sub put
+   {my ($e) = @_;
+    $a->push(element => Vq($e, $e));
+   };
+
+  my sub get
+   {my ($i) = @_;                                                              # Parameters
+    $a->get(my $v = Vq('index', $i), my $e = Vq(element));
+    $v->out; PrintOutString "  "; $e->outNL;
+   };
+
+  put($_)   for 1..15;
+  get($_-1) for 1..15;
+
+  put(16);
+  get(15);
+
+  put($_ )  for 17..36;
+  get($_-1) for 17..36;
+
+  ok Assemble(debug => 0, eq => <<END);
+index: 0000 0000 0000 0000  element: 0000 0000 0000 0001
+index: 0000 0000 0000 0001  element: 0000 0000 0000 0002
+index: 0000 0000 0000 0002  element: 0000 0000 0000 0003
+index: 0000 0000 0000 0003  element: 0000 0000 0000 0004
+index: 0000 0000 0000 0004  element: 0000 0000 0000 0005
+index: 0000 0000 0000 0005  element: 0000 0000 0000 0006
+index: 0000 0000 0000 0006  element: 0000 0000 0000 0007
+index: 0000 0000 0000 0007  element: 0000 0000 0000 0008
+index: 0000 0000 0000 0008  element: 0000 0000 0000 0009
+index: 0000 0000 0000 0009  element: 0000 0000 0000 000A
+index: 0000 0000 0000 000A  element: 0000 0000 0000 000B
+index: 0000 0000 0000 000B  element: 0000 0000 0000 000C
+index: 0000 0000 0000 000C  element: 0000 0000 0000 000D
+index: 0000 0000 0000 000D  element: 0000 0000 0000 000E
+index: 0000 0000 0000 000E  element: 0000 0000 0000 000F
+index: 0000 0000 0000 000F  element: 0000 0000 0000 0010
+index: 0000 0000 0000 0010  element: 0000 0000 0000 0011
+index: 0000 0000 0000 0011  element: 0000 0000 0000 0012
+index: 0000 0000 0000 0012  element: 0000 0000 0000 0013
+index: 0000 0000 0000 0013  element: 0000 0000 0000 0014
+index: 0000 0000 0000 0014  element: 0000 0000 0000 0015
+index: 0000 0000 0000 0015  element: 0000 0000 0000 0016
+index: 0000 0000 0000 0016  element: 0000 0000 0000 0017
+index: 0000 0000 0000 0017  element: 0000 0000 0000 0018
+index: 0000 0000 0000 0018  element: 0000 0000 0000 0019
+index: 0000 0000 0000 0019  element: 0000 0000 0000 001A
+index: 0000 0000 0000 001A  element: 0000 0000 0000 001B
+index: 0000 0000 0000 001B  element: 0000 0000 0000 001C
+index: 0000 0000 0000 001C  element: 0000 0000 0000 001D
+index: 0000 0000 0000 001D  element: 0000 0000 0000 001E
+index: 0000 0000 0000 001E  element: 0000 0000 0000 001F
+index: 0000 0000 0000 001F  element: 0000 0000 0000 0020
+index: 0000 0000 0000 0020  element: 0000 0000 0000 0021
+index: 0000 0000 0000 0021  element: 0000 0000 0000 0022
+index: 0000 0000 0000 0022  element: 0000 0000 0000 0023
+index: 0000 0000 0000 0023  element: 0000 0000 0000 0024
 END
  }
 
