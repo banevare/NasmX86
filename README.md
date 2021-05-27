@@ -21,8 +21,13 @@ This [module](https://en.wikipedia.org/wiki/Modular_programming) is part of the 
 modern version of Perl which generates x86 assembler [code](https://en.wikipedia.org/wiki/Computer_program) directly. Perl Zero
 is [process](https://en.wikipedia.org/wiki/Process_management_(computing)) friendly: every data structure used is completely [relocatable](https://en.wikipedia.org/wiki/Relocation_%28computing%29) and so
 can be moved directly between different processes via a [file](https://en.wikipedia.org/wiki/Computer_file) or a socket. A
-Perl Zero [program](https://en.wikipedia.org/wiki/Computer_program) is a single expression with no key words: only [user](https://en.wikipedia.org/wiki/User_(computing)) defined
-infix operators and expressions are used to construct programs. Perl Zero
+Perl Zero [program](https://en.wikipedia.org/wiki/Computer_program) is a single expression with no key words: only expressions
+constructed from [user](https://en.wikipedia.org/wiki/User_(computing)) defined
+[unary](https://en.wikipedia.org/wiki/Unary_operation)
+and
+[binary](https://en.wikipedia.org/wiki/Binary_operation)
+[operators](https://en.wikipedia.org/wiki/Operator_(mathematics))
+are used to construct programs. Perl Zero
 leverages Perl 5 as its macro assembler and CPAN as its [module](https://en.wikipedia.org/wiki/Modular_programming) repository.
 Please feel free to join in.
 
