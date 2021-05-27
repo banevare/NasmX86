@@ -3135,7 +3135,18 @@ sub Nasm::X86::ByteString::blockSize($)                                         
 sub Nasm::X86::ByteString::allocBlock($@)                                       # Allocate a block to hold a zmm register in the specified byte string and return the offset of the block in a variable
  {my ($byteString, @variables) = @_;                                            # Byte string, variables
   @_ >= 2 or confess;
-  $byteString->allocate(Vq(size, RegisterSize(zmm0)), @variables);
+  my $ffb = $byteString->firstFreeBlock;                                        # Check for a free block
+  If ($ffb > 0, sub                                                             # Free block available
+   {for my $v(@variables)
+     {if (ref($v) and $v->name eq "offset")
+       {$v->copy($ffb);
+        return;
+       }
+     }
+   },
+  sub
+   {$byteString->allocate(Vq(size, RegisterSize(zmm0)), @variables);
+   });
  }
 
 sub Nasm::X86::ByteString::firstFreeBlock($)                                    #P Create and load a variable with the first free block on the free block chain or zero if no such block in the given byte string
@@ -12391,7 +12402,7 @@ Byte String
 END
  }
 
-latest:;
+#latest:;
 
 if (1) {                                                                        #TCreateBlockArray  #TBlockArray::push #TBlockArray::pop #TBlockArray::put #TBlockArray::get
   my $c = Rb(0..255);
@@ -12552,16 +12563,16 @@ Byte String
 00C0: 0000 0000 0000 00000000 0000 0000 00000000 0000 D800 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
 Byte String
   Size: 0000 0000 0000 1000
-  Used: 0000 0000 0000 01D8
-0000: 0010 0000 0000 0000D801 0000 0000 00005800 0000 0000 00002600 0000 1801 00005801 0000 9801 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
-0040: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
-0080: 0000 0000 0000 00000000 0000 0000 00000000 0000 9800 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+  Used: 0000 0000 0000 0118
+0000: 0010 0000 0000 00001801 0000 0000 00005800 0000 0000 00002600 0000 5800 00005800 0000 5800 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+0040: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00004000 0000 4200 00004400 0000 4600 00004800 0000 4A00 00000000 0000 0000 00000000 0000 0000 0000
+0080: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
 00C0: 0000 0000 0000 00000000 0000 0000 00000000 0000 D800 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
 END
  }
-exit if $develop;
-#latest:;
+#exit if $develop;
 
+#latest:;
 if (1) {                                                                        #TNasm::X86::ByteString::allocBlock #TNasm::X86::ByteString::freeBlock
   my $a = CreateByteString;              $a->dump;
   $a->allocBlock(my $b1 = Vq(offset));   $a->dump;
