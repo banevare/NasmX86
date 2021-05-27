@@ -3138,6 +3138,33 @@ sub Nasm::X86::ByteString::allocBlock($@)                                       
   $byteString->allocate(Vq(size, RegisterSize(zmm0)), @variables);
  }
 
+sub Nasm::X86::ByteString::firstFreeBlock($)                                    #P Create and load a variable with the first free block on the free block chain or zero if no such block in the given byte string
+ {my ($byteString) = @_;                                                        # Byte string address as a variable
+  @_ == 1 or confess;
+
+  Comment "Get first free block in a byte string";
+  PushR rax;
+  $byteString->bs->setReg(rax);                                                 #P Address underlying byte string
+  KeepFree rax;
+  Mov rax, $byteString->free->addr;                                             # Content of free chain pointer
+  my $v = Vq('free', rax);                                                      # Remainder of the free chain
+  PopR rax;
+  $v
+ }
+
+sub Nasm::X86::ByteString::setFirstFreeBlock($$)                                #P Set the first free block field from a variable
+ {my ($byteString, $offset) = @_;                                               # Byte string descriptor, first free block offset as a variable
+  @_ == 2 or confess;
+
+  Comment "Set first free block";
+  PushR my @save = (rax, rsi, rdx);
+  $byteString->bs->setReg(rax);                                                 # Address underlying byte string
+  Lea rdx, $byteString->free->addr;                                             # Address of address of free chain
+  $offset->setReg(rsi);                                                         # Offset of block being freed
+  Mov "[rdx]", rsi;                                                             # Set head of free chain to point to block just freed
+  PopR @save;
+ }
+
 sub Nasm::X86::ByteString::freeBlock($@)                                        # Free a block in a byte string by placing it on the free chain
  {my ($byteString, @variables) = @_;                                            # Byte string descriptor, variables
   @_ >= 2 or confess;
@@ -3145,18 +3172,13 @@ sub Nasm::X86::ByteString::freeBlock($@)                                        
   my $s = Subroutine
    {my ($p) = @_;                                                               # Parameters
     Comment "Free a block in a byte string";
-    SaveFirstFour;
-    $$p{bs}->setReg(rax);                                                       # Address underlying byte string
-    Lea rdx, $byteString->free->addr;                                           # Address of address of free chain
-    Mov rdi, "[rdx]";                                                           # Address of free chain
-    my $rfc = Vq('next', rdi);                                                  # Remainder of the free chain
-
-    ClearRegisters zmm30;                                                       # Second block
-    $rfc->putDIntoZmm(30, 60);                                                  # The position of the next pointer was dictated by BlockString.
-    $byteString->putBlock($$p{bs}, $$p{offset}, 30);                            # Link the freed block to the rest of the free chain
-    $$p{offset}->setReg(rsi);                                                   # Offset of block being freed
-    Mov "[rdx]", rsi;                                                           # Set head of free chain to point to block just freed
-    RestoreFirstFour;
+    PushR zmm31;
+    my $rfc = $byteString->firstFreeBlock;                                      # Get first free block
+    ClearRegisters zmm31;                                                       # Second block
+    $rfc->putDIntoZmm(31, 60);                                                  # The position of the next pointer was dictated by BlockString.
+    $byteString->putBlock($$p{bs}, $$p{offset}, 31);                            # Link the freed block to the rest of the free chain
+    $byteString->setFirstFreeBlock($$p{offset});                                # Set free chain field to point to latest free chain element
+    PopR zmm31;
    } in => {bs => 3, offset => 3};
 
   $s->call($byteString->bs, @variables);
