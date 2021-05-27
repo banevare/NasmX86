@@ -159,9 +159,12 @@ Call **C** functions by naming them as external and including their library:
   my $format = Rs "Hello %s\n";
   my $data   = Rs "World";
 
-  Extern qw(printf exit); Link 'c';
+  Extern qw(printf exit malloc strcpy); Link 'c';
 
-  CallC 'printf', $format, $data;
+  CallC 'malloc', length($format)+1;
+  Mov r15, rax;
+  CallC 'strcpy', r15, $format;
+  CallC 'printf', r15, $data;
   CallC 'exit', 0;
 
   ok Assemble(eq => <<END);
