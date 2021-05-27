@@ -28,8 +28,10 @@ and
 [binary](https://en.wikipedia.org/wiki/Binary_operation)
 [operators](https://en.wikipedia.org/wiki/Operator_(mathematics))
 are used to construct programs. Perl Zero
-leverages Perl 5 as its macro assembler and CPAN as its [module](https://en.wikipedia.org/wiki/Modular_programming) repository.
-Please feel free to join in.
+leverages Perl 5 as its
+[macro assembler](https://en.wikipedia.org/wiki/Assembly_language#Macros) and
+[CPAN](https://metacpan.org/author/PRBRENAN)
+as its [module](https://en.wikipedia.org/wiki/Modular_programming) repository. Please feel free to join in.
 
 # Useful links
 
