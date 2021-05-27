@@ -2436,7 +2436,7 @@ sub Nasm::X86::LocalData::start($)                                              
 sub Nasm::X86::LocalData::free($)                                               # Free a local data area on the stack
  {my ($local) = @_;                                                             # Local data descriptor
   @_ == 1 or confess;
-  Mov rsp,rbp;
+  Mov rsp, rbp;
   Pop rbp;
  }
 
@@ -3135,6 +3135,33 @@ sub Nasm::X86::ByteString::allocBlock($@)                                       
  {my ($byteString, @variables) = @_;                                            # Byte string, variables
   @_ >= 2 or confess;
   $byteString->allocate(Vq(size, RegisterSize(zmm0)), @variables);
+ }
+
+sub Nasm::X86::ByteString::freeBlock($@)                                        # Free a block in a byte string by placing it on the free chain
+ {my ($byteString, @variables) = @_;                                            # Byte string descriptor, variables
+  @_ >= 3 or confess;
+
+  my $s = Subroutine
+   {my ($p) = @_;                                                               # Parameters
+    Comment "Free a block in a byte string";
+    SaveFirstFour;
+
+    sub                                                                         # Two or more blocks on the chain
+     {$$p{bs}->setReg(rax);                                                     # Address underlying byte string
+      Lea rdx, $byteString->free->addr;                                         # Address of address of free chain
+      Mov rdi, "[rdx]";                                                         # Address of free chain
+      my $rfc = Vq('next', rdi);                                                # Remainder of the free chain
+
+      ClearRegisters zmm30;                                                     # Second block
+      $rfc->putDIntoZmm(30, 60);                                                # The position of the next pointer was dictated by BlockString.
+      $byteString->putBlock($$p{bs}, $$p{offset}, 30);                          # Link the freed block to the rest of the free chain
+      $$p{offset}->setReg(rsi);                                                 # Offset of block being freed
+      Mov "[rdx]", rsi;                                                         # Set head of free chain to point to block just freed
+     },
+    RestoreFirstFour;
+   } in => {bs => 3, offset => 3};
+
+  $s->call($byteString->bs, @variables);
  }
 
 sub Nasm::X86::ByteString::getBlock($$$$)                                       # Get the block with the specified offset in the specified block string and return it in the numbered zmm
@@ -4100,11 +4127,11 @@ sub Nasm::X86::BlockArray::pop($@)                                              
         Jmp $success;                                                           # Element successfully popped from first block
        });
 
-      If ($size == $N, sub                                                      # Migrate the first block to the second block and fill in the last slot
+      If ($size == $N, sub                                                      # Migrate the second block to the first block now that the last slot is empty
        {PushR my @save = (rax, k7, zmm30);
         Mov rax, -2;                                                            # Load expansion mask
         Kmovq k7, rax;                                                          # Set  compression mask
-        Vpcompressd "zmm30{k7}{z}", zmm31;                                      # Compress first block into second block
+        Vpexpandd "zmm31{k7}{z}", zmm30;                                        # Expand second block into first block
         ClearRegisters zmm31;                                                   # Clear first block
         ($size+1)->putDIntoZmm(31, 0);                                          # Save new size in first block
         $b  ->allocBlock(my $new = Vq(offset));                                 # Allocate new block
@@ -4490,9 +4517,10 @@ sub totalBytesAssembled                                                         
 if (0)                                                                          # Print exports
  {my @e;
   for my $a(sort keys %Nasm::X86::)
-   {next if $a =~ m(DATA|confirmHasCommandLineCommand|currentDirectory|fff|fileMd5Sum|fileSize|findFiles|firstNChars|formatTable|fpe|fpf|genHash|lll|owf|pad|readFile|stringsAreNotEqual|stringMd5Sum|temporaryFile);
+   {next if $a =~ m(BAIL_OUT|BEGIN|DATA|confirmHasCommandLineCommand|currentDirectory|fff|fileMd5Sum|fileSize|findFiles|firstNChars|formatTable|fpe|fpf|genHash|lll|owf|pad|readFile|stringsAreNotEqual|stringMd5Sum|temporaryFile);
     next if $a =~ m(\AEXPORT);
     next if $a !~ m(\A[A-Z]) and !$Registers{$a};
+    next if $a =~ m(::\Z);
     push @e, $a if $Nasm::X86::{$a} =~ m(\*Nasm::X86::);
    }
   say STDERR q/@EXPORT_OK    = qw(/.join(' ', @e).q/);/;
@@ -4505,7 +4533,7 @@ use vars qw(@ISA @EXPORT @EXPORT_OK %EXPORT_TAGS);
 
 @ISA          = qw(Exporter);
 @EXPORT       = qw();
-@EXPORT_OK    = qw(Add All8Structure AllocateAll8OnStack AllocateMemory And Assemble BAIL_OUT BEGIN Bswap Bt Btc Btr Bts Bzhi Call ClearMemory ClearRegisters ClearZF CloseFile Cmova Cmovae Cmovb Cmovbe Cmovc Cmove Cmovg Cmovge Cmovl Cmovle Cmovna Cmovnae Cmovnb Cmp Comment ConcatenateShortStrings Copy CopyMemory CreateByteString Cstrlen DComment Db Dbwdq Dd Dec Decrement Dq Ds Dw EXPORT EXPORT_OK EXPORT_TAGS Exit Float32 Float64 For ForEver ForIn Fork FreeMemory GenTree GetLengthOfShortString GetPPid GetPid GetPidInHex GetUid Hash ISA Idiv If IfEq IfGe IfGt IfLe IfLt IfNe IfNz Imul Inc Increment InsertIntoXyz Isa Ja Jae Jb Jbe Jc Jcxz Je Jecxz Jg Jge Jl Jle Jmp Jna Jnae Jnb Jnbe Jnc Jne Jng Jnge Jnl Jnle Jno Jnp Jns Jnz Jo Jp Jpe Jpo Jrcxz Js Jz Kaddb Kaddd Kaddq Kaddw Kandb Kandd Kandnb Kandnd Kandnq Kandnw Kandq Kandw Keep KeepFree KeepPop KeepPush KeepReturn KeepSet Kmovb Kmovd Kmovq Kmovw Knotb Knotd Knotq Knotw Korb Kord Korq Kortestb Kortestd Kortestq Kortestw Korw Kshiftlb Kshiftld Kshiftlq Kshiftlw Kshiftrb Kshiftrd Kshiftrq Kshiftrw Ktestb Ktestd Ktestq Ktestw Kunpckb Kunpckd Kunpckq Kunpckw Kxnorb Kxnord Kxnorq Kxnorw Kxorb Kxord Kxorq Kxorw Label Lea LoadShortStringFromMemoryToZmm LoadShortStringFromMemoryToZmm2 LoadTargetZmmFromSourceZmm LoadZmmFromMemory LocalData LocateIntelEmulator Lzcnt Macro MaximumOfTwoRegisters MinimumOfTwoRegisters Minus Mov Movdqa Mulpd Neg Not OpenRead OpenWrite Or PeekR Pextrb Pextrd Pextrq Pextrw Pi32 Pi64 Pinsrb Pinsrd Pinsrq Pinsrw Plus Pop PopR PopRR Popfq PrintErrMemory PrintErrMemoryInHex PrintErrMemoryInHexNL PrintErrMemoryNL PrintErrNL PrintErrRaxInHex PrintErrRegisterInHex PrintErrString PrintErrStringNL PrintMemory PrintMemoryInHex PrintNL PrintOutMemory PrintOutMemoryInHex PrintOutMemoryInHexNL PrintOutMemoryNL PrintOutNL PrintOutRaxInHex PrintOutRaxInReverseInHex PrintOutRegisterInHex PrintOutRegistersInHex PrintOutRflagsInHex PrintOutRipInHex PrintOutString PrintOutStringNL PrintOutZF PrintRaxInHex PrintRegisterInHex PrintString Pslldq Psrldq Push PushR PushRR Pushfq RComment Rb Rbwdq Rd Rdtsc ReadFile ReadTimeStampCounter RegisterSize ReorderSyscallRegisters ReorderXmmRegisters RestoreFirstFour RestoreFirstFourExceptRax RestoreFirstFourExceptRaxAndRdi RestoreFirstSeven RestoreFirstSevenExceptRax RestoreFirstSevenExceptRaxAndRdi Ret Rq Rs Rw SaveFirstFour SaveFirstSeven Scope ScopeEnd SetLabel SetLengthOfShortString SetMaskRegister SetRegisterToMinusOne SetZF Seta Setae Setb Setbe Setc Sete Setg Setge Setl Setle Setna Setnae Setnb Setnbe Setnc Setne Setng Setnge Setnl Setno Setnp Setns Setnz Seto Setp Setpe Setpo Sets Setz Shl Shr Start StatSize Structure Sub Sub:: Subroutine Syscall TODO Test Tzcnt UnReorderSyscallRegisters UnReorderXmmRegisters VERSION Vaddd Vaddpd Variable Variable:: Vb Vcvtudq2pd Vcvtudq2ps Vcvtuqq2pd Vd Vdpps Vgetmantps Vmovd Vmovdqa32 Vmovdqa64 Vmovdqu Vmovdqu32 Vmovdqu64 Vmovdqu8 Vmovq Vmulpd Vpbroadcastb Vpbroadcastd Vpbroadcastq Vpbroadcastw Vpcmpub Vpcmpud Vpcmpuq Vpcmpuw Vpcompressd Vpcompressq Vpexpandd Vpexpandq Vpextrb Vpextrd Vpextrq Vpextrw Vpinsrb Vpinsrd Vpinsrq Vpinsrw Vpmullb Vpmulld Vpmullq Vpmullw Vprolq Vpsubb Vpsubd Vpsubq Vpsubw Vpxorq Vq Vr Vsqrtpd Vw Vx VxyzInit Vy Vz WaitPid Xchg Xor ah al ax bh bl bp bpl bx ch cl cs cx dh di dil dl ds dx eax ebp ebx ecx edi edx es esi esp fs gs k0 k1 k2 k3 k4 k5 k6 k7 mm0 mm1 mm2 mm3 mm4 mm5 mm6 mm7 r10 r10b r10d r10l r10w r11 r11b r11d r11l r11w r12 r12b r12d r12l r12w r13 r13b r13d r13l r13w r14 r14b r14d r14l r14w r15 r15b r15d r15l r15w r8 r8b r8d r8l r8w r9 r9b r9d r9l r9w rax rbp rbx rcx rdi rdx rflags rip rsi rsp si sil sp spl ss st0 st1 st2 st3 st4 st5 st6 st7 xmm0 xmm1 xmm10 xmm11 xmm12 xmm13 xmm14 xmm15 xmm16 xmm17 xmm18 xmm19 xmm2 xmm20 xmm21 xmm22 xmm23 xmm24 xmm25 xmm26 xmm27 xmm28 xmm29 xmm3 xmm30 xmm31 xmm4 xmm5 xmm6 xmm7 xmm8 xmm9 ymm0 ymm1 ymm10 ymm11 ymm12 ymm13 ymm14 ymm15 ymm16 ymm17 ymm18 ymm19 ymm2 ymm20 ymm21 ymm22 ymm23 ymm24 ymm25 ymm26 ymm27 ymm28 ymm29 ymm3 ymm30 ymm31 ymm4 ymm5 ymm6 ymm7 ymm8 ymm9 zmm0 zmm1 zmm10 zmm11 zmm12 zmm13 zmm14 zmm15 zmm16 zmm17 zmm18 zmm19 zmm2 zmm20 zmm21 zmm22 zmm23 zmm24 zmm25 zmm26 zmm27 zmm28 zmm29 zmm3 zmm30 zmm31 zmm4 zmm5 zmm6 zmm7 zmm8 zmm9);
+@EXPORT_OK    = qw(Add All8Structure AllocateAll8OnStack AllocateMemory And Assemble Bswap Bt Btc Btr Bts Bzhi Call CallC ClearMemory ClearRegisters ClearZF CloseFile Cmova Cmovae Cmovb Cmovbe Cmovc Cmove Cmovg Cmovge Cmovl Cmovle Cmovna Cmovnae Cmovnb Cmp Comment ConcatenateShortStrings Copy CopyMemory CreateByteString Cstrlen DComment Db Dbwdq Dd Dec Decrement Dq Ds Dw Exit Extern Float32 Float64 For ForEver ForIn Fork FreeMemory GetLengthOfShortString GetPPid GetPid GetPidInHex GetUid Hash ISA Idiv If IfEq IfGe IfGt IfLe IfLt IfNe IfNz Imul Inc Increment InsertIntoXyz Isa Ja Jae Jb Jbe Jc Jcxz Je Jecxz Jg Jge Jl Jle Jmp Jna Jnae Jnb Jnbe Jnc Jne Jng Jnge Jnl Jnle Jno Jnp Jns Jnz Jo Jp Jpe Jpo Jrcxz Js Jz Kaddb Kaddd Kaddq Kaddw Kandb Kandd Kandnb Kandnd Kandnq Kandnw Kandq Kandw Keep KeepFree KeepPop KeepPush KeepReturn KeepSet Kmovb Kmovd Kmovq Kmovw Knotb Knotd Knotq Knotw Korb Kord Korq Kortestb Kortestd Kortestq Kortestw Korw Kshiftlb Kshiftld Kshiftlq Kshiftlw Kshiftrb Kshiftrd Kshiftrq Kshiftrw Ktestb Ktestd Ktestq Ktestw Kunpckb Kunpckd Kunpckq Kunpckw Kxnorb Kxnord Kxnorq Kxnorw Kxorb Kxord Kxorq Kxorw Label Lea Link LoadShortStringFromMemoryToZmm LoadShortStringFromMemoryToZmm2 LoadTargetZmmFromSourceZmm LoadZmmFromMemory LocalData LocateIntelEmulator Lzcnt Macro MaximumOfTwoRegisters MinimumOfTwoRegisters Minus Mov Movdqa Mulpd Neg Not OpenRead OpenWrite Or PeekR Pextrb Pextrd Pextrq Pextrw Pi32 Pi64 Pinsrb Pinsrd Pinsrq Pinsrw Plus Pop PopR PopRR Popfq PrintErrMemory PrintErrMemoryInHex PrintErrMemoryInHexNL PrintErrMemoryNL PrintErrNL PrintErrRaxInHex PrintErrRegisterInHex PrintErrString PrintErrStringNL PrintMemory PrintMemoryInHex PrintNL PrintOutMemory PrintOutMemoryInHex PrintOutMemoryInHexNL PrintOutMemoryNL PrintOutNL PrintOutRaxInHex PrintOutRaxInReverseInHex PrintOutRegisterInHex PrintOutRegistersInHex PrintOutRflagsInHex PrintOutRipInHex PrintOutString PrintOutStringNL PrintOutZF PrintRaxInHex PrintRegisterInHex PrintString Pslldq Psrldq Push PushR PushRR Pushfq RComment Rb Rbwdq Rd Rdtsc ReadFile ReadTimeStampCounter RegisterSize ReorderSyscallRegisters ReorderXmmRegisters RestoreFirstFour RestoreFirstFourExceptRax RestoreFirstFourExceptRaxAndRdi RestoreFirstSeven RestoreFirstSevenExceptRax RestoreFirstSevenExceptRaxAndRdi Ret Rq Rs Rw SaveFirstFour SaveFirstSeven Scope ScopeEnd SetLabel SetLengthOfShortString SetMaskRegister SetRegisterToMinusOne SetZF Seta Setae Setb Setbe Setc Sete Setg Setge Setl Setle Setna Setnae Setnb Setnbe Setnc Setne Setng Setnge Setnl Setno Setnp Setns Setnz Seto Setp Setpe Setpo Sets Setz Shl Shr Start StatSize Structure Sub Subroutine Syscall TODO Test Tzcnt UnReorderSyscallRegisters UnReorderXmmRegisters VERSION Vaddd Vaddpd Variable Vb Vcvtudq2pd Vcvtudq2ps Vcvtuqq2pd Vd Vdpps Vgetmantps Vmovd Vmovdqa32 Vmovdqa64 Vmovdqu Vmovdqu32 Vmovdqu64 Vmovdqu8 Vmovq Vmulpd Vpbroadcastb Vpbroadcastd Vpbroadcastq Vpbroadcastw Vpcmpub Vpcmpud Vpcmpuq Vpcmpuw Vpcompressd Vpcompressq Vpexpandd Vpexpandq Vpextrb Vpextrd Vpextrq Vpextrw Vpinsrb Vpinsrd Vpinsrq Vpinsrw Vpmullb Vpmulld Vpmullq Vpmullw Vprolq Vpsubb Vpsubd Vpsubq Vpsubw Vpxorq Vq Vr Vsqrtpd Vw Vx VxyzInit Vy Vz WaitPid Xchg Xor ah al ax bh bl bp bpl bx ch cl cs cx dh di dil dl ds dx eax ebp ebx ecx edi edx es esi esp fs gs k0 k1 k2 k3 k4 k5 k6 k7 mm0 mm1 mm2 mm3 mm4 mm5 mm6 mm7 r10 r10b r10d r10l r10w r11 r11b r11d r11l r11w r12 r12b r12d r12l r12w r13 r13b r13d r13l r13w r14 r14b r14d r14l r14w r15 r15b r15d r15l r15w r8 r8b r8d r8l r8w r9 r9b r9d r9l r9w rax rbp rbx rcx rdi rdx rflags rip rsi rsp si sil sp spl ss st0 st1 st2 st3 st4 st5 st6 st7 xmm0 xmm1 xmm10 xmm11 xmm12 xmm13 xmm14 xmm15 xmm16 xmm17 xmm18 xmm19 xmm2 xmm20 xmm21 xmm22 xmm23 xmm24 xmm25 xmm26 xmm27 xmm28 xmm29 xmm3 xmm30 xmm31 xmm4 xmm5 xmm6 xmm7 xmm8 xmm9 ymm0 ymm1 ymm10 ymm11 ymm12 ymm13 ymm14 ymm15 ymm16 ymm17 ymm18 ymm19 ymm2 ymm20 ymm21 ymm22 ymm23 ymm24 ymm25 ymm26 ymm27 ymm28 ymm29 ymm3 ymm30 ymm31 ymm4 ymm5 ymm6 ymm7 ymm8 ymm9 zmm0 zmm1 zmm10 zmm11 zmm12 zmm13 zmm14 zmm15 zmm16 zmm17 zmm18 zmm19 zmm2 zmm20 zmm21 zmm22 zmm23 zmm24 zmm25 zmm26 zmm27 zmm28 zmm29 zmm3 zmm30 zmm31 zmm4 zmm5 zmm6 zmm7 zmm8 zmm9);
 %EXPORT_TAGS  = (all => [@EXPORT, @EXPORT_OK]);
 
 # podDocumentation
@@ -12397,7 +12425,7 @@ Index out of bounds on get from array, Index: 0000 0000 0000 000F  Size: 0000 00
 END
  }
 
-latest:
+#latest:
 if (1) {                                                                        #TExtern #TLink #TCallC
   my $format = Rs "Hello %s\n";
   my $data   = Rs "World";
