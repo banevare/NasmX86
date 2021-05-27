@@ -140,7 +140,7 @@ each [process](https://en.wikipedia.org/wiki/Process_management_(computing)) inv
 
 Read this file and print it out:
 
-  ```
+```
   use Nasm::X86 qw(:all);
 
   Mov rax, Rs($0);                                                              # File to read
@@ -148,7 +148,8 @@ Read this file and print it out:
   PrintOutMemory;                                                               # Print memory
 
   my $r = Assemble;                                                             # Assemble and execute
-  ok index($r, readFile($0)) > -1;                                              # Output contains this [file](https://en.wikipedia.org/wiki/Computer_file)   ```
+  ok index($r, readFile($0)) > -1;                                              # Output contains this [file](https://en.wikipedia.org/wiki/Computer_file) 
+```
 
 # Call functions in Libc
 
