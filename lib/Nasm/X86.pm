@@ -12420,7 +12420,7 @@ if (1) {                                                                        
     $a->push(element=>$index*2);
    });
 
-#  $A->dump if $develop;
+# $A->dump;
 
   ok Assemble(debug => 0, eq => <<END);
 index: 0000 0000 0000 0000  element: 0000 0000 0000 0001
