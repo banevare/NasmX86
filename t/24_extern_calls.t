@@ -15,7 +15,7 @@ Link 'c';
 # before calling a function
 CallC 'printf', $format_string, $printf_argument;
 CallC 'exit', 0;
-is_deeply Assemble(keep=>'z'), "Printf call: Success", "Assemble output test";
+is_deeply Assemble(keep=>'z'), "Printf call: Success\n", "Assemble output test";
 my $r = qx(./z);
 is $r, "Printf call: Success\n", "Output test";
 # cleanup
