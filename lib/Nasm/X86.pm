@@ -12242,9 +12242,11 @@ if (1) {                                                                        
   my $format = Rs "Hello %s\n";
   my $data   = Rs "World";
 
-  Extern qw(printf exit); Link 'c';
+  Extern qw(printf exit malloc); Link 'c';
 
   CallC 'printf', $format, $data;
+  CallC malloc, 16;
+  PrintErrRegisterInHex rax;
   CallC 'exit', 0;
 
   ok Assemble(eq => <<END);
