@@ -821,7 +821,7 @@ sub For(&$$$)                                                                   
   SetLabel $end;
  }
 
-sub ForIn(&$$$$)                                                                # For - iterate the body as long as register plus increment is less than than limit incrementing by increment each time
+sub ForIn(&$$$$)                                                                # For - iterate the full body as long as register plus increment is less than than limit incrementing by increment each time then increment the last body for the last non full block.
  {my ($full, $last, $register, $limit, $increment) = @_;                        # Body for full block, body for last block , register, limit on loop, increment on each iteration
   @_ == 5 or confess;
   Comment "For $register $limit";
@@ -1686,8 +1686,8 @@ sub Nasm::X86::Variable::print($)                                               
   PopR @regs;
  }
 
-sub Nasm::X86::Variable::dump($$$;$)                                            # Dump the value of a variable to the specified channel adding an optional title and new line if requested
- {my ($left, $channel, $newLine, $title) = @_;                                  # Left variable, channel, new line required, optional title
+sub Nasm::X86::Variable::dump($$$;$$)                                           # Dump the value of a variable to the specified channel adding an optional title and new line if requested
+ {my ($left, $channel, $newLine, $title1, $title2) = @_;                        # Left variable, channel, new line required, optional leading title, optional trailing title
   @_ >= 3 or confess;
   if ($left->size == 3)                                                         # General purpose register
    {PushR my @regs = (rax, rdi);
@@ -1699,8 +1699,9 @@ sub Nasm::X86::Variable::dump($$$;$)                                            
      }
     Mov rax, "[rax]";
     confess  dump($channel) unless $channel =~ m(\A1|2\Z);
-    PrintString  ($channel, $title//$left->name.": ");
+    PrintString  ($channel, $title1//$left->name.": ");
     PrintRaxInHex($channel);
+    PrintString  ($channel, $title2) if defined $title2;
     PrintNL      ($channel) if $newLine;
     PopR @regs;
    }
@@ -1710,7 +1711,7 @@ sub Nasm::X86::Variable::dump($$$;$)                                            
     my $s = RegisterSize rax;
     Mov rax, "[$l]";
     Mov rdi, "[$l+$s]";
-    &PrintErrString($title//$left->name.": ");
+    &PrintErrString($title1//$left->name.": ");
     &PrintErrRaxInHex();
     &PrintErrString("  ");
     KeepFree rax;
@@ -1721,24 +1722,24 @@ sub Nasm::X86::Variable::dump($$$;$)                                            
    }
  }
 
-sub Nasm::X86::Variable::err($;$)                                               # Dump the value of a variable on stderr
- {my ($left, $title) = @_;                                                      # Left variable, optional title
-  $left->dump($stderr, 0, $title);
+sub Nasm::X86::Variable::err($;$$)                                              # Dump the value of a variable on stderr
+ {my ($left, $title1, $title2) = @_;                                            # Left variable, optional leading title, optional trailing title
+  $left->dump($stderr, 0, $title1, $title2);
  }
 
-sub Nasm::X86::Variable::out($;$)                                               # Dump the value of a variable on stdout
- {my ($left, $title) = @_;                                                      # Left variable, optional title
-  $left->dump($stdout, 0, $title);
+sub Nasm::X86::Variable::out($;$$)                                               # Dump the value of a variable on stdout
+ {my ($left, $title1, $title2) = @_;                                            # Left variable, optional leading title, optional trailing title
+  $left->dump($stdout, 0, $title1, $title2);
  }
 
-sub Nasm::X86::Variable::errNL($;$)                                             # Dump the value of a variable on stderr and append a new line
- {my ($left, $title) = @_;                                                      # Left variable, optional title
-  $left->dump($stderr, 1, $title);
+sub Nasm::X86::Variable::errNL($;$$)                                             # Dump the value of a variable on stderr and append a new line
+ {my ($left, $title1, $title2) = @_;                                            # Left variable, optional leading title, optional trailing title
+  $left->dump($stderr, 1, $title1, $title2);
  }
 
-sub Nasm::X86::Variable::outNL($;$)                                             # Dump the value of a variable on stdout and append a new line
- {my ($left, $title) = @_;                                                      # Left variable, optional title
-  $left->dump($stdout, 1, $title);
+sub Nasm::X86::Variable::outNL($;$$)                                             # Dump the value of a variable on stdout and append a new line
+ {my ($left, $title1, $title2) = @_;                                            # Left variable, optional leading title, optional trailing title
+  $left->dump($stdout, 1, $title1, $title2);
  }
 
 sub Nasm::X86::Variable::debug($)                                               # Dump the value of a variable on stdout with an indication of where the dump came from
@@ -3459,7 +3460,6 @@ sub Nasm::X86::ByteString::dump($)                                              
     PrintOutRaxInHex;
     PrintOutNL;
     PopR rax;
-    RestoreFirstFour;
 
     Mov rdi, 64;
     PrintOutString("0000: ");
@@ -3476,6 +3476,7 @@ sub Nasm::X86::ByteString::dump($)                                              
     Add rax, 64;
     PrintOutString("00C0: ");
     PrintOutMemoryInHexNL;
+    RestoreFirstFour;
    } name => "Nasm::X86::ByteString::dump";
 
   PopR @save;
@@ -3598,7 +3599,7 @@ sub Nasm::X86::BlockString::putNextandPrevBlockOffsetIntoZmm($$$$)              
    }
  }
 
-sub Nasm::X86::BlockString::dump($)                                             # Dump a block string  to sysout
+sub Nasm::X86::BlockString::dump($)                                             # Dump a block string to sysout
  {my ($blockString) = @_;                                                       # Block string descriptor
   @_ == 1 or confess;
 
@@ -4019,6 +4020,54 @@ sub Nasm::X86::BlockArray::allocBlock($@)                                       
   $blockArray->bs->allocBlock($blockArray->address, @variables);
  }
 
+sub Nasm::X86::BlockArray::dump($@)                                             # Dump a block array
+ {my ($blockArray, @variables) = @_;                                            # Block array descriptor, variables
+  @_ >= 1 or confess;
+  my $b = $blockArray->bs;                                                      # Underlying byte string
+  my $W = RegisterSize zmm0;                                                    # The size of a block
+  my $w = $blockArray->width;                                                   # The size of an entry in a block
+  my $n = $blockArray->slots1;                                                  # The number of slots per block
+  my $N = $blockArray->slots2;                                                  # The number of slots per block
+
+  my $s = Subroutine
+   {my ($p) = @_;                                                               # Parameters
+
+    my $B = $$p{bs};                                                            # Byte string
+    my $F = $$p{first};                                                         # First block
+
+    PushR my @save = (zmm30, zmm31);
+    $b->getBlock($B, $F, 31);                                                   # Get the first block
+    my $size = getDFromZmmAsVariable(31, 0);                                    # Size of array
+    PrintOutStringNL("Block Array");
+    $size->out("Size: ", "  ");
+    PrintOutRegisterInHex zmm31;
+
+    If ($size > $n, sub                                                         # Array has secondary blocks
+     {my $T = $size / $N;                                                       # Number of full blocks
+
+      $T->for(sub                                                               # Print out each block
+       {my ($index, $start, $next, $end) = @_;                                  # Execute body
+        my $S = getDFromZmmAsVariable(31, ($index + 1) * $w);                   # Address secondary block from first block
+        $b->getBlock($B, $S, 30);                                               # Get the secondary block
+        $S->out("Full: ", "  ");
+        PrintOutRegisterInHex zmm30;
+       });
+
+      my $lastBlockCount = $size % $N;                                          # Number of elements in the last block
+      If ($lastBlockCount, sub                                                  # Print non empty last block
+       {my $S = getDFromZmmAsVariable(31, ($T + 1) * $w);                       # Address secondary block from first block
+        $b->getBlock($B, $S, 30);                                               # Get the secondary block
+        $S->out("Last: ", "  ");
+        PrintOutRegisterInHex zmm30;
+       });
+     });
+
+    PopR @save;
+   }  in => {bs => 3, first => 3};
+
+  $s->call($blockArray->address, $blockArray->first, @variables);
+ }
+
 sub Nasm::X86::BlockArray::push($@)                                             # Push an element onto the array
  {my ($blockArray, @variables) = @_;                                            # Block array descriptor, variables
   @_ >= 2 or confess;
@@ -4122,48 +4171,54 @@ sub Nasm::X86::BlockArray::pop($@)                                              
        {$E       ->getDFromZmm(31, ($size + 1) * $w);                           # Get element
         ($size-1)->putDIntoZmm(31, 0);                                          # Update size
         $b       ->putBlock($B, $F, 31);                                        # Put the first block back into memory
-        Jmp $success;                                                           # Element successfully popped from first block
+PrintOutStringNL "AAAA1111";
+        Jmp $success;                                                           # Element successfully retrieved from secondary block
        });
 
       If ($size == $N, sub                                                      # Migrate the second block to the first block now that the last slot is empty
        {PushR my @save = (rax, k7, zmm30);
+        my $S = getDFromZmmAsVariable(31, $w);                                  # Offset of second block in first block
+        $b->getBlock($B, $S, 30);                                               # Get the second block
+        $E->getDFromZmm(31, ($size + 1) * $w);                                  # Get element from second block
         Mov rax, -2;                                                            # Load expansion mask
-        Kmovq k7, rax;                                                          # Set  compression mask
+        Kmovq k7, rax;                                                          # Set  expansion mask
         Vpexpandd "zmm31{k7}{z}", zmm30;                                        # Expand second block into first block
         ClearRegisters zmm31;                                                   # Clear first block
-        ($size+1)->putDIntoZmm(31, 0);                                          # Save new size in first block
-        $b  ->allocBlock(my $new = Vq(offset));                                 # Allocate new block
-        $new->putDIntoZmm(31, $w);                                              # Save offset of second block in first block
-        $E  ->putDIntoZmm(30, $W - 1 * $w);                                     # Place new element
-        $b  ->putBlock($B, $new, 30);                                           # Put the second block back into memory
-        $b  ->putBlock($B, $F,   31);                                           # Put the first  block back into memory
+        ($size-1)->putDIntoZmm(31, 0);                                          # Save new size in first block
+        $b  -> putBlock($B, $F, 31);                                            # Save the first block
+        $b  ->freeBlock($B, offset=>$S);                                        # Free the now redundant second block
         PopR @save;
-        Jmp $success;                                                           # Element successfully inserted in second block
+PrintOutStringNL "AAAA2222";
+        Jmp $success;                                                           # Element successfully retrieved from secondary block
        });
 
       If ($size <= $N * ($N - 1), sub                                           # Still within two levels
-       {If ($size % $N == 0, sub                                                # New secondary block needed
+       {If ($size % $N == 1, sub                                                # Secondary block can be freed
          {PushR my @save = (rax, zmm30);
-          $b->allocBlock(my $new = Vq(offset));                                 # Allocate new block
-          $E       ->putDIntoZmm(30, 0);                                        # Place new element last in new second block
-          ($size+1)->putDIntoZmm(31, 0);                                        # Save new size in first block
-          $new     ->putDIntoZmm(31, ($size / $N + 1) * $w);                    # Address new second block from first block
-          $b       ->putBlock($B, $new, 30);                                    # Put the second block back into memory
-          $b       ->putBlock($B, $F,   31);                                    # Put the first  block back into memory
+          my $S = getDFromZmmAsVariable(31, ($size / $N + 1) * $w);             # Address secondary block from first block
+          $b       ->getBlock($B, $S, 30);                                      # Load secondary block
+          $E->getDFromZmm(30, 0);                                               # Get first element from secondary block
+          $b->freeBlock($B, offset=>$S);                                        # Free the secondary block
+          Vq(zero, 0)->putDIntoZmm(31, ($size / $N + 1) * $w);                  # Zero at offset of secondary block in first block
+          ($size-1)->putDIntoZmm(31, 0);                                        # Save new size in first block
+          $b       ->freeBlock($B, offset=>$S);                                 # Free the secondary block
+          $b       ->putBlock ($B, $F, 31);                                     # Put the first  block back into memory
           PopR @save;
-          Jmp $success;                                                         # Element successfully inserted in second block
+PrintOutStringNL "AAAA3333";
+          Jmp $success;                                                         # Element successfully retrieved from secondary block
          });
 
         if (1)                                                                  # Continue with existing secondary block
          {PushR my @save = (rax, r14, zmm30);
-          my $S = getDFromZmmAsVariable(31, ($size / $N + 1) * $w);             # Offset of second block in first block
-          $b       ->getBlock($B, $S, 30);                                      # Get the second block
-          $E       ->putDIntoZmm(30, ($size % $N) * $w);                        # Place new element last in new second block
-          ($size+1)->putDIntoZmm(31, 0);                                        # Save new size in first block
-          $b       ->putBlock($B, $S, 30);                                      # Put the second block back into memory
+          my $S = getDFromZmmAsVariable(31, ($size / $N + 1) * $w);             # Offset of secondary block in first block
+          $b       ->getBlock($B, $S, 30);                                      # Get the secondary block
+          $E       ->getDFromZmm(30, ($size % $N - 1) * $w);                    # Get element from secondary block
+          ($size-1)->putDIntoZmm(31, 0);                                        # Save new size in first block
+          $b       ->putBlock($B, $S, 30);                                      # Put the secondary block back into memory
           $b       ->putBlock($B, $F, 31);                                      # Put the first  block back into memory
           PopR @save;
-          Jmp $success;                                                         # Element successfully inserted in second block
+PrintOutStringNL "AAAA4444";
+          Jmp $success;                                                         # Element successfully retrieved from secondary block
          }
        });
      });
@@ -4336,7 +4391,7 @@ sub Exit(;$)                                                                    
     KeepFree  rdi;
     Mov rdi, $c;
    }
-  KeepFree rax;
+  KeepFree rax, rdi;
   Mov rax, 60;
   Syscall;
  }
@@ -12321,7 +12376,7 @@ Byte String
 END
  }
 
-#latest:;
+latest:;
 
 if (1) {                                                                        #TCreateBlockArray  #TBlockArray::push #TBlockArray::pop #TBlockArray::put #TBlockArray::get
   my $c = Rb(0..255);
@@ -12355,6 +12410,14 @@ if (1) {                                                                        
   if (1)
    {$a->put(my $i = Vq('index', 19), my $e = Vq(element, 0xEEE9));
     get(19);
+   }
+
+  $a->dump;
+
+  for my $i(reverse 1..36)
+   {$a->pop(my $e = Vq(element));
+    $e->outNL;
+    $a->dump if $i =~ m(\A(33|32|17|16|15|14|1|0)\Z);
    }
 
   ok Assemble(debug => 0, eq => <<END);
@@ -12398,7 +12461,7 @@ index: 0000 0000 0000 0009  element: 0000 0000 0000 FFF9
 index: 0000 0000 0000 0013  element: 0000 0000 0000 EEE9
 END
  }
-
+exit;
 #latest:;
 
 if (1) {                                                                        #TNasm::X86::ByteString::allocBlock #TNasm::X86::ByteString::freeBlock
