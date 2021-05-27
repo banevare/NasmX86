@@ -12245,8 +12245,6 @@ if (1) {                                                                        
   Extern qw(printf exit malloc); Link 'c';
 
   CallC 'printf', $format, $data;
-  CallC 'malloc', 16;
-  PrintErrRegisterInHex rax;
   CallC 'exit', 0;
 
   ok Assemble(eq => <<END);
