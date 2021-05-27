@@ -150,9 +150,10 @@ Read this file and print it out:
   my $r = Assemble;                                                             # Assemble and execute
   ok index($r, readFile($0)) > -1;                                              # Output contains this [file](https://en.wikipedia.org/wiki/Computer_file)   ```
 
-Call functions in Libc
+# Call functions in Libc
 
 Call **C** functions by naming them as external and including their library:
+
 ```
   my $format = Rs "Hello %s\n";
   my $data   = Rs "World";
