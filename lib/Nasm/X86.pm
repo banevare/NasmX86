@@ -2045,6 +2045,26 @@ sub getQFromZmmAsVariable($$)                                                   
   getBwdqFromMmAsVariable('q', "zmm$zmm", $offset)                              # Get the numbered byte|word|double word|quad word from the numbered zmm register and return it in a variable
  }
 
+sub Nasm::X86::Variable::getBFromZmm($$$)                                       # Get the byte from the numbered zmm register and put it in a variable
+ {my ($variable, $zmm, $offset) = @_;                                           # Variable, numbered zmm, offset in bytes
+  $variable->copy(getBwdqFromMmAsVariable('b', "zmm$zmm", $offset))             # Get the numbered byte|word|double word|quad word from the numbered zmm register and put it in a variable
+ }
+
+sub Nasm::X86::Variable::getWFromZmm($$$)                                       # Get the word from the numbered zmm register and put it in a variable
+ {my ($variable, $zmm, $offset) = @_;                                           # Variable, numbered zmm, offset in bytes
+  $variable->copy(getBwdqFromMmAsVariable('w', "zmm$zmm", $offset))             # Get the numbered byte|word|double word|quad word from the numbered zmm register and put it in a variable
+ }
+
+sub Nasm::X86::Variable::getDFromZmm($$$)                                       # Get the double word from the numbered zmm register and put it in a variable
+ {my ($variable, $zmm, $offset) = @_;                                           # Variable, numbered zmm, offset in bytes
+  $variable->copy(getBwdqFromMmAsVariable('d', "zmm$zmm", $offset))             # Get the numbered byte|word|double word|quad word from the numbered zmm register and put it in a variable
+ }
+
+sub Nasm::X86::Variable::getQFromZmm($$$)                                       # Get the quad word from the numbered zmm register and put it in a variable
+ {my ($variable, $zmm, $offset) = @_;                                           # Variable, numbered zmm, offset in bytes
+  $variable->copy(getBwdqFromMmAsVariable('q', "zmm$zmm", $offset))             # Get the numbered byte|word|double word|quad word from the numbered zmm register and put it in a variable
+ }
+
 sub Nasm::X86::Variable::putBwdqIntoMm($$$$)                                    # Place the value of the content variable at the byte|word|double word|quad word in the numbered zmm register
  {my ($content, $size, $mm, $offset) = @_;                                      # Variable with content, size of put, numbered zmm, offset in bytes
   @_ == 4 or confess;
@@ -4051,6 +4071,85 @@ sub Nasm::X86::BlockArray::push($@)                                             
   $s->call($blockArray->address, $blockArray->first, @variables);
  }
 
+sub Nasm::X86::BlockArray::pop($@)                                              # Pop an element from an array
+ {my ($blockArray, @variables) = @_;                                            # Block array descriptor, variables
+  @_ >= 2 or confess;
+  my $b = $blockArray->bs;                                                      # Underlying byte string
+  my $W = RegisterSize zmm0;                                                    # The size of a block
+  my $w = $blockArray->width;                                                   # The size of an entry in a block
+  my $n = $blockArray->slots1;                                                  # The number of slots per block
+  my $N = $blockArray->slots2;                                                  # The number of slots per block
+
+  my $s = Subroutine
+   {my ($p) = @_;                                                               # Parameters
+    my $success = Label;                                                        # Short circuit if ladders by jumping directly to the end after a successful push
+
+    my $B = $$p{bs};                                                            # Byte string
+    my $F = $$p{first};                                                         # First block
+    my $E = $$p{element};                                                       # The element being popped
+
+    PushR my @save = (zmm31);
+    $b->getBlock($B, $F, 31);                                                   # Get the first block
+    my $size = getDFromZmmAsVariable(31, 0);                                    # Size of array
+
+    If ($size > 0, sub                                                          # Array has elements
+     {If ($size <= $n, sub                                                      # In the first block
+       {$E       ->getDFromZmm(31, ($size + 1) * $w);                           # Get element
+        ($size-1)->putDIntoZmm(31, 0);                                          # Update size
+        $b       ->putBlock($B, $F, 31);                                        # Put the first block back into memory
+        Jmp $success;                                                           # Element successfully popped from first block
+       });
+
+      If ($size == $N, sub                                                      # Migrate the first block to the second block and fill in the last slot
+       {PushR my @save = (rax, k7, zmm30);
+        Mov rax, -2;                                                            # Load expansion mask
+        Kmovq k7, rax;                                                          # Set  compression mask
+        Vpcompressd "zmm30{k7}{z}", zmm31;                                      # Compress first block into second block
+        ClearRegisters zmm31;                                                   # Clear first block
+        ($size+1)->putDIntoZmm(31, 0);                                          # Save new size in first block
+        $b  ->allocBlock(my $new = Vq(offset));                                 # Allocate new block
+        $new->putDIntoZmm(31, $w);                                              # Save offset of second block in first block
+        $E  ->putDIntoZmm(30, $W - 1 * $w);                                     # Place new element
+        $b  ->putBlock($B, $new, 30);                                           # Put the second block back into memory
+        $b  ->putBlock($B, $F,   31);                                           # Put the first  block back into memory
+        PopR @save;
+        Jmp $success;                                                           # Element successfully inserted in second block
+       });
+
+      If ($size <= $N * ($N - 1), sub                                           # Still within two levels
+       {If ($size % $N == 0, sub                                                # New secondary block needed
+         {PushR my @save = (rax, zmm30);
+          $b->allocBlock(my $new = Vq(offset));                                 # Allocate new block
+          $E       ->putDIntoZmm(30, 0);                                        # Place new element last in new second block
+          ($size+1)->putDIntoZmm(31, 0);                                        # Save new size in first block
+          $new     ->putDIntoZmm(31, ($size / $N + 1) * $w);                    # Address new second block from first block
+          $b       ->putBlock($B, $new, 30);                                    # Put the second block back into memory
+          $b       ->putBlock($B, $F,   31);                                    # Put the first  block back into memory
+          PopR @save;
+          Jmp $success;                                                         # Element successfully inserted in second block
+         });
+
+        if (1)                                                                  # Continue with existing secondary block
+         {PushR my @save = (rax, r14, zmm30);
+          my $S = getDFromZmmAsVariable(31, ($size / $N + 1) * $w);             # Offset of second block in first block
+          $b       ->getBlock($B, $S, 30);                                      # Get the second block
+          $E       ->putDIntoZmm(30, ($size % $N) * $w);                        # Place new element last in new second block
+          ($size+1)->putDIntoZmm(31, 0);                                        # Save new size in first block
+          $b       ->putBlock($B, $S, 30);                                      # Put the second block back into memory
+          $b       ->putBlock($B, $F, 31);                                      # Put the first  block back into memory
+          PopR @save;
+          Jmp $success;                                                         # Element successfully inserted in second block
+         }
+       });
+     });
+
+    SetLabel $success;
+    PopR @save;
+   }  in => {bs => 3, first => 3}, out => {element => 3};
+
+  $s->call($blockArray->address, $blockArray->first, @variables);
+ }
+
 sub Nasm::X86::BlockArray::get($@)                                              # Get an element from the array
  {my ($blockArray, @variables) = @_;                                            # Block array descriptor, variables
   @_ >= 3 or confess;
@@ -4075,19 +4174,19 @@ sub Nasm::X86::BlockArray::get($@)                                              
 
     If ($I < $size, sub                                                         # Index is in array
      {If ($size <= $n, sub                                                      # Element is in the first block
-       {$E->copy(getDFromZmmAsVariable(31, ($I + 1) * $w));                      # Get element
+       {$E->getDFromZmm(31, ($I + 1) * $w);                                     # Get element
         Jmp $success;                                                           # Element successfully inserted in first block
        });
 
       If ($size <= $N * ($N - 1), sub                                           # Still within two levels
        {my $S = getDFromZmmAsVariable(31, ($I / $N + 1) * $w);                  # Offset of second block in first block
         $b->getBlock($B, $S, 31);                                               # Get the second block
-        $E->copy(getDFromZmmAsVariable(31, ($I % $N) * $w));                    # Offset of second block in first block
+        $E->getDFromZmm(31, ($I % $N) * $w);                                    # Offset of element in second block
         Jmp $success;                                                           # Element successfully inserted in second block
        });
      });
 
-    PrintErrString "Index out of bounds, ";                                     # Array index out of bounds
+    PrintErrString "Index out of bounds on get from array, ";                   # Array index out of bounds
     $I->err("Index: "); PrintErrString "  "; $size->errNL("Size: ");
     Exit(1);
 
@@ -4098,14 +4197,62 @@ sub Nasm::X86::BlockArray::get($@)                                              
   $s->call($blockArray->address, $blockArray->first, @variables);
  }
 
+sub Nasm::X86::BlockArray::put($@)                                              # Put an element into an array as long as it is with in its limits established by pushing.
+ {my ($blockArray, @variables) = @_;                                            # Block array descriptor, variables
+  @_ >= 3 or confess;
+  my $b = $blockArray->bs;                                                      # Underlying byte string
+  my $W = RegisterSize zmm0;                                                    # The size of a block
+  my $w = $blockArray->width;                                                   # The size of an entry in a block
+  my $n = $blockArray->slots1;                                                  # The number of slots in the first block
+  my $N = $blockArray->slots2;                                                  # The number of slots in the secondary blocks
+
+  my $s = Subroutine
+   {my ($p) = @_;                                                               # Parameters
+    my $success = Label;                                                        # Short circuit if ladders by jumping directly to the end after a successful push
+
+    my $B = $$p{bs};                                                            # Byte string
+    my $F = $$p{first};                                                         # First block
+    my $E = $$p{element};                                                       # The element to be added
+    my $I = $$p{index};                                                         # Index of the element to be inserted
+
+    PushR my @save = (zmm31);
+    $b->getBlock($B, $F, 31);                                                   # Get the first block
+    my $size = getDFromZmmAsVariable(31, 0);                                    # Size of array
+    If ($I < $size, sub                                                         # Index is in array
+     {If ($size <= $n, sub                                                      # Element is in the first block
+       {$E->putDIntoZmm(31, ($I + 1) * $w);                                     # Put element
+        $b->putBlock($B, $F, 31);                                               # Get the first block
+        Jmp $success;                                                           # Element successfully inserted in first block
+       });
+
+      If ($size <= $N * ($N - 1), sub                                           # Still within two levels
+       {my $S = getDFromZmmAsVariable(31, ($I / $N + 1) * $w);                  # Offset of second block in first block
+        $b->getBlock($B, $S, 31);                                               # Get the second block
+        $E->putDIntoZmm(31, ($I % $N) * $w);                                    # Put the element into the second block in first block
+        $b->putBlock($B, $S, 31);                                               # Get the first block
+        Jmp $success;                                                           # Element successfully inserted in second block
+       });
+     });
+
+    PrintErrString "Index out of bounds on put to array, ";                     # Array index out of bounds
+    $I->err("Index: "); PrintErrString "  "; $size->errNL("Size: ");
+    Exit(1);
+
+    SetLabel $success;
+    PopR @save;
+   }  in => {bs => 3, first => 3, index => 3, element => 3};
+
+  $s->call($blockArray->address, $blockArray->first, @variables);
+ }
+
 #D1 Assemble                                                                    # Assemble generated code
 
 sub CallC($@)                                                                   # Call a C subroutine
  {my ($sub, @parameters) = @_;                                                  # Name of the sub to call, parameters
-  my @order = (rdi, rsi, rdx, rcx, r8, r9);
+  my @order = (rdi, rsi, rdx, rcx, r8, r9, r15);
   PushR @order;
 
-  for my $i(keys @parameters)                                                   # Load paramters into designated registers
+  for my $i(keys @parameters)                                                   # Load parameters into designated registers
    {Mov $order[$i], $parameters[$i];
    }
 
@@ -4128,11 +4275,10 @@ sub CallC($@)                                                                   
    {Call $sub;
    }
 
-  Pop rax;                                                                      # Decode and reset stack after 16 byte alignment
-  Cmp rax, 2;                                                                   # Check for double push
-  Pop rax;                                                                      # Single or double push
-  IfEq {Pop rax};                                                               # Double push
-
+  Pop r15;                                                                      # Decode and reset stack after 16 byte alignment
+  Cmp r15, 2;                                                                   # Check for double push
+  Pop r15;                                                                      # Single or double push
+  IfEq {Pop r15};                                                               # Double push
   PopR @order;
  }
 
@@ -4492,9 +4638,12 @@ Call B<C> functions by naming them as external and including their library:
   my $format = Rs "Hello %s\n";
   my $data   = Rs "World";
 
-  Extern qw(printf exit); Link 'c';
+  Extern qw(printf exit malloc strcpy); Link 'c';
 
-  CallC 'printf', $format, $data;
+  CallC 'malloc', length($format)+1;
+  Mov r15, rax;
+  CallC 'strcpy', r15, $format;
+  CallC 'printf', r15, $data;
   CallC 'exit', 0;
 
   ok Assemble(eq => <<END);
@@ -12148,7 +12297,7 @@ END
 
 #latest:;
 
-if (1) {                                                                        #TCreateBlockArray  #TBlockArray::push
+if (1) {                                                                        #TCreateBlockArray  #TBlockArray::push #TBlockArray::pop #TBlockArray::put #TBlockArray::get
   my $c = Rb(0..255);
   my $A = CreateByteString;  my $a = $A->CreateBlockArray;
 
@@ -12158,7 +12307,7 @@ if (1) {                                                                        
    };
 
   my sub get
-   {my ($i) = @_;                                                              # Parameters
+   {my ($i) = @_;
     $a->get(my $v = Vq('index', $i), my $e = Vq(element));
     $v->out; PrintOutString "  "; $e->outNL;
    };
@@ -12172,7 +12321,17 @@ if (1) {                                                                        
   put($_ )  for 17..36;
   get($_-1) for 17..36;
 
-  ok Assemble(debug => 0, eq => <<END);
+  if (1)
+   {$a->put(my $i = Vq('index',  9), my $e = Vq(element, 0xFFF9));
+    get(9);
+   }
+
+  if (1)
+   {$a->put(my $i = Vq('index', 19), my $e = Vq(element, 0xEEE9));
+    get(19);
+   }
+
+  ok Assemble(debug => 1, eq => <<END);
 index: 0000 0000 0000 0000  element: 0000 0000 0000 0001
 index: 0000 0000 0000 0001  element: 0000 0000 0000 0002
 index: 0000 0000 0000 0002  element: 0000 0000 0000 0003
@@ -12209,6 +12368,8 @@ index: 0000 0000 0000 0020  element: 0000 0000 0000 0021
 index: 0000 0000 0000 0021  element: 0000 0000 0000 0022
 index: 0000 0000 0000 0022  element: 0000 0000 0000 0023
 index: 0000 0000 0000 0023  element: 0000 0000 0000 0024
+index: 0000 0000 0000 0009  element: 0000 0000 0000 FFF9
+index: 0000 0000 0000 0013  element: 0000 0000 0000 EEE9
 END
  }
 
@@ -12232,19 +12393,21 @@ if (1) {                                                                        
   put($_) for 1..15;  get(15);
 
   ok Assemble(debug => 2, eq => <<END);
-Index out of bounds, Index: 0000 0000 0000 000F  Size: 0000 0000 0000 000F
+Index out of bounds on get from array, Index: 0000 0000 0000 000F  Size: 0000 0000 0000 000F
 END
  }
 
-latest:;
-
+latest:
 if (1) {                                                                        #TExtern #TLink #TCallC
   my $format = Rs "Hello %s\n";
   my $data   = Rs "World";
 
-  Extern qw(printf exit malloc); Link 'c';
+  Extern qw(printf exit malloc strcpy); Link 'c';
 
-  CallC 'printf', $format, $data;
+  CallC 'malloc', length($format)+1;
+  Mov r15, rax;
+  CallC 'strcpy', r15, $format;
+  CallC 'printf', r15, $data;
   CallC 'exit', 0;
 
   ok Assemble(eq => <<END);
