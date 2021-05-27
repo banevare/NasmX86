@@ -12415,6 +12415,8 @@ if (1) {                                                                        
     $a->dump if $i =~ m(\A(33|32|17|16|15|14|1|0)\Z);
    }
 
+#$A->dump;
+
   ok Assemble(debug => 0, eq => <<END);
 index: 0000 0000 0000 0000  element: 0000 0000 0000 0001
 index: 0000 0000 0000 0001  element: 0000 0000 0000 0002
@@ -12516,7 +12518,7 @@ Block Array
 Size: 0000 0000 0000 0000   zmm31: 0000 000F 0000 000E   0000 000D 0000 000C   0000 000B 0000 FFF9   0000 0009 0000 0008   0000 0007 0000 0006   0000 0005 0000 0004   0000 0003 0000 0002   0000 0001 0000 0000
 END
  }
-exit;
+exit if -e q(/home/phil/);
 #latest:;
 
 if (1) {                                                                        #TNasm::X86::ByteString::allocBlock #TNasm::X86::ByteString::freeBlock
