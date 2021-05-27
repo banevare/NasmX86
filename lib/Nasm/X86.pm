@@ -3139,25 +3139,23 @@ sub Nasm::X86::ByteString::allocBlock($@)                                       
 
 sub Nasm::X86::ByteString::freeBlock($@)                                        # Free a block in a byte string by placing it on the free chain
  {my ($byteString, @variables) = @_;                                            # Byte string descriptor, variables
-  @_ >= 3 or confess;
+  @_ >= 2 or confess;
 
   my $s = Subroutine
    {my ($p) = @_;                                                               # Parameters
     Comment "Free a block in a byte string";
     SaveFirstFour;
 
-    sub                                                                         # Two or more blocks on the chain
-     {$$p{bs}->setReg(rax);                                                     # Address underlying byte string
-      Lea rdx, $byteString->free->addr;                                         # Address of address of free chain
-      Mov rdi, "[rdx]";                                                         # Address of free chain
-      my $rfc = Vq('next', rdi);                                                # Remainder of the free chain
+    $$p{bs}->setReg(rax);                                                       # Address underlying byte string
+    Lea rdx, $byteString->free->addr;                                           # Address of address of free chain
+    Mov rdi, "[rdx]";                                                           # Address of free chain
+    my $rfc = Vq('next', rdi);                                                  # Remainder of the free chain
 
-      ClearRegisters zmm30;                                                     # Second block
-      $rfc->putDIntoZmm(30, 60);                                                # The position of the next pointer was dictated by BlockString.
-      $byteString->putBlock($$p{bs}, $$p{offset}, 30);                          # Link the freed block to the rest of the free chain
-      $$p{offset}->setReg(rsi);                                                 # Offset of block being freed
-      Mov "[rdx]", rsi;                                                         # Set head of free chain to point to block just freed
-     },
+    ClearRegisters zmm30;                                                       # Second block
+    $rfc->putDIntoZmm(30, 60);                                                  # The position of the next pointer was dictated by BlockString.
+    $byteString->putBlock($$p{bs}, $$p{offset}, 30);                            # Link the freed block to the rest of the free chain
+    $$p{offset}->setReg(rsi);                                                   # Offset of block being freed
+    Mov "[rdx]", rsi;                                                           # Set head of free chain to point to block just freed
     RestoreFirstFour;
    } in => {bs => 3, offset => 3};
 
@@ -4460,7 +4458,7 @@ END
    }
 
   if (!$k and $debug == 1)                                                      # Print files if soft debugging
-   {say STDERR readFile($o1);
+   {say STDERR readFile($o1) =~ s(0) ( )gsr;
     say STDERR readFile($o2);
    }
 
@@ -12359,7 +12357,7 @@ if (1) {                                                                        
     get(19);
    }
 
-  ok Assemble(debug => 1, eq => <<END);
+  ok Assemble(debug => 0, eq => <<END);
 index: 0000 0000 0000 0000  element: 0000 0000 0000 0001
 index: 0000 0000 0000 0001  element: 0000 0000 0000 0002
 index: 0000 0000 0000 0002  element: 0000 0000 0000 0003
@@ -12398,6 +12396,54 @@ index: 0000 0000 0000 0022  element: 0000 0000 0000 0023
 index: 0000 0000 0000 0023  element: 0000 0000 0000 0024
 index: 0000 0000 0000 0009  element: 0000 0000 0000 FFF9
 index: 0000 0000 0000 0013  element: 0000 0000 0000 EEE9
+END
+ }
+
+#latest:;
+
+if (1) {                                                                        #TNasm::X86::ByteString::allocBlock #TNasm::X86::ByteString::freeBlock
+  my $a = CreateByteString;              $a->dump;
+  $a->allocBlock(my $b1 = Vq(offset));   $a->dump;
+  $a->allocBlock(my $b2 = Vq(offset));   $a->dump;
+  $a->freeBlock($b2);                    $a->dump;
+  $a->freeBlock($b1);                    $a->dump;
+
+  ok Assemble(debug => 0, eq => <<END);
+Byte String
+  Size: 0000 0000 0000 1000
+  Used: 0000 0000 0000 0018
+0000: 0010 0000 0000 00001800 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+0040: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+0080: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+00C0: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+Byte String
+  Size: 0000 0000 0000 1000
+  Used: 0000 0000 0000 0058
+0000: 0010 0000 0000 00005800 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+0040: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+0080: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+00C0: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+Byte String
+  Size: 0000 0000 0000 1000
+  Used: 0000 0000 0000 0098
+0000: 0010 0000 0000 00009800 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+0040: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+0080: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+00C0: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+Byte String
+  Size: 0000 0000 0000 1000
+  Used: 0000 0000 0000 0098
+0000: 0010 0000 0000 00009800 0000 0000 00005800 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+0040: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+0080: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+00C0: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+Byte String
+  Size: 0000 0000 0000 1000
+  Used: 0000 0000 0000 0098
+0000: 0010 0000 0000 00009800 0000 0000 00001800 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+0040: 0000 0000 0000 00000000 0000 0000 00000000 0000 5800 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+0080: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+00C0: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
 END
  }
 
