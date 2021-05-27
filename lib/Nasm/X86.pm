@@ -3146,7 +3146,6 @@ sub Nasm::X86::ByteString::freeBlock($@)                                        
    {my ($p) = @_;                                                               # Parameters
     Comment "Free a block in a byte string";
     SaveFirstFour;
-
     $$p{bs}->setReg(rax);                                                       # Address underlying byte string
     Lea rdx, $byteString->free->addr;                                           # Address of address of free chain
     Mov rdi, "[rdx]";                                                           # Address of free chain
@@ -4195,7 +4194,6 @@ sub Nasm::X86::BlockArray::pop($@)                                              
           my $S = getDFromZmmAsVariable(31, ($size / $N + 1) * $w);             # Address secondary block from first block
           $b       ->getBlock($B, $S, 30);                                      # Load secondary block
           $E->getDFromZmm(30, 0);                                               # Get first element from secondary block
-          $b->freeBlock($B, offset=>$S);                                        # Free the secondary block
           Vq(zero, 0)->putDIntoZmm(31, ($size / $N + 1) * $w);                  # Zero at offset of secondary block in first block
           ($size-1)->putDIntoZmm(31, 0);                                        # Save new size in first block
           $b       ->freeBlock($B, offset=>$S);                                 # Free the secondary block
@@ -12415,7 +12413,14 @@ if (1) {                                                                        
     $a->dump if $i =~ m(\A(33|32|17|16|15|14|1|0)\Z);
    }
 
-#$A->dump;
+  $A->dump if $develop;
+
+  Vq(limit,38)->for(sub                                                         # Push using a loop a reusing the freed space
+   {my ($index, $start, $next, $end) = @_;
+    $a->push(element=>$index*2);
+   });
+
+#  $A->dump if $develop;
 
   ok Assemble(debug => 0, eq => <<END);
 index: 0000 0000 0000 0000  element: 0000 0000 0000 0001
@@ -12516,9 +12521,16 @@ element: 0000 0000 0000 0002
 element: 0000 0000 0000 0001
 Block Array
 Size: 0000 0000 0000 0000   zmm31: 0000 000F 0000 000E   0000 000D 0000 000C   0000 000B 0000 FFF9   0000 0009 0000 0008   0000 0007 0000 0006   0000 0005 0000 0004   0000 0003 0000 0002   0000 0001 0000 0000
+Byte String
+  Size: 0000 0000 0000 1000
+  Used: 0000 0000 0000 0118
+0000: 0010 0000 0000 00001801 0000 0000 00005800 0000 0000 00000000 0000 0100 00000200 0000 0300 00000400 0000 0500 00000600 0000 0700 00000800 0000 0900 0000
+0040: F9FF 0000 0B00 00000C00 0000 0D00 00000E00 0000 0F00 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+0080: 0000 0000 0000 00000000 0000 0000 00000000 0000 9800 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+00C0: 0000 0000 0000 00000000 0000 0000 00000000 0000 D800 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
 END
  }
-exit if -e q(/home/phil/);
+exit if $develop;
 #latest:;
 
 if (1) {                                                                        #TNasm::X86::ByteString::allocBlock #TNasm::X86::ByteString::freeBlock
