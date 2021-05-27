@@ -2189,7 +2189,7 @@ sub Nasm::X86::Variable::freeMemory($)                                          
   PopR @save;
  }
 
-sub Nasm::X86::Variable::for($&)                                                # Iterate the body from 0 limit times.
+sub Nasm::X86::Variable::for($&)                                                # Iterate the body limit times.
  {my ($limit, $body) = @_;                                                      # Limit, Body
   @_ == 2 or confess;
   Comment "Variable::For $limit";
@@ -12402,31 +12402,47 @@ Byte String
 END
  }
 
-#latest:;
+latest:;
 
 if (1) {                                                                        #TCreateBlockArray  #TBlockArray::push #TBlockArray::pop #TBlockArray::put #TBlockArray::get
   my $c = Rb(0..255);
   my $A = CreateByteString;  my $a = $A->CreateBlockArray;
+  my $l = Vq(limit, 15);
+  my $L = $l + 5;
 
   my sub put
    {my ($e) = @_;
-    $a->push(element => Vq($e, $e));
+    $a->push(element => (ref($e) ? $e : Vq($e, $e)));
    };
 
   my sub get
    {my ($i) = @_;
-    $a->get(my $v = Vq('index', $i), my $e = Vq(element));
-    $v->out; PrintOutString "  "; $e->outNL;
+    $a->get(index=>(my $v = ref($i) ? $i : Vq('index', $i)), my $e = Vq(element));
+    $v->out("index: ", "  "); $e->outNL;
    };
 
-  put($_)   for 1..15;
-  get($_-1) for 1..15;
+  $l->for(sub
+   {my ($index, $start, $next, $end) = @_;
+    put($index+1);
+   });
+
+  $l->for(sub
+   {my ($index, $start, $next, $end) = @_;
+    get($index);
+   });
 
   put(16);
   get(15);
 
-  put($_ )  for 17..36;
-  get($_-1) for 17..36;
+  $L->for(sub
+   {my ($index, $start, $next, $end) = @_;
+    put($index+$l+2);
+   });
+
+  $L->for(sub
+   {my ($index, $start, $next, $end) = @_;
+    get($index + $l + 1);
+   });
 
   if (1)
    {$a->put(my $i = Vq('index',  9), my $e = Vq(element, 0xFFF9));
@@ -12570,7 +12586,7 @@ Byte String
 00C0: 0000 0000 0000 00000000 0000 0000 00000000 0000 D800 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
 END
  }
-#exit if $develop;
+exit if $develop;
 
 #latest:;
 if (1) {                                                                        #TNasm::X86::ByteString::allocBlock #TNasm::X86::ByteString::freeBlock
