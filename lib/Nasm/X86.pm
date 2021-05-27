@@ -4168,10 +4168,9 @@ sub Nasm::X86::BlockArray::pop($@)                                              
 
     If ($size > 0, sub                                                          # Array has elements
      {If ($size <= $n, sub                                                      # In the first block
-       {$E       ->getDFromZmm(31, ($size + 1) * $w);                           # Get element
+       {$E       ->getDFromZmm(31, $size * $w);                                 # Get element
         ($size-1)->putDIntoZmm(31, 0);                                          # Update size
         $b       ->putBlock($B, $F, 31);                                        # Put the first block back into memory
-PrintOutStringNL "AAAA1111";
         Jmp $success;                                                           # Element successfully retrieved from secondary block
        });
 
@@ -4179,16 +4178,14 @@ PrintOutStringNL "AAAA1111";
        {PushR my @save = (rax, k7, zmm30);
         my $S = getDFromZmmAsVariable(31, $w);                                  # Offset of second block in first block
         $b->getBlock($B, $S, 30);                                               # Get the second block
-        $E->getDFromZmm(31, ($size + 1) * $w);                                  # Get element from second block
+        $E->getDFromZmm(30, $n * $w);                                           # Get element from second block
         Mov rax, -2;                                                            # Load expansion mask
         Kmovq k7, rax;                                                          # Set  expansion mask
         Vpexpandd "zmm31{k7}{z}", zmm30;                                        # Expand second block into first block
-        ClearRegisters zmm31;                                                   # Clear first block
         ($size-1)->putDIntoZmm(31, 0);                                          # Save new size in first block
         $b  -> putBlock($B, $F, 31);                                            # Save the first block
         $b  ->freeBlock($B, offset=>$S);                                        # Free the now redundant second block
         PopR @save;
-PrintOutStringNL "AAAA2222";
         Jmp $success;                                                           # Element successfully retrieved from secondary block
        });
 
@@ -4204,20 +4201,18 @@ PrintOutStringNL "AAAA2222";
           $b       ->freeBlock($B, offset=>$S);                                 # Free the secondary block
           $b       ->putBlock ($B, $F, 31);                                     # Put the first  block back into memory
           PopR @save;
-PrintOutStringNL "AAAA3333";
           Jmp $success;                                                         # Element successfully retrieved from secondary block
          });
 
         if (1)                                                                  # Continue with existing secondary block
          {PushR my @save = (rax, r14, zmm30);
-          my $S = getDFromZmmAsVariable(31, ($size / $N + 1) * $w);             # Offset of secondary block in first block
+          my $S = getDFromZmmAsVariable(31, (($size-1) / $N + 1) * $w);             # Offset of secondary block in first block
           $b       ->getBlock($B, $S, 30);                                      # Get the secondary block
-          $E       ->getDFromZmm(30, ($size % $N - 1) * $w);                    # Get element from secondary block
+          $E       ->getDFromZmm(30, (($size - 1)  % $N) * $w);             # Get element from secondary block
           ($size-1)->putDIntoZmm(31, 0);                                        # Save new size in first block
           $b       ->putBlock($B, $S, 30);                                      # Put the secondary block back into memory
           $b       ->putBlock($B, $F, 31);                                      # Put the first  block back into memory
           PopR @save;
-PrintOutStringNL "AAAA4444";
           Jmp $success;                                                         # Element successfully retrieved from secondary block
          }
        });
@@ -12459,6 +12454,66 @@ index: 0000 0000 0000 0022  element: 0000 0000 0000 0023
 index: 0000 0000 0000 0023  element: 0000 0000 0000 0024
 index: 0000 0000 0000 0009  element: 0000 0000 0000 FFF9
 index: 0000 0000 0000 0013  element: 0000 0000 0000 EEE9
+Block Array
+Size: 0000 0000 0000 0024   zmm31: 0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 00D8 0000 0098   0000 0058 0000 0024
+Full: 0000 0000 0000 0058   zmm30: 0000 0010 0000 000F   0000 000E 0000 000D   0000 000C 0000 000B   0000 FFF9 0000 0009   0000 0008 0000 0007   0000 0006 0000 0005   0000 0004 0000 0003   0000 0002 0000 0001
+Full: 0000 0000 0000 0098   zmm30: 0000 0020 0000 001F   0000 001E 0000 001D   0000 001C 0000 001B   0000 001A 0000 0019   0000 0018 0000 0017   0000 0016 0000 0015   0000 EEE9 0000 0013   0000 0012 0000 0011
+Last: 0000 0000 0000 00D8   zmm30: 0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0024 0000 0023   0000 0022 0000 0021
+element: 0000 0000 0000 0024
+element: 0000 0000 0000 0023
+element: 0000 0000 0000 0022
+element: 0000 0000 0000 0021
+Block Array
+Size: 0000 0000 0000 0020   zmm31: 0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0098   0000 0058 0000 0020
+Full: 0000 0000 0000 0058   zmm30: 0000 0010 0000 000F   0000 000E 0000 000D   0000 000C 0000 000B   0000 FFF9 0000 0009   0000 0008 0000 0007   0000 0006 0000 0005   0000 0004 0000 0003   0000 0002 0000 0001
+Full: 0000 0000 0000 0098   zmm30: 0000 0020 0000 001F   0000 001E 0000 001D   0000 001C 0000 001B   0000 001A 0000 0019   0000 0018 0000 0017   0000 0016 0000 0015   0000 EEE9 0000 0013   0000 0012 0000 0011
+element: 0000 0000 0000 0020
+Block Array
+Size: 0000 0000 0000 001F   zmm31: 0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0098   0000 0058 0000 001F
+Full: 0000 0000 0000 0058   zmm30: 0000 0010 0000 000F   0000 000E 0000 000D   0000 000C 0000 000B   0000 FFF9 0000 0009   0000 0008 0000 0007   0000 0006 0000 0005   0000 0004 0000 0003   0000 0002 0000 0001
+Last: 0000 0000 0000 0098   zmm30: 0000 0020 0000 001F   0000 001E 0000 001D   0000 001C 0000 001B   0000 001A 0000 0019   0000 0018 0000 0017   0000 0016 0000 0015   0000 EEE9 0000 0013   0000 0012 0000 0011
+element: 0000 0000 0000 001F
+element: 0000 0000 0000 001E
+element: 0000 0000 0000 001D
+element: 0000 0000 0000 001C
+element: 0000 0000 0000 001B
+element: 0000 0000 0000 001A
+element: 0000 0000 0000 0019
+element: 0000 0000 0000 0018
+element: 0000 0000 0000 0017
+element: 0000 0000 0000 0016
+element: 0000 0000 0000 0015
+element: 0000 0000 0000 EEE9
+element: 0000 0000 0000 0013
+element: 0000 0000 0000 0012
+element: 0000 0000 0000 0011
+Block Array
+Size: 0000 0000 0000 0010   zmm31: 0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0058 0000 0010
+Full: 0000 0000 0000 0058   zmm30: 0000 0010 0000 000F   0000 000E 0000 000D   0000 000C 0000 000B   0000 FFF9 0000 0009   0000 0008 0000 0007   0000 0006 0000 0005   0000 0004 0000 0003   0000 0002 0000 0001
+element: 0000 0000 0000 0010
+Block Array
+Size: 0000 0000 0000 000F   zmm31: 0000 000F 0000 000E   0000 000D 0000 000C   0000 000B 0000 FFF9   0000 0009 0000 0008   0000 0007 0000 0006   0000 0005 0000 0004   0000 0003 0000 0002   0000 0001 0000 000F
+element: 0000 0000 0000 000F
+Block Array
+Size: 0000 0000 0000 000E   zmm31: 0000 000F 0000 000E   0000 000D 0000 000C   0000 000B 0000 FFF9   0000 0009 0000 0008   0000 0007 0000 0006   0000 0005 0000 0004   0000 0003 0000 0002   0000 0001 0000 000E
+element: 0000 0000 0000 000E
+Block Array
+Size: 0000 0000 0000 000D   zmm31: 0000 000F 0000 000E   0000 000D 0000 000C   0000 000B 0000 FFF9   0000 0009 0000 0008   0000 0007 0000 0006   0000 0005 0000 0004   0000 0003 0000 0002   0000 0001 0000 000D
+element: 0000 0000 0000 000D
+element: 0000 0000 0000 000C
+element: 0000 0000 0000 000B
+element: 0000 0000 0000 FFF9
+element: 0000 0000 0000 0009
+element: 0000 0000 0000 0008
+element: 0000 0000 0000 0007
+element: 0000 0000 0000 0006
+element: 0000 0000 0000 0005
+element: 0000 0000 0000 0004
+element: 0000 0000 0000 0003
+element: 0000 0000 0000 0002
+element: 0000 0000 0000 0001
+Block Array
+Size: 0000 0000 0000 0000   zmm31: 0000 000F 0000 000E   0000 000D 0000 000C   0000 000B 0000 FFF9   0000 0009 0000 0008   0000 0007 0000 0006   0000 0005 0000 0004   0000 0003 0000 0002   0000 0001 0000 0000
 END
  }
 exit;
