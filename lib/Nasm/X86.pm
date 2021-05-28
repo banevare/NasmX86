@@ -971,7 +971,6 @@ sub Nasm::X86::Sub::call($%)                                                    
    }
 
   Call $$sub{start};                                                            # Call the sub routine
-
   for my $p(keys $sub->out->%*)                                                 # Load output parameters
    {confess qq(Missing output parameter: "$p") unless my $v = $p{$p};
     $v->copy($sub->variables->{$p});
@@ -3137,12 +3136,17 @@ sub Nasm::X86::ByteString::allocBlock($@)                                       
   @_ >= 2 or confess;
   my $ffb = $byteString->firstFreeBlock;                                        # Check for a free block
   If ($ffb > 0, sub                                                             # Free block available
-   {for my $v(@variables)
+   {PushR zmm31;
+    $byteString->getBlock($byteString->bs, $ffb, 31);                           # Load the first block on the free chain
+    my $second = getDFromZmmAsVariable(31, 60);                                # The location of the next pointer is forced upon us by block string which got there first.
+    $byteString->setFirstFreeBlock($second);                                   # Set the first free block field to point to the second block
+    for my $v(@variables)
      {if (ref($v) and $v->name eq "offset")
        {$v->copy($ffb);
-        return;
+        last;
        }
      }
+    PopR zmm31;
    },
   sub
    {$byteString->allocate(Vq(size, RegisterSize(zmm0)), @variables);
@@ -12402,8 +12406,7 @@ Byte String
 END
  }
 
-latest:;
-
+#latest:;
 if (1) {                                                                        #TCreateBlockArray  #TBlockArray::push #TBlockArray::pop #TBlockArray::put #TBlockArray::get
   my $c = Rb(0..255);
   my $A = CreateByteString;  my $a = $A->CreateBlockArray;
@@ -12455,21 +12458,26 @@ if (1) {                                                                        
    }
 
   $a->dump;
-
   for my $i(reverse 1..36)
    {$a->pop(my $e = Vq(element));
     $e->outNL;
     $a->dump if $i =~ m(\A(33|32|17|16|15|14|1|0)\Z);
    }
 
-  $A->dump;
-
-  Vq(limit,38)->for(sub                                                         # Push using a loop a reusing the freed space
+  Vq(limit, 38)->for(sub                                                        # Push using a loop and reusing the freed space
    {my ($index, $start, $next, $end) = @_;
     $a->push(element=>$index*2);
    });
 
-  $A->dump;
+  $a->dump;
+
+  Vq(limit, 38)->for(sub                                                        # Push using a loop and reusing the freed space
+   {my ($index, $start, $next, $end) = @_;
+    $a->pop(my $e = Vq(element));
+    $e->outNL;
+   });
+
+  $a->dump;
 
   ok Assemble(debug => 0, eq => <<END);
 index: 0000 0000 0000 0000  element: 0000 0000 0000 0001
@@ -12570,23 +12578,54 @@ element: 0000 0000 0000 0002
 element: 0000 0000 0000 0001
 Block Array
 Size: 0000 0000 0000 0000   zmm31: 0000 000F 0000 000E   0000 000D 0000 000C   0000 000B 0000 FFF9   0000 0009 0000 0008   0000 0007 0000 0006   0000 0005 0000 0004   0000 0003 0000 0002   0000 0001 0000 0000
-Byte String
-  Size: 0000 0000 0000 1000
-  Used: 0000 0000 0000 0118
-0000: 0010 0000 0000 00001801 0000 0000 00005800 0000 0000 00000000 0000 0100 00000200 0000 0300 00000400 0000 0500 00000600 0000 0700 00000800 0000 0900 0000
-0040: F9FF 0000 0B00 00000C00 0000 0D00 00000E00 0000 0F00 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
-0080: 0000 0000 0000 00000000 0000 0000 00000000 0000 9800 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
-00C0: 0000 0000 0000 00000000 0000 0000 00000000 0000 D800 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
-Byte String
-  Size: 0000 0000 0000 1000
-  Used: 0000 0000 0000 0118
-0000: 0010 0000 0000 00001801 0000 0000 00005800 0000 0000 00002600 0000 5800 00005800 0000 5800 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
-0040: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00004000 0000 4200 00004400 0000 4600 00004800 0000 4A00 00000000 0000 0000 00000000 0000 0000 0000
-0080: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
-00C0: 0000 0000 0000 00000000 0000 0000 00000000 0000 D800 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+Block Array
+Size: 0000 0000 0000 0026   zmm31: 0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 00D8 0000 0098   0000 0058 0000 0026
+Full: 0000 0000 0000 0058   zmm30: 0000 001E 0000 001C   0000 001A 0000 0018   0000 0016 0000 0014   0000 0012 0000 0010   0000 000E 0000 000C   0000 000A 0000 0008   0000 0006 0000 0004   0000 0002 0000 0000
+Full: 0000 0000 0000 0098   zmm30: 0000 003E 0000 003C   0000 003A 0000 0038   0000 0036 0000 0034   0000 0032 0000 0030   0000 002E 0000 002C   0000 002A 0000 0028   0000 0026 0000 0024   0000 0022 0000 0020
+Last: 0000 0000 0000 00D8   zmm30: 0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 004A 0000 0048   0000 0046 0000 0044   0000 0042 0000 0040
+element: 0000 0000 0000 004A
+element: 0000 0000 0000 0048
+element: 0000 0000 0000 0046
+element: 0000 0000 0000 0044
+element: 0000 0000 0000 0042
+element: 0000 0000 0000 0040
+element: 0000 0000 0000 003E
+element: 0000 0000 0000 003C
+element: 0000 0000 0000 003A
+element: 0000 0000 0000 0038
+element: 0000 0000 0000 0036
+element: 0000 0000 0000 0034
+element: 0000 0000 0000 0032
+element: 0000 0000 0000 0030
+element: 0000 0000 0000 002E
+element: 0000 0000 0000 002C
+element: 0000 0000 0000 002A
+element: 0000 0000 0000 0028
+element: 0000 0000 0000 0026
+element: 0000 0000 0000 0024
+element: 0000 0000 0000 0022
+element: 0000 0000 0000 0020
+element: 0000 0000 0000 001E
+element: 0000 0000 0000 001C
+element: 0000 0000 0000 001A
+element: 0000 0000 0000 0018
+element: 0000 0000 0000 0016
+element: 0000 0000 0000 0014
+element: 0000 0000 0000 0012
+element: 0000 0000 0000 0010
+element: 0000 0000 0000 000E
+element: 0000 0000 0000 000C
+element: 0000 0000 0000 000A
+element: 0000 0000 0000 0008
+element: 0000 0000 0000 0006
+element: 0000 0000 0000 0004
+element: 0000 0000 0000 0002
+element: 0000 0000 0000 0000
+Block Array
+Size: 0000 0000 0000 0000   zmm31: 0000 001C 0000 001A   0000 0018 0000 0016   0000 0014 0000 0012   0000 0010 0000 000E   0000 000C 0000 000A   0000 0008 0000 0006   0000 0004 0000 0002   0000 0000 0000 0000
 END
  }
-exit if $develop;
+#exit if $develop;
 
 #latest:;
 if (1) {                                                                        #TNasm::X86::ByteString::allocBlock #TNasm::X86::ByteString::freeBlock
