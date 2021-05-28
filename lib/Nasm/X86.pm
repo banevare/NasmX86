@@ -1891,6 +1891,7 @@ sub Nasm::X86::Variable::or($$)                                                 
   PushR my @save = (r14, r15);
   Mov r14, 1;
   $left->setReg(r15);
+  KeepFree r14, r15;
   Cmp r15, 0;
   &IfEq (
     sub
@@ -12406,30 +12407,30 @@ Byte String
 END
  }
 
-#latest:;
+latest:;
 if (1) {                                                                        #TCreateBlockArray  #TBlockArray::push #TBlockArray::pop #TBlockArray::put #TBlockArray::get
   my $c = Rb(0..255);
   my $A = CreateByteString;  my $a = $A->CreateBlockArray;
   my $l = Vq(limit, 15);
   my $L = $l + 5;
 
-  my sub put
+  my sub put                                                                    # Put a constant or a variable
    {my ($e) = @_;
     $a->push(element => (ref($e) ? $e : Vq($e, $e)));
    };
 
-  my sub get
+  my sub get                                                                    # Get a constant or a variable
    {my ($i) = @_;
     $a->get(index=>(my $v = ref($i) ? $i : Vq('index', $i)), my $e = Vq(element));
     $v->out("index: ", "  "); $e->outNL;
    };
 
-  $l->for(sub
+  $l->for(sub                                                                   # Loop to the limit pushing
    {my ($index, $start, $next, $end) = @_;
     put($index+1);
    });
 
-  $l->for(sub
+  $l->for(sub                                                                   # Loop to the limit getting
    {my ($index, $start, $next, $end) = @_;
     get($index);
    });
@@ -12458,11 +12459,14 @@ if (1) {                                                                        
    }
 
   $a->dump;
-  for my $i(reverse 1..36)
-   {$a->pop(my $e = Vq(element));
+  ($l+$L+1)->for(sub
+   {my ($i, $start, $next, $end) = @_;
+    $a->pop(my $e = Vq(element));
     $e->outNL;
-    $a->dump if $i =~ m(\A(33|32|17|16|15|14|1|0)\Z);
-   }
+    If (($e == 33)|($e == 32)|($e == 17)|($e == 16)|($e == 15)|($e == 14)|($e == 1)|($e == 0), sub
+     {$a->dump;
+     });
+   });
 
   Vq(limit, 38)->for(sub                                                        # Push using a loop and reusing the freed space
    {my ($index, $start, $next, $end) = @_;
