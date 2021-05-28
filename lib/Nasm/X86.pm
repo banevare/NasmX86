@@ -2310,7 +2310,7 @@ sub ReadTimeStampCounter()                                                      
 
 #D2 Push, Pop, Peek                                                             # Generic versions of push, pop, peek
 
-sub PushRR(@)                                                                   # Push registers onto the stack without tracking
+sub PushRR(@)                                                                   #P Push registers onto the stack without tracking
  {my (@r) = @_;                                                                 # Register
   for my $r(@r)
    {my $size = RegisterSize $r;
@@ -2328,13 +2328,13 @@ sub PushRR(@)                                                                   
    }
  }
 
-sub PushR(@)                                                                    # Push registers onto the stack
+sub PushR(@)                                                                    #P Push registers onto the stack
  {my (@r) = @_;                                                                 # Register
   PushRR   @r;                                                                  # Push
   KeepPush @r;                                                                  # Track
  }
 
-sub PopRR(@)                                                                    # Pop registers from the stack without tracking
+sub PopRR(@)                                                                    #P Pop registers from the stack without tracking
  {my (@r) = @_;                                                                 # Register
   for my $r(reverse @r)                                                         # Pop registers in reverse order
    {my $size = RegisterSize $r;
@@ -8756,46 +8756,6 @@ Manage data on the stack
 
 Generic versions of push, pop, peek
 
-=head3 PushRR(@r)
-
-Push registers onto the stack without tracking
-
-     Parameter  Description
-  1  @r         Register
-
-=head3 PushR(@r)
-
-Push registers onto the stack
-
-     Parameter  Description
-  1  @r         Register
-
-B<Example:>
-
-
-    Mov rax, 0x11111111;
-    Mov rbx, 0x22222222;
-  
-    PushR my @save = (rax, rbx);  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
-
-    Mov rax, 0x33333333;
-    PopR @save;
-    PrintOutRegisterInHex rax;
-    PrintOutRegisterInHex rbx;
-  
-    is_deeply Assemble,<<END;
-     rax: 0000 0000 1111 1111
-     rbx: 0000 0000 2222 2222
-  END
-  
-
-=head3 PopRR(@r)
-
-Pop registers from the stack without tracking
-
-     Parameter  Description
-  1  @r         Register
-
 =head3 PopR(@r)
 
 Pop registers from the stack
@@ -10490,6 +10450,46 @@ Check that variable describes allocated memory and optionally load registers wit
   1  $memory    Variable describing memory as returned by Allocate Memory
   2  $address   Register to contain address
   3  $length    Register to contain size
+
+=head2 PushRR(@r)
+
+Push registers onto the stack without tracking
+
+     Parameter  Description
+  1  @r         Register
+
+=head2 PushR(@r)
+
+Push registers onto the stack
+
+     Parameter  Description
+  1  @r         Register
+
+B<Example:>
+
+
+    Mov rax, 0x11111111;
+    Mov rbx, 0x22222222;
+  
+    PushR my @save = (rax, rbx);  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+
+    Mov rax, 0x33333333;
+    PopR @save;
+    PrintOutRegisterInHex rax;
+    PrintOutRegisterInHex rbx;
+  
+    is_deeply Assemble,<<END;
+     rax: 0000 0000 1111 1111
+     rbx: 0000 0000 2222 2222
+  END
+  
+
+=head2 PopRR(@r)
+
+Pop registers from the stack without tracking
+
+     Parameter  Description
+  1  @r         Register
 
 =head2 Nasm::X86::ByteString::updateSpace($byteString, @variables)
 
