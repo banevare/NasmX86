@@ -4,18 +4,7 @@
 # Philip R Brenan at gmail dot com, Appa Apps Ltd, 2017
 #-------------------------------------------------------------------------------
 package MakeWithPerl;
-
-=pod
-
-Integrated development environment for Geany or similar editor for compiling
-running and documenting programs written in a number of languages.
-
-  makeWithPerl --compile "%f"
-  makeWithPerl --run "%f"
-  makeWithPerl --doc "%f"
-
-=cut
-
+our $VERSION = "20210529";
 use warnings FATAL => qw(all);
 use strict;
 use Carp qw(confess);
@@ -37,7 +26,6 @@ my $run;                                                                        
 my $upload;                                                                     # Upload files
 my $valgrind;                                                                   # Check C memory usage
 my $xmlCatalog;                                                                 # Verify xml
-
 
 sub makeWithPerl {                                                              # Make a file
 GetOptions(
@@ -65,26 +53,6 @@ unless($file)                                                                   
 
 if (! -e $file)                                                                 # No such file
  {confess "No such file:\n$file"
- }
-
-if ($file =~ m(\.p[lm]\Z))                                                      # Perl
- {if ($compile)                                                                 # Syntax check perl
-   {print STDERR qx(perl -CSDA -cw "$file");
-   }
-  elsif ($run)                                                                  # Run perl
-   {if ($file =~ m(.cgi\Z)s)                                                    # Run from web server
-     {&cgiPerl($file);
-     }
-    else                                                                        # Run from command line
-     {say STDERR qq(perl -CSDA -w  "$file");
-      print STDERR qx(perl -CSDA -w  "$file");
-     }
-   }
-  elsif ($doc)                                                                  # Document perl
-   {say STDERR "Document perl $file";
-    updatePerlModuleDocumentation($file);
-   }
-  exit;
  }
 
 if ($upload)                                                                    # Upload files to GitHub
@@ -134,6 +102,26 @@ if (-e mwpl and $run)                                                           
  {my $p = join ' ', @ARGV;
   my $c = mwpl;
   print STDERR qx(perl -CSDA $c $p);
+  exit;
+ }
+
+if ($file =~ m(\.p[lm]\Z))                                                      # Perl
+ {if ($compile)                                                                 # Syntax check perl
+   {print STDERR qx(perl -CSDA -cw "$file");
+   }
+  elsif ($run)                                                                  # Run perl
+   {if ($file =~ m(.cgi\Z)s)                                                    # Run from web server
+     {&cgiPerl($file);
+     }
+    else                                                                        # Run from command line
+     {say STDERR qq(perl -CSDA -w  "$file");
+      print STDERR qx(perl -CSDA -w  "$file");
+     }
+   }
+  elsif ($doc)                                                                  # Document perl
+   {say STDERR "Document perl $file";
+    updatePerlModuleDocumentation($file);
+   }
   exit;
  }
 
@@ -324,5 +312,115 @@ sub cgiPerl($)                                                                  
    }
  }
 }
+
+#d
+#-------------------------------------------------------------------------------
+# Export - eeee
+#-------------------------------------------------------------------------------
+
+use Exporter qw(import);
+
+use vars qw(@ISA @EXPORT @EXPORT_OK %EXPORT_TAGS);
+
+@ISA          = qw(Exporter);
+@EXPORT       = qw();
+@EXPORT_OK    = qw(
+ );
+%EXPORT_TAGS = (all=>[@EXPORT, @EXPORT_OK]);
+
+# podDocumentation
+=pod
+
+=encoding utf-8
+
+=head1 Name
+
+MakeWithPerl - Make with Perl
+
+=head1 Synopsis
+
+Integrated development environment for Geany or similar editor for compiling
+running and documenting programs written in a number of languages.
+
+=head2 Installation:
+
+  sudo cpan install MakeWithPerl
+
+=head2 Operation
+
+Configure Geany as described at
+L<README.md|https://github.com/philiprbrenan/MakeWithPerl>.
+
+=head1 Description
+
+Make with Perl
+
+
+Version "20210529".
+
+
+The following sections describe the methods in each functional area of this
+module.  For an alphabetic listing of all methods by name see L<Index|/Index>.
+
+
+
+
+=head1 Index
+
+
+=head1 Installation
+
+This module is written in 100% Pure Perl and, thus, it is easy to read,
+comprehend, use, modify and install via B<cpan>:
+
+  sudo cpan install MakeWithPerl
+
+=head1 Author
+
+L<philiprbrenan@gmail.com|mailto:philiprbrenan@gmail.com>
+
+L<http://www.appaapps.com|http://www.appaapps.com>
+
+=head1 Copyright
+
+Copyright (c) 2016-2021 Philip R Brenan.
+
+This module is free software. It may be used, redistributed and/or modified
+under the same terms as Perl itself.
+
+=cut
+
+
+
+# Tests and documentation
+
+sub test
+ {my $p = __PACKAGE__;
+  binmode($_, ":utf8") for *STDOUT, *STDERR;
+  return if eval "eof(${p}::DATA)";
+  my $s = eval "join('', <${p}::DATA>)";
+  $@ and die $@;
+  eval $s;
+  $@ and die $@;
+  1
+ }
+
+test unless caller;
+
+1;
+# podDocumentation
+__DATA__
+use Time::HiRes qw(time);
+use Test::Most tests => 1;
+
+my $f = owf("zzz.pl", <<END);
+#!/usr/bin/perl
+say STDOUT 'Hello World';
+END
+my $c = qq(perl -Ilib -M"MakeWithPerl" -e"MakeWithPerl::makeWithPerl" -- --run $f 2>&1);
+my $r = qx($c);
+unlink $f;
+
+ok $r =~ m(Hello World);
 
 1;
