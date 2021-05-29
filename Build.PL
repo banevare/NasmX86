@@ -19,8 +19,8 @@ my $b = Module::Build->new
   configure_requires => {'Module::Build' => 0.4224},
   meta_merge =>
    {resources =>
-     {repository => 'https://github.com/philiprbrenan/TreeMulti',
-      bugtracker => 'https://github.com/philiprbrenan/TreeMulti/issues'
+     {repository => 'https://github.com/philiprbrenan/MakeWithPerl',
+      bugtracker => 'https://github.com/philiprbrenan/MakeWithPerl/issues'
      }
    },
   create_readme =>  0,
