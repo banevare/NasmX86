@@ -410,8 +410,22 @@ test unless caller;
 1;
 # podDocumentation
 __DATA__
+use Test::Most;
 use Time::HiRes qw(time);
-use Test::Most tests => 1;
+
+bail_on_fail;
+
+my $develop   = -e q(/home/phil/);                                              # Developing
+my $localTest = ((caller(1))[0]//'MakeWithPerl') eq "MakeWithPerl";             # Local testing mode
+
+Test::More->builder->output("/dev/null") if $localTest;                         # Reduce number of confirmation messages during testing
+
+if ($^O =~ m(bsd|linux|cygwin)i)                                                # Supported systems
+ {plan tests => 1;
+ }
+else
+ {plan skip_all => qq(Not supported on: $^O);
+ }
 
 my $f = owf("zzz.pl", <<END);
 #!/usr/bin/perl
