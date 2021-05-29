@@ -3,24 +3,24 @@ require v5.26;
 use Module::Build;
 
 my $b = Module::Build->new
- (module_name   => 'Nasm::X86',
+ (module_name   => 'MakeWithPerl',
   dist_author   => 'philiprbrenan@gmail.com',
-  dist_abstract => 'Generate Nasm X86 code from Perl.',
+  dist_abstract => 'Make with Perl',
   license       => 'perl',
   requires      =>
    {'Carp'                =>0,
     'Data::Dump'          =>0,
     'feature'             =>0,
-    'Asm::C'              =>0,
-    'Data::Table::Text'   =>0,
+    'Data::Table::Text'   =>20200101,
+    'Getopt::Long'        =>0,
     'Test2::API'          =>0,
-    'Test::More'          =>0,
+    'Test::Most'          =>0,
    },
   configure_requires => {'Module::Build' => 0.4224},
   meta_merge =>
    {resources =>
-     {repository => 'https://github.com/philiprbrenan/NasmX86',
-      bugtracker => 'https://github.com/philiprbrenan/NasmX86/issues'
+     {repository => 'https://github.com/philiprbrenan/TreeMulti',
+      bugtracker => 'https://github.com/philiprbrenan/TreeMulti/issues'
      }
    },
   create_readme =>  0,
