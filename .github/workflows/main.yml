@@ -1,4 +1,4 @@
-# Test NasmX86 2021-05-28 at 09:14:05
+# Test MakeWithPerl 2021-05-29 at 02:13:28
 
 name: Test
 
@@ -22,37 +22,15 @@ jobs:
       run: |
         sudo cpan install -T Digest::SHA1
 
-    - name: Install Asm::C
-      run: |
-        sudo cpan install -T Asm::C
-
     - name: Install Test::Most
       run: |
         sudo cpan install -T Test::Most
-
-    - name: Install Nasm
-      run: |
-        sudo apt-get install -y nasm
 
     - name: Install tree
       run: |
         sudo apt-get install -y tree
 
-    - name: Download Intel Sde
-      run: |
-        curl https://software.intel.com/content/dam/develop/external/us/en/documents/downloads/sde-external-8.63.0-2021-01-18-lin.tar.bz2 > sde.tar.bz2
-        tree
-
-    - name: Install Intel Sde
-      run: |
-        tar -xf sde.tar.bz2
-        mv sde-external-8.63.0-2021-01-18-lin/ sde/
-        tree
 
     - name: Test
       run: |
-        perl lib/Nasm/X86.pm
-
-    - name: Prove
-      run: |
-        #prove -Ilib
+        perl lib/MakeWIthPerl.pm
