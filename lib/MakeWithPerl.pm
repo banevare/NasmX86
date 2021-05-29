@@ -420,7 +420,7 @@ my $localTest = ((caller(1))[0]//'MakeWithPerl') eq "MakeWithPerl";             
 
 Test::More->builder->output("/dev/null") if $localTest;                         # Reduce number of confirmation messages during testing
 
-if ($^O =~ m(bsd|linux|cygwin)i)                                                # Supported systems
+if ($^O =~ m(bsd|linux|cygwin)i and $^V and $^V ge v5.26)                       # Supported systems
  {plan tests => 1;
  }
 else
