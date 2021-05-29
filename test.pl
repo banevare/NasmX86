@@ -1,11 +1,9 @@
-#!/usr/bin/perl -I/home/phil/perl/cpan/NasmX86/lib
+#!/usr/bin/perl -I/home/phil/perl/cpan/DataTableText/lib -I/home/phil/perl/makeWithPerl/ -I/home/phil/perl/cpan/JavaDoc/lib -I/home/phil/perl/cpan/MakeWithPerl/lib/
 #-------------------------------------------------------------------------------
-# Test Nasm:X86
-# Philip R Brenan at gmail dot com, Appa Apps Ltd, 2016
+# Test MakeWithPerl
+# Philip R Brenan at gmail dot com, Appa Apps Ltd, 2021
 #-------------------------------------------------------------------------------
 
-use warnings FATAL => qw(all);
-use strict;
-use Nasm::X86;
+use MakeWithPerl;
 
-Nasm::X86::test();
+MakeWithPerl::test();
