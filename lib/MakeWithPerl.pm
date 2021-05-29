@@ -4,7 +4,7 @@
 # Philip R Brenan at gmail dot com, Appa Apps Ltd, 2017
 #-------------------------------------------------------------------------------
 package MakeWithPerl;
-our $VERSION = "20210530";
+our $VERSION = "20210531";
 use warnings FATAL => qw(all);
 use strict;
 use Carp qw(confess);
