@@ -103,7 +103,7 @@ vmulpd vaddpd
 END
 
   my @i3qdwb =  split /\s+/, <<END;                                             # Triple operand instructions which have qdwb versions
-pinsr pextr vpinsr vpextr vpadd vpsub vpmull
+pinsr pextr vpcmpeq vpinsr vpextr vpadd vpsub vpmull
 END
 
   my @i4 =  split /\s+/, <<END;                                                 # Quadruple operand instructions
@@ -13280,12 +13280,21 @@ END
 
 latest:
 if (1) {
-  Mov rax, 0x77777701;
-  Popcnt rax, rax;
-  PrintOutRegisterInHex rax;
+  my $a = Rb((reverse 0..16)x16);
+  my $b = Rb((        0..16)x16);
+  KeepFree rax; Mov rax, $a;  Vmovdqu8 zmm0, "[rax]";
+  KeepFree rax; Mov rax, $b;  Vmovdqu8 zmm1, "[rax]";
+  Vpcmpeqb k0, zmm0, zmm1;
+
+  KeepFree rax; Kmovq rax, k0; Popcnt rax, rax;
+  PrintOutRegisterInHex zmm0, zmm1, k0, rax;
+
 
   ok Assemble(eq => <<END);
-   rax: 0000 0000 0000 0013
+  zmm0: 0405 0607 0809 0A0B   0C0D 0E0F 1000 0102   0304 0506 0708 090A   0B0C 0D0E 0F10 0001   0203 0405 0607 0809   0A0B 0C0D 0E0F 1000   0102 0304 0506 0708   090A 0B0C 0D0E 0F10
+  zmm1: 0C0B 0A09 0807 0605   0403 0201 0010 0F0E   0D0C 0B0A 0908 0706   0504 0302 0100 100F   0E0D 0C0B 0A09 0807   0605 0403 0201 0010   0F0E 0D0C 0B0A 0908   0706 0504 0302 0100
+    k0: 0800 0400 0200 0100
+   rax: 0000 0000 0000 0004
 END
  }
 
