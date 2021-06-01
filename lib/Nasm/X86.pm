@@ -11161,7 +11161,7 @@ Test::More->builder->output("/dev/null") if $localTest;                         
 
 if ($^O =~ m(bsd|linux|cygwin)i)                                                # Supported systems
  {if (confirmHasCommandLineCommand(q(nasm)) and LocateIntelEmulator)            # Network assembler and Intel Software Development emulator
-   {plan tests => 109;
+   {plan tests => 111;
    }
   else
    {plan skip_all => qq(Nasm or Intel 64 emulator not available);
@@ -13302,6 +13302,8 @@ if (0) {
   is_deeply Assemble(debug=>1), <<END;
 END
  }
+
+ok 1;
 
 unlink $_ for qw(hash print2 sde-log.txt sde-ptr-check.out.txt z.txt);          # Remove incidental files
 
