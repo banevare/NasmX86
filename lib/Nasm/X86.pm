@@ -1390,7 +1390,7 @@ sub VxyzInit($@)                                                                
     confess "More code needed";
    }
   my $N = 2 ** ($var->size - 3);                                                # Number of quads to fully initialize
-  @expr <= $N or confess "$N initializers required";                            # Number of quads to fully initialize
+  @expr <= $N or confess "$N initializers required";
   my $l = $var->label;                                                          # Label
   my $s = RegisterSize(rax);                                                    # Size of initializers
   for my $i(keys @expr)                                                         # Each initializer
@@ -2997,8 +2997,24 @@ sub CreateByteString(%)                                                         
     used      => $used,                                                         # Used field details
     free      => $free,                                                         # Free chain offset
     data      => $data,                                                         # The first 8 bytes of the data
-    bs        => $bs,                                                           # Variable that address the bytes string
+    bs        => $bs,                                                           # Variable that addresses the byte string
    );
+ }
+
+sub Nasm::X86::ByteString::chain($$@)                                           # Return a variable with the end point of a chain of double words in the byte string starting at the specified variable.
+ {my ($byteString, $variable, @offsets) = @_;                                   # Byte string descriptor, start variable,  offsets
+  @_ >= 2 or confess;
+
+  PushR my @save = (r14, r15);                                                  # 14 is the byte string address, 15 the current offset in the byte string
+  $byteString->bs->setReg(r14);
+  $variable->setReg(r15);
+  for my $o(@offsets)                                                           # Each offset
+   {KeepFree r15;
+    Mov r15d, "dword[r14+r15+$o]";                                               # Step through each offset
+   }
+  my $r = Vq(join (' ', @offsets), r15);                                        # Create a variable with the result
+  PopR @save;
+  $r
  }
 
 sub Nasm::X86::ByteString::length($@)                                           # Get the length of a byte string
@@ -3139,8 +3155,8 @@ sub Nasm::X86::ByteString::allocBlock($@)                                       
   If ($ffb > 0, sub                                                             # Free block available
    {PushR zmm31;
     $byteString->getBlock($byteString->bs, $ffb, 31);                           # Load the first block on the free chain
-    my $second = getDFromZmmAsVariable(31, 60);                                # The location of the next pointer is forced upon us by block string which got there first.
-    $byteString->setFirstFreeBlock($second);                                   # Set the first free block field to point to the second block
+    my $second = getDFromZmmAsVariable(31, 60);                                 # The location of the next pointer is forced upon us by block string which got there first.
+    $byteString->setFirstFreeBlock($second);                                    # Set the first free block field to point to the second block
     for my $v(@variables)
      {if (ref($v) and $v->name eq "offset")
        {$v->copy($ffb);
@@ -3537,7 +3553,7 @@ sub Nasm::X86::ByteString::CreateBlockString($)                                 
     length  => $b - 2 * $o - 1,                                                 # Maximum length in a block
     first   => Vq('first'),                                                     # Variable addressing first block in block string
    );
-
+### This can be simplified to set first immediately
   $s->allocBlock(my $first = Vq(offset));  $s->first->copy($first);             # Allocate first block and save it in a variable named first not offset
 
   if (1)                                                                        # Initialize circular list
@@ -4309,6 +4325,425 @@ sub Nasm::X86::BlockArray::get($@)                                              
  }
 
 sub Nasm::X86::BlockArray::put($@)                                              # Put an element into an array as long as it is with in its limits established by pushing.
+ {my ($blockArray, @variables) = @_;                                            # Block array descriptor, variables
+  @_ >= 3 or confess;
+  my $b = $blockArray->bs;                                                      # Underlying byte string
+  my $W = RegisterSize zmm0;                                                    # The size of a block
+  my $w = $blockArray->width;                                                   # The size of an entry in a block
+  my $n = $blockArray->slots1;                                                  # The number of slots in the first block
+  my $N = $blockArray->slots2;                                                  # The number of slots in the secondary blocks
+
+  my $s = Subroutine
+   {my ($p) = @_;                                                               # Parameters
+    my $success = Label;                                                        # Short circuit if ladders by jumping directly to the end after a successful push
+
+    my $B = $$p{bs};                                                            # Byte string
+    my $F = $$p{first};                                                         # First block
+    my $E = $$p{element};                                                       # The element to be added
+    my $I = $$p{index};                                                         # Index of the element to be inserted
+
+    PushR my @save = (zmm31);
+    $b->getBlock($B, $F, 31);                                                   # Get the first block
+    my $size = getDFromZmmAsVariable(31, 0);                                    # Size of array
+    If ($I < $size, sub                                                         # Index is in array
+     {If ($size <= $n, sub                                                      # Element is in the first block
+       {$E->putDIntoZmm(31, ($I + 1) * $w);                                     # Put element
+        $b->putBlock($B, $F, 31);                                               # Get the first block
+        Jmp $success;                                                           # Element successfully inserted in first block
+       });
+
+      If ($size <= $N * ($N - 1), sub                                           # Still within two levels
+       {my $S = getDFromZmmAsVariable(31, ($I / $N + 1) * $w);                  # Offset of second block in first block
+        $b->getBlock($B, $S, 31);                                               # Get the second block
+        $E->putDIntoZmm(31, ($I % $N) * $w);                                    # Put the element into the second block in first block
+        $b->putBlock($B, $S, 31);                                               # Get the first block
+        Jmp $success;                                                           # Element successfully inserted in second block
+       });
+     });
+
+    PrintErrString "Index out of bounds on put to array, ";                     # Array index out of bounds
+    $I->err("Index: "); PrintErrString "  "; $size->errNL("Size: ");
+    Exit(1);
+
+    SetLabel $success;
+    PopR @save;
+   }  in => {bs => 3, first => 3, index => 3, element => 3};
+
+  $s->call($blockArray->address, $blockArray->first, @variables);
+ }
+
+#D1 Block Multiway Tree                                                         # Multiway Tree constructed as a tree of blocks in a byte string
+#bbbb
+sub Nasm::X86::ByteString::CreateBlockMultiWayTree($)                           # Create a block multiway tree in a byte string
+ {my ($byteString) = @_;                                                        # Byte string description
+  @_ == 1 or confess;
+  my $b = RegisterSize zmm0;                                                    # Size of a block == size of a zmm register
+  my $o = RegisterSize eax;                                                     # Size of a double word
+
+  Comment "Allocate a new block multiway tree in a byte string";
+
+  my $s       = genHash(__PACKAGE__."::BlockMultiWayTree",                      # Block multiway tree
+    bs        => $byteString,                                                   # Byte string definition
+    first     => undef,                                                         # Variable addressing offset to first block of keys
+    width     => $o,                                                            # Width of a key or data slot
+    keys      => $o * 1,                                                        # Offset of keys in header
+    data      => $o * 2,                                                        # Offset of data in header
+    node      => $o * 3,                                                        # Offset of nodes in header
+    minKeys   => int($b / 2) - 1,                                               # Minimum number of keys
+    maxKeys   => $b / $o - 1,                                                   # Maximum number of keys
+    maxNodes  => $b / $o,                                                       # Maximum number of children per parent.
+    loop      => $b - $o,                                                       # Offset of keys, data, node loop
+    length    => $b - $o * 2,                                                   # Offset of length in keys block
+    head      => undef,                                                         # Offset of header block
+   );
+
+  $s->allocBlock(my $keys = $s->first = Vq(offset));                            # Allocate first keys block
+  $s->allocBlock(my $data =             Vq(offset));                            # Allocate first data block
+
+  ClearRegisters zmm31;                                                         # Initialize first keys, data, node loop
+  $s->putLoop($data, 31);                                                       # Keys loops to data
+  $byteString->putBlock($s->address, $keys, 31);                                # Write first keys
+
+  $s                                                                            # Description of block array
+ }
+
+sub Nasm::X86::BlockMultiWayTree::insert($@)                                    # Insert a (key, data) pair into the tree
+ {my ($bmt, @variables) = @_;                                                   # Block multi way tree descriptor, variables
+  @_ >= 2 or confess;
+  my $b = $bmt->bs;                                                             # Underlying byte string
+  my $W = RegisterSize zmm0;                                                    # The size of a block
+
+  my $s = Subroutine
+   {my ($p) = @_;                                                               # Parameters
+    my $success = Label;                                                        # Short circuit if ladders by jumping directly to the end after a successful push
+
+    my $B = $$p{bs};                                                            # Byte string
+    my $F = $$p{first};                                                         # First keys block
+    my $K = $$p{key};                                                           # Key  to be inserted
+    my $D = $$p{data};                                                          # Data to be inserted
+
+    PushR my @save = (zmm31);
+    $b->getBlock($B, $F, 31);                                                   # Get the first keys block
+    my $l = getDFromXmmAsVariable(31, $bmt->length);                            # Get the length of the keys block
+
+    If ($l == 0, sub                                                            # Empty tree
+     {$K->putDIntoZmm     (31, 0);                                              # Write key
+      $bmt->setBlockLength(31, Vq(one, 1));                                     # Set the length of the block
+      $b->putBlock($B, $F, 31);                                                 # Write the keys block back into the underlying byte string
+
+      my $d = $bmt->getLoop(31);                                                # Get the offset if the corresponding data block
+      $b->getBlock($B, $d, 30);                                                 # Get the data block
+      $D->putDIntoZmm     (30, 0);                                              # Write data
+      $b->putBlock($B, $d, 30);                                                 # Write the data block back into the underlying byte string
+      Jmp $success;
+     });
+
+    SetLabel $success;                                                          # Insert completed successfully
+    PopR @save;
+   }  in => {bs => 3, first => 3, key => 3, data => 3};
+
+  $s->call($bmt->address, first => $bmt->first, @variables);
+ }
+
+sub Nasm::X86::BlockMultiWayTree::getBlockLength($$)                            # Get the length of the block in the numbered zmm and return it as a variable
+ {my ($bmt, $zmm) = @_;                                                         # Block multi way tree descriptor, zmm number
+  @_ == 2 or confess;
+  getDFromZmmAsVariable($zmm, $bmt->length);                                    # The length field as a variable
+ }
+
+sub Nasm::X86::BlockMultiWayTree::setBlockLength($$$)                           # Get the length of the block in the numbered zmm from the specified variable
+ {my ($bmt, $zmm, $length) = @_;                                                # Block multi way tree, zmm number. length variable
+  @_ == 3 or confess;
+  $length->putDIntoZmm($zmm, $bmt->length);                                     # Set the length field
+ }
+
+sub Nasm::X86::BlockMultiWayTree::getLoop($$)                                   # Return the value of the loop field as a variable
+ {my ($bmt, $zmm) = @_;                                                         # Block multi way tree descriptor, numbered zmm
+  @_ >= 1 or confess;
+  getDFromZmmAsVariable($zmm, $bmt->loop);                                      # Get loop field as a variable
+ }
+
+sub Nasm::X86::BlockMultiWayTree::putLoop($$$)                                  # Set the value of the loop field from a variable
+ {my ($bmt, $value, $zmm) = @_;                                                 # Block multi way tree descriptor, variable containing offset of next loop entry, numbered zmm
+  @_ >= 1 or confess;
+  $value->putDIntoZmm($zmm, $bmt->loop);                                        # Put loop field as a variable
+ }
+
+sub Nasm::X86::BlockMultiWayTree::leftOrRightMost($$@)                          # Return the left most or right most node
+ {my ($bmt, $dir, @variables) = @_;                                             # Block multi way tree descriptor, direction: left = 0 or right = 1, variables
+  @_ >= 1 or confess;
+  my $success = Label;                                                          # Short circuit if ladders by jumping directly to the end after a successful push
+  my $b = $bmt->bs;                                                             # Underlying byte string
+
+  my $s = Subroutine
+   {my ($p) = @_;                                                               # Parameters
+
+    my $B = $$p{bs};                                                            # Byte string
+    my $F = $$p{first};                                                         # First keys block
+
+    PushR my @save = (rax, zmm31);
+    ForEver
+     {$b->getBlock($B, $F, 31);                                                 # Get the first keys block
+      my $d = $bmt->getLoop(31);                                                # Get the data block offset from the key block loop
+      $b->getBlock($B, $d, 31);                                                 # Get the data block
+      my $n = $bmt->getLoop(31);                                                # Get the node block offset from the data block loop
+      If ($n == 0, sub                                                          # Reached the end so return the containing block
+       {$$p{offset}->copy($F);
+        Jmp $success;
+       });
+      $b->getBlock($B, $n, 31);                                                 # Get the node block
+      if ($dir == 0)                                                            # Left most
+       {my $l = getDFromXmmAsVariable(31, 0);                                   # Get the left most node
+        $F->copy($l);                                                           # Continue with the next level
+       }
+      else                                                                      # Right most
+       {my $l = $bmt->getBlockLength(31);                                       # Length of the node
+        my $r = getDFromXmmAsVariable(31, $l);                                  # Get the right most child
+        $F->copy($r);                                                           # Continue with the next level
+       }
+     };
+
+    SetLabel $success;                                                          # Insert completed successfully
+    PopR @save;
+   } name => $dir == 0 ? "Nasm::X86::BlockMultiWayTree::leftMost"
+                       : "Nasm::X86::BlockMultiWayTree::rightMost",
+     in => {bs => 3, first => 3}, out => {offset => 3};
+
+  $s->call($bmt->address, first => $bmt->first, @variables);
+ }
+
+sub Nasm::X86::BlockMultiWayTree::leftMost($@)                                  # Return the left most node
+ {my ($bmt, @variables) = @_;                                                   # Block multi way tree descriptor, variables
+  $bmt->leftOrRightMost(0, @variables)                                          # Return the left most node
+ }
+
+sub Nasm::X86::BlockMultiWayTree::rightMost($@)                                 # Return the right most node
+ {my ($bmt,  @variables) = @_;                                                  # Block multi way tree descriptor, variables
+  $bmt->leftOrRightMost(1, @variables)                                          # Return the right most node
+ }
+
+sub Nasm::X86::BlockMultiWayTree::full($$)                                      #P Confirm that the block held in the numbered zmm is full by returning a variable containing a non zero value else a variable with a zero value.
+ {my ($bmt, $zmm) = @_;                                                         # Block multi way tree descriptor, zmm
+  @_ == 2 or confess;
+  my $l = $bmt->getBlockLength($zmm);                                           # Length of the node
+  $l == $bmt->maxKeys;                                                          # Check length
+ }
+
+sub Nasm::X86::BlockMultiWayTree::half($)                                       #P Confirm that a node is half full.
+ {my ($bmt, $zmm) = @_;                                                         # Block multi way tree descriptor, numbered zmm containing keys
+  @_ == 2 or confess;
+  my $l = $bmt->getBlockLength($zmm);                                           # Length of the node
+  $l == $bmt->minKeys;                                                          # Check length
+ }
+
+sub Nasm::X86::BlockMultiWayTree::dataFromKey($$$)                              # Load the the data block into the numbered zmm corresponding to the key block held in the numbered zmm.
+ {my ($bmt, $keys, $data) = @_;                                                 # Block multi way tree descriptor, numbered zmm containing keys, numbered zmm to hold data block
+  @_ == 3 or confess;
+  my $loop = $bmt->getLoop($keys);                                              # Get loop offset from keys
+  $bmt->getBlock($bmt->address, $loop, $data);                                  # Data
+ }
+
+sub Nasm::X86::BlockMultiWayTree::nodeFromData($$$)                             # Load the the node block into the numbered zmm corresponding to the data block held in the numbered zmm.
+ {my ($bmt, $data, $node) = @_;                                                 # Block multi way tree descriptor, numbered zmm containing data, numbered zmm to hold node block
+  @_ == 3 or confess;
+  my $loop = $bmt->getLoop($data);                                              # Get loop offset from data
+  $bmt->getBlock($bmt->address, $loop, $node);                                  # Node
+ }
+
+sub Nasm::X86::BlockMultiWayTree::leaf($$)                                      # Whether the data block in the numbered zmm indicates that we are on a leaf.
+ {my ($bmt, $data) = @_;                                                        # Block multi way tree descriptor, numbered zmm containing data
+  @_ == 2 or confess;
+  $bmt->getLoop($data);                                                         # Get the loop offset which will act as a boolean variable
+ }
+
+sub Nasm::X86::BlockMultiWayTree::address($)                                    # Address of the byte string containing a block multi way tree
+ {my ($bmt) = @_;                                                               # Block multi way tree descriptor
+  @_ == 1 or confess;
+  $bmt->bs->bs;
+ }
+
+sub Nasm::X86::BlockMultiWayTree::allocBlock($@)                                # Allocate a block to hold a zmm register in the specified byte string and return the offset of the block in a variable
+ {my ($bmt, @variables) = @_;                                                   # Block multi way tree descriptor
+  @_ >= 2 or confess;
+
+  $bmt->bs->allocBlock($bmt->address, @variables);                              # Allocate a block
+ }
+
+sub Nasm::X86::BlockMultiWayTree::dump($@)                                      # Dump a block multi way tree
+ {my ($bmt, @variables) = @_;                                                   # Block multi way tree, variables
+  @_ >= 1 or confess;
+  my $b = $bmt->bs;                                                             # Underlying byte string
+  my $W = RegisterSize zmm0;                                                    # The size of a block
+  my $w = $bmt->width;                                                          # The size of an entry in a block
+  my $n = $bmt->slots1;                                                         # The number of slots per block
+  my $N = $bmt->slots2;                                                         # The number of slots per block
+
+  my $s = Subroutine
+   {my ($p) = @_;                                                               # Parameters
+
+    my $B = $$p{bs};                                                            # Byte string
+    my $F = $$p{first};                                                         # First block
+
+    PushR my @save = (zmm30, zmm31);
+    $b->getBlock($B, $F, 31);                                                   # Get the first block
+    my $size = getDFromZmmAsVariable(31, 0);                                    # Size of array
+    PrintOutStringNL("Block Array");
+    $size->out("Size: ", "  ");
+    PrintOutRegisterInHex zmm31;
+
+    If ($size > $n, sub                                                         # Array has secondary blocks
+     {my $T = $size / $N;                                                       # Number of full blocks
+
+      $T->for(sub                                                               # Print out each block
+       {my ($index, $start, $next, $end) = @_;                                  # Execute body
+        my $S = getDFromZmmAsVariable(31, ($index + 1) * $w);                   # Address secondary block from first block
+        $b->getBlock($B, $S, 30);                                               # Get the secondary block
+        $S->out("Full: ", "  ");
+        PrintOutRegisterInHex zmm30;
+       });
+
+      my $lastBlockCount = $size % $N;                                          # Number of elements in the last block
+      If ($lastBlockCount, sub                                                  # Print non empty last block
+       {my $S = getDFromZmmAsVariable(31, ($T + 1) * $w);                       # Address secondary block from first block
+        $b->getBlock($B, $S, 30);                                               # Get the secondary block
+        $S->out("Last: ", "  ");
+        PrintOutRegisterInHex zmm30;
+       });
+     });
+
+    PopR @save;
+   }  in => {bs => 3, first => 3};
+
+  $s->call($bmt->address, $bmt->first, @variables);
+ }
+
+sub Nasm::X86::BlockMultiWayTree::pop($@)                                              # Pop an element from an array
+ {my ($blockArray, @variables) = @_;                                            # Block array descriptor, variables
+  @_ >= 2 or confess;
+  my $b = $blockArray->bs;                                                      # Underlying byte string
+  my $W = RegisterSize zmm0;                                                    # The size of a block
+  my $w = $blockArray->width;                                                   # The size of an entry in a block
+  my $n = $blockArray->slots1;                                                  # The number of slots per block
+  my $N = $blockArray->slots2;                                                  # The number of slots per block
+
+  my $s = Subroutine
+   {my ($p) = @_;                                                               # Parameters
+    my $success = Label;                                                        # Short circuit if ladders by jumping directly to the end after a successful push
+
+    my $B = $$p{bs};                                                            # Byte string
+    my $F = $$p{first};                                                         # First block
+    my $E = $$p{element};                                                       # The element being popped
+
+    PushR my @save = (zmm31);
+    $b->getBlock($B, $F, 31);                                                   # Get the first block
+    my $size = getDFromZmmAsVariable(31, 0);                                    # Size of array
+
+    If ($size > 0, sub                                                          # Array has elements
+     {If ($size <= $n, sub                                                      # In the first block
+       {$E       ->getDFromZmm(31, $size * $w);                                 # Get element
+        ($size-1)->putDIntoZmm(31, 0);                                          # Update size
+        $b       ->putBlock($B, $F, 31);                                        # Put the first block back into memory
+        Jmp $success;                                                           # Element successfully retrieved from secondary block
+       });
+
+      If ($size == $N, sub                                                      # Migrate the second block to the first block now that the last slot is empty
+       {PushR my @save = (rax, k7, zmm30);
+        my $S = getDFromZmmAsVariable(31, $w);                                  # Offset of second block in first block
+        $b->getBlock($B, $S, 30);                                               # Get the second block
+        $E->getDFromZmm(30, $n * $w);                                           # Get element from second block
+        Mov rax, -2;                                                            # Load expansion mask
+        Kmovq k7, rax;                                                          # Set  expansion mask
+        Vpexpandd "zmm31{k7}{z}", zmm30;                                        # Expand second block into first block
+        ($size-1)->putDIntoZmm(31, 0);                                          # Save new size in first block
+        $b  -> putBlock($B, $F, 31);                                            # Save the first block
+        $b  ->freeBlock($B, offset=>$S);                                        # Free the now redundant second block
+        PopR @save;
+        Jmp $success;                                                           # Element successfully retrieved from secondary block
+       });
+
+      If ($size <= $N * ($N - 1), sub                                           # Still within two levels
+       {If ($size % $N == 1, sub                                                # Secondary block can be freed
+         {PushR my @save = (rax, zmm30);
+          my $S = getDFromZmmAsVariable(31, ($size / $N + 1) * $w);             # Address secondary block from first block
+          $b       ->getBlock($B, $S, 30);                                      # Load secondary block
+          $E->getDFromZmm(30, 0);                                               # Get first element from secondary block
+          Vq(zero, 0)->putDIntoZmm(31, ($size / $N + 1) * $w);                  # Zero at offset of secondary block in first block
+          ($size-1)->putDIntoZmm(31, 0);                                        # Save new size in first block
+          $b       ->freeBlock($B, offset=>$S);                                 # Free the secondary block
+          $b       ->putBlock ($B, $F, 31);                                     # Put the first  block back into memory
+          PopR @save;
+          Jmp $success;                                                         # Element successfully retrieved from secondary block
+         });
+
+        if (1)                                                                  # Continue with existing secondary block
+         {PushR my @save = (rax, r14, zmm30);
+          my $S = getDFromZmmAsVariable(31, (($size-1) / $N + 1) * $w);             # Offset of secondary block in first block
+          $b       ->getBlock($B, $S, 30);                                      # Get the secondary block
+          $E       ->getDFromZmm(30, (($size - 1)  % $N) * $w);             # Get element from secondary block
+          ($size-1)->putDIntoZmm(31, 0);                                        # Save new size in first block
+          $b       ->putBlock($B, $S, 30);                                      # Put the secondary block back into memory
+          $b       ->putBlock($B, $F, 31);                                      # Put the first  block back into memory
+          PopR @save;
+          Jmp $success;                                                         # Element successfully retrieved from secondary block
+         }
+       });
+     });
+
+    SetLabel $success;
+    PopR @save;
+   }  in => {bs => 3, first => 3}, out => {element => 3};
+
+  $s->call($blockArray->address, $blockArray->first, @variables);
+ }
+
+sub Nasm::X86::BlockMultiWayTree::get($@)                                              # Get an element from the array
+ {my ($blockArray, @variables) = @_;                                            # Block array descriptor, variables
+  @_ >= 3 or confess;
+  my $b = $blockArray->bs;                                                      # Underlying byte string
+  my $W = RegisterSize zmm0;                                                    # The size of a block
+  my $w = $blockArray->width;                                                   # The size of an entry in a block
+  my $n = $blockArray->slots1;                                                  # The number of slots in the first block
+  my $N = $blockArray->slots2;                                                  # The number of slots in the secondary blocks
+
+  my $s = Subroutine
+   {my ($p) = @_;                                                               # Parameters
+    my $success = Label;                                                        # Short circuit if ladders by jumping directly to the end after a successful push
+
+    my $B = $$p{bs};                                                            # Byte string
+    my $F = $$p{first};                                                         # First block
+    my $E = $$p{element};                                                       # The element to be returned
+    my $I = $$p{index};                                                         # Index of the element to be returned
+
+    PushR my @save = (zmm31);
+    $b->getBlock($B, $F, 31);                                                   # Get the first block
+    my $size = getDFromZmmAsVariable(31, 0);                                    # Size of array
+
+    If ($I < $size, sub                                                         # Index is in array
+     {If ($size <= $n, sub                                                      # Element is in the first block
+       {$E->getDFromZmm(31, ($I + 1) * $w);                                     # Get element
+        Jmp $success;                                                           # Element successfully inserted in first block
+       });
+
+      If ($size <= $N * ($N - 1), sub                                           # Still within two levels
+       {my $S = getDFromZmmAsVariable(31, ($I / $N + 1) * $w);                  # Offset of second block in first block
+        $b->getBlock($B, $S, 31);                                               # Get the second block
+        $E->getDFromZmm(31, ($I % $N) * $w);                                    # Offset of element in second block
+        Jmp $success;                                                           # Element successfully inserted in second block
+       });
+     });
+
+    PrintErrString "Index out of bounds on get from array, ";                   # Array index out of bounds
+    $I->err("Index: "); PrintErrString "  "; $size->errNL("Size: ");
+    Exit(1);
+
+    SetLabel $success;
+    PopR @save;
+   }  in => {bs => 3, first => 3, index => 3}, out => {element => 3};
+
+  $s->call($blockArray->address, $blockArray->first, @variables);
+ }
+
+sub Nasm::X86::BlockMultiWayTree::put($@)                                              # Put an element into an array as long as it is with in its limits established by pushing.
  {my ($blockArray, @variables) = @_;                                            # Block array descriptor, variables
   @_ >= 3 or confess;
   my $b = $blockArray->bs;                                                      # Underlying byte string
@@ -13278,7 +13713,7 @@ Hello World
 END
  }
 
-latest:
+#latest:
 if (1) {
   my $a = Rb((reverse 0..16)x16);
   my $b = Rb((        0..16)x16);
@@ -13289,12 +13724,60 @@ if (1) {
   KeepFree rax; Kmovq rax, k0; Popcnt rax, rax;
   PrintOutRegisterInHex zmm0, zmm1, k0, rax;
 
-
   ok Assemble(eq => <<END);
   zmm0: 0405 0607 0809 0A0B   0C0D 0E0F 1000 0102   0304 0506 0708 090A   0B0C 0D0E 0F10 0001   0203 0405 0607 0809   0A0B 0C0D 0E0F 1000   0102 0304 0506 0708   090A 0B0C 0D0E 0F10
   zmm1: 0C0B 0A09 0807 0605   0403 0201 0010 0F0E   0D0C 0B0A 0908 0706   0504 0302 0100 100F   0E0D 0C0B 0A09 0807   0605 0403 0201 0010   0F0E 0D0C 0B0A 0908   0706 0504 0302 0100
     k0: 0800 0400 0200 0100
    rax: 0000 0000 0000 0004
+END
+ }
+
+latest:
+if (1) {                                                                        #TNasm::X86::ByteString::chain
+  my $format = Rd(18,19,20,21,22);
+
+  my $b = CreateByteString;
+  $b->allocBlock($b->bs, my $a = Vq(offset));                                   # Allocate a block
+  Vmovdqu8 zmm31, "[$format]";
+  $b->putBlock($b->bs, $a, 31);
+  my $r = $b->chain(Vq(start,18));
+  $r->outNL;
+
+  ok Assemble(eq => <<END);
+END
+ }
+
+latest:
+if (1) {                                                                        # Multiway tree
+  my $b = CreateByteString;
+  my $t = $b->CreateBlockMultiWayTree;
+  $t->insert(Vq(key, 0xff), Vq(data, 0xdd));
+  $b->dump;
+
+  $t->leftMost(my $l = Vq(offset));
+  $l->outNL('LeftMost : ');
+
+  $t->rightMost(my $r = Vq(offset));
+  $r->outNL('RightMost: ');
+
+  $t->bs->getBlock($t->address, $t->first, 31);
+  $t->full(31)->outNL('Full     : ');
+  $t->half(31)->outNL('Half     : ');
+  $t->getLoop(31)->outNL('Loop     : ');
+
+  ok Assemble(eq => <<END);
+Byte String
+  Size: 0000 0000 0000 1000
+  Used: 0000 0000 0000 0098
+0000: 0010 0000 0000 00009800 0000 0000 00000000 0000 0000 0000FF00 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+0040: 0000 0000 0000 00000000 0000 0000 00000100 0000 5800 0000DD00 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+0080: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+00C0: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+LeftMost : 0000 0000 0000 0018
+RightMost: 0000 0000 0000 0018
+Full     : 0000 0000 0000 0000
+Half     : 0000 0000 0000 0000
+Loop     : 0000 0000 0000 0058
 END
  }
 
