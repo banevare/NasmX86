@@ -13734,16 +13734,23 @@ END
 
 latest:
 if (1) {                                                                        #TNasm::X86::ByteString::chain
-  my $format = Rd(18,19,20,21,22);
+  my $format = Rd(map{4*$_+24} 0..64);
 
   my $b = CreateByteString;
   $b->allocBlock($b->bs, my $a = Vq(offset));                                   # Allocate a block
   Vmovdqu8 zmm31, "[$format]";
   $b->putBlock($b->bs, $a, 31);
-  my $r = $b->chain(Vq(start,18));
-  $r->outNL;
+  my $r = $b->chain(Vq(start,24), 4);
+  $r->outNL("chain1: ");
+  my $s = $b->chain($r, 4);
+  $s->outNL("chain2: ");
+  my $t = $b->chain($s, 4);
+  $t->outNL("chain3: ");
 
   ok Assemble(eq => <<END);
+chain1: 0000 0000 0000 001C
+chain2: 0000 0000 0000 0020
+chain3: 0000 0000 0000 0024
 END
  }
 
