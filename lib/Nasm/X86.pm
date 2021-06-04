@@ -13746,10 +13746,13 @@ if (1) {                                                                        
   $s->outNL("chain2: ");
   my $t = $b->chain($s, 4);
   $t->outNL("chain3: ");
+  my $A = $b->chain(Vq(start,24), 4, 4, 4);
+  $A->outNL("chain3: ");
 
   ok Assemble(eq => <<END);
 chain1: 0000 0000 0000 001C
 chain2: 0000 0000 0000 0020
+chain3: 0000 0000 0000 0024
 chain3: 0000 0000 0000 0024
 END
  }
