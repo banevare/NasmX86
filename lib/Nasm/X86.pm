@@ -11596,7 +11596,7 @@ Test::More->builder->output("/dev/null") if $localTest;                         
 
 if ($^O =~ m(bsd|linux|cygwin)i)                                                # Supported systems
  {if (confirmHasCommandLineCommand(q(nasm)) and LocateIntelEmulator)            # Network assembler and Intel Software Development emulator
-   {plan tests => 111;
+   {plan tests => 113;
    }
   else
    {plan skip_all => qq(Nasm or Intel 64 emulator not available);
@@ -13746,7 +13746,7 @@ if (1) {                                                                        
   $s->outNL("chain2: ");
   my $t = $b->chain($s, 4);
   $t->outNL("chain3: ");
-  my $A = $b->chain(Vq(start,24), 4, 4, 4);
+  my $A = $b->chain(Vq(start,24), 4, 4, 4);                                     # A long chain
   $A->outNL("chain3: ");
 
   ok Assemble(eq => <<END);
