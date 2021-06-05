@@ -3002,7 +3002,7 @@ sub CreateByteString(%)                                                         
  }
 
 sub Nasm::X86::ByteString::chain($$@)                                           # Return a variable with the end point of a chain of double words in the byte string starting at the specified variable.
- {my ($byteString, $variable, @offsets) = @_;                                   # Byte string descriptor, start variable,  offsets
+ {my ($byteString, $variable, @offsets) = @_;                                   # Byte string descriptor, start variable,  offsets chain
   @_ >= 2 or confess;
 
   PushR my @save = (r14, r15);                                                  # 14 is the byte string address, 15 the current offset in the byte string
@@ -3015,6 +3015,29 @@ sub Nasm::X86::ByteString::chain($$@)                                           
   my $r = Vq(join (' ', @offsets), r15);                                        # Create a variable with the result
   PopR @save;
   $r
+ }
+
+sub Nasm::X86::ByteString::putChain($$$@)                                       # Write the double word in the specified variable to the double word location at the the specified offset in the specified byte string.
+ {my ($byteString, $variable, $value, @offsets) = @_;                           # Byte string descriptor, start variable, value to put as a variable,  offsets chain
+  @_ >= 2 or confess;
+
+  PushR my @save = (r14, r15);                                                  # 14 is the byte string address, 15 the current offset in the byte string
+  $byteString->bs->setReg(r14);
+  $variable->setReg(r15);
+  for my $i(keys @offsets)                                                      # Each offset
+   {my $o = $offsets[$i];
+    KeepFree r15;
+    if ($i < $#offsets)                                                         # Step through each offset
+     {Mov r15d, "dword[r14+r15+$o]";
+     }
+    else                                                                        # Address last location
+     {Lea r15,       "[r14+r15+$o]";
+     }
+   }
+  KeepFree r14;
+  $value->setReg(r14);
+  Mov "[r15]", r14d;
+  PopR @save;
  }
 
 sub Nasm::X86::ByteString::length($@)                                           # Get the length of a byte string
@@ -13752,20 +13775,31 @@ if (1) {                                                                        
   $b->allocBlock($b->bs, my $a = Vq(offset));                                   # Allocate a block
   Vmovdqu8 zmm31, "[$format]";
   $b->putBlock($b->bs, $a, 31);
-  my $r = $b->chain(Vq(start,24), 4);
+  my $r = $b->chain(Vq(start, 0x18), 4);
   $r->outNL("chain1: ");
   my $s = $b->chain($r, 4);
   $s->outNL("chain2: ");
   my $t = $b->chain($s, 4);
   $t->outNL("chain3: ");
-  my $A = $b->chain(Vq(start,24), 4, 4, 4);                                     # A long chain
+  my $A = $b->chain(Vq(start, 0x18), 4, 4, 4);                                  # Get a long chain
   $A->outNL("chain3: ");
+
+  $b->putChain(Vq(start,0x18), Vq(end,0xff), 4, 4, 4);                          # Put at the end of a long chain
+
+  $b->dump;
 
   ok Assemble(eq => <<END);
 chain1: 0000 0000 0000 001C
 chain2: 0000 0000 0000 0020
 chain3: 0000 0000 0000 0024
 chain3: 0000 0000 0000 0024
+Byte String
+  Size: 0000 0000 0000 1000
+  Used: 0000 0000 0000 0058
+0000: 0010 0000 0000 00005800 0000 0000 00000000 0000 0000 00001800 0000 1C00 00002000 0000 FF00 00002800 0000 2C00 00003000 0000 3400 00003800 0000 3C00 0000
+0040: 4000 0000 4400 00004800 0000 4C00 00005000 0000 5400 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+0080: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+00C0: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
 END
  }
 
