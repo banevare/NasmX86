@@ -4457,7 +4457,7 @@ sub Nasm::X86::BlockMultiWayTree::insert($@)                                    
     my $K = $$p{key};                                                           # Key  to be inserted
     my $D = $$p{data};                                                          # Data to be inserted
 
-    PushR my @save = (k5, k6, k7, r14, r15, zmm29, zmm30, zmm31);
+    PushR my @save = (k4, k5, k6, k7, r14, r15, zmm29, zmm30, zmm31);
     $b->getBlock($B, $F,  31);                                                  # Get the first keys block
     my $d = $bmt->getLoop(31);                                                  # Get the offset of the corresponding data block
     $b->getBlock($B, $d,  30);                                                  # Get the data block
@@ -4475,53 +4475,36 @@ sub Nasm::X86::BlockMultiWayTree::insert($@)                                    
       Jmp $success;                                                             # Insert completed successfully
      });
 
-#   If (($n == 0) & ($l < maximumNumberOfKeys),                                 # Node is root with no children and space for more keys
-#    {$l->setMaskFirst(k7);                                                     # Set the compare  bits
-#     $K->setReg(r15);                                                          # Key to search for
-#     Vpbroadcastd zmm29, r15d;                                                 # Load key
-#     Vpcmpud "k6{k7}", zmm29, zmm31, 0;                                          # Check for equal key
-#     ClearRegisters k5;                                                        # Zero so we can check the result mask against zero
-#     Ktestd k5, k6;                                                            # Check whether a key was equal
-#
-#     IfNz(                                                                      # We found a key
-#      {$D->setReg(r15);                                                        # Key to search for
-#       Vpbroadcastd "zmm30{k6}", r14d;                                         # Load data
-#       $b->putBlock($B, $d, 30);                                               # Write the data block back into the underlying byte string
-#       Jmp $success;                                                           # Insert completed successfully
-#      });
-# 0000000001111111 A Length    = k7
-# .........1111000 B Greater   = k6
-# 0000000001111000 C =  A&B    = k5
-# 0000000000000111 D = !C&A    = k4
-# 0000000011110000 E Shift left 1 C = K5
-# 0000000011110111 F Want expand mask =   E&D =  k5&K4 ->k5
-# 0000000000001000 G Want broadcast mask !F&A =  K5!&k7->k6
+    If (($n == 0) & ($l < $bmt->maxKeys), sub                                   # Node is root with no children and space for more keys
+     {$l->setMaskFirst(k7);                                                     # Set the compare  bits
+      $K->setReg(r15);                                                          # Key to search for
+      Vpbroadcastd zmm29, r15d;                                                 # Load key
+      Vpcmpud "k6{k7}", zmm29, zmm31, 0;                                        # Check for equal key
+      ClearRegisters k5;                                                        # Zero so we can check the result mask against zero
+      Ktestd k5, k6;                                                            # Check whether a key was equal
 
-#      Vpcmpud k6{k7}, zmm29, zmm31, 1;                                          # Check for elements that are greater
-#      Kshiftw k5, 1;                                                            # Shift up the greater than keys
-#      Kandw   k5, k7;                                                           # Restrict to length
-#      Vpexpandw zmm31{k5],zmm31;                                                # Shift up keys
-#      Vpexpandw zmm30{k5],zmm30;                                                # Shift up data
+      IfNz                                                                      # We found a key
+       {$D->setReg(r14);                                                        # Key to search for
+        Vpbroadcastd "zmm30{k6}", r14d;                                         # Load data
+        $b->putBlock($B, $d, 30);                                               # Write the data block back into the underlying byte string
+        KeepFree r14;
+        Jmp $success;                                                           # Insert completed successfully
+       };
 
-# insert key and data
-#      Kandw k6, k7;
-#
-#      ClearRegisters k5;                                                        # Zero so we can check the result mask against zero
-#      Ktestd k5, k6;                                                            # Check whether a key was equal
-#
-#      my @k = $tree->keys->@*;
-#      for my $i(keys @k)
-#       {return if (my $s = $key <=> $k[$i]) == 0;
-#        if ($s > 0)
-#         {splice $tree->keys->@*, $i, 1, $key;
-#          splice $tree->data->@*, $i, 1, $data;
-#          return;
-#         }
-#       }
-#     }
-#   }
+      Vpcmpud "k6{k7}", zmm29, zmm31, 1;                                        # Check for elements that are greater
+      Kandw    k5, k6, k7;                                                      # Tested at: # Insert key for BlockMultiWayTree
+      Kandnw   k4, k5, k7;
+      Kshiftlw k5, k5, 1;
+      Korw     k5, k4, k5;                                                      # Broadcast mask
+      Kandnw   k6, k5, k7;                                                      # Expand mask
 
-
+      Vpexpandd    "zmm31{k6}", zmm31;                                          # Shift up keys
+      Vpexpandd    "zmm30{k6}", zmm30;                                          # Shift up data
+      Vpbroadcastd "zmm31{k5}", r15d;                                           # Load key
+      $D->setReg(r14);                                                          # Corresponding data
+      Vpbroadcastd "zmm30{k5}", r14d;                                           # Load data
+      Jmp $success;                                                             # Insert completed successfully
+     });
 
     SetLabel $success;                                                          # Insert completed successfully
     PopR @save;
@@ -13830,7 +13813,7 @@ END
  }
 
 latest:
-if (1) {
+if (1) {                                                                        # Insert key for BlockMultiWayTree
 # 0000000001111111 A Length    = k7
 # .........1111000 B Greater   = k6
 # 0000000001111000 C =  A&B    = k5
@@ -13839,16 +13822,19 @@ if (1) {
 # 0000000011110111 F Want expand mask =   E&D =  k5&K4 ->k5
 # 0000000000001000 G Want broadcast mask !F&A =  K5!&k7->k6
 
-  Mov r15, 0x007f; Kmovw k7, r15w;
-  Mov r14, 0x0F78; Kmovw k6, r14w;
+  Mov eax, 0x007f; Kmovw k7, eax;
+  Mov esi, 0x0F78; Kmovw k6, esi;
   Kandw    k5, k6, k7;
   Kandnw   k4, k5, k7;
   Kshiftlw k5, k5, 1;
-  Kandw    k5, k4, k5;
+  Korw     k5, k4, k5;
   Kandnw   k6, k5, k7;
-  PrintOutRegisterInHex k7,k5,k6;
+  PrintOutRegisterInHex k7, k5, k6;
 
   ok Assemble(eq => <<END);
+    k7: 0000 0000 0000 007F
+    k5: 0000 0000 0000 00F7
+    k6: 0000 0000 0000 0008
 END
  }
 
@@ -13889,7 +13875,7 @@ END
  }
 
 latest:
-if (1) {                                                                        # Multiway tree
+if (1) {                                                                        #TNasm::X86::ByteString::CreateBlockMultiWayTree
   my $b = CreateByteString;
   my $t = $b->CreateBlockMultiWayTree;
   $t->insert(Vq(key, 0xff), Vq(data, 0xdd));
