@@ -1927,6 +1927,18 @@ sub Nasm::X86::Variable::setMask($$$)                                           
   PopR @save;
  }
 
+sub Nasm::X86::Variable::setMaskFirst($$)                                       # Set the first bit in the mask register
+ {my ($length, $mask) = @_;                                                     # Variable containing length to set, mask register to set
+  @_ == 2 or confess;
+
+  PushR my @save = (r14, r15);
+  Mov r15, -1;
+  $length->setReg(r14);
+  Bzhi r15, r15, r14;
+  Kmovq $mask, r15;
+  PopR @save;
+ }
+
 sub Nasm::X86::Variable::setZmm($$$$)                                           # Load bytes from the memory addressed by specified source variable into the numbered zmm register at the offset in the specified offset moving the number of bytes in the specified variable
  {my ($source, $zmm, $offset, $length) = @_;                                    # Variable containing the address of the source, number of zmm to load, variable containing offset in zmm to move to, variable containing length of move
   @_ == 4 or confess;
@@ -4445,8 +4457,12 @@ sub Nasm::X86::BlockMultiWayTree::insert($@)                                    
     my $K = $$p{key};                                                           # Key  to be inserted
     my $D = $$p{data};                                                          # Data to be inserted
 
-    PushR my @save = (zmm31);
-    $b->getBlock($B, $F, 31);                                                   # Get the first keys block
+    PushR my @save = (k5, k6, k7, r14, r15, zmm29, zmm30, zmm31);
+    $b->getBlock($B, $F,  31);                                                  # Get the first keys block
+    my $d = $bmt->getLoop(31);                                                  # Get the offset of the corresponding data block
+    $b->getBlock($B, $d,  30);                                                  # Get the data block
+    my $n = $bmt->getLoop(30);                                                  # Get the offset of the corresponding node block
+
     my $l = getDFromXmmAsVariable(31, $bmt->length);                            # Get the length of the keys block
 
     If ($l == 0, sub                                                            # Empty tree
@@ -4454,12 +4470,58 @@ sub Nasm::X86::BlockMultiWayTree::insert($@)                                    
       $bmt->setBlockLength(31, Vq(one, 1));                                     # Set the length of the block
       $b->putBlock($B, $F, 31);                                                 # Write the keys block back into the underlying byte string
 
-      my $d = $bmt->getLoop(31);                                                # Get the offset if the corresponding data block
-      $b->getBlock($B, $d, 30);                                                 # Get the data block
       $D->putDIntoZmm     (30, 0);                                              # Write data
       $b->putBlock($B, $d, 30);                                                 # Write the data block back into the underlying byte string
-      Jmp $success;
+      Jmp $success;                                                             # Insert completed successfully
      });
+
+#   If (($n == 0) & ($l < maximumNumberOfKeys),                                 # Node is root with no children and space for more keys
+#    {$l->setMaskFirst(k7);                                                     # Set the compare  bits
+#     $K->setReg(r15);                                                          # Key to search for
+#     Vpbroadcastd zmm29, r15d;                                                 # Load key
+#     Vpcmpud "k6{k7}", zmm29, zmm31, 0;                                          # Check for equal key
+#     ClearRegisters k5;                                                        # Zero so we can check the result mask against zero
+#     Ktestd k5, k6;                                                            # Check whether a key was equal
+#
+#     IfNz(                                                                      # We found a key
+#      {$D->setReg(r15);                                                        # Key to search for
+#       Vpbroadcastd "zmm30{k6}", r14d;                                         # Load data
+#       $b->putBlock($B, $d, 30);                                               # Write the data block back into the underlying byte string
+#       Jmp $success;                                                           # Insert completed successfully
+#      });
+# 0000000001111111 A Length    = k7
+# .........1111000 B Greater   = k6
+# 0000000001111000 C =  A&B    = k5
+# 0000000000000111 D = !C&A    = k4
+# 0000000011110000 E Shift left 1 C = K5
+# 0000000011110111 F Want expand mask =   E&D =  k5&K4 ->k5
+# 0000000000001000 G Want broadcast mask !F&A =  K5!&k7->k6
+
+#      Vpcmpud k6{k7}, zmm29, zmm31, 1;                                          # Check for elements that are greater
+#      Kshiftw k5, 1;                                                            # Shift up the greater than keys
+#      Kandw   k5, k7;                                                           # Restrict to length
+#      Vpexpandw zmm31{k5],zmm31;                                                # Shift up keys
+#      Vpexpandw zmm30{k5],zmm30;                                                # Shift up data
+
+# insert key and data
+#      Kandw k6, k7;
+#
+#      ClearRegisters k5;                                                        # Zero so we can check the result mask against zero
+#      Ktestd k5, k6;                                                            # Check whether a key was equal
+#
+#      my @k = $tree->keys->@*;
+#      for my $i(keys @k)
+#       {return if (my $s = $key <=> $k[$i]) == 0;
+#        if ($s > 0)
+#         {splice $tree->keys->@*, $i, 1, $key;
+#          splice $tree->data->@*, $i, 1, $data;
+#          return;
+#         }
+#       }
+#     }
+#   }
+
+
 
     SetLabel $success;                                                          # Insert completed successfully
     PopR @save;
@@ -13764,6 +13826,29 @@ if (1) {
   zmm1: 0C0B 0A09 0807 0605   0403 0201 0010 0F0E   0D0C 0B0A 0908 0706   0504 0302 0100 100F   0E0D 0C0B 0A09 0807   0605 0403 0201 0010   0F0E 0D0C 0B0A 0908   0706 0504 0302 0100
     k0: 0800 0400 0200 0100
    rax: 0000 0000 0000 0004
+END
+ }
+
+latest:
+if (1) {
+# 0000000001111111 A Length    = k7
+# .........1111000 B Greater   = k6
+# 0000000001111000 C =  A&B    = k5
+# 0000000000000111 D = !C&A    = k4
+# 0000000011110000 E Shift left 1 C = K5
+# 0000000011110111 F Want expand mask =   E&D =  k5&K4 ->k5
+# 0000000000001000 G Want broadcast mask !F&A =  K5!&k7->k6
+
+  Mov r15, 0x007f; Kmovw k7, r15w;
+  Mov r14, 0x0F78; Kmovw k6, r14w;
+  Kandw    k5, k6, k7;
+  Kandnw   k4, k5, k7;
+  Kshiftlw k5, k5, 1;
+  Kandw    k5, k4, k5;
+  Kandnw   k6, k5, k7;
+  PrintOutRegisterInHex k7,k5,k6;
+
+  ok Assemble(eq => <<END);
 END
  }
 
