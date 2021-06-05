@@ -4876,8 +4876,20 @@ sub LocateIntelEmulator()                                                       
   if (qx(sde64 -version) =~ m(Intel.R. Software Development Emulator))          # Try path
    {return $LocateIntelEmulator = "sde64";
    }
+i:;
+  my $install = <<END =~ s(\n) (  && )gsr;                                      # Install sde
+cd /home/phil/Downloads
+curl https://software.intel.com/content/dam/develop/external/us/en/documents/downloads/sde-external-8.63.0-2021-01-18-lin.tar.bz2 > sde.tar.bz2
+tar -xf sde.tar.bz2
+sudo mkdir -p /var/isde/
+sudo cp -r * /var/isde/
+ls -ls /var/isde/
+END
+  $install =~ s(&&\s*\Z) ();
 
-  undef                                                                         # Emulator  not found
+  say STDERR qx($install);
+
+  q(/var/isde/sde64)
  }
 
 my $assembliesPerformed = 0;                                                    # Number of assemblies performed
