@@ -4463,13 +4463,11 @@ sub Nasm::X86::BlockMultiWayTree::insert($@)                                    
     $b->getBlock($B, $d,  30);                                                  # Get the data block
     my $n = $bmt->getLoop(30);                                                  # Get the offset of the corresponding node block
 
-    my $l = getDFromXmmAsVariable(31, $bmt->length);                            # Get the length of the keys block
-
+    my $l = getDFromZmmAsVariable(31, $bmt->length);                            # Get the length of the keys block
     If ($l == 0, sub                                                            # Empty tree
      {$K->putDIntoZmm     (31, 0);                                              # Write key
       $bmt->setBlockLength(31, Vq(one, 1));                                     # Set the length of the block
       $b->putBlock($B, $F, 31);                                                 # Write the keys block back into the underlying byte string
-
       $D->putDIntoZmm     (30, 0);                                              # Write data
       $b->putBlock($B, $d, 30);                                                 # Write the data block back into the underlying byte string
       Jmp $success;                                                             # Insert completed successfully
@@ -4484,8 +4482,10 @@ sub Nasm::X86::BlockMultiWayTree::insert($@)                                    
       Ktestd k5, k6;                                                            # Check whether a key was equal
 
       IfNz                                                                      # We found a key
-       {$D->setReg(r14);                                                        # Key to search for
+       {$bmt->setBlockLength(31, $l + 1);                                       # Set the length of the block
+        $D->setReg(r14);                                                        # Key to search for
         Vpbroadcastd "zmm30{k6}", r14d;                                         # Load data
+        $b->putBlock($B, $F, 31);                                               # Write the keys block back into the underlying byte string
         $b->putBlock($B, $d, 30);                                               # Write the data block back into the underlying byte string
         KeepFree r14;
         Jmp $success;                                                           # Insert completed successfully
@@ -4497,12 +4497,14 @@ sub Nasm::X86::BlockMultiWayTree::insert($@)                                    
       Kshiftlw k5, k5, 1;
       Korw     k5, k4, k5;                                                      # Broadcast mask
       Kandnw   k6, k5, k7;                                                      # Expand mask
-
-      Vpexpandd    "zmm31{k6}", zmm31;                                          # Shift up keys
-      Vpexpandd    "zmm30{k6}", zmm30;                                          # Shift up data
-      Vpbroadcastd "zmm31{k5}", r15d;                                           # Load key
+      Vpexpandd    "zmm31{k5}", zmm31;                                          # Shift up keys
+      Vpexpandd    "zmm30{k5}", zmm30;                                          # Shift up data
+      Vpbroadcastd "zmm31{k6}", r15d;                                           # Load key
       $D->setReg(r14);                                                          # Corresponding data
-      Vpbroadcastd "zmm30{k5}", r14d;                                           # Load data
+      Vpbroadcastd "zmm30{k6}", r14d;                                           # Load data
+      $bmt->setBlockLength(31, $l + 1);                                         # Set the length of the block
+      $b->putBlock($B, $F, 31);                                                 # Write the keys block back into the underlying byte string
+      $b->putBlock($B, $d, 30);                                                 # Write the data block back into the underlying byte string
       Jmp $success;                                                             # Insert completed successfully
      });
 
@@ -13812,7 +13814,7 @@ if (1) {
 END
  }
 
-latest:
+#latest:
 if (1) {                                                                        # Insert key for BlockMultiWayTree
 # 0000000001111111 A Length    = k7
 # .........1111000 B Greater   = k6
@@ -13838,7 +13840,7 @@ if (1) {                                                                        
 END
  }
 
-latest:
+#latest:
 if (1) {                                                                        #TNasm::X86::ByteString::chain
   my $format = Rd(map{4*$_+24} 0..64);
 
@@ -13878,8 +13880,7 @@ latest:
 if (1) {                                                                        #TNasm::X86::ByteString::CreateBlockMultiWayTree
   my $b = CreateByteString;
   my $t = $b->CreateBlockMultiWayTree;
-  $t->insert(Vq(key, 0xff), Vq(data, 0xdd));
-  $b->dump;
+  $t->insert(Vq(key, 0xffff), Vq(data, 0xeeee));
 
   $t->leftMost(my $l = Vq(offset));
   $l->outNL('LeftMost : ');
@@ -13888,23 +13889,29 @@ if (1) {                                                                        
   $r->outNL('RightMost: ');
 
   $t->bs->getBlock($t->address, $t->first, 31);
-  $t->full(31)->outNL('Full     : ');
-  $t->half(31)->outNL('Half     : ');
+  $t->full(31)   ->outNL('Full     : ');
+  $t->half(31)   ->outNL('Half     : ');
   $t->getLoop(31)->outNL('Loop     : ');
 
-  ok Assemble(eq => <<END);
-Byte String
-  Size: 0000 0000 0000 1000
-  Used: 0000 0000 0000 0098
-0000: 0010 0000 0000 00009800 0000 0000 00000000 0000 0000 0000FF00 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
-0040: 0000 0000 0000 00000000 0000 0000 00000100 0000 5800 0000DD00 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
-0080: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
-00C0: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+  $t->insert(Vq(key, 0xbbbb), Vq(data, 0xaaaa));
+  $t->insert(Vq(key, 0xdddd), Vq(data, 0xcccc));
+  $t->insert(Vq(key, 0x9999), Vq(data, 0x8888));
+
+  $b->dump;
+
+  ok Assemble(debug => 1, eq => <<END);
 LeftMost : 0000 0000 0000 0018
 RightMost: 0000 0000 0000 0018
 Full     : 0000 0000 0000 0000
 Half     : 0000 0000 0000 0000
 Loop     : 0000 0000 0000 0058
+Byte String
+  Size: 0000 0000 0000 1000
+  Used: 0000 0000 0000 0098
+0000: 0010 0000 0000 00009800 0000 0000 00000000 0000 0000 00009999 0000 BBBB 0000DDDD 0000 FFFF 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+0040: 0000 0000 0000 00000000 0000 0000 00000400 0000 5800 00008888 0000 AAAA 0000CCCC 0000 EEEE 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+0080: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+00C0: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
 END
  }
 
