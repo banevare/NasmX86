@@ -4492,13 +4492,20 @@ sub Nasm::X86::BlockMultiWayTree::insert($@)                                    
        };
 
       Vpcmpud "k6{k7}", zmm29, zmm31, 1;                                        # Check for elements that are greater
-      Kandw    k5, k6, k7;                                                      # Tested at: # Insert key for BlockMultiWayTree
-      Kandnw   k4, k5, k7;
-      Kshiftlw k5, k5, 1;
-      Korw     k5, k4, k5;                                                      # Broadcast mask
-      Kandnw   k6, k5, k7;                                                      # Expand mask
-      Vpexpandd    "zmm31{k5}", zmm31;                                          # Shift up keys
-      Vpexpandd    "zmm30{k5}", zmm30;                                          # Shift up data
+      Ktestw   k6, k6;
+      IfEq                                                                      # K6 zero implies the latest key goes at the end
+       {Kshiftlw k6, k7, 1;                                                     # Reach next empty field
+        Kandnw   k6, k7, k6;                                                    # Remove back fill to leave a single bit at the next empty field
+       }
+      sub
+       {Kandw    k5, k6, k7;                                                    # Tested at: # Insert key for BlockMultiWayTree
+        Kandnw   k4, k5, k7;
+        Kshiftlw k5, k5, 1;
+        Korw     k5, k4, k5;                                                    # Broadcast mask
+        Kandnw   k6, k5, k7;                                                    # Expand mask
+        Vpexpandd    "zmm31{k5}", zmm31;                                        # Shift up keys
+        Vpexpandd    "zmm30{k5}", zmm30;                                        # Shift up data
+       };
       Vpbroadcastd "zmm31{k6}", r15d;                                           # Load key
       $D->setReg(r14);                                                          # Corresponding data
       Vpbroadcastd "zmm30{k6}", r14d;                                           # Load data
@@ -13880,7 +13887,6 @@ latest:
 if (1) {                                                                        #TNasm::X86::ByteString::CreateBlockMultiWayTree
   my $b = CreateByteString;
   my $t = $b->CreateBlockMultiWayTree;
-  $t->insert(Vq(key, 0xffff), Vq(data, 0xeeee));
 
   $t->leftMost(my $l = Vq(offset));
   $l->outNL('LeftMost : ');
@@ -13893,9 +13899,20 @@ if (1) {                                                                        
   $t->half(31)   ->outNL('Half     : ');
   $t->getLoop(31)->outNL('Loop     : ');
 
-  $t->insert(Vq(key, 0xbbbb), Vq(data, 0xaaaa));
-  $t->insert(Vq(key, 0xdddd), Vq(data, 0xcccc));
-  $t->insert(Vq(key, 0x9999), Vq(data, 0x8888));
+  $t->insert(Vq(key, 0xbFFb), Vq(data, 0xb77b));  $b->chain($t->first, 56)->outNL('Length: ');
+  $t->insert(Vq(key, 0x6FF6), Vq(data, 0x6776));  $b->chain($t->first, 56)->outNL('Length: ');
+  $t->insert(Vq(key, 0xaFFa), Vq(data, 0xa77a));  $b->chain($t->first, 56)->outNL('Length: ');
+  $t->insert(Vq(key, 0x3FF3), Vq(data, 0x3773));  $b->chain($t->first, 56)->outNL('Length: ');
+  $t->insert(Vq(key, 0xcFFc), Vq(data, 0xc77c));  $b->chain($t->first, 56)->outNL('Length: ');
+  $t->insert(Vq(key, 0x4FF4), Vq(data, 0x4774));  $b->chain($t->first, 56)->outNL('Length: ');
+  $t->insert(Vq(key, 0x5FF5), Vq(data, 0x5775));  $b->chain($t->first, 56)->outNL('Length: ');
+  $t->insert(Vq(key, 0xeFFe), Vq(data, 0xe77e));  $b->chain($t->first, 56)->outNL('Length: ');
+  $t->insert(Vq(key, 0x2FF2), Vq(data, 0x2772));  $b->chain($t->first, 56)->outNL('Length: ');
+  $t->insert(Vq(key, 0x7FF7), Vq(data, 0x7777));  $b->chain($t->first, 56)->outNL('Length: ');
+  $t->insert(Vq(key, 0xdFFd), Vq(data, 0xd77d));  $b->chain($t->first, 56)->outNL('Length: ');
+  $t->insert(Vq(key, 0x8FF8), Vq(data, 0x8778));  $b->chain($t->first, 56)->outNL('Length: ');
+  $t->insert(Vq(key, 0x1FF1), Vq(data, 0x1771));  $b->chain($t->first, 56)->outNL('Length: ');
+  $t->insert(Vq(key, 0x9FF9), Vq(data, 0x9779));  $b->chain($t->first, 56)->outNL('Length: ');
 
   $b->dump;
 
@@ -13905,12 +13922,26 @@ RightMost: 0000 0000 0000 0018
 Full     : 0000 0000 0000 0000
 Half     : 0000 0000 0000 0000
 Loop     : 0000 0000 0000 0058
+Length: 0000 0000 0000 0001
+Length: 0000 0000 0000 0002
+Length: 0000 0000 0000 0003
+Length: 0000 0000 0000 0004
+Length: 0000 0000 0000 0005
+Length: 0000 0000 0000 0006
+Length: 0000 0000 0000 0007
+Length: 0000 0000 0000 0008
+Length: 0000 0000 0000 0009
+Length: 0000 0000 0000 000A
+Length: 0000 0000 0000 000B
+Length: 0000 0000 0000 000C
+Length: 0000 0000 0000 000D
+Length: 0000 0000 0000 000E
 Byte String
   Size: 0000 0000 0000 1000
   Used: 0000 0000 0000 0098
-0000: 0010 0000 0000 00009800 0000 0000 00000000 0000 0000 00009999 0000 BBBB 0000DDDD 0000 FFFF 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
-0040: 0000 0000 0000 00000000 0000 0000 00000400 0000 5800 00008888 0000 AAAA 0000CCCC 0000 EEEE 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
-0080: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+0000: 0010 0000 0000 00009800 0000 0000 00000000 0000 0000 0000F11F 0000 F22F 0000F33F 0000 F44F 0000F55F 0000 F66F 0000F77F 0000 F88F 0000F99F 0000 FAAF 0000
+0040: FBBF 0000 FCCF 0000FDDF 0000 FEEF 00000E00 0000 5800 00007117 0000 7227 00007337 0000 7447 00007557 0000 7667 00007777 0000 7887 00007997 0000 7AA7 0000
+0080: 7BB7 0000 7CC7 00007DD7 0000 7EE7 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
 00C0: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
 END
  }
