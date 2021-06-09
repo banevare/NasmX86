@@ -152,8 +152,7 @@ Read this file and print it out:
 
   Mov rax, Rs($0);                                                              # File to read
   ReadFile;                                                                     # Read [file](https://en.wikipedia.org/wiki/Computer_file) 
-  PrintOutMemory;                                                               # Print memory
-
+  PrintOutMemory;                                                               # Print [memory](https://en.wikipedia.org/wiki/Computer_memory) 
   my $r = Assemble;                                                             # Assemble and execute
   ok index($r, readFile($0)) > -1;                                              # Output contains this [file](https://en.wikipedia.org/wiki/Computer_file) 
 ```
