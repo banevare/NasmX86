@@ -529,6 +529,7 @@ sub Keep(@)                                                                     
  {my (@target) = @_;                                                            # Registers to keep
   for my $target(@target)
    {my $r = $RegisterContaining{$target};                                       # Containing register
+    $r or confess "No such register $target";
     if (my $l = $Keep{$r})                                                      # Check whether the register is already in use
      {say STDERR $l;
       confess "$r reset";
@@ -681,6 +682,16 @@ sub Minus($$$)                                                                  
    {confess "Use ClearRegisters instead";
    }
   $target                                                                       # Return register containing result
+ }
+
+#D2 Mask                                                                        # Operations on mask registers
+
+sub LoadConstantIntoMasKRegister($$)                                            # Load a constant into a mask register
+ {my ($reg, $value) = @_;                                                       # Mask register to load, constant to load
+  PushR rax;
+  Mov rax, $value;                                                              # Load a general register
+  Kmovq $reg, rax;                                                              # Load mask register
+  PopR rax;
  }
 
 #D2 Zmm                                                                         # Operations on zmm registers
@@ -1920,11 +1931,13 @@ sub Nasm::X86::Variable::setMask($$$)                                           
    {$start->setReg(r14);
     Bzhi r15, r15, r14;
     Not  r15;
+    ref($length) or confess "Not a variable";
     $length->setReg(r13);
     Add  r14, r13;
    }
   else                                                                          # Starting at zero
-   {$length->setReg(r13);
+   {confess "Deprecated: use setMaskFirst instead";
+     $length->setReg(r13);
     Mov r14, $length;
    }
   Bzhi r15, r15, r14;
@@ -2157,11 +2170,11 @@ sub Nasm::X86::Variable::putQIntoZmm($$$)                                       
 
 #D3 Broadcast                                                                   # Broadcast from a variable into a zmm
 
-sub Nasm::X86::Variable::broadcastD($$)                                         # Broadcast a double word in a variable into the numbered zmm.
+sub Nasm::X86::Variable::zBroadCastD($$)                                        # Broadcast a double word in a variable into the numbered zmm.
  {my ($variable, $zmm) = @_;                                                    # Variable containing value to broadcast, numbered zmm to broadcast to
   PushR my @save = (r15);
   $variable->setReg(r15);                                                       # Value of variable
-  Vpbroadcastd $zmm, r15w;                                                      # Broadcast
+  Vpbroadcastd "zmm".$zmm, r15d;                                                # Broadcast
   PopR @save;
  }
 
@@ -2343,6 +2356,7 @@ sub PushRR(@)                                                                   
  {my (@r) = @_;                                                                 # Register
   for my $r(@r)
    {my $size = RegisterSize $r;
+    $size or confess "No such register: $r";
     if    ($size > 8)                                                           # Wide registers
      {Sub rsp, $size;
       Vmovdqu32 "[rsp]", $r;
@@ -3047,12 +3061,12 @@ sub Nasm::X86::ByteString::chain($$@)                                           
  }
 
 sub Nasm::X86::ByteString::putChain($$$@)                                       # Write the double word in the specified variable to the double word location at the the specified offset in the specified byte string.
- {my ($byteString, $variable, $value, @offsets) = @_;                           # Byte string descriptor, start variable, value to put as a variable,  offsets chain
+ {my ($byteString, $start, $value, @offsets) = @_;                              # Byte string descriptor, start variable, value to put as a variable,  offsets chain
   @_ >= 2 or confess;
 
   PushR my @save = (r14, r15);                                                  # 14 is the byte string address, 15 the current offset in the byte string
   $byteString->bs->setReg(r14);
-  $variable->setReg(r15);
+  $start->setReg(r15);
   for my $i(keys @offsets)                                                      # Each offset
    {my $o = $offsets[$i];
     KeepFree r15;
@@ -3540,9 +3554,10 @@ sub unlinkFile(@)                                                               
   $s->call(@variables);
  }
 
-sub Nasm::X86::ByteString::dump($)                                              # Dump details of a byte string
- {my ($byteString) = @_;                                                        # Byte string descriptor
-  @_ == 1 or confess;
+sub Nasm::X86::ByteString::dump($;$)                                            # Dump details of a byte string
+ {my ($byteString, $depth) = @_;                                                # Byte string descriptor, optional amount of memory to dump
+  @_ == 1 or @_ == 2  or confess;
+  $depth //= 4;                                                                 # Default depth
 
   PushR my @save = (rax, r15);                                                  # Get address of byte string
   $byteString->bs->setReg(rax);
@@ -3567,22 +3582,15 @@ sub Nasm::X86::ByteString::dump($)                                              
     PopR rax;
 
     Mov rdi, 64;
-    PrintOutString("0000: ");
-    PrintOutMemoryInHexNL;
+    for my $b(0..$depth-1)                                                      # Print the requested number of blocks
+     {my $o = sprintf("%04x: ", 64 * $b);
+      PrintOutString($o);
+      PrintOutMemoryInHexNL;
+      Add rax, 64;
+     }
 
-    Add rax, 64;
-    PrintOutString("0040: ");
-    PrintOutMemoryInHexNL;
-
-    Add rax, 64;
-    PrintOutString("0080: ");
-    PrintOutMemoryInHexNL;
-
-    Add rax, 64;
-    PrintOutString("00C0: ");
-    PrintOutMemoryInHexNL;
     RestoreFirstFour;
-   } name => "Nasm::X86::ByteString::dump";
+   } name => "Nasm::X86::ByteString::dump$depth";
 
   PopR @save;
  }
@@ -4442,16 +4450,17 @@ sub Nasm::X86::ByteString::CreateBlockMultiWayTree($)                           
     data      => $o * 2,                                                        # Offset of data in header
     node      => $o * 3,                                                        # Offset of nodes in header
     minKeys   => int($b / 2) - 1,                                               # Minimum number of keys
-    maxKeys   => $b / $o - 1,                                                   # Maximum number of keys
-    maxNodes  => $b / $o,                                                       # Maximum number of children per parent.
+    maxKeys   => $b / $o - 2,                                                   # Maximum number of keys
+    maxNodes  => $b / $o - 1,                                                   # Maximum number of children per parent.
     loop      => $b - $o,                                                       # Offset of keys, data, node loop
     length    => $b - $o * 2,                                                   # Offset of length in keys block
     up        => $b - $o * 2,                                                   # Offset of up in data block
     head      => undef,                                                         # Offset of header block
    );
+  confess "Maximum keys must be 14" unless $s->maxKeys == 14;                   # Maximum number fo keys is expected to be 14
 
-  $s->allocBlock(my $keys = $s->first = Vq(offset));                            # Allocate first keys block
-  $s->allocBlock(my $data =             Vq(offset));                            # Allocate first data block
+  my $keys = $s->first = $s->allocBlock;                                        # Allocate first keys block
+  my $data = $s->allocBlock;                                                    # Allocate first data block
 
   ClearRegisters zmm31;                                                         # Initialize first keys, data, node loop
   $s->putLoop($data, 31);                                                       # Keys loops to data
@@ -4465,12 +4474,12 @@ sub Nasm::X86::BlockMultiWayTree::splitFullNode($$$@)                           
   @_ >= 2 or confess;
   my $b = $bmt->bs;                                                             # Underlying byte string
   my $N = int $bmt->maxNodes / 2;                                               # Split points
-  my $leftLength  = $bmt->maxKeys % 2 == 0 ? $N - 1 : $N - 2;                   # Left split point
+  my $leftLength  = $bmt->maxKeys / 2;                                          # Left split point
   my $rightLength = $bmt->maxKeys - 1 - $leftLength;                            # Right split point
 
-  my $zmmLK = 28; my $zmmLD = 27;                                               # Key and data blocks in left child
-  my $zmmRK = 26; my $zmmRD = 25;                                               # Key and data blocks in right child
-  my $zmmPK = 24; my $zmmPD = 23; my $zmmPN = 22;                               # Key, data and node blocks for parent
+  my $zmmLK = 28; my $zmmLD = 27; my $zmmLN = 26;                               # Key, data, node blocks in left child
+  my $zmmRK = 25; my $zmmRD = 24; my $zmmRN = 23;                               # Key, data, node blocks in right child
+  my $zmmPK = 22; my $zmmPD = 21; my $zmmPN = 20;                               # Key, data, node blocks for parent
   my $zmmTest = 21;                                                             # Zmm used to hold test values via broadcast
 
   for my $z($zmmLK, $zmmLD, $zmmRK, $zmmRD)                                     # Check for register collisions
@@ -4485,61 +4494,82 @@ sub Nasm::X86::BlockMultiWayTree::splitFullNode($$$@)                           
     my $node = $$parameters{node};                                              # Node to split
 
     my $L = $bmt->getBlockLength($zmmKeys);                                     # Length of node
-    PushR my @save = (k5, k6, k7, r14, r15, $zmmLK, $zmmLD, $zmmRK, $zmmRD, $zmmPK, $zmmPD, $zmmPN);
+    PushR my @save = (k5, k6, k7, r14, r15,
+      map {"zmm$_"} $zmmLK, $zmmLD, $zmmLD,
+                    $zmmRK, $zmmRD, $zmmRD,
+                    $zmmPK, $zmmPD, $zmmPN);
+
     If ($bmt->getBlockLength($zmmKeys) != $bmt->maxKeys, sub                    # Only split full blocks
      {Jmp $success;
      });
 
-    $bmt->allocBlock(my $lk = Vq(offset));                                      # New left keys
-    $bmt->allocBlock(my $ld = Vq(offset));                                      # New left data
-    $bmt->allocBlock(my $rk = Vq(offset));                                      # New right keys
-    $bmt->allocBlock(my $rd = Vq(offset));                                      # New right data
+    my $lk = $bmt->allocBlock;                                                  # New left keys
+    my $ld = $bmt->allocBlock;                                                  # New left data
+    my $rk = $bmt->allocBlock;                                                  # New right keys
+    my $rd = $bmt->allocBlock;                                                  # New right data
 
-    my $p = $bmt->getUpFromData($zmmData);                                      # Parent node
+    my $p = $bmt->getUpFromData($zmmData);                                      # Parent node offset as a variable
     If ($p == 0, sub                                                            # Parent or root keys block
      {$p->copy($node);                                                          # We are splitting the root
      });
 
     if (1)                                                                      # Set loop and up pointers for new left and right nodes
-     {ClearRegisters $zmmLK, $zmmLD, $zmmRK, $zmmRD;                            # Clear new children
-      $bmt->putLoop   ($ld, $zmmLK);                                            # Set the link from key to data for left node
-      $bmt->putLoop   ($rd, $zmmRK);                                            # Set the link from key to data for right node
-      $bmt->setBlockUp($p,  $zmmLD);                                            # Up from left child to parent
-      $bmt->setBlockUp($p,  $zmmRD);                                            # Up from right child to parent
+     {ClearRegisters map {"zmm$_"} $zmmLK, $zmmLD, $zmmRK, $zmmRD;              # Clear new children
+      $bmt->putLoop      ($ld, $zmmLK);                                         # Set the link from key to data for left node
+      $bmt->putLoop      ($rd, $zmmRK);                                         # Set the link from key to data for right node
+      $bmt->setUpIntoData($p,  $zmmLD);                                         # Up from left child to parent
+      $bmt->setUpIntoData($p,  $zmmRD);                                         # Up from right child to parent
      }
 
     if (1)                                                                      # Transfer data and keys to new nodes
-     {Vq(splitPoint, $leftLength)->setMaskFirst(k7);                            # Mask up to the split point
-      Vmovdqu8 $zmmLK."{k7}", $zmmKeys;                                         # Split keys left
-      Vmovdqu8 $zmmLD."{k7}", $zmmData;                                         # Split data left
-      $bmt->setBlockLength(Vq(leftLength, $leftLength), $zmmLK);                # Length of left node
-      Vq(splitPoint, $leftLength+2)->setMask($rightLength, k7);                 # Mask from split point
-      Vmovdqu8 $zmmRK."{k7}", $zmmKeys;                                         # Split keys right
-      Vmovdqu8 $zmmRD."{k7}", $zmmData;                                         # Split data right
-      $bmt->setBlockLength(Vq(rightLength, $rightLength), $zmmRK);              # Length of right node
+     {LoadConstantIntoMasKRegister(k7, eval "0b".'1'x$leftLength);              # Constant mask up to the split point
+      Vmovdqu8 "zmm".$zmmLK."{k7}", "zmm".$zmmKeys;                             # Split keys left
+      Vmovdqu8 "zmm".$zmmLD."{k7}", "zmm".$zmmData;                             # Split data left
+      $bmt->setBlockLength($zmmLK, Vq(leftLength, $leftLength));                # Length of left node
+      my $mr = eval "0b".('1'x$rightLength).('0'x($leftLength+1));              # Right mask
+      LoadConstantIntoMasKRegister(k7, $mr);                                    # Constant mask from one beyond split point to end of keys
+      Vmovdqu8 "zmm".$zmmRK."{k7}", "zmm".$zmmKeys;                             # Split keys right
+      Vmovdqu8 "zmm".$zmmRD."{k7}", "zmm".$zmmData;                             # Split data right
+      $bmt->setBlockLength($zmmRK, Vq(rightLength, $rightLength));              # Length of right node
      }
+
 
     if (1)                                                                      # Reparent children of new left and right nodes
-     {my $stack = Vq(stack, rsp);                                               # Address nodes in stack
-      for my $n(0..$leftLength+1)                                               # Reparent children of left node
-       {$b->putChain($stack, $lk, $bmt->width * $n, $bmt->loop, $bmt->up);
-       }
-      for my $n($leftLength+2..$bmt->maxNode - 1)                               # Reparent children of right node
-       {$b->putChain($stack, $rk, $bmt->width * $n, $bmt->loop, $bmt->up);
-       }
+     {my $node = $bmt->getLoop($zmmData);                                       # Child nodes for this node
+      If ($node, sub                                                            # Node has children
+       {my $start = Vq(start);                                                  # Start node variable
+        PushRR rax, "zmm".$zmmNode;                                             # Nodes on stack
+        for my $n(0..$leftLength+1)                                             # Reparent children of left node
+         {ClearRegisters rax;
+          Push ax, Push ax; Pop rax;                                            # The nodes are double words but we cannot pop a double word from the stack in 64 bit long mode
+          $start->getReg(rax);
+          KeepFree rax;
+          $b->putChain($start, $lk, $bmt->width * $n, $bmt->loop, $bmt->up);
+         }
+        for my $n($leftLength+2..$bmt->maxNodes - 1)                            # Reparent children of right node
+         {Push ax, Push ax; Pop rax;                                            # The nodes are double words but we cannot pop a double word from the stack in 64 bit long mode
+          $start->getReg(rax);
+          $b->putChain($start, $rk, $bmt->width * $n, $bmt->loop, $bmt->up);
+         }
+        Pop ax; Pop ax, Pop rax;                                                # Relevel the stack
+       },
+      sub                                                                       # Otherwise allocate a child node block and connect it to the nodes data block
+       {my $n = $bmt->allocBlock;                                               # Block for child nodes
+        $bmt->putLoop($n, $zmmData);                                            # The data block now points to the node block
+       });
      }
 
-    my $k = getDFromZmmAsVariable($zmmKeys, $leftLength);                       # Splitting key
-    my $d = getDFromZmmAsVariable($zmmData, $leftLength);                       # Splitting data
+    my $k = getDFromZmmAsVariable($zmmKeys, $leftLength * $bmt->width);         # Splitting key
+    my $d = getDFromZmmAsVariable($zmmData, $leftLength * $bmt->width);         # Splitting data
 
     If ($p != $node, sub                                                        # Not a root node
      {$bmt->getKeysDataNode($p, $zmmPK, $zmmPD,  $zmmPN);                       # Load parent blocks
-      PushR my @save = (r15, k2, k3, k4, k5, k6, k7, $zmmTest);
+      PushR my @save = (r15, k2, k3, k4, k5, k6, k7, "zmm".$zmmTest);
       my $parentLength = $bmt->getBlockLength($zmmPK);                          # Current length of parent
       $parentLength->setMaskFirst(k7);                                          # Set the length mask
       $node->setReg(r15);                                                       # Offset to search for in parent
-      Vpbroadcastd $zmmTest, r15d;                                              # Load offset to search for
-      Vpcmpud "k6{k7}", $zmmPN, $zmmTest, 0;                                    # Check for equal offset - one of them will match to create the single insertion point in k6
+      Vpbroadcastd "zmm".$zmmTest, r15d;                                        # Load offset to search for
+      Vpcmpud "k6{k7}", "zmm".$zmmPN, "zmm".$zmmTest, 0;                        # Check for equal offset - one of them will match to create the single insertion point in k6
 
       Kshiftlw   k5, k7,  1;                                                    # Extend length by 1
       Korw       k5, k5, k7;                                                    # Set trailing zero
@@ -4548,78 +4578,91 @@ sub Nasm::X86::BlockMultiWayTree::splitFullNode($$$@)                           
       Korw       k5, k5, k7;                                                    # Set trailing zero
       Kshiftlw   k3, k6,  1;                                                    # Move up found location by 1 to make k3 the secondary insertion point
       Kandnw     k2, k3, k5;                                                    # K2 is the double expand mask
-      Vpexpandd  $zmmPK."{k4}", $zmmPK;                                         # Shift up keys  to make space for one new ones
-      Vpexpandd  $zmmPD."{k4}", $zmmPD;                                         # Shift up data  to make space for one new ones
-      Vpexpandd  $zmmPN."{k2}", $zmmPN;                                         # Shift up child nodes to make a space for two new ones
+      Vpexpandd  "zmm".$zmmPK."{k4}", "zmm".$zmmPK;                             # Shift up keys  to make space for one new ones
+      Vpexpandd  "zmm".$zmmPD."{k4}", "zmm".$zmmPD;                             # Shift up data  to make space for one new ones
+      Vpexpandd  "zmm".$zmmPN."{k2}", "zmm".$zmmPN;                             # Shift up child nodes to make a space for two new ones
 
-      $k->zBroadCast($zmmTest);                                                 # Broadcast new key
-      Vmovdqu32 $zmmPK."{k6}", $zmmTest;                                        # Insert new key
-      $d->zBroadCast($zmmTest);                                                 # Broadcast new data
-      Vmovdqu32 $zmmPD."{k6}", $zmmTest;                                        # Insert new data
+      $k->zBroadCastD($zmmTest);                                                # Broadcast new key
+      Vmovdqu32 "zmm".$zmmPK."{k6}", "zmm".$zmmTest;                            # Insert new key
+      $d->zBroadCastD($zmmTest);                                                # Broadcast new data
+      Vmovdqu32 "zmm".$zmmPD."{k6}", "zmm".$zmmTest;                            # Insert new data
 
-      $lk->zBroadCast($zmmTest);                                                # Broadcast new left child
-      Vmovdqu32 $zmmPN."{k6}", $zmmTest;                                        # Insert new data
-      $rk->zBroadCast($zmmTest);                                                # Broadcast new right child
-      Vmovdqu32 $zmmPN."{k3}", $zmmTest;                                        # Insert new data
+      $lk->zBroadCastD($zmmTest);                                               # Broadcast new left child
+      Vmovdqu32 "zmm".$zmmPN."{k6}", "zmm".$zmmTest;                            # Insert new data
+      $rk->zBroadCastD($zmmTest);                                               # Broadcast new right child
+      Vmovdqu32 "zmm".$zmmPN."{k3}", "zmm".$zmmTest;                            # Insert new data
 
       my $newParentLength = $parentLength + 1;                                  # New parent length
-      $bmt->setLength($zmmPK, $newParentLength);                                # Set length in parent keys
-      $bmt->setLength($zmmPD, $newParentLength);                                # Set length in parent data
-      $bmt->setLength($zmmPN, $newParentLength+2);                              # Set length in parent data
+      $bmt->setBlockLength($zmmPK, $newParentLength);                           # Set length in parent keys
+      $bmt->setBlockLength($zmmPD, $newParentLength);                           # Set length in parent data
+      $bmt->setBlockLength($zmmPN, $newParentLength+2);                         # Set length in parent data
 
       $bmt->putKeysDataNode($p, $zmmPK, $zmmPD,  $zmmPN);                       # Save parent blocks
       PopR @save;
      },
-    sub                                                                         # Make a new root as we are splitting the root
-     {PushR my @save = (r15, k7, $zmmTest);
-      Mov r15, 1;
-      Kmovw k7, r15w;                                                           # Position of key, data and first node
-      KeepFree r15;
-      $k->zBroadCast($zmmTest);                                                 # Broadcast keys
-      Vmovdqu32 $zmmKeys."{k7}", $zmmTest;                                      # Insert key
-      $d->zBroadCast($zmmTest);                                                 # Broadcast data
-      Vmovdqu32 $zmmData."{k7}", $zmmTest;                                      # Insert data
+    sub                                                                         # Make a new root as we are splitting the existing root
+     {PushR my @save = (rax, k7, "zmm".$zmmTest);
+      Mov rax, 1;
+      Kmovq k7, rax;                                                            # Position of key, data and first node
+      $k->zBroadCastD($zmmTest);                                                # Broadcast keys
+      Vmovdqu32 "zmm".$zmmKeys."{k7}", "zmm".$zmmTest;                          # Insert key
+      $d->zBroadCastD($zmmTest);                                                # Broadcast data
+      Vmovdqu32 "zmm".$zmmData."{k7}", "zmm".$zmmTest;                          # Insert data
 
-      $lk->zBroadCast($zmmTest);                                                # Broadcast left child
-      Vmovdqu32 $zmmNode."{k7}", $zmmTest;                                      # Insert left hand child as first node
+      $lk->zBroadCastD($zmmTest);                                               # Broadcast left child
+      Vmovdqu32 "zmm".$zmmNode."{k7}", "zmm".$zmmTest;                          # Insert left hand child as first node
 
-      Shl r15, 1;                                                               # Position of second data
-      $rk->zBroadCast($zmmTest);                                                # Broadcast right child
-      Vmovdqu32 $zmmNode."{k7}", $zmmTest;                                      # Insert right hand child as second node
+      Kshiftlw k7, k7, 1;                                                       # Position of second data
+      $rk->zBroadCastD($zmmTest);                                               # Broadcast right child
+      Vmovdqu32 "zmm".$zmmNode."{k7}", "zmm".$zmmTest;                          # Insert right hand child as second node
 
-      my $one = Vq(one,1);
-      $bmt->setLength($zmmKeys, $one);                                          # Set length of root keys
-      $bmt->setLength($zmmData, $one);                                          # Set length of root data
-      $bmt->setLength($zmmNode, Vq(two,2));                                     # Set length of root nodes
+      my $one = Vq(one, 1);
+      $bmt->setBlockLength($zmmKeys, Vq(one,  1));                              # Set length of root keys
+      $bmt->setUpIntoData (Vq(zero, 0), $zmmData);                              # Parent has no root
+      $bmt->putKeysData($lk, $zmmLK, $zmmLD);                                   # Save left  block
+      $bmt->putKeysData($rk, $zmmRK, $zmmRD);                                   # Save right block
+      PopR @save;
      });
 
     SetLabel $success;                                                          # Insert completed successfully
     PopR @save;
    }  in => {bs => 3, node => 3};
 
-  $s->call($bmt->address, first => $bmt->first, @variables);
+  $s->call($bmt->address, node => $bmt->first, @variables);
+ }
+
+sub Nasm::X86::BlockMultiWayTree::getKeysData($$$$)                             # Load the keys and data blocks for a node
+ {my ($bmt, $offset, $zmmKeys, $zmmData) = @_;                                  # Block multi way tree descriptor, offset as a variable, numbered zmm for keys, numbered data for keys
+  @_ == 4 or confess;
+  my $b = $bmt->bs;                                                             # Underlying byte string
+  $b->getBlock($b->bs, $offset, $zmmKeys);                                      # Get the keys block
+  my $data = $bmt->getLoop($zmmKeys);                                           # Get the offset of the corresponding data block
+  $b->getBlock($b->bs, $data, $zmmData);                                        # Get the data block
+ }
+
+sub Nasm::X86::BlockMultiWayTree::putKeysData($$$$)                             # Save the key and data blocks for a node
+ {my ($bmt, $offset, $zmmKeys, $zmmData) = @_;                                  # Block multi way tree descriptor, offset as a variable, numbered zmm for keys, numbered data for keys
+  @_ == 4 or confess;
+  my $b = $bmt->bs;                                                             # Underlying byte string
+  $b->putBlock($b->bs, $offset, $zmmKeys);                                      # Put the keys block
+  my $data = $bmt->getLoop($zmmKeys);                                           # Get the offset of the corresponding data block
+  $b->putBlock($b->bs, $data, $zmmData);                                        # Put the data block
  }
 
 sub Nasm::X86::BlockMultiWayTree::getKeysDataNode($$$$$)                        # Load the keys, data and child nodes for a node
  {my ($bmt, $offset, $zmmKeys, $zmmData, $zmmNode) = @_;                        # Block multi way tree descriptor, offset as a variable, numbered zmm for keys, numbered data for keys, numbered numbered for keys
-  @_ >= 5 or confess;
-  my $b = $bmt->bs;                                                             # Underlying byte string
-  $b->getBlock($b->address, $offset, $zmmKeys);                                 # Get the keys block
-  my $data = $bmt->getLoop($zmmKeys);                                           # Get the offset of the corresponding data block
-  $b->getBlock($b->address, $data, $zmmData);                                   # Get the data block
+  @_ == 5 or confess;
+  $bmt->getKeysData($offset, $zmmKeys, $zmmData);                               # Get keys and data
   my $node = $bmt->getLoop($zmmData);                                           # Get the offset of the corresponding node block
-  $b->getBlock($b->address, $node, $zmmNode);                                   # Get the node block
+  $bmt->bs->getBlock($bmt->bs->bs, $node, $zmmNode);                            # Get the node block
  }
 
 sub Nasm::X86::BlockMultiWayTree::putKeysDataNode($$$$$)                        # Save the keys, data and child nodes for a node
  {my ($bmt, $offset, $zmmKeys, $zmmData, $zmmNode) = @_;                        # Block multi way tree descriptor, offset as a variable, numbered zmm for keys, numbered data for keys, numbered numbered for keys
-  @_ >= 5 or confess;
-  my $b = $bmt->bs;                                                             # Underlying byte string
-  $b->putBlock($b->address, $offset, $zmmKeys);                                 # Put the keys block
-  my $data = $bmt->getLoop($zmmKeys);                                           # Get the offset of the corresponding data block
-  $b->putBlock($b->address, $data, $zmmData);                                   # Put the data block
+  @_ == 5 or confess;
+  $bmt->putKeysData($offset, $zmmKeys, $zmmData);                               # Put keys and data
   my $node = $bmt->getLoop($zmmData);                                           # Get the offset of the corresponding node block
-  $b->putBlock($b->address, $node, $zmmNode);                                   # Put the node block
+  $bmt->bs->putBlock($bmt->bs->bs, $node, $zmmNode);                            # Put the node block
  }
 
 sub Nasm::X86::BlockMultiWayTree::insert($@)                                    # Insert a (key, data) pair into the tree
@@ -4708,22 +4751,23 @@ sub Nasm::X86::BlockMultiWayTree::getBlockLength($$)                            
   getDFromZmmAsVariable($zmm, $bmt->length);                                    # The length field as a variable
  }
 
+sub Nasm::X86::BlockMultiWayTree::setBlockLength($$$)                           # Get the length of the block in the numbered zmm from the specified variable
+ {my ($bmt, $zmm, $length) = @_;                                                # Block multi way tree, zmm number. length variable
+  @_ == 3 or confess;
+  ref($length) or confess dump($length);
+  $length->putDIntoZmm($zmm, $bmt->length);                                     # Set the length field
+ }
+
 sub Nasm::X86::BlockMultiWayTree::getUpFromData($$)                             # Get the up offset from the data block in the numbered zmm and return it as a variable
  {my ($bmt, $zmm) = @_;                                                         # Block multi way tree descriptor, zmm number
   @_ == 2 or confess;
   getDFromZmmAsVariable($zmm, $bmt->length);                                    # The length field as a variable
  }
 
-sub Nasm::X86::BlockMultiWayTree::setUpIntoData($$)                             # Get the up offset from the data block in the numbered zmm and return it as a variable
+sub Nasm::X86::BlockMultiWayTree::setUpIntoData($$)                             # Put the offset of the parent keys block expressed as a variable into the numbered zmm
  {my ($bmt, $offset, $zmm) = @_;                                                # Block multi way tree descriptor, variable containing up offset, zmm number
   @_ == 3 or confess;
   $offset->putDIntoZmm($zmm, $bmt->length);                                     # Save the up offset into the data block
- }
-
-sub Nasm::X86::BlockMultiWayTree::setBlockLength($$$)                           # Get the length of the block in the numbered zmm from the specified variable
- {my ($bmt, $zmm, $length) = @_;                                                # Block multi way tree, zmm number. length variable
-  @_ == 3 or confess;
-  $length->putDIntoZmm($zmm, $bmt->length);                                     # Set the length field
  }
 
 sub Nasm::X86::BlockMultiWayTree::getLoop($$)                                   # Return the value of the loop field as a variable
@@ -4831,11 +4875,11 @@ sub Nasm::X86::BlockMultiWayTree::address($)                                    
   $bmt->bs->bs;
  }
 
-sub Nasm::X86::BlockMultiWayTree::allocBlock($@)                                # Allocate a block to hold a zmm register in the specified byte string and return the offset of the block in a variable
+sub Nasm::X86::BlockMultiWayTree::allocBlock($)                                 # Allocate a block to hold a zmm register in the specified byte string and return the offset of the block in a variable
  {my ($bmt, @variables) = @_;                                                   # Block multi way tree descriptor
-  @_ >= 2 or confess;
-
-  $bmt->bs->allocBlock($bmt->address, @variables);                              # Allocate a block
+  @_ == 1 or confess;
+  $bmt->bs->allocBlock($bmt->address, my $o = Vq(offset));                      # Allocate a block
+  $o                                                                            # Return the offset of the block
  }
 
 sub Nasm::X86::BlockMultiWayTree::dump($@)                                      # Dump a block multi way tree
@@ -14076,6 +14120,34 @@ END
  }
 
 #latest:
+if (1) {                                                                        #TNasm::X86::ByteString::CreateBlockMultiWayTree #TLoadConstantIntoMasKRegister
+  Mov r14, 0;
+  Kmovq k0, r14;
+  Ktestq k0, k0;
+  IfZ {PrintOutStringNL "0 & 0 == 0"};
+  PrintOutZF;
+
+  LoadConstantIntoMasKRegister k1, 1;
+  Ktestq k1, k1;
+  IfNz {PrintOutStringNL "1 & 1 != 0"};
+  PrintOutZF;
+
+  LoadConstantIntoMasKRegister k2, eval "0b".(('1'x4).('0'x4))x2;
+
+  PrintOutRegisterInHex k0, k1, k2;
+
+  ok Assemble(debug => 1, eq => <<END);
+0 & 0 == 0
+ZF=1
+1 & 1 != 0
+ZF=0
+    k0: 0000 0000 0000 0000
+    k1: 0000 0000 0000 0001
+    k2: 0000 0000 0000 F0F0
+END
+ }
+
+latest:
 if (1) {                                                                        #TNasm::X86::ByteString::CreateBlockMultiWayTree
   my $b = CreateByteString;
   my $t = $b->CreateBlockMultiWayTree;
@@ -14106,7 +14178,11 @@ if (1) {                                                                        
   $t->insert(Vq(key, 0x1FF1), Vq(data, 0x1771));  $b->chain($t->first, 56)->outNL('Length: ');
   $t->insert(Vq(key, 0x9FF9), Vq(data, 0x9779));  $b->chain($t->first, 56)->outNL('Length: ');
 
-  $b->dump;
+  $t->getKeysData($t->first, 31, 30);
+  $t->splitFullNode(31, 30, 29);
+  $t->putKeysDataNode($t->first, 31, 30, 29);
+
+  $b->dump(8);
 
   ok Assemble(debug => 0, eq => <<END);
 LeftMost : 0000 0000 0000 0018
@@ -14130,37 +14206,15 @@ Length: 0000 0000 0000 000D
 Length: 0000 0000 0000 000E
 Byte String
   Size: 0000 0000 0000 1000
-  Used: 0000 0000 0000 0098
-0000: 0010 0000 0000 00009800 0000 0000 00000000 0000 0000 0000F11F 0000 F22F 0000F33F 0000 F44F 0000F55F 0000 F66F 0000F77F 0000 F88F 0000F99F 0000 FAAF 0000
-0040: FBBF 0000 FCCF 0000FDDF 0000 FEEF 00000E00 0000 5800 00007117 0000 7227 00007337 0000 7447 00007557 0000 7667 00007777 0000 7887 00007997 0000 7AA7 0000
-0080: 7BB7 0000 7CC7 00007DD7 0000 7EE7 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
-00C0: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
-END
- }
-
-latest:
-if (1) {                                                                        #TNasm::X86::ByteString::CreateBlockMultiWayTree
-  Mov r14, 0;
-  Kmovq k0, r14;
-  Ktestq k0, k0;
-  IfZ {PrintOutStringNL "0 & 0 == 0"};
-  PrintOutZF;
-
-  Mov r15, 1;
-  Kmovq k1, r15;
-  Ktestq k1, k1;
-  IfNz {PrintOutStringNL "1 & 1 != 0"};
-  PrintOutZF;
-
-  PrintOutRegisterInHex k0, k1;
-
-  ok Assemble(debug => 0, eq => <<END);
-0 & 0 == 0
-ZF=1
-1 & 1 != 0
-ZF=0
-    k0: 0000 0000 0000 0000
-    k1: 0000 0000 0000 0001
+  Used: 0000 0000 0000 01D8
+0000: 0010 0000 0000 0000D801 0000 0000 00000000 0000 0000 0000F88F 0000 F22F 0000F33F 0000 F44F 0000F55F 0000 F66F 0000F77F 0000 F88F 0000F99F 0000 FAAF 0000
+0040: FBBF 0000 FCCF 0000FDDF 0000 FEEF 00000100 0000 5800 00007887 0000 7227 00007337 0000 7447 00007557 0000 7667 00007777 0000 7887 00007997 0000 7AA7 0000
+0080: 7BB7 0000 7CC7 00007DD7 0000 7EE7 00000000 0000 9801 0000F11F 0000 F22F 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+00c0: 0000 0000 0000 00000000 0000 0000 00000700 0000 D800 00007117 0000 7227 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+0100: 0000 0000 0000 00000000 0000 0000 00001800 0000 0000 00000000 0000 0000 0000F33F 0000 F44F 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+0140: 0000 0000 0000 00000000 0000 0000 00000600 0000 5801 00000000 0000 0000 00007337 0000 7447 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+0180: 0000 0000 0000 00000000 0000 0000 00001800 0000 0000 00009800 0000 1801 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+01c0: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
 END
  }
 
