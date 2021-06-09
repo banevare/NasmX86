@@ -774,9 +774,14 @@ sub IfNe(&;&)                                                                   
   If(q(Je), $then, $else);                                                      # Opposite code
  }
 
-sub IfNz(&;&)                                                                   # If not zero execute the then body else the else body
+sub IfNz(&;&)                                                                   # If the zero is not set then execute the then body else the else body
  {my ($then, $else) = @_;                                                       # Then - required , else - optional
   If(q(Jz), $then, $else);                                                      # Opposite code
+ }
+
+sub IfZ(&;&)                                                                    # If the zero is set then execute the then body else the else body
+ {my ($then, $else) = @_;                                                       # Then - required , else - optional
+  If(q(Jnz), $then, $else);                                                     # Opposite code
  }
 
 sub IfLt(&;&)                                                                   # If less than execute the then body else the else body
@@ -14138,17 +14143,21 @@ if (1) {                                                                        
   Mov r14, 0;
   Kmovq k0, r14;
   Ktestq k0, k0;
+  IfZ {PrintOutStringNL "0 & 0 == 0"};
   PrintOutZF;
 
   Mov r15, 1;
   Kmovq k1, r15;
   Ktestq k1, k1;
+  IfNz {PrintOutStringNL "1 & 1 != 0"};
   PrintOutZF;
 
   PrintOutRegisterInHex k0, k1;
 
   ok Assemble(debug => 0, eq => <<END);
+0 & 0 == 0
 ZF=1
+1 & 1 != 0
 ZF=0
     k0: 0000 0000 0000 0000
     k1: 0000 0000 0000 0001
