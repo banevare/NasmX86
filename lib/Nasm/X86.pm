@@ -3621,8 +3621,9 @@ sub Nasm::X86::ByteString::CreateBlockString($)                                 
     length  => $b - 2 * $o - 1,                                                 # Maximum length in a block
     first   => Vq('first'),                                                     # Variable addressing first block in block string
    );
-### This can be simplified to set first immediately
-  $s->allocBlock(my $first = Vq(offset));  $s->first->copy($first);             # Allocate first block and save it in a variable named first not offset
+
+  my $first = $s->allocBlock;                                                   # Allocate first block
+  $s->first->copy($first);                                                      # Record offset of first block
 
   if (1)                                                                        # Initialize circular list
    {my $nn = $s->next;
@@ -3643,11 +3644,11 @@ sub Nasm::X86::BlockString::address($)                                          
   $blockString->bs->bs;
  }
 
-sub Nasm::X86::BlockString::allocBlock($@)                                      # Allocate a block to hold a zmm register in the specified byte string and return the offset of the block in a variable
- {my ($blockString, @variables) = @_;                                           # Block string descriptor, variables
-  @_ >= 2 or confess;
+sub Nasm::X86::BlockString::allocBlock($)                                       # Allocate a block to hold a zmm register in the specified byte string and return the offset of the block in a variable
+ {my ($blockString) = @_;                                                       # Block string descriptor, variables
+  @_ == 1 or confess;
 
-  $blockString->bs->allocBlock($blockString->address, @variables);
+  $blockString->bs->allocBlock;                                                 # Allocate block and return its offset as a variable
  }
 
 sub Nasm::X86::BlockString::getBlockLengthInZmm($$)                             # Get the block length of the numbered zmm and return it in a variable
@@ -3800,7 +3801,7 @@ sub Nasm::X86::BlockString::concatenate($$)                                     
     ForEver                                                                     # Each block in source string
      {my ($start, $end) = @_;                                                   # Start and end labels
 
-      $target->allocBlock(bs => $tb, my $new = Vq(offset));                     # Allocate new block
+      my $new = $target->allocBlock;                                            # Allocate new block
       Vmovdqu8 zmm29, zmm31;                                                    # Load new target block from source
       my ($next, $prev) = $target->getNextAndPrevBlockOffsetFromZmm(30);        # Linkage from last target block
 
@@ -3870,7 +3871,7 @@ sub Nasm::X86::BlockString::insertChar($@)                                      
           $blockString->setBlockLengthInZmm($O,          31);                   # New shorter length of original block
           $blockString->setBlockLengthInZmm($L - $O + 1, 30);                   # Set length of  remainder plus inserted char in the new block
 
-          $blockString->allocBlock($B, my $new = Vq(offset));                   # Allocate new block
+          my $new = $blockString->allocBlock;                                   # Allocate new block
           my ($next, $prev)=$blockString->getNextAndPrevBlockOffsetFromZmm(31); # Linkage from last block
 
           If ($next == $prev, sub                                               # The existing string has one block, add new as the second block
@@ -4029,7 +4030,7 @@ sub Nasm::X86::BlockString::append($@)                                          
       $source += $toCopy;                                                       # Remaining source
       $size   -= $toCopy;                                                       # Remaining source length
 
-      $blockString->allocBlock($B, my $new = Vq(offset));                       # Allocate new block
+      my $new = $blockString->allocBlock;                                       # Allocate new block
       $blockString->getBlock  ($B, $new, 30);                                   # Load the new block
       my ($next, $prev) = $blockString->getNextAndPrevBlockOffsetFromZmm(31);   # Linkage from last block
 
@@ -4123,7 +4124,7 @@ sub Nasm::X86::ByteString::CreateBlockArray($)                                  
    );
   $s->slots2 == 16 or confess "Number of slots per block not 16";               # Slots per block
 
-  $s->allocBlock(bs => $byteString->bs, my $first = Vq(offset));                # Allocate first block
+  my $first = $s->allocBlock;                                                   # Allocate first block
   $s->first->copy($first);                                                      # Save first block
   $s                                                                            # Description of block array
  }
@@ -4134,11 +4135,11 @@ sub Nasm::X86::BlockArray::address($)                                           
   $blockArray->bs->bs;
  }
 
-sub Nasm::X86::BlockArray::allocBlock($@)                                       # Allocate a block to hold a zmm register in the specified byte string and return the offset of the block in a variable
- {my ($blockArray, @variables) = @_;                                            # Block array descriptor, variables
-  @_ >= 2 or confess;
+sub Nasm::X86::BlockArray::allocBlock($)                                        # Allocate a block to hold a zmm register in the specified byte string and return the offset of the block in a variable
+ {my ($blockArray) = @_;                                                        # Block array descriptor
+  @_ == 1 or confess;
 
-  $blockArray->bs->allocBlock($blockArray->address, @variables);
+  $blockArray->bs->allocBlock;
  }
 
 sub Nasm::X86::BlockArray::dump($@)                                             # Dump a block array
@@ -4224,7 +4225,7 @@ sub Nasm::X86::BlockArray::push($@)                                             
       Vpcompressd "zmm30{k7}{z}", zmm31;                                        # Compress first block into second block
       ClearRegisters zmm31;                                                     # Clear first block
       ($size+1)->putDIntoZmm(31, 0);                                            # Save new size in first block
-      $b  ->allocBlock(my $new = Vq(offset));                                   # Allocate new block
+      my $new = $b->allocBlock;                                                 # Allocate new block
       $new->putDIntoZmm(31, $w);                                                # Save offset of second block in first block
       $E  ->putDIntoZmm(30, $W - 1 * $w);                                       # Place new element
       $b  ->putBlock($B, $new, 30);                                             # Put the second block back into memory
@@ -4236,7 +4237,7 @@ sub Nasm::X86::BlockArray::push($@)                                             
     If ($size <= $N * ($N - 1), sub                                             # Still within two levels
      {If ($size % $N == 0, sub                                                  # New secondary block needed
        {PushR my @save = (rax, zmm30);
-        $b->allocBlock(my $new = Vq(offset));                                   # Allocate new block
+        my $new = $b->allocBlock;                                               # Allocate new block
         $E       ->putDIntoZmm(30, 0);                                          # Place new element last in new second block
         ($size+1)->putDIntoZmm(31, 0);                                          # Save new size in first block
         $new     ->putDIntoZmm(31, ($size / $N + 1) * $w);                      # Address new second block from first block
@@ -4886,8 +4887,7 @@ sub Nasm::X86::BlockMultiWayTree::address($)                                    
 sub Nasm::X86::BlockMultiWayTree::allocBlock($)                                 # Allocate a block to hold a zmm register in the specified byte string and return the offset of the block in a variable
  {my ($bmt, @variables) = @_;                                                   # Block multi way tree descriptor
   @_ == 1 or confess;
-  $bmt->bs->allocBlock($bmt->address, my $o = Vq(offset));                      # Allocate a block
-  $o                                                                            # Return the offset of the block
+  $bmt->bs->allocBlock                                                          # Allocate a block and return its offset as a variable
  }
 
 sub Nasm::X86::BlockMultiWayTree::dump($@)                                      # Dump a block multi way tree
@@ -13683,7 +13683,6 @@ END
  }
 
 #latest:;
-
 if (1) {                                                                        #TCreateBlockArray  #TBlockArray::push
   my $c = Rb(0..255);
   my $A = CreateByteString;  my $a = $A->CreateBlockArray;
@@ -13959,11 +13958,11 @@ END
 
 #latest:;
 if (1) {                                                                        #TNasm::X86::ByteString::allocBlock #TNasm::X86::ByteString::freeBlock
-  my $a = CreateByteString;              $a->dump;
-  $a->allocBlock(my $b1 = Vq(offset));   $a->dump;
-  $a->allocBlock(my $b2 = Vq(offset));   $a->dump;
-  $a->freeBlock($b2);                    $a->dump;
-  $a->freeBlock($b1);                    $a->dump;
+  my $a = CreateByteString; $a->dump;
+  my $b1 = $a->allocBlock;  $a->dump;
+  my $b2 = $a->allocBlock;  $a->dump;
+  $a->freeBlock($b2);       $a->dump;
+  $a->freeBlock($b1);       $a->dump;
 
   ok Assemble(debug => 0, eq => <<END);
 Byte String
@@ -14096,7 +14095,7 @@ if (1) {                                                                        
   my $format = Rd(map{4*$_+24} 0..64);
 
   my $b = CreateByteString;
-  $b->allocBlock($b->bs, my $a = Vq(offset));                                   # Allocate a block
+  my $a = $b->allocBlock;
   Vmovdqu8 zmm31, "[$format]";
   $b->putBlock($b->bs, $a, 31);
   my $r = $b->chain(Vq(start, 0x18), 4);
@@ -14155,7 +14154,7 @@ ZF=0
 END
  }
 
-latest:
+#latest:
 if (1) {                                                                        #TNasm::X86::ByteString::CreateBlockMultiWayTree
   my $b = CreateByteString;
   my $t = $b->CreateBlockMultiWayTree;
