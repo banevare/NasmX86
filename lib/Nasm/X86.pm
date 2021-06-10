@@ -2179,6 +2179,29 @@ sub Nasm::X86::Variable::zBroadCastD($$)                                        
   PopR @save;
  }
 
+#D2 Stack                                                                       # Push and pop variables to and from the stack
+
+sub Nasm::X86::Variable::push($)                                                # Push a variable onto the stack
+ {my ($variable) = @_;                                                          # Variable
+  $variable->size == 3 or confess "Wrong size";
+  Push rax; Push rax;                                                           # Make a slot on the stack and save rax
+  $variable->setReg(rax);                                                       # Variable to rax
+  my $s = RegisterSize rax;                                                     # Size of rax
+  Mov "[rsp+$s]", rax;                                                          # Move variable to slot
+  Pop rax;                                                                      # Remove rax to leave variable on top of the stack
+ }
+
+sub Nasm::X86::Variable::pop($)                                                 # Pop a variable from the stack
+ {my ($variable) = @_;                                                          # Variable
+  $variable->size == 3 or confess "Wrong size";
+  Push rax;                                                                     # Liberate a register
+  my $s = RegisterSize rax;                                                     # Size of rax
+  Mov rax, "[rsp+$s]";                                                          # Load from stack
+  $variable->getReg(rax);                                                       # Variable to rax
+  Pop rax;                                                                      # Remove rax to leave variable on top of the stack
+  Add rax, $s;                                                                  # Remove variable from stack
+ }
+
 #D2 Memory                                                                      # Actions on memory described by variables
 
 sub Nasm::X86::Variable::confirmIsMemory($;$$)                                  #P Check that variable describes allocated memory and optionally load registers with its length and size
@@ -4927,9 +4950,8 @@ sub Nasm::X86::BlockMultiWayTree::print($@)                                     
     PushRR $zmmKeys;                                                            # Stack the keys
 
     $length->for(sub                                                            # Print spacing
-     {ClearRegisters rax;
-      Push ax, Push ax; Pop rax;                                                # The keys are double words but we cannot pop a double word from the stack in 64 bit long mode
-      PrintRaxInHex($stdout, 3);                                                # Low double word in rax
+     {PopR eax;                                                                 # Synthetic pop for eax
+      PrintEaxInHex($stdout, 3);                                                # Low double word in rax
       PrintOutString '  ';                                                      # Space between keys
      });
 
