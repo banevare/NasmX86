@@ -2184,22 +2184,22 @@ sub Nasm::X86::Variable::zBroadCastD($$)                                        
 sub Nasm::X86::Variable::push($)                                                # Push a variable onto the stack
  {my ($variable) = @_;                                                          # Variable
   $variable->size == 3 or confess "Wrong size";
-  Push rax; Push rax;                                                           # Make a slot on the stack and save rax
+  PushR rax; Push rax;                                                           # Make a slot on the stack and save rax
   $variable->setReg(rax);                                                       # Variable to rax
   my $s = RegisterSize rax;                                                     # Size of rax
   Mov "[rsp+$s]", rax;                                                          # Move variable to slot
-  Pop rax;                                                                      # Remove rax to leave variable on top of the stack
+  PopR rax;                                                                      # Remove rax to leave variable on top of the stack
  }
 
 sub Nasm::X86::Variable::pop($)                                                 # Pop a variable from the stack
  {my ($variable) = @_;                                                          # Variable
   $variable->size == 3 or confess "Wrong size";
-  Push rax;                                                                     # Liberate a register
+  PushR rax;                                                                    # Liberate a register
   my $s = RegisterSize rax;                                                     # Size of rax
   Mov rax, "[rsp+$s]";                                                          # Load from stack
   $variable->getReg(rax);                                                       # Variable to rax
-  Pop rax;                                                                      # Remove rax to leave variable on top of the stack
-  Add rax, $s;                                                                  # Remove variable from stack
+  PopR rax;                                                                     # Remove rax to leave variable on top of the stack
+  Add rsp, $s;                                                                  # Remove variable from stack
  }
 
 #D2 Memory                                                                      # Actions on memory described by variables
@@ -14153,7 +14153,7 @@ Byte String
 END
  }
 
-#latest:
+latest:
 if (1) {                                                                        #TNasm::X86::ByteString::CreateBlockMultiWayTree #TLoadConstantIntoMasKRegister
   Mov r14, 0;
   Kmovq k0, r14;
@@ -14177,6 +14177,13 @@ if (1) {                                                                        
   PrintOutRaxInHex;
   PrintOutNL;
 
+  my $a = Vq('aaa', 0x01234567);
+  $a->push;
+  my $b = Vq('bbb');
+  $b->pop;
+  $a->outNL;
+  $b->outNL;
+
   ok Assemble(debug => 1, eq => <<END);
 0 & 0 == 0
 ZF=1
@@ -14186,6 +14193,8 @@ ZF=0
     k1: 0000 0000 0000 0001
     k2: 0000 0000 0000 F0F0
 0000 0000 00AB CDEF
+aaa: 0000 0000 0123 4567
+bbb: 0000 0000 0123 4567
 END
  }
 
