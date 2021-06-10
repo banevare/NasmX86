@@ -14147,7 +14147,7 @@ ZF=0
 END
  }
 
-#latest:
+latest:
 if (1) {                                                                        #TNasm::X86::ByteString::CreateBlockMultiWayTree
   my $b = CreateByteString;
   my $t = $b->CreateBlockMultiWayTree;
@@ -14182,9 +14182,11 @@ if (1) {                                                                        
   $t->splitFullNode(31, 30, 29);
   $t->putKeysDataNode($t->first, 31, 30, 29);
 
+  $t->insert(Vq(key, 0x1EE1), Vq(data, 0x1661));
+
   $b->dump(8);
 
-  ok Assemble(debug => 0, eq => <<END);
+  ok Assemble(debug => 1, eq => <<END);
 LeftMost : 0000 0000 0000 0018
 RightMost: 0000 0000 0000 0018
 Full     : 0000 0000 0000 0000
