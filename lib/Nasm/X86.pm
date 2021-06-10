@@ -1113,7 +1113,7 @@ sub hexTranslateTable                                                           
 
 sub PrintRaxInHex($;$)                                                          # Write the content of register rax in hexadecimal in big endian notation to the specified channel
  {my ($channel, $end) = @_;                                                     # Channel, optional end byte
-  @_ == 1 or confess;
+  @_ == 1 or @_ == 2 or confess;
   Comment "Print Rax In Hex on channel: $channel";
   my $hexTranslateTable = hexTranslateTable;
   $end //= 7;                                                                   # Default end byte
@@ -1124,7 +1124,7 @@ sub PrintRaxInHex($;$)                                                          
     Mov rdi, 2;                                                                 # Length of a byte in hex
     KeepFree rax;
 
-    for my $i(0..$end)                                                          # Each byte
+    for my $i((7-$end)..7)                                                      # Each byte
      {my $s = 8*$i;
       KeepFree rax;
       Mov rax, rdx;
@@ -1136,7 +1136,7 @@ sub PrintRaxInHex($;$)                                                          
       PrintString($channel, ' ') if $i % 2 and $i < 7;
      }
     RestoreFirstFour;
-   } name => "PrintOutRaxInHexOn$channel";
+   } name => "PrintOutRaxInHexOn-$channel-$end";
 
   Call $sub;
  }
@@ -2427,10 +2427,8 @@ sub PopR(@)                                                                     
 
 sub PopEax()                                                                    # We cannot pop a double word from the stack in 64 bit long mode using pop so we improvise
  {my $l = RegisterSize eax;                                                     # eax is half rax
-  Add rsp, $l;
-  Pop rax;
-  Shl rax, $l * 8;
-  Shr rax, $l * 8;
+  Mov eax, "[rsp]";
+  Add rsp, RegisterSize eax;
  }
 
 sub PeekR($)                                                                    # Peek at register on stack
@@ -4933,13 +4931,16 @@ sub Nasm::X86::BlockMultiWayTree::print($@)                                     
    {my ($parameters) = @_;                                                      # Parameters
 
     my $B = $$parameters{bs};                                                   # Byte string
-    my $N = $$parameters{node};                                                 # Node to print
-    my $D = $$parameters{depth};                                                # Depth in tree
+    my $F = $$parameters{first};                                                # Root of tree
 
-    PushR my @save = (map {"zmm".$_} $zmmKeys, $zmmData);
-    $b->getKeysData($B, $zmmKeys, $zmmData);                                    # Get the first block
+    PushR my @save = (r14, r15, map {"zmm".$_} $zmmKeys, $zmmData);
 
+    Mov r15, -1;                                                                # Mark the end of the stack
+    PushR r15;
+    $b->getKeysData($F, $zmmKeys, $zmmData);                                    # Get the first block
     my $length = $b->getBlockLength($zmmKeys);                                  # Length of the block in a variable
+
+
     $length->for(sub                                                            # Print spacing
      {my ($index, $start, $next, $end) = @_;                                    # Execute body
       PrintOutString '  ';                                                      # Space per depth
@@ -14153,10 +14154,11 @@ Byte String
 END
  }
 
-latest:
-if (1) {                                                                        #TNasm::X86::ByteString::CreateBlockMultiWayTree #TLoadConstantIntoMasKRegister
+#latest:
+if (1) {                                                                        #TNasm::X86::ByteString::CreateBlockMultiWayTree #TLoadConstantIntoMasKRegister #TPopEax
   Mov r14, 0;
   Kmovq k0, r14;
+  KeepFree r14;
   Ktestq k0, k0;
   IfZ {PrintOutStringNL "0 & 0 == 0"};
   PrintOutZF;
@@ -14170,21 +14172,22 @@ if (1) {                                                                        
 
   PrintOutRegisterInHex k0, k1, k2;
 
-  Mov  rax, 0xabcdef;
-  Shl  rax, 32;
-  Push rax;
-  PopEax;
-  PrintOutRaxInHex;
-  PrintOutNL;
+  Mov  r15, 0x89abcdef;
+  Mov  r14, 0x01234567;
+  Shl  r14, 32;
+  Or r15, r14;
+  Push r15;
+  Push r15;
+  PopEax;  PrintRaxInHex($stdout, 3); PrintOutNL; KeepFree rax;
 
-  my $a = Vq('aaa', 0x01234567);
+  my $a = Vq('aaaa');
+  $a->pop;
   $a->push;
-  my $b = Vq('bbb');
-  $b->pop;
   $a->outNL;
-  $b->outNL;
 
-  ok Assemble(debug => 1, eq => <<END);
+  PopEax;  PrintRaxInHex($stdout, 3); PrintOutNL; KeepFree rax;
+
+  ok Assemble(debug => 0, eq => <<END);
 0 & 0 == 0
 ZF=1
 1 & 1 != 0
@@ -14192,9 +14195,9 @@ ZF=0
     k0: 0000 0000 0000 0000
     k1: 0000 0000 0000 0001
     k2: 0000 0000 0000 F0F0
-0000 0000 00AB CDEF
-aaa: 0000 0000 0123 4567
-bbb: 0000 0000 0123 4567
+89AB CDEF
+aaaa: 89AB CDEF 0123 4567
+0123 4567
 END
  }
 
