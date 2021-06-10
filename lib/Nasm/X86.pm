@@ -1111,11 +1111,12 @@ sub hexTranslateTable                                                           
    Rs @t                                                                        # Constant strings are only saved if they are unique, else a read only copy is returned.
  }
 
-sub PrintRaxInHex($)                                                            # Write the content of register rax in hexadecimal in big endian notation to the specified channel
- {my ($channel) = @_;                                                           # Channel
+sub PrintRaxInHex($;$)                                                          # Write the content of register rax in hexadecimal in big endian notation to the specified channel
+ {my ($channel, $end) = @_;                                                     # Channel, optional end byte
   @_ == 1 or confess;
   Comment "Print Rax In Hex on channel: $channel";
   my $hexTranslateTable = hexTranslateTable;
+  $end //= 7;                                                                   # Default end byte
 
   my $sub = Macro
    {SaveFirstFour rax;                                                          # Rax is a parameter
@@ -1123,7 +1124,7 @@ sub PrintRaxInHex($)                                                            
     Mov rdi, 2;                                                                 # Length of a byte in hex
     KeepFree rax;
 
-    for my $i(0..7)
+    for my $i(0..$end)                                                          # Each byte
      {my $s = 8*$i;
       KeepFree rax;
       Mov rax, rdx;
@@ -2399,6 +2400,14 @@ sub PopR(@)                                                                     
  {my (@r) = @_;                                                                 # Register
   PopRR   @r;                                                                   # Pop registers from the stack without tracking
   KeepPop @r;                                                                   # Track
+ }
+
+sub PopEax()                                                                    # We cannot pop a double word from the stack in 64 bit long mode using pop so we improvise
+ {my $l = RegisterSize eax;                                                     # eax is half rax
+  Add rsp, $l;
+  Pop rax;
+  Shl rax, $l * 8;
+  Shr rax, $l * 8;
  }
 
 sub PeekR($)                                                                    # Peek at register on stack
@@ -4560,7 +4569,7 @@ sub Nasm::X86::BlockMultiWayTree::splitFullNode($$$@)                           
           $start->getReg(rax);
           $b->putChain($start, $rk, $bmt->width * $n, $bmt->loop, $bmt->up);
          }
-        Pop ax; Pop ax, Pop rax;                                                # Relevel the stack
+        Pop ax; Pop ax, Pop rax;                                                # Level the stack
        },
       sub                                                                       # Otherwise allocate a child node block and connect it to the nodes data block
        {my $n = $bmt->allocBlock;                                               # Block for child nodes
@@ -4890,52 +4899,46 @@ sub Nasm::X86::BlockMultiWayTree::allocBlock($)                                 
   $bmt->bs->allocBlock                                                          # Allocate a block and return its offset as a variable
  }
 
-sub Nasm::X86::BlockMultiWayTree::dump($@)                                      # Dump a block multi way tree
- {my ($bmt, @variables) = @_;                                                   # Block multi way tree, variables
+sub Nasm::X86::BlockMultiWayTree::print($@)                                     # Print the keys in a multi way tree
+ {my ($b) = @_;                                                                 # Block multi way tree, variables
   @_ >= 1 or confess;
-  my $b = $bmt->bs;                                                             # Underlying byte string
-  my $W = RegisterSize zmm0;                                                    # The size of a block
-  my $w = $bmt->width;                                                          # The size of an entry in a block
-  my $n = $bmt->slots1;                                                         # The number of slots per block
-  my $N = $bmt->slots2;                                                         # The number of slots per block
+
+  my $zmmKeys = 31;                                                             # Assign zmm registers
+  my $zmmData = 30;
 
   my $s = Subroutine
-   {my ($p) = @_;                                                               # Parameters
+   {my ($parameters) = @_;                                                      # Parameters
 
-    my $B = $$p{bs};                                                            # Byte string
-    my $F = $$p{first};                                                         # First block
+    my $B = $$parameters{bs};                                                   # Byte string
+    my $N = $$parameters{node};                                                 # Node to print
+    my $D = $$parameters{depth};                                                # Depth in tree
 
-    PushR my @save = (zmm30, zmm31);
-    $b->getBlock($B, $F, 31);                                                   # Get the first block
-    my $size = getDFromZmmAsVariable(31, 0);                                    # Size of array
-    PrintOutStringNL("Block Array");
-    $size->out("Size: ", "  ");
-    PrintOutRegisterInHex zmm31;
+    PushR my @save = (map {"zmm".$_} $zmmKeys, $zmmData);
+    $b->getKeysData($B, $zmmKeys, $zmmData);                                    # Get the first block
 
-    If ($size > $n, sub                                                         # Array has secondary blocks
-     {my $T = $size / $N;                                                       # Number of full blocks
-
-      $T->for(sub                                                               # Print out each block
-       {my ($index, $start, $next, $end) = @_;                                  # Execute body
-        my $S = getDFromZmmAsVariable(31, ($index + 1) * $w);                   # Address secondary block from first block
-        $b->getBlock($B, $S, 30);                                               # Get the secondary block
-        $S->out("Full: ", "  ");
-        PrintOutRegisterInHex zmm30;
-       });
-
-      my $lastBlockCount = $size % $N;                                          # Number of elements in the last block
-      If ($lastBlockCount, sub                                                  # Print non empty last block
-       {my $S = getDFromZmmAsVariable(31, ($T + 1) * $w);                       # Address secondary block from first block
-        $b->getBlock($B, $S, 30);                                               # Get the secondary block
-        $S->out("Last: ", "  ");
-        PrintOutRegisterInHex zmm30;
-       });
+    my $length = $b->getBlockLength($zmmKeys);                                  # Length of the block in a variable
+    $length->for(sub                                                            # Print spacing
+     {my ($index, $start, $next, $end) = @_;                                    # Execute body
+      PrintOutString '  ';                                                      # Space per depth
      });
 
+    PushR my @save2 = (rax, rdi);                                               # Work registers
+    Mov rdi, rsp;                                                               # Current stack position
+    PushRR $zmmKeys;                                                            # Stack the keys
+
+    $length->for(sub                                                            # Print spacing
+     {ClearRegisters rax;
+      Push ax, Push ax; Pop rax;                                                # The keys are double words but we cannot pop a double word from the stack in 64 bit long mode
+      PrintRaxInHex($stdout, 3);                                                # Low double word in rax
+      PrintOutString '  ';                                                      # Space between keys
+     });
+
+    Mov rsp, rdi;                                                               # Level stack
+    PopR @save2;
     PopR @save;
    }  in => {bs => 3, first => 3};
 
-  $s->call($bmt->address, $bmt->first, @variables);
+  $s->call($b->address, $b->first);
  }
 
 sub Nasm::X86::BlockMultiWayTree::pop($@)                                              # Pop an element from an array
@@ -5344,6 +5347,8 @@ END
       my $b2 = '_' x 80;
       say STDERR "Want $b1\n", firstNChars($E, 80);
       say STDERR "Got  $b2\n", firstNChars($G, 80);
+      say STDERR "Want: ", dump($e);
+      say STDERR "Got : ", dump($g);
       confess "Test failed";                                                    # Test failed unless we are debugging test failures
      }
     return 1;                                                                   # Test passed
@@ -14143,7 +14148,14 @@ if (1) {                                                                        
 
   PrintOutRegisterInHex k0, k1, k2;
 
-  ok Assemble(debug => 0, eq => <<END);
+  Mov  rax, 0xabcdef;
+  Shl  rax, 32;
+  Push rax;
+  PopEax;
+  PrintOutRaxInHex;
+  PrintOutNL;
+
+  ok Assemble(debug => 1, eq => <<END);
 0 & 0 == 0
 ZF=1
 1 & 1 != 0
@@ -14151,6 +14163,7 @@ ZF=0
     k0: 0000 0000 0000 0000
     k1: 0000 0000 0000 0001
     k2: 0000 0000 0000 F0F0
+0000 0000 00AB CDEF
 END
  }
 
