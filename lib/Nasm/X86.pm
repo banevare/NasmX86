@@ -3214,7 +3214,7 @@ sub Nasm::X86::ByteString::blockSize($)                                         
   RegisterSize(zmm0)
  }
 
-sub Nasm::X86::ByteString::allocBlock($@)                                       # Allocate a block to hold a zmm register in the specified byte string and return the offset of the block in a variable
+sub Nasm::X86::ByteString::allocZmmBlock($@)                                    # Allocate a block to hold a zmm register in the specified byte string and return the offset of the block in a variable
  {my ($byteString, @variables) = @_;                                            # Byte string, variables
   @_ >= 2 or confess;
   my $ffb = $byteString->firstFreeBlock;                                        # Check for a free block
@@ -3234,6 +3234,14 @@ sub Nasm::X86::ByteString::allocBlock($@)                                       
   sub
    {$byteString->allocate(Vq(size, RegisterSize(zmm0)), @variables);
    });
+ }
+
+sub Nasm::X86::ByteString::allocBlock($)                                        # Allocate a block to hold a zmm register in the specified byte string and return the offset of the block in a variable
+ {my ($byteString) = @_;                                                        # Byte string
+  @_ == 1 or confess;
+  $byteString->allocZmmBlock                                                    # Allocate a zmm block
+   ($byteString->bs, Vq(size, RegisterSize(zmm0)), my $o = Vq(offset));
+  $o                                                                            # Offset as a variable
  }
 
 sub Nasm::X86::ByteString::firstFreeBlock($)                                    #P Create and load a variable with the first free block on the free block chain or zero if no such block in the given byte string
