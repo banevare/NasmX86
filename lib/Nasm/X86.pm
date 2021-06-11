@@ -1806,7 +1806,7 @@ sub Nasm::X86::Variable::setReg($$@)                                            
 sub Nasm::X86::Variable::getReg($$@)                                            # Load the variable from the named registers
  {my ($variable, $register, @registers) = @_;                                   # Variable, register to load, optional further registers to load from
   if ($variable->size == 3)
-   {if ($variable->isRef)
+   {if ($variable->isRef)                                                       # Move to the location referred to by this variable
      {Comment "Get variable value from register";
       my $r = $register eq r15 ? r14 : r15;
       PushR $r;
@@ -1814,7 +1814,7 @@ sub Nasm::X86::Variable::getReg($$@)                                            
       Mov "[$r]", $register;
       PopR $r;
      }
-    else
+    else                                                                        # Move to this variable
      {Mov $variable->address, $register;
      }
    }
@@ -1999,7 +1999,7 @@ sub Nasm::X86::Variable::saveZmm($$)                                            
  }
 
 sub getBwdqFromMmAsVariable($$$)                                                # Get the numbered byte|word|double word|quad word from the numbered zmm register and return it in a variable
- {my ($size, $mm, $offset) = @_;                                                # Size of get, register, offset in bytes
+ {my ($size, $mm, $offset) = @_;                                                # Size of get, register, offset in bytes either as a constant or as a variable
   @_ == 3 or confess;
 
   my $o;                                                                        # The offset into the mm register
@@ -4920,51 +4920,139 @@ sub Nasm::X86::BlockMultiWayTree::allocBlock($)                                 
   $bmt->bs->allocBlock                                                          # Allocate a block and return its offset as a variable
  }
 
-sub Nasm::X86::BlockMultiWayTree::print($@)                                     # Print the keys in a multi way tree
- {my ($b) = @_;                                                                 # Block multi way tree, variables
-  @_ >= 1 or confess;
+sub Nasm::X86::BlockMultiWayTree::iterator($)                                   # Iterate through a multi way tree
+ {my ($b) = @_;                                                                 # Block multi way tree
+  @_ == 1 or confess;
 
-  my $zmmKeys = 31;                                                             # Assign zmm registers
-  my $zmmData = 30;
+  my $i = genHash(__PACKAGE__.'::BlockMultiWayTree::Iterator',                  # Iterator
+    tree  => $b,                                                                # Tree we are iterating over
+    node  => Vq(node),                                                          # Current node within tree
+    pos   => Vq('pos'),                                                         # Current position within node
+    key   => Vq(key),                                                           # Key at this position
+    data  => Vq(data),                                                          # Data at this position
+    count => Vq(count, 0),                                                      # Counter - number of node
+    more  => Vq(more, 1),                                                       # Iteration not yet finished
+   );
 
-  my $s = Subroutine
-   {my ($parameters) = @_;                                                      # Parameters
-
-    my $B = $$parameters{bs};                                                   # Byte string
-    my $F = $$parameters{first};                                                # Root of tree
-
-    PushR my @save = (r14, r15, map {"zmm".$_} $zmmKeys, $zmmData);
-
-    Mov r15, -1;                                                                # Mark the end of the stack
-    PushR r15;
-    $b->getKeysData($F, $zmmKeys, $zmmData);                                    # Get the first block
-    my $length = $b->getBlockLength($zmmKeys);                                  # Length of the block in a variable
-
-
-    $length->for(sub                                                            # Print spacing
-     {my ($index, $start, $next, $end) = @_;                                    # Execute body
-      PrintOutString '  ';                                                      # Space per depth
-     });
-
-    PushR my @save2 = (rax, rdi);                                               # Work registers
-    Mov rdi, rsp;                                                               # Current stack position
-    PushRR $zmmKeys;                                                            # Stack the keys
-
-    $length->for(sub                                                            # Print spacing
-     {PopR eax;                                                                 # Synthetic pop for eax
-      PrintEaxInHex($stdout, 3);                                                # Low double word in rax
-      PrintOutString '  ';                                                      # Space between keys
-     });
-
-    Mov rsp, rdi;                                                               # Level stack
-    PopR @save2;
-    PopR @save;
-   }  in => {bs => 3, first => 3};
-
-  $s->call($b->address, $b->first);
+  $i->next;                                                                     # First element if any
  }
 
-sub Nasm::X86::BlockMultiWayTree::pop($@)                                              # Pop an element from an array
+sub Nasm::X86::BlockMultiWayTree::Iterator::next($)                             # Next element in the tree
+ {my ($iter) = @_;                                                              # Iterator
+  @_ == 1 or confess;
+  my $zero = Vq(zero, 0);                                                       # Zero
+
+  my $s = Subroutine
+   {my ($p) = @_;                                                               # Parameters
+    my $success = Label;                                                        # Short circuit if ladders by jumping directly to the end after a successful push
+
+    my $C = $$p{node};                                                          # Current node required
+    ++$$p{count};                                                               # Count the calls to the iterator
+
+    my $new  = sub                                                              # Load iterator with latest position
+     {my ($node, $pos) = @_;                                                    # Parameters
+      PushR my @save = (zmm31, zmm30,  zmm29);
+      $$p{node}->copy($node);                                                   # Set current node
+      $$p{pos}  = $pos;                                                         # Set current position in node
+      $iter->tree->getKeysData($node, zmm31, zmm30);                            # Load keys and data
+
+      my $offset = $pos * $iter->tree->width;                                   # Load key and data
+      $$p{key}   = getDFromZmmAsVariable(zmm31, $offset);
+      $$p{data}  = getDFromZmmAsVariable(zmm30, $offset);
+      PopR @save;
+     };
+
+    my $done = sub {$$p{more}->getReg(0)};                                      # The tree has been completely traversed
+
+    If ($$p{pos},  sub                                                          # Initial descent
+     {my $l = $C->node->[0];
+      my $t = $iter->tree;
+      PushR my @save = (zmm31, zmm30,  zmm29);
+      $t->getKeysData($C, zmm31, zmm30);                                        # Load keys and data
+
+      If ($t->getBlockLength(zmm30), sub                                        # Go left if there are child nodes
+       {my $l = $t->leftMost($C);
+        &$new($l, $zero);
+       },
+      sub
+       {my $l = $t->getBlockLength(zmm31);                                      # Number of keys
+        If ($l, sub                                                             # Start with the current node as it is a leaf
+         {&$new($C, $zero);
+         },
+        sub
+         {&$done;
+         });
+       });
+      PopR @save;
+     });
+
+    my $up = sub                                                                # Iterate up to next node that has not been visited
+     {my $top = Label;                                                          # Reached the top of the tree
+       my $n = Vq('current');
+         $n->copy($C);
+      my $zmmNK = 31; my $zmmPK = 28; my $zmmTest = 25;
+      my $zmmND = 30; my $zmmPD = 27;
+      my $zmmNN = 29; my $zmmPN = 26;
+      PushR my @save = (k7, r14, r15, map {"zmm$_"} 25..31);
+      my $t = $iter->tree;
+      ForEver                                                                   # Up through the tree
+       {my ($start, $end) = @_;                                                 # Parameters
+        $t->getKeysData($n, $zmmNK, $zmmND);                                    # Load keys and data for current node
+        my $p = $t->getUpFromData($zmmND);
+        If (!$p, sub{Jmp $end});                                                # Jump to the end if we have reached the top of the tree
+        $t->getKeysDataNode($p, $zmmPK, $zmmPD, $zmmPN);                        # Load keys, data and children nodes for parent which must have children
+        $n->setReg(r15);
+        Vpbroadcastd $zmmTest, r15d;                                            # Current node broadcasted
+        Vpcmpud k7, "zmm".$zmmPN, "zmm".$zmmTest, 0;                            # Check for equal offset - one of them will match to create the single insertion point in k6
+        Kmovw r14, k7;                                                          # Bit mask ready for count
+        Lzcnt r14, r14;                                                         # Number of leading zeros gives us the position of the child in the parent
+        my $i = Vq(indexInParent, r14);                                         # Index in parent
+        my $l = $t->getBlockLength($zmmPK);                                     # Length of parent
+        If ($i < $l, sub                                                        # Continue with this node if all the keys have yet to be finished
+         {&$new($p, $i);
+          Jmp $top;
+         });
+        $n->copy($p);                                                           # Continue with parent
+       };
+      &$done;                                                                    # No nodes not visited
+      SetLabel $top;
+      PopR @save;
+     };
+
+    my $i = ++$iter->pos;
+    PushR my @save = (zmm31, zmm30,  zmm29);
+    $iter->tree->getKeysData($C, zmm31, zmm30);                                   # Load keys and data
+    my $l = $iter->tree->getBlockLength(zmm31);                                   # Length of keys
+    my $n = $iter->tree->getUpFromData (zmm30);                                   # Parent
+    If (!$n, sub                                                                  # Leaf
+     {If ($i < $l, sub
+       {&$new($C, $i)
+       },
+      sub
+       {&$up;
+       });
+     },
+    sub                                                                           # Node
+     {If ($i < $l, sub
+       {$iter->tree->getKeysDataNode($C, zmm31, zmm30, zmm29);
+        my $offsetAtI = getDFromZmmAsVariable(zmm29, $i * $iter->tree->width);
+        my $l = $iter->tree->leftMost($offsetAtI);
+        &$new($l, $zero);
+       },
+      sub
+       {&$up;
+       });
+     });
+
+    SetLabel $success;
+    PopR @save;
+   }  io => {node => 3, pos => 3, key => 3, data => 3, count => 3, more => 3};
+
+  $s->call($iter->node, $iter->pos,   $iter->key,                               # Call with iterator variables
+           $iter->data, $iter->count, $iter->more);
+ }
+
+sub Nasm::X86::BlockMultiWayTree::pop($@)                                       # Pop an element from an array
  {my ($blockArray, @variables) = @_;                                            # Block array descriptor, variables
   @_ >= 2 or confess;
   my $b = $blockArray->bs;                                                      # Underlying byte string
