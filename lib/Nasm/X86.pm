@@ -14341,14 +14341,10 @@ if (1) {                                                                        
   my $a = $b->allocBlock;
   Vmovdqu8 zmm31, "[$format]";
   $b->putBlock($b->bs, $a, 31);
-  my $r = $b->chain(Vq(start, 0x18), 4);
-  $r->outNL("chain1: ");
-  my $s = $b->chain($r, 4);
-  $s->outNL("chain2: ");
-  my $t = $b->chain($s, 4);
-  $t->outNL("chain3: ");
-  my $A = $b->chain(Vq(start, 0x18), 4, 4, 4);                                  # Get a long chain
-  $A->outNL("chain3: ");
+  my $r = $b->chain(Vq(start, 0x18), 4);       $r->outNL("chain1: ");
+  my $s = $b->chain($r, 4);                    $s->outNL("chain2: ");
+  my $t = $b->chain($s, 4);                    $t->outNL("chain3: ");
+  my $A = $b->chain(Vq(start, 0x18), 4, 4, 4); $A->outNL("chain4: ");           # Get a long chain
 
   $b->putChain(Vq(start,0x18), Vq(end,0xff), 4, 4, 4);                          # Put at the end of a long chain
 
@@ -14372,7 +14368,7 @@ if (1) {                                                                        
 chain1: 0000 0000 0000 001C
 chain2: 0000 0000 0000 0020
 chain3: 0000 0000 0000 0024
-chain3: 0000 0000 0000 0024
+chain4: 0000 0000 0000 0024
 Byte String
   Size: 0000 0000 0000 1000
   Used: 0000 0000 0000 0058
