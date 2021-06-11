@@ -744,7 +744,7 @@ sub If($$;$)                                                                    
  {my ($jump, $then, $else) = @_;                                                # Jump op code of variable, then - required , else - optional
   @_ >= 2 && @_ <= 3 or confess;
 
-  ref($jump) or $jump =~ m(\AJ(e|ge|gt|h|l|le|ne|z)\Z) or confess "Invalid jump: $jump";
+  ref($jump) or $jump =~ m(\AJ(e|g|ge|gt|h|l|le|ne|nz|z)\Z) or confess "Invalid jump: $jump";
 
   if (ref($jump))                                                               # Variable reference - non zero then then else else
    {PushR r15;
@@ -988,7 +988,11 @@ sub Nasm::X86::Sub::call($%)                                                    
      }
    }
 
+  my $n = $$sub{name};
+  &PrintErrStringNL("Call $n start") if 0;
   Call $$sub{start};                                                            # Call the sub routine
+  &PrintErrStringNL("Call $n end")   if 0;
+
   for my $p(keys $sub->out->%*)                                                 # Load output parameters
    {confess qq(Missing output parameter: "$p") unless my $v = $p{$p};
     $v->copy($sub->variables->{$p});
@@ -1072,7 +1076,7 @@ sub PrintString($@)                                                             
   my $a = Rs($c);
 
   SaveFirstFour;
-  Comment "Write to channel  $channel, the string: $c";
+  Comment "Write to channel  $channel, the string: ".dump($c);
   Mov rax, 1;
   Mov rdi, $channel;
   Mov rsi, $a;
@@ -1276,7 +1280,15 @@ sub PrintOutRegistersInHex                                                      
   Call $sub;
  }
 
-sub PrintOutZF                                                                  # Print the zero flag without disturbing it
+sub PrintErrZF                                                                  # Print the zero flag without disturbing it on stderr
+ {@_ == 0 or confess;
+
+  Pushfq;
+  IfNz {PrintErrStringNL "ZF=0"} sub {PrintErrStringNL "ZF=1"};
+  Popfq;
+ }
+
+sub PrintOutZF                                                                  # Print the zero flag without disturbing it on stdout
  {@_ == 0 or confess;
 
   Pushfq;
@@ -1333,11 +1345,19 @@ sub Nasm::X86::Scope::currentlyVisible($)                                       
 
 #D2 Definitions                                                                 # Variable definitions
 
-sub Variable($$;$)                                                              # Create a new variable with the specified size and name initialized via an expression
- {my ($size, $name, $expr) = @_;                                                # Size as a power of 2, name of variable, optional expression initializing variable
+sub Variable($$;$%)                                                             # Create a new variable with the specified size and name initialized via an expression
+ {my ($size, $name, $expr, %options) = @_;                                      # Size as a power of 2, name of variable, optional expression initializing variable
   $size =~ m(\A0|1|2|3|4|5|6|b|w|d|q|x|y|z\Z)i or confess "Size must be 0..6 or b|w|d|q|x|y|z";# Check size of variable
 
-  DComment qq(Variable name: "$name", size: $size);
+  my $const = $options{constant} // 0;                                          # Whether the variable is in fact a constant
+  if ($const)                                                                   # Comment in appropriate section
+   {defined($expr) or confess "Value required for constant";
+    RComment qq(Constant name: "$name", size: $size, value $expr);
+   }
+  else
+   {DComment qq(Variable name: "$name", size: $size);
+   }
+
   my $label = $size =~ m(\A0|b\Z) ? Db(0) :                                     # Allocate space for variable
               $size =~ m(\A1|w\Z) ? Dw(0) :                                     # Allocate space for variable
               $size =~ m(\A2|d\Z) ? Dd(0) :
@@ -1351,7 +1371,8 @@ sub Variable($$;$)                                                              
   if (defined $expr)                                                            # Initialize variable if an initializer was supplied
    {my $t = "[$label]";
     if ($Registers{$expr})
-     {Mov $t, $expr;
+     {$const and confess "Cannot use a register to initialize a constant";
+      Mov $t, $expr;
      }
     else
      {PushR r15;
@@ -1365,6 +1386,7 @@ sub Variable($$;$)                                                              
    }
 
   genHash(__PACKAGE__."::Variable",                                             # Variable definition
+    constant  => $options{constant},                                            # Constant if true
     expr      => $expr,                                                         # Expression that initializes the variable
     label     => $label,                                                        # Address in memory
     laneSize  => undef,                                                         # Size of the lanes in this variable
@@ -1377,24 +1399,29 @@ sub Variable($$;$)                                                              
    );
  }
 
-sub Vb(*;$)                                                                     # Define a byte variable
- {my ($name, $expr) = @_;                                                       # Name of variable, initializing expression
+sub Vb(*;$%)                                                                    # Define a byte variable
+ {my ($name, $expr, %options) = @_;                                             # Name of variable, initializing expression, options
   &Variable(0, @_)
  }
 
-sub Vw(*;$)                                                                     # Define a word variable
- {my ($name, $expr) = @_;                                                       # Name of variable, initializing expression
+sub Vw(*;$%)                                                                     # Define a word variable
+ {my ($name, $expr, %options) = @_;                                             # Name of variable, initializing expression, options
   &Variable(1, @_)
  }
 
-sub Vd(*;$)                                                                     # Define a double word variable
- {my ($name, $expr) = @_;                                                       # Name of variable, initializing expression
+sub Vd(*;$%)                                                                     # Define a double word variable
+ {my ($name, $expr, %options) = @_;                                             # Name of variable, initializing expression, options
   &Variable(2, @_)
  }
 
-sub Vq(*;$)                                                                     # Define a quad variable
- {my ($name, $expr) = @_;                                                       # Name of variable, initializing expression
+sub Vq(*;$%)                                                                     # Define a quad variable
+ {my ($name, $expr, %options) = @_;                                             # Name of variable, initializing expression, options
   &Variable(3, @_)
+ }
+
+sub Cq(*;$%)                                                                    # Define a quad constant
+ {my ($name, $expr, %options) = @_;                                             # Name of variable, initializing expression, options
+  &Variable(3, @_, constant=>1)
  }
 
 sub VxyzInit($@)                                                                # Initialize an xyz register from general purpose registers
@@ -1501,7 +1528,6 @@ sub Nasm::X86::Variable::copyRef($$)                                            
   my $l = $left ->address;
   my $r = $right->address;
 
-
   if ($left->size == 3 and $right->size == 3)
    {Comment "Copy parameter ".$right->name.' to '.$left->name;
     PushR my @save = (r14, r15);
@@ -1540,14 +1566,37 @@ sub Nasm::X86::Variable::equals($$$)                                            
 
 sub Nasm::X86::Variable::assign($$$)                                            # Assign to the left hand side the value of the right hand side
  {my ($left, $op, $right) = @_;                                                 # Left variable, operator, right variable
+  $left->constant and confess "cannot assign to a constant";
 
   if ($left->size == 3 and !ref($right) || $right->size == 3)
    {Comment "Variable assign";
     PushR my @save = (r14, r15);
     Mov r14, $left ->address;
-    Mov r15, ref($right) ? $right->address : $right;
-    &$op(r14,r15);
-    Mov $left ->address, r14;
+    if ($left->reference)                                                       # Dereference left if necessary
+     {KeepFree r14;
+      Mov r14, "[r14]";
+     }
+    if (!ref($right))                                                           # Load right constant
+     {KeepFree r15;
+      Mov r15, $right;
+     }
+    else                                                                        # Load right variable
+     {Mov r15, $right->address;
+      if ($right->reference)                                                    # Dereference right if necessary
+       {KeepFree r15;
+        Mov r15, "[r15]";
+       }
+     }
+    &$op(r14, r15);
+    if ($left->reference)                                                       # Store in reference on left if necessary
+     {PushR r13;
+      Mov r13, $left->address;
+      Mov "[r13]", r14;
+      PopR r13;
+     }
+    else                                                                        # Store in variable
+     {Mov $left ->address, r14;
+     }
     PopR @save;
     return $left;
    }
@@ -1650,15 +1699,31 @@ sub Nasm::X86::Variable::mod($$)                                                
 sub Nasm::X86::Variable::boolean($$$$)                                          # Combine the left hand variable with the right hand variable via a boolean operator
  {my ($sub, $op, $left, $right) = @_;                                           # Operator, operator name, Left variable,  right variable
 
-  my $l = $left ->address;
   my $r = ref($right) ? $right->address : $right;                               # Right can be either a variable reference or a constant
-  if ($left->size == 3 and ! ref($right) || $right->size == 3)
+
+  if ($left->size == 3)
    {PushR r15;
-    Mov r15, $l;
-    Cmp r15, $r;
+    Mov r15, $left ->address;
+    if ($left->reference)                                                       # Dereference left if necessary
+     {KeepFree r15;
+      Mov r15, "[r15]";
+     }
+    if (ref($right) and $right->reference)                                      # Dereference on right if necesssary
+     {PushR r14;
+      Mov r14, $right ->address;
+      KeepFree r14;
+      Mov r14, "[r14]";
+      Cmp r15, r14;
+     }
+    elsif (ref($right))                                                         # Variable but not a reference on the right
+     {Cmp r15, $right->address;
+     }
+    else                                                                        # Constant on the right
+     {Cmp r15, $right;
+     }
     KeepFree r15;
-    &$sub(sub {Mov  r15, 1; KeepFree r15},
-          sub {Mov  r15, 0; KeepFree r15});
+
+    &$sub(sub {Mov  r15, 1;  KeepFree r15}, sub {Mov  r15, 0;  KeepFree r15});
     my $v = Vq(join(' ', '('.$left->name, $op, (ref($right) ? $right->name : '').')'), r15);
     PopR r15;
     return $v;
@@ -1746,17 +1811,17 @@ sub Nasm::X86::Variable::err($;$$)                                              
   $left->dump($stderr, 0, $title1, $title2);
  }
 
-sub Nasm::X86::Variable::out($;$$)                                               # Dump the value of a variable on stdout
+sub Nasm::X86::Variable::out($;$$)                                              # Dump the value of a variable on stdout
  {my ($left, $title1, $title2) = @_;                                            # Left variable, optional leading title, optional trailing title
   $left->dump($stdout, 0, $title1, $title2);
  }
 
-sub Nasm::X86::Variable::errNL($;$$)                                             # Dump the value of a variable on stderr and append a new line
+sub Nasm::X86::Variable::errNL($;$$)                                            # Dump the value of a variable on stderr and append a new line
  {my ($left, $title1, $title2) = @_;                                            # Left variable, optional leading title, optional trailing title
   $left->dump($stderr, 1, $title1, $title2);
  }
 
-sub Nasm::X86::Variable::outNL($;$$)                                             # Dump the value of a variable on stdout and append a new line
+sub Nasm::X86::Variable::outNL($;$$)                                            # Dump the value of a variable on stdout and append a new line
  {my ($left, $title1, $title2) = @_;                                            # Left variable, optional leading title, optional trailing title
   $left->dump($stdout, 1, $title1, $title2);
  }
@@ -4839,15 +4904,24 @@ sub Nasm::X86::BlockMultiWayTree::leftOrRightMost($$@)                          
 
     PushR my @save = (rax, zmm31);
     ForEver
-     {$b->getBlock($B, $F, 31);                                                 # Get the first keys block
+     {PrintErrStringNL "LLLLL 1111";
+      $B->errNL("bs: ");
+      $F->errNL("F: ");
+      $b->getBlock($B, $F, 31);                                                 # Get the first keys block
+      PrintErrStringNL "LLLLL 2222";
       my $d = $bmt->getLoop(31);                                                # Get the data block offset from the key block loop
+      PrintErrStringNL "LLLLL 3333";
       $b->getBlock($B, $d, 31);                                                 # Get the data block
+      PrintErrStringNL "LLLLL 4444";
       my $n = $bmt->getLoop(31);                                                # Get the node block offset from the data block loop
+      PrintErrStringNL "LLLLL 5555";
       If ($n == 0, sub                                                          # Reached the end so return the containing block
        {$$p{offset}->copy($F);
         Jmp $success;
        });
+      PrintErrStringNL "LLLLL 6666";
       $b->getBlock($B, $n, 31);                                                 # Get the node block
+      PrintErrStringNL "LLLLL 7777";
       if ($dir == 0)                                                            # Left most
        {my $l = getDFromXmmAsVariable(31, 0);                                   # Get the left most node
         $F->copy($l);                                                           # Continue with the next level
@@ -4928,16 +5002,22 @@ sub Nasm::X86::BlockMultiWayTree::iterator($)                                   
  {my ($b) = @_;                                                                 # Block multi way tree
   @_ == 1 or confess;
 
+  my $node = Vq(node);                                                          # The current node
+  $node->copy($b->first);                                                       # Start at the first node in the tree
+
   my $i = genHash(__PACKAGE__.'::BlockMultiWayTree::Iterator',                  # Iterator
     tree  => $b,                                                                # Tree we are iterating over
-    node  => Vq(node),                                                          # Current node within tree
+    node  => $node,                                                             # Current node within tree
     pos   => Vq('pos'),                                                         # Current position within node
     key   => Vq(key),                                                           # Key at this position
     data  => Vq(data),                                                          # Data at this position
-    count => Vq(count, 0),                                                      # Counter - number of node
-    more  => Vq(more, 1),                                                       # Iteration not yet finished
+    count => Vq(count),                                                         # Counter - number of node
+    more  => Vq(more),                                                          # Iteration not yet finished
    );
 
+  $i->pos  ->copy(Vq('pos', -1));                                               # Initialize iterator
+  $i->count->copy(Vq(count,  0));
+  $i->more ->copy(Vq(more,   1));
   $i->next;                                                                     # First element if any
  }
 
@@ -4972,12 +5052,23 @@ sub Nasm::X86::BlockMultiWayTree::Iterator::next($)                             
       $$p{more}->getReg(rax);
       PopR rax;
       };
+PrintErrStringNL "CCCC1112";
+$$p{pos}->errNL;
+my $eqmo = $$p{pos} == -1;
+$eqmo->errNL;
 
-    If ($$p{pos},  sub                                                          # Initial descent
+    If ($eqmo,  sub                                                             # Initial descent
+     {PrintErrStringNL "CCCC22222";
+     });
+
+    If ($$p{pos} == -1,  sub                                                    # Initial descent
      {my $t = $iter->tree;
+PrintErrStringNL "CCCC4444";
       PushR my @save = (zmm31, zmm30,  zmm29);
+PrintErrStringNL "CCCC5555";
       $t->getKeysData($C, 31, 30);                                              # Load keys and data
-
+      my $bl = $t->getBlockLength(30);                                          # Block length
+$bl->errNL('CCCC6666');
       If ($t->getBlockLength(30), sub                                           # Go left if there are child nodes
        {$t->leftMost($t->address, $C, my $l = Vq(offset));
         &$new($l, $zero);
@@ -4992,11 +5083,12 @@ sub Nasm::X86::BlockMultiWayTree::Iterator::next($)                             
          });
        });
       PopR @save;
+      Jmp $success;                                                             # Return with iterator loaded
      });
 
     my $up = sub                                                                # Iterate up to next node that has not been visited
      {my $top = Label;                                                          # Reached the top of the tree
-       my $n = Vq('current');
+      my $n = Vq('current');
          $n->copy($C);
       my $zmmNK = 31; my $zmmPK = 28; my $zmmTest = 25;
       my $zmmND = 30; my $zmmPD = 27;
@@ -5010,9 +5102,9 @@ sub Nasm::X86::BlockMultiWayTree::Iterator::next($)                             
         If ($p == 0, sub{Jmp $end});                                            # Jump to the end if we have reached the top of the tree
         $t->getKeysDataNode($p, $zmmPK, $zmmPD, $zmmPN);                        # Load keys, data and children nodes for parent which must have children
         $n->setReg(r15);
-        Vpbroadcastd $zmmTest, r15d;                                            # Current node broadcasted
+        Vpbroadcastd "zmm".$zmmTest, r15d;                                      # Current node broadcasted
         Vpcmpud k7, "zmm".$zmmPN, "zmm".$zmmTest, 0;                            # Check for equal offset - one of them will match to create the single insertion point in k6
-        Kmovw r14, k7;                                                          # Bit mask ready for count
+        Kmovw r14d, k7;                                                         # Bit mask ready for count
         Lzcnt r14, r14;                                                         # Number of leading zeros gives us the position of the child in the parent
         my $i = Vq(indexInParent, r14);                                         # Index in parent
         my $l = $t->getBlockLength($zmmPK);                                     # Length of parent
@@ -5027,14 +5119,25 @@ sub Nasm::X86::BlockMultiWayTree::Iterator::next($)                             
       PopR @save;
      };
 
-    my $i = ++$iter->pos;
+    my $i = ++$$p{pos};
+
+PrintErrStringNL "AAAAA";
+$$p{pos}->errNL;
+$i->errNL;
     PushR my @save = (zmm31, zmm30,  zmm29);
     $iter->tree->getKeysData($C, 31, 30);                                       # Load keys and data
     my $l = $iter->tree->getBlockLength(31);                                    # Length of keys
     my $n = $iter->tree->getUpFromData (30);                                    # Parent
+
+PrintErrStringNL "AAAAAAAAA";
+$$p{pos}->errNL;
+$$p{node}->errNL;
+$l->errNL("lllll: ");
+$n->errNL("nnnnn: ");
+$i->errNL("iiii: ");
     If ($n == 0, sub                                                            # Leaf
      {If ($i < $l, sub
-       {&$new($C, $i)
+       {&$new($C, $i);
        },
       sub
        {&$up;
@@ -5042,7 +5145,7 @@ sub Nasm::X86::BlockMultiWayTree::Iterator::next($)                             
      },
     sub                                                                         # Node
      {If ($i < $l, sub
-       {$iter->tree->getKeysDataNode($C, 31, 30,29);
+       {$iter->tree->getKeysDataNode($C, 31, 30, 29);
         my $offsetAtI = getDFromZmmAsVariable(29, $i * $iter->tree->width);
         $iter->tree->leftMost(node=>$offsetAtI, my $l = Vq(offset));
         &$new($l, $zero);
@@ -5052,8 +5155,8 @@ sub Nasm::X86::BlockMultiWayTree::Iterator::next($)                             
        });
      });
 
-    SetLabel $success;
     PopR @save;
+    SetLabel $success;
    }  io => {node => 3, pos => 3, key => 3, data => 3, count => 3, more => 3};
 
   $s->call($iter->node, $iter->pos,   $iter->key,                               # Call with iterator variables
@@ -12068,7 +12171,7 @@ Test::More->builder->output("/dev/null") if $localTest;                         
 
 if ($^O =~ m(bsd|linux|cygwin)i)                                                # Supported systems
  {if (confirmHasCommandLineCommand(q(nasm)) and LocateIntelEmulator)            # Network assembler and Intel Software Development emulator
-   {plan tests => 115;
+   {plan tests => 114;
    }
   else
    {plan skip_all => qq(Nasm or Intel 64 emulator not available);
@@ -13079,12 +13182,13 @@ if (1) {                                                                        
       KeepFree rax;
       my $Op = ucfirst $op;
       eval qq(If$Op {PrintOutStringNL("$a $op $b")} sub {PrintOutStringNL("$a NOT $op $b")});
+      $@ and confess $@;
      }
    };
   &$cmp(1,1);
   &$cmp(1,2);
   &$cmp(3,2);
-  is_deeply Assemble, <<END;
+  Assemble(debug => 0, eq => <<END);
 1 eq 1
 1 NOT ne 1
 1 NOT lt 1
@@ -14250,6 +14354,20 @@ if (1) {                                                                        
 
   $b->dump;
 
+  my $sub = Subroutine
+   {my ($p) = @_;                                                               # Parameters
+    If ($$p{c} == -1,
+      sub {PrintOutStringNL "C is minus one"},
+      sub {PrintOutStringNL "C is NOT minus one"},
+     );
+    If ($$p{d} == -1,
+      sub {PrintOutStringNL "D is minus one"},
+      sub {PrintOutStringNL "D is NOT minus one"},
+     );
+   } name=> 'aaa', in => {c => 3}, io => {d => 3};
+
+  $sub->call(c=>Cq(c,-1), d=>Cq(d,-1));
+
   ok Assemble(eq => <<END);
 chain1: 0000 0000 0000 001C
 chain2: 0000 0000 0000 0020
@@ -14262,6 +14380,8 @@ Byte String
 0040: 4000 0000 4400 00004800 0000 4C00 00005000 0000 5400 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
 0080: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
 00C0: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+C is minus one
+D is minus one
 END
  }
 
@@ -14289,6 +14409,7 @@ if (1) {                                                                        
   Or r15, r14;
   Push r15;
   Push r15;
+  KeepFree r15;
   PopEax;  PrintRaxInHex($stdout, 3); PrintOutNL; KeepFree rax;
 
   my $a = Vq('aaaa');
@@ -14312,7 +14433,7 @@ aaaa: 89AB CDEF 0123 4567
 END
  }
 
-latest:
+#latest:
 if (1) {                                                                        #TNasm::X86::ByteString::CreateBlockMultiWayTree
   my $b = CreateByteString;
   my $t = $b->CreateBlockMultiWayTree;
@@ -14364,11 +14485,11 @@ if (1) {                                                                        
 
   $b->dump(8);
 
-  $t->by(sub
-   {my ($iter, $end) = @_;
-    $iter->key->out('key: ');
-    $iter->data->outNL(' data: ');
-   });
+#  $t->by(sub
+#   {my ($iter, $end) = @_;
+#    $iter->key->out('key: ');
+#    $iter->data->outNL(' data: ');
+#   });
 
   ok Assemble(debug => 1, eq => <<END);
 LeftMost : 0000 0000 0000 0018
