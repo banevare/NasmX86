@@ -744,6 +744,8 @@ sub If($$;$)                                                                    
  {my ($jump, $then, $else) = @_;                                                # Jump op code of variable, then - required , else - optional
   @_ >= 2 && @_ <= 3 or confess;
 
+  ref($jump) or $jump =~ m(\AJ(e|ge|gt|h|l|le|ne|z)\Z) or confess "Invalid jump: $jump";
+
   if (ref($jump))                                                               # Variable reference - non zero then then else else
    {PushR r15;
     Mov r15, $jump->address;
@@ -1010,8 +1012,9 @@ sub cxr(&@)                                                                     
 sub Comment(@)                                                                  # Insert a comment into the assembly code
  {my (@comment) = @_;                                                           # Text of comment
   my $c = join "", @comment;
+  my ($p, $f, $l) = caller;
   push @text, <<END;
-; $c
+; $c at $f line $l
 END
  }
 
@@ -1807,7 +1810,8 @@ sub Nasm::X86::Variable::getReg($$@)                                            
  {my ($variable, $register, @registers) = @_;                                   # Variable, register to load, optional further registers to load from
   if ($variable->size == 3)
    {if ($variable->isRef)                                                       # Move to the location referred to by this variable
-     {Comment "Get variable value from register";
+     {$Registers{$register} or confess "No such register: $register";           # Check we have been given a register
+      Comment "Get variable value from register $register";
       my $r = $register eq r15 ? r14 : r15;
       PushR $r;
       Mov $r, $variable->address;
@@ -4831,7 +4835,7 @@ sub Nasm::X86::BlockMultiWayTree::leftOrRightMost($$@)                          
    {my ($p) = @_;                                                               # Parameters
 
     my $B = $$p{bs};                                                            # Byte string
-    my $F = $$p{first};                                                         # First keys block
+    my $F = $$p{node};                                                          # Staring keys blockFirst keys block
 
     PushR my @save = (rax, zmm31);
     ForEver
@@ -4859,9 +4863,9 @@ sub Nasm::X86::BlockMultiWayTree::leftOrRightMost($$@)                          
     PopR @save;
    } name => $dir == 0 ? "Nasm::X86::BlockMultiWayTree::leftMost"
                        : "Nasm::X86::BlockMultiWayTree::rightMost",
-     in => {bs => 3, first => 3}, out => {offset => 3};
+     in => {bs => 3, node => 3}, out => {offset => 3};
 
-  $s->call($bmt->address, first => $bmt->first, @variables);
+  $s->call($bmt->address, @variables);
  }
 
 sub Nasm::X86::BlockMultiWayTree::leftMost($@)                                  # Return the left most node
@@ -4954,28 +4958,32 @@ sub Nasm::X86::BlockMultiWayTree::Iterator::next($)                             
       PushR my @save = (zmm31, zmm30,  zmm29);
       $$p{node}->copy($node);                                                   # Set current node
       $$p{pos}  = $pos;                                                         # Set current position in node
-      $iter->tree->getKeysData($node, zmm31, zmm30);                            # Load keys and data
+      $iter->tree->getKeysData($node, 31, 30);                                  # Load keys and data
 
       my $offset = $pos * $iter->tree->width;                                   # Load key and data
-      $$p{key}   = getDFromZmmAsVariable(zmm31, $offset);
-      $$p{data}  = getDFromZmmAsVariable(zmm30, $offset);
+      $$p{key}   = getDFromZmmAsVariable(31, $offset);
+      $$p{data}  = getDFromZmmAsVariable(30, $offset);
       PopR @save;
      };
 
-    my $done = sub {$$p{more}->getReg(0)};                                      # The tree has been completely traversed
+    my $done = sub                                                              # The tree has been completely traversed
+     {PushR rax;
+      Mov rax, 0;
+      $$p{more}->getReg(rax);
+      PopR rax;
+      };
 
     If ($$p{pos},  sub                                                          # Initial descent
-     {my $l = $C->node->[0];
-      my $t = $iter->tree;
+     {my $t = $iter->tree;
       PushR my @save = (zmm31, zmm30,  zmm29);
-      $t->getKeysData($C, zmm31, zmm30);                                        # Load keys and data
+      $t->getKeysData($C, 31, 30);                                              # Load keys and data
 
-      If ($t->getBlockLength(zmm30), sub                                        # Go left if there are child nodes
-       {my $l = $t->leftMost($C);
+      If ($t->getBlockLength(30), sub                                           # Go left if there are child nodes
+       {$t->leftMost($t->address, $C, my $l = Vq(offset));
         &$new($l, $zero);
        },
       sub
-       {my $l = $t->getBlockLength(zmm31);                                      # Number of keys
+       {my $l = $t->getBlockLength(31);                                         # Number of keys
         If ($l, sub                                                             # Start with the current node as it is a leaf
          {&$new($C, $zero);
          },
@@ -4999,7 +5007,7 @@ sub Nasm::X86::BlockMultiWayTree::Iterator::next($)                             
        {my ($start, $end) = @_;                                                 # Parameters
         $t->getKeysData($n, $zmmNK, $zmmND);                                    # Load keys and data for current node
         my $p = $t->getUpFromData($zmmND);
-        If (!$p, sub{Jmp $end});                                                # Jump to the end if we have reached the top of the tree
+        If ($p == 0, sub{Jmp $end});                                            # Jump to the end if we have reached the top of the tree
         $t->getKeysDataNode($p, $zmmPK, $zmmPD, $zmmPN);                        # Load keys, data and children nodes for parent which must have children
         $n->setReg(r15);
         Vpbroadcastd $zmmTest, r15d;                                            # Current node broadcasted
@@ -5014,17 +5022,17 @@ sub Nasm::X86::BlockMultiWayTree::Iterator::next($)                             
          });
         $n->copy($p);                                                           # Continue with parent
        };
-      &$done;                                                                    # No nodes not visited
+      &$done;                                                                   # No nodes not visited
       SetLabel $top;
       PopR @save;
      };
 
     my $i = ++$iter->pos;
     PushR my @save = (zmm31, zmm30,  zmm29);
-    $iter->tree->getKeysData($C, zmm31, zmm30);                                   # Load keys and data
-    my $l = $iter->tree->getBlockLength(zmm31);                                   # Length of keys
-    my $n = $iter->tree->getUpFromData (zmm30);                                   # Parent
-    If (!$n, sub                                                                  # Leaf
+    $iter->tree->getKeysData($C, 31, 30);                                       # Load keys and data
+    my $l = $iter->tree->getBlockLength(31);                                    # Length of keys
+    my $n = $iter->tree->getUpFromData (30);                                    # Parent
+    If ($n == 0, sub                                                            # Leaf
      {If ($i < $l, sub
        {&$new($C, $i)
        },
@@ -5032,11 +5040,11 @@ sub Nasm::X86::BlockMultiWayTree::Iterator::next($)                             
        {&$up;
        });
      },
-    sub                                                                           # Node
+    sub                                                                         # Node
      {If ($i < $l, sub
-       {$iter->tree->getKeysDataNode($C, zmm31, zmm30, zmm29);
-        my $offsetAtI = getDFromZmmAsVariable(zmm29, $i * $iter->tree->width);
-        my $l = $iter->tree->leftMost($offsetAtI);
+       {$iter->tree->getKeysDataNode($C, 31, 30,29);
+        my $offsetAtI = getDFromZmmAsVariable(29, $i * $iter->tree->width);
+        $iter->tree->leftMost(node=>$offsetAtI, my $l = Vq(offset));
         &$new($l, $zero);
        },
       sub
@@ -5050,6 +5058,21 @@ sub Nasm::X86::BlockMultiWayTree::Iterator::next($)                             
 
   $s->call($iter->node, $iter->pos,   $iter->key,                               # Call with iterator variables
            $iter->data, $iter->count, $iter->more);
+
+  $iter                                                                         # Return the iterator
+ }
+
+sub Nasm::X86::BlockMultiWayTree::by($&)                                        # Call the specified body with each (key, data) from the specified tree in order
+ {my ($b, $body) = @_;                                                          # Block Multi Way Tree descriptor, body
+  @_ == 2 or confess;
+
+  my $iter = $b->iterator;                                                      # Create an iterator
+  my $start = SetLabel Label; my $end = Label;                                  # Start and end of loop
+  If ($iter->more == 0, sub {Jmp $end});                                        # Jump to end if there are no more elements to process
+  &$body($iter, $end);                                                          # Perform the body parameterized by the iterator and the end label
+  $iter->next;                                                                  # Next element
+  Jmp $start;                                                                   # Pocess next element
+  SetLabel $end;                                                                # End of the loop
  }
 
 sub Nasm::X86::BlockMultiWayTree::pop($@)                                       # Pop an element from an array
@@ -14289,15 +14312,15 @@ aaaa: 89AB CDEF 0123 4567
 END
  }
 
-#latest:
+latest:
 if (1) {                                                                        #TNasm::X86::ByteString::CreateBlockMultiWayTree
   my $b = CreateByteString;
   my $t = $b->CreateBlockMultiWayTree;
 
-  $t->leftMost(my $l = Vq(offset));
+  $t->leftMost(node => $t->first, my $l = Vq(offset));
   $l->outNL('LeftMost : ');
 
-  $t->rightMost(my $r = Vq(offset));
+  $t->rightMost(node => $t->first, my $r = Vq(offset));
   $r->outNL('RightMost: ');
 
   $t->bs->getBlock($t->address, $t->first, 31);
@@ -14325,8 +14348,27 @@ if (1) {                                                                        
   $t->putKeysDataNode($t->first, 31, 30, 29);
 
   $t->insert(Vq(key, 0x1EE1), Vq(data, 0x1661));
+  $t->insert(Vq(key, 0x2EE2), Vq(data, 0x2662));
+  $t->insert(Vq(key, 0x3EE3), Vq(data, 0x3663));
+  $t->insert(Vq(key, 0x4EE4), Vq(data, 0x4664));
+  $t->insert(Vq(key, 0x5EE5), Vq(data, 0x5665));
+  $t->insert(Vq(key, 0x6EE6), Vq(data, 0x6666));
+  $t->insert(Vq(key, 0x7EE7), Vq(data, 0x7667));
+  $t->insert(Vq(key, 0x8EE8), Vq(data, 0x8668));
+  $t->insert(Vq(key, 0x9EE9), Vq(data, 0x9669));
+  $t->insert(Vq(key, 0xaEEa), Vq(data, 0xa66a));
+  $t->insert(Vq(key, 0xbEEb), Vq(data, 0xb66b));
+  $t->insert(Vq(key, 0xcEEc), Vq(data, 0xc66c));
+  $t->insert(Vq(key, 0xdEEd), Vq(data, 0xd66d));
+  $t->insert(Vq(key, 0xeEEe), Vq(data, 0xe66e));
 
   $b->dump(8);
+
+  $t->by(sub
+   {my ($iter, $end) = @_;
+    $iter->key->out('key: ');
+    $iter->data->outNL(' data: ');
+   });
 
   ok Assemble(debug => 1, eq => <<END);
 LeftMost : 0000 0000 0000 0018
