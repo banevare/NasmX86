@@ -255,6 +255,7 @@ sub KeepReturn(@);                                                              
 sub PeekR($);                                                                   # Peek at the register on top of the stack
 sub PopR(@);                                                                    # Pop a list of registers off the stack
 sub PopRR(@);                                                                   # Pop a list of registers off the stack without tracking
+sub PrintErrStringNL(@);                                                         # Print a constant string followed by a new line to stderr
 sub PrintOutMemory;                                                             # Print the memory addressed by rax for a length of rdi
 sub PrintOutRegisterInHex(@);                                                   # Print any register as a hex string
 sub PrintOutStringNL(@);                                                        # Print a constant string to stdout followed by new line
@@ -980,18 +981,20 @@ sub Nasm::X86::Sub::call($%)                                                    
 
   for my $p(keys $sub->io->%*)                                                  # Load io parameters
    {confess "Missing io parameter: $p" unless my $v = $p{$p};
+PrintErrStringNL "AAAA1111";
     if ($v->isRef)                                                              # If we already have a reference we can just copy the content
      {$sub->variables->{$p}->copy($v);
      }
     else                                                                        # Otherwise make a reference
      {$sub->variables->{$p}->copyAddress($v);
      }
+PrintErrStringNL "AAAA2222";
    }
 
   my $n = $$sub{name};
-  &PrintErrStringNL("Call $n start") if 0;
+  PrintErrStringNL("Call $n start") if 0;
   Call $$sub{start};                                                            # Call the sub routine
-  &PrintErrStringNL("Call $n end")   if 0;
+  PrintErrStringNL("Call $n end")   if 0;
 
   for my $p(keys $sub->out->%*)                                                 # Load output parameters
    {confess qq(Missing output parameter: "$p") unless my $v = $p{$p};
@@ -3262,7 +3265,6 @@ sub Nasm::X86::ByteString::updateSpace($@)                                      
   my $s = Subroutine
    {my ($p) = @_;                                                               # Parameters
     Comment "Allocate more space for a byte string";
-
     SaveFirstFour;
     $$p{bs}->setReg(rax);                                                       # Address byte string
     my $oldSize = Vq(oldSize, $size);                                           # Size
@@ -5086,7 +5088,6 @@ sub Nasm::X86::BlockMultiWayTree::iterator($)                                   
 sub Nasm::X86::BlockMultiWayTree::Iterator::next($)                             # Next element in the tree
  {my ($iter) = @_;                                                              # Iterator
   @_ == 1 or confess;
-  my $zero = Vq(zero, 0);                                                       # Zero
 
   my $s = Subroutine
    {my ($p) = @_;                                                               # Parameters
@@ -5221,7 +5222,7 @@ $i->errNL("iiii: ");
        {$iter->tree->getKeysDataNode($C, 31, 30, 29);
         my $offsetAtI = getDFromZmmAsVariable(29, $i * $iter->tree->width);
         $iter->tree->leftMost(node=>$offsetAtI, my $l = Vq(offset));
-        &$new($l, $zero);
+        &$new($l, Cq(zero, 0));
        },
       sub
        {&$up;
@@ -12627,6 +12628,7 @@ if (1) {                                                                        
   ok stringMd5Sum($r) eq fileMd5Sum($0);                                          # Output contains this file
  }
 
+latest:;
 if (1) {                                                                        #TCreateByteString #TByteString::clear #TByteString::out #TByteString::copy #TByteString::nl
   my $a = CreateByteString;                                                     # Create a string
   $a->q('aa');
@@ -14523,7 +14525,7 @@ aaaa: 89AB CDEF 0123 4567
 END
  }
 
-latest:
+#latest:
 if (1) {                                                                        #TNasm::X86::ByteString::CreateBlockMultiWayTree
   my $b = CreateByteString;
   my $t = $b->CreateBlockMultiWayTree;
