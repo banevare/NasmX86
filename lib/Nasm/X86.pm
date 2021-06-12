@@ -4826,6 +4826,12 @@ sub Nasm::X86::BlockMultiWayTree::putKeysData($$$$)                             
   $b->putBlock($b->bs, $data, $zmmData);                                        # Put the data block
  }
 
+sub Nasm::X86::BlockMultiWayTree::getNode($$$)                                  # Load the child nodes for a node
+ {my ($bmt, $offset, $zmmNode) = @_;                                            # Block multi way tree descriptor, offset of nodes, numbered zmm for keys, numbered data for keys, numbered numbered for keys
+  @_ == 3 or confess;
+  $bmt->bs->getBlock($bmt->bs->bs, $offset, $zmmNode);                          # Get the node block
+ }
+
 sub Nasm::X86::BlockMultiWayTree::getKeysDataNode($$$$$)                        # Load the keys, data and child nodes for a node
  {my ($bmt, $offset, $zmmKeys, $zmmData, $zmmNode) = @_;                        # Block multi way tree descriptor, offset as a variable, numbered zmm for keys, numbered data for keys, numbered numbered for keys
   @_ == 5 or confess;
@@ -4840,6 +4846,76 @@ sub Nasm::X86::BlockMultiWayTree::putKeysDataNode($$$$$)                        
   $bmt->putKeysData($offset, $zmmKeys, $zmmData);                               # Put keys and data
   my $node = $bmt->getLoop($zmmData);                                           # Get the offset of the corresponding node block
   $bmt->bs->putBlock($bmt->bs->bs, $node, $zmmNode);                            # Put the node block
+ }
+
+sub Nasm::X86::BlockMultiWayTree::find($@)                                      # Find a key in a tree and  return its associated data
+ {my ($bmt, @variables) = @_;                                                   # Block multi way tree descriptor, variables
+  @_ >= 3 or confess;
+  my $W = $bmt->width;                                                          # Width of keys and data
+
+  my $s = Subroutine
+   {my ($p) = @_;                                                               # Parameters
+    my $success = Label;                                                        # Short circuit if ladders by jumping directly to the end after a successful push
+
+    my $B = $$p{bs};                                                            # Byte string
+    my $F = $$p{first};                                                         # First keys block
+    my $K = $$p{key};                                                           # Key to find
+
+    my $tree = $F->clone;                                                       # Start at the first key block
+    PushR my @save = (k6, k7, r14, r15, zmm28, zmm29, zmm30, zmm31);
+    my $zmmKeys = 31; my $zmmData = 30; my $zmmNode = 29; my $zmmTest = 28;
+    my $lengthMask = k6; my $testMask = k7;
+
+    $K->setReg(r15);                                                            # Load key into test register
+    Vpbroadcastd "zmm$zmmTest", r15d;
+    KeepFree r15;
+
+    ForEver
+     {my ($start, $end) = @_;                                                   # Parameters
+      $bmt->getKeysData($tree, $zmmKeys, $zmmData);                             # Get the keys block
+
+      my $l = $bmt->getBlockLength($zmmKeys);                                   # Length of the block
+      If ($l == 0, sub                                                          # Empty tree so we have not found the key
+       {$$p{found}->copy(Cq(zero, 0));                                          # Key not found
+        Jmp $success;                                                           # Return
+       });
+
+      $l->setMaskFirst($lengthMask);                                            # Set the length mask
+      Vpcmpud "$testMask\{$lengthMask}", "zmm$zmmKeys", "zmm$zmmTest", 0;       # Check for equal elements
+      Ktestw   $testMask, $testMask;
+      IfNz                                                                      # Result mask is non zero so we must have found the key
+       {Kmovq r15, $testMask;
+        Tzcnt r14, r15;                                                         # Trailing zeros
+        $$p{found}->copy(Cq(one, 1));                                           # Key found
+        my $d = getDFromZmmAsVariable($zmmData, "r14*$W");
+        $$p{data}->copy($d);                                                    # Data associated with the key
+        Jmp $success;                                                           # Return
+       };
+
+      my $n = $bmt->getLoop($zmmData);                                          # Offset of child nodes block
+      If ($n == 0, sub                                                          # Zero implies that this is a leaf node
+       {$$p{found}->copy(Cq(zero, 0));                                          # Key not found
+        Jmp $success;                                                           # Return
+       });
+
+      $bmt->getNode($n, $zmmNode);                                              # Get the child nodes block
+
+      Vpcmpud "$testMask\{$lengthMask}", "zmm$zmmKeys", "zmm$zmmTest", 1;       # Check for greater elements
+      Ktestw   $testMask, $testMask;
+      IfNz                                                                      # Zero implies that the key is less than some of the keys
+       {Kmovq r15, $testMask;
+        Tzcnt r14, r15;                                                         # Trailing zeros
+        $tree = getDFromZmmAsVariable($zmmData, "r14*$W");                      # Corresponding node
+        Jmp $end;                                                               # Loop
+       };
+      $tree = getDFromZmmAsVariable($zmmData, 0);                               # Less than all keys so jump to node zero
+     };
+
+    SetLabel $success;                                                          # Insert completed successfully
+    PopR @save;
+   }  in => {bs => 3, first => 3, key => 3}, out => {data => 3, found => 3};
+
+  $s->call($bmt->address, first => $bmt->first, @variables);
  }
 
 sub Nasm::X86::BlockMultiWayTree::insert($@)                                    # Insert a (key, data) pair into the tree
@@ -4858,17 +4934,15 @@ sub Nasm::X86::BlockMultiWayTree::insert($@)                                    
     my $D = $$p{data};                                                          # Data to be inserted
 
     PushR my @save = (k4, k5, k6, k7, r14, r15, zmm29, zmm30, zmm31);
-    $b->getBlock($B, $F,  31);                                                  # Get the first keys block
-    my $d = $bmt->getLoop(31);                                                  # Get the offset of the corresponding data block
-    $b->getBlock($B, $d,  30);                                                  # Get the data block
+    $bmt->getKeysData($F, 31, 30);                                              # Get the first block
 
-    my $l = getDFromZmmAsVariable(31, $bmt->length);                            # Get the length of the keys block
+#   my $l = getDFromZmmAsVariable(31, $bmt->length);                            # Get the length of the keys block
+    my $l = $bmt->getBlockLength(31);                                           # Length of the block
     If ($l == 0, sub                                                            # Empty tree
-     {$K->putDIntoZmm     (31, 0);                                              # Write key
-      $bmt->setBlockLength(31, Vq(one, 1));                                     # Set the length of the block
-      $b->putBlock($B, $F, 31);                                                 # Write the keys block back into the underlying byte string
-      $D->putDIntoZmm     (30, 0);                                              # Write data
-      $b->putBlock($B, $d, 30);                                                 # Write the data block back into the underlying byte string
+     {$K->putDIntoZmm      (31, 0);                                             # Write key
+      $bmt->setBlockLength (31, Cq(one, 1));                                    # Set the length of the block
+      $D->putDIntoZmm      (30, 0);                                             # Write data
+      $bmt->putKeysData($F, 31, 30);                                            # Write the data block back into the underlying byte string
       Jmp $success;                                                             # Insert completed successfully
      });
 
@@ -4885,8 +4959,7 @@ sub Nasm::X86::BlockMultiWayTree::insert($@)                                    
        {$bmt->setBlockLength(31, $l + 1);                                       # Set the length of the block
         $D->setReg(r14);                                                        # Key to search for
         Vpbroadcastd "zmm30{k6}", r14d;                                         # Load data
-        $b->putBlock($B, $F, 31);                                               # Write the keys block back into the underlying byte string
-        $b->putBlock($B, $d, 30);                                               # Write the data block back into the underlying byte string
+        $bmt->putKeysData($F, 31, 30);                                          # Write the data block back into the underlying byte string
         KeepFree r14;
         Jmp $success;                                                           # Insert completed successfully
        };
@@ -4909,9 +4982,8 @@ sub Nasm::X86::BlockMultiWayTree::insert($@)                                    
       Vpbroadcastd "zmm31{k6}", r15d;                                           # Load key
       $D->setReg(r14);                                                          # Corresponding data
       Vpbroadcastd "zmm30{k6}", r14d;                                           # Load data
-      $bmt->setBlockLength(31, $l + 1);                                         # Set the length of the block
-      $b->putBlock($B, $F, 31);                                                 # Write the keys block back into the underlying byte string
-      $b->putBlock($B, $d, 30);                                                 # Write the data block back into the underlying byte string
+      $bmt->setBlockLength( 31, $l + 1);                                        # Set the length of the block
+      $bmt->putKeysData($F, 31, 30);                                            # Write the data block back into the underlying byte string
       Jmp $success;                                                             # Insert completed successfully
      });
 
@@ -12933,6 +13005,7 @@ if (1) {
     k7: FFFF FFFF FFFF FFFF
    rax: 0000 0000 0000 00$P
 END
+#   0 eq    1 gt    2 ge    4 ne    4 le    4 lt   comparisons
  }
 
 if (1) {                                                                        #TCstrlen
@@ -14415,6 +14488,8 @@ latest:
 if (1) {
   my $b = CreateByteString;
   my $t = $b->CreateBlockMultiWayTree;
+  my $d = Vq(data);
+  my $f = Vq(found);
 
   Vq(count, 15)->for(sub
    {my ($index, $start, $next, $end) = @_;
@@ -14425,24 +14500,31 @@ if (1) {
   $t->by(sub
    {my ($iter, $end) = @_;
     $iter->key ->out('key: ');
-    $iter->data->outNL(' data: ');
+    $iter->data->out(' data: ');
+
+    $t->find(key => $iter->key, $d, $f);
+    $f->out(' found: '); $d->outNL(' data: ');
    });
 
-  ok Assemble(debug => 1, eq => <<END);
-key: 0000 0000 0000 0000 data: 0000 0000 0000 0100
-key: 0000 0000 0000 0001 data: 0000 0000 0000 0101
-key: 0000 0000 0000 0002 data: 0000 0000 0000 0102
-key: 0000 0000 0000 0003 data: 0000 0000 0000 0103
-key: 0000 0000 0000 0004 data: 0000 0000 0000 0104
-key: 0000 0000 0000 0005 data: 0000 0000 0000 0105
-key: 0000 0000 0000 0006 data: 0000 0000 0000 0106
-key: 0000 0000 0000 0007 data: 0000 0000 0000 0107
-key: 0000 0000 0000 0008 data: 0000 0000 0000 0108
-key: 0000 0000 0000 0009 data: 0000 0000 0000 0109
-key: 0000 0000 0000 000A data: 0000 0000 0000 010A
-key: 0000 0000 0000 000B data: 0000 0000 0000 010B
-key: 0000 0000 0000 000C data: 0000 0000 0000 010C
-key: 0000 0000 0000 000D data: 0000 0000 0000 010D
+  $t->find(key => Vq(key, 0xffff), $d, $f);
+  $f->outNL('Found: ');
+
+  ok Assemble(debug => 0, eq => <<END);
+key: 0000 0000 0000 0000 data: 0000 0000 0000 0100 found: 0000 0000 0000 0001 data: 0000 0000 0000 0100
+key: 0000 0000 0000 0001 data: 0000 0000 0000 0101 found: 0000 0000 0000 0001 data: 0000 0000 0000 0101
+key: 0000 0000 0000 0002 data: 0000 0000 0000 0102 found: 0000 0000 0000 0001 data: 0000 0000 0000 0102
+key: 0000 0000 0000 0003 data: 0000 0000 0000 0103 found: 0000 0000 0000 0001 data: 0000 0000 0000 0103
+key: 0000 0000 0000 0004 data: 0000 0000 0000 0104 found: 0000 0000 0000 0001 data: 0000 0000 0000 0104
+key: 0000 0000 0000 0005 data: 0000 0000 0000 0105 found: 0000 0000 0000 0001 data: 0000 0000 0000 0105
+key: 0000 0000 0000 0006 data: 0000 0000 0000 0106 found: 0000 0000 0000 0001 data: 0000 0000 0000 0106
+key: 0000 0000 0000 0007 data: 0000 0000 0000 0107 found: 0000 0000 0000 0001 data: 0000 0000 0000 0107
+key: 0000 0000 0000 0008 data: 0000 0000 0000 0108 found: 0000 0000 0000 0001 data: 0000 0000 0000 0108
+key: 0000 0000 0000 0009 data: 0000 0000 0000 0109 found: 0000 0000 0000 0001 data: 0000 0000 0000 0109
+key: 0000 0000 0000 000A data: 0000 0000 0000 010A found: 0000 0000 0000 0001 data: 0000 0000 0000 010A
+key: 0000 0000 0000 000B data: 0000 0000 0000 010B found: 0000 0000 0000 0001 data: 0000 0000 0000 010B
+key: 0000 0000 0000 000C data: 0000 0000 0000 010C found: 0000 0000 0000 0001 data: 0000 0000 0000 010C
+key: 0000 0000 0000 000D data: 0000 0000 0000 010D found: 0000 0000 0000 0001 data: 0000 0000 0000 010D
+Found: 0000 0000 0000 0000
 END
  }
 
