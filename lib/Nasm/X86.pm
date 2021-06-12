@@ -14506,8 +14506,8 @@ if (1) {
     $f->out(' found: '); $d->outNL(' data: ');
    });
 
-  $t->find(key => Vq(key, 0xffff), $d, $f);
-  $f->outNL('Found: ');
+  $t->find(key => Vq(key, 0xffff), $d, $f);  $f->outNL('Found: ');
+  $t->find(key => Vq(key, 0xd),    $d, $f);  $f->outNL('Found: ');
 
   ok Assemble(debug => 0, eq => <<END);
 key: 0000 0000 0000 0000 data: 0000 0000 0000 0100 found: 0000 0000 0000 0001 data: 0000 0000 0000 0100
@@ -14525,6 +14525,7 @@ key: 0000 0000 0000 000B data: 0000 0000 0000 010B found: 0000 0000 0000 0001 da
 key: 0000 0000 0000 000C data: 0000 0000 0000 010C found: 0000 0000 0000 0001 data: 0000 0000 0000 010C
 key: 0000 0000 0000 000D data: 0000 0000 0000 010D found: 0000 0000 0000 0001 data: 0000 0000 0000 010D
 Found: 0000 0000 0000 0000
+Found: 0000 0000 0000 0001
 END
  }
 
