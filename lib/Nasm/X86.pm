@@ -1552,27 +1552,6 @@ sub Nasm::X86::Variable::copy($$)                                               
 
   confess "Need more code";
  }
-# Almost certainly not needed now we have copy handling references above.
-sub Nasm::X86::Variable::copyRef($$)                                            # Copy one variable into an referenced variable
- {my ($left, $right) = @_;                                                      # Left variable, right variable
-
-  $left->reference           or confess "Reference required for: ".$left->name;
-  ref($right) =~ m(Variable) or confess "Variable required";
-  my $l = $left ->address;
-  my $r = $right->address;
-
-  if ($left->size == 3 and $right->size == 3)
-   {Comment "Copy parameter ".$right->name.' to '.$left->name;
-    PushR my @save = (r14, r15);
-    Mov r15, $r;
-    Mov r14, $l;
-    Mov "[r14]", r15;
-    PopR @save;
-    return;
-   }
-
-  confess "Need more code";
- }
 
 sub Nasm::X86::Variable::copyAddress($$)                                        # Copy a reference to a variable
  {my ($left, $right) = @_;                                                      # Left variable, right variable
@@ -3291,7 +3270,7 @@ sub Nasm::X86::ByteString::updateSpace($@)                                      
       AllocateMemory(size => $newSize, my $address = Vq(address));              # Create new byte string
       CopyMemory(target  => $address, source => $$p{bs}, size => $oldUsed);     # Copy old byte string into new byte string
       FreeMemory(address => $$p{bs},  size   => $oldSize);                      # Free previous memory previously occupied byte string
-      $$p{bs}->copyRef($address);                                               # Save new byte string address
+      $$p{bs}->copy($address);                                                  # Save new byte string address
      });
 
     RestoreFirstFour;
@@ -5173,6 +5152,10 @@ sub Nasm::X86::BlockMultiWayTree::Iterator::next($)                             
     my $l = $iter->tree->getBlockLength(31);                                    # Length of keys
     my $n = $iter->tree->getLoop           (30);                                # Parent
 
+PrintErrStringNL "AAAAAAAAA";
+$i->errNL('i');
+$l->errNL('l');
+$n->errNL('n');
     If ($n == 0, sub                                                            # Leaf
      {If ($i < $l, sub
        {&$new($C, $i);
@@ -14485,7 +14468,7 @@ aaaa: 89AB CDEF 0123 4567
 END
  }
 
-latest:
+#latest:
 if (1) {                                                                        #TNasm::X86::ByteString::CreateBlockMultiWayTree
   my $b = CreateByteString;
   my $t = $b->CreateBlockMultiWayTree;
