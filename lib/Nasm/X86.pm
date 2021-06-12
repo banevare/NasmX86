@@ -918,13 +918,13 @@ sub Subroutine(&%)                                                              
   my sub checkSize($$)                                                          # Check the size of a parameter
    {my ($name, $size) = @_;
     confess "Invalid size $size for parameter: $name" unless $size =~ m(\A(1|2|3|4|5|6)\Z);
-    $p{$name} = Variable($size, $name);
+    $p{$name} = Variable($size, $name);                                         # Make a value parameter variable
    }
 
   my sub checkIo($$)                                                            # Check an io parameter
    {my ($name, $size) = @_;
     confess "Invalid size $size for parameter: $name" unless $size =~ m(\A(1|2|3|4|5|6)\Z);
-    $p{$name} = Vr($name, $size);                                               # Make a reference
+    $p{$name} = Vr($name, $size);                                               # Make a reference  parameter variable
    }
 
   checkSize($_, $in {$_}) for keys %in;
@@ -981,14 +981,7 @@ sub Nasm::X86::Sub::call($%)                                                    
 
   for my $p(keys $sub->io->%*)                                                  # Load io parameters
    {confess "Missing io parameter: $p" unless my $v = $p{$p};
-PrintErrStringNL "AAAA1111";
-    if ($v->isRef)                                                              # If we already have a reference we can just copy the content
-     {$sub->variables->{$p}->copy($v);
-     }
-    else                                                                        # Otherwise make a reference
-     {$sub->variables->{$p}->copyAddress($v);
-     }
-PrintErrStringNL "AAAA2222";
+    $sub->variables->{$p}->copyAddress($v);
    }
 
   my $n = $$sub{name};
@@ -1584,14 +1577,22 @@ sub Nasm::X86::Variable::copyRef($$)                                            
 sub Nasm::X86::Variable::copyAddress($$)                                        # Copy a reference to a variable
  {my ($left, $right) = @_;                                                      # Left variable, right variable
 
+  $left->reference  or confess "Left hand side must be a reference";
+  $left->size == 3  or confess "Left hand side must be size 3";
+
   my $l = $left ->address;
   my $r = $right->address;
 
-  if ($left->size == 3 and $right->size == 3)
+  if ($right->size == 3)
    {Comment "Copy parameter address";
     PushR my @save = (r15);
-    Lea r15, $r;
-    Mov $l, r15;
+    if ($right->reference)                                                      # Right is a reference so we copy its value
+     {Mov r15, $r;
+     }
+    else                                                                        # Right is not a reference so we copy its address
+     {Lea r15, $r;
+     }
+    Mov $l, r15;                                                                # Save value of address in left
     PopR @save;
     return;
    }
@@ -2780,6 +2781,12 @@ sub AllocateMemory(@)                                                           
     Mov r8,  -1;                                                                # File descriptor for file backing memory if any
     Mov r9,  0;                                                                 # Offset into file
     Syscall;
+    Cmp rax, -12;                                                               # Check return code
+    IfEq(sub
+     {PrintErrString "Cannot allocate memory, ";
+      $$p{size}->errNL;
+      Exit(1);
+     });
     $$p{address}->getReg(rax);                                                  # Amount of memory
 
     RestoreFirstSeven;
@@ -12628,7 +12635,7 @@ if (1) {                                                                        
   ok stringMd5Sum($r) eq fileMd5Sum($0);                                          # Output contains this file
  }
 
-latest:;
+#latest:;
 if (1) {                                                                        #TCreateByteString #TByteString::clear #TByteString::out #TByteString::copy #TByteString::nl
   my $a = CreateByteString;                                                     # Create a string
   $a->q('aa');
@@ -12687,7 +12694,6 @@ if (1) {                                                                        
   my $a = CreateByteString;                                                     # Create a string
   $a->q('ab');
   my $b = CreateByteString;                                                     # Create target byte string
-  $a->bs(r15);
   $b->append(source=>$a->bs);
   $b->append(source=>$a->bs);
   $a->append(source=>$b->bs);
@@ -14624,6 +14630,7 @@ key: 0000 0000 0000 7FF7 data: 0000 0000 0000 7777
 END
  }
 
+#latest:
 if (0) {
   is_deeply Assemble(debug=>1), <<END;
 END
