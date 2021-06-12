@@ -1521,6 +1521,7 @@ sub Nasm::X86::Variable::address($;$)                                           
 
 sub Nasm::X86::Variable::copy($$)                                               # Copy one variable into another
  {my ($left, $right) = @_;                                                      # Left variable, right variable
+  @_ == 2 or confess;
 
   ref($right) =~ m(Variable) or confess "Variable required";
   my $l = $left ->address;
@@ -1548,6 +1549,24 @@ sub Nasm::X86::Variable::copy($$)                                               
      }
     PopR @save;
     return;
+   }
+
+  confess "Need more code";
+ }
+
+sub Nasm::X86::Variable::clone($$)                                              # Clone a variable to create a new variable
+ {my ($var) = @_;                                                               # Variable to clone
+  @_ == 1 or confess;
+
+  my $a = $var->address;
+  if ($var->size == 3)
+   {Comment "Clone ".$var->name;
+    my $new = Vq('Clone of '.$var->name);
+    PushR my @save = (r15);
+    Mov r15, $var->address;
+    Mov $new->address, r15;
+    PopR @save;
+    return $new;
    }
 
   confess "Need more code";
@@ -14382,13 +14401,15 @@ if (1) {                                                                        
       sub {PrintOutStringNL "D is NOT minus one"},
      );
 
+    my $C = $$p{c}->clone;
+    $C->outNL;
+
     $$p{e} += 1;
     $$p{e}->outNL('E: ');
 
     $$p{f}->outNL('F1: ');
     $$p{f}++;
     $$p{f}->outNL('F2: ');
-
    } name=> 'aaa', in => {c => 3}, io => {d => 3, e => 3, f => 3};
 
   my $c = Cq(c, -1);
@@ -14413,6 +14434,7 @@ Byte String
 00C0: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
 C is minus one
 D is minus one
+Clone of c: FFFF FFFF FFFF FFFF
 E: 0000 0000 0000 0002
 F1: 0000 0000 0000 0002
 F2: 0000 0000 0000 0003
