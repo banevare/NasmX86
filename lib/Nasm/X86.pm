@@ -1358,13 +1358,35 @@ sub Variable($$;$%)                                                             
    {DComment qq(Variable name: "$name", size: $size);
    }
 
-  my $label = $size =~ m(\A0|b\Z) ? Db(0) :                                     # Allocate space for variable
-              $size =~ m(\A1|w\Z) ? Dw(0) :                                     # Allocate space for variable
+  my $init = 0;                                                                 # Initializer
+  if (defined $expr)                                                            # Initialize value
+   {if ($Registers{$expr})
+     {$const and confess "Cannot use a register to initialize a constant";
+     }
+    else
+     {$init = $expr;
+     }
+   }
+  else
+   {$const and confess "Expression required for constant";
+   }
+
+  my $label;                                                                    # Allocate space
+     $label = $size =~ m(\A0|b\Z) ? Db(0) :
+              $size =~ m(\A1|w\Z) ? Dw(0) :
               $size =~ m(\A2|d\Z) ? Dd(0) :
               $size =~ m(\A3|q\Z) ? Dq(0) :
               $size =~ m(\A4|x\Z) ? Dq(0,0) :
               $size =~ m(\A5|y\Z) ? Dq(0,0,0,0) :
-              $size =~ m(\A6|z\Z) ? Dq(0,0,0,0,0,0,0,0) : undef;
+              $size =~ m(\A6|z\Z) ? Dq(0,0,0,0,0,0,0,0) : undef unless $const;
+
+     $label = $size =~ m(\A0|b\Z) ? Rb($init) :
+              $size =~ m(\A1|w\Z) ? Rw($init) :
+              $size =~ m(\A2|d\Z) ? Rd($init) :
+              $size =~ m(\A3|q\Z) ? Rq($init) :
+              $size =~ m(\A4|x\Z) ? Rq(0,0) :
+              $size =~ m(\A5|y\Z) ? Rq(0,0,0,0) :
+              $size =~ m(\A6|z\Z) ? Rq(0,0,0,0,0,0,0,0) : undef if $const;
 
   my $nSize = $size =~ tr(bwdqxyz) (0123456)r;                                  # Size of variable
 
@@ -1374,7 +1396,7 @@ sub Variable($$;$%)                                                             
      {$const and confess "Cannot use a register to initialize a constant";
       Mov $t, $expr;
      }
-    else
+    elsif (!$const)
      {PushR r15;
       Mov r15, $expr;
       Mov $t, r15b        if $nSize == 0;
@@ -1509,17 +1531,32 @@ sub Nasm::X86::Variable::copy($$)                                               
   my $r = $right->address;
 
   if ($left->size == 3 and $right->size == 3)
-   {Comment "Copy parameter ".$right->name.' to '.$left->name;
+   {my $lr = $left ->reference;
+    my $rr = $right->reference;
+    Comment "Copy ".$right->name.' to '.$left->name;
     PushR my @save = (r15);
     Mov r15, $r;
-    Mov $l, r15;
+    if ($rr)
+     {KeepFree r15;
+      Mov r15, "[r15]";
+     }
+    if (!$lr)
+     {Mov $l, r15;
+     }
+    else
+     {Comment "Copy ".$right->name.' to '.$left->name;
+      PushR my @save2 = (r14);
+      Mov r14, $l;
+      Mov "[r14]", r15;
+      PopR @save2;
+     }
     PopR @save;
     return;
    }
 
   confess "Need more code";
  }
-
+# Almost certainly not needed now we have copy handling references above.
 sub Nasm::X86::Variable::copyRef($$)                                            # Copy one variable into an referenced variable
  {my ($left, $right) = @_;                                                      # Left variable, right variable
 
@@ -1900,11 +1937,11 @@ sub Nasm::X86::Variable::getReg($$@)                                            
 
 sub Nasm::X86::Variable::incDec($$)                                             # Increment or decrement a variable
  {my ($left, $op) = @_;                                                         # Left variable operator, address of operator to perform inc or dec
+  $left->constant and confess "Cannot increment or decrement a constant";
   my $l = $left->address;
   if ($left->size == 3)
    {if ($left->reference)
      {PushR my @save = (r14, r15);
-lll "IDIDIDID", dump($left);
       Mov r15, $l;
       KeepFree r15;
       Mov r14, "[r15]";
@@ -4924,8 +4961,8 @@ sub Nasm::X86::BlockMultiWayTree::leftOrRightMost($$@)                          
    {my ($p) = @_;                                                               # Parameters
 
     my $B = $$p{bs};                                                            # Byte string
-    my $F = $$p{node};                                                          # Staring keys blockFirst keys block
-
+    my $F = $$p{node};                                                          # Starting keys blockFirst keys block
+$F->errNL("FFFFF");
     PushR my @save = (rax, zmm31);
     ForEver
      {PrintErrStringNL "LLLLL 1111";
@@ -4944,6 +4981,7 @@ sub Nasm::X86::BlockMultiWayTree::leftOrRightMost($$@)                          
       If ($n == 0, sub                                                          # Reached the end so return the containing block
        {$$p{offset}->copy($F);
       PrintErrStringNL "LLLLL 6666";
+      $F->errNL;
         Jmp $success;
        });
       PrintErrStringNL "LLLLL 7777";
@@ -5064,8 +5102,11 @@ sub Nasm::X86::BlockMultiWayTree::Iterator::next($)                             
      {my ($node, $pos) = @_;                                                    # Parameters
       PushR my @save = (zmm31, zmm30,  zmm29);
       $$p{node}->copy($node);                                                   # Set current node
-      $$p{pos}  = $pos;                                                         # Set current position in node
+      $$p{pos} ->copy($pos);                                                    # Set current position in node
+PrintErrStringNL "DDDD 11111";
+$node->errNL;
       $iter->tree->getKeysData($node, 31, 30);                                  # Load keys and data
+PrintErrStringNL "DDDD 2222";
 
       my $offset = $pos * $iter->tree->width;                                   # Load key and data
       $$p{key}   = getDFromZmmAsVariable(31, $offset);
@@ -5091,10 +5132,12 @@ PrintErrStringNL "CCCC2222";
       $t->getKeysData($C, 31, 30);                                              # Load keys and data
       my $nodes = $t->getLoop(30);                                              # Nodes
 $nodes->errNL('CCCC3333');
+$C->errNL;
       If ($nodes, sub                                                           # Go left if there are child nodes
        {$t->leftMost($t->address, $C, my $l = Vq(offset));
 $nodes->errNL('CCCC44444');
         &$new($l, Cq(zero, 0));
+$nodes->errNL('CCCC44444-2222');
        },
       sub
        {my $l = $t->getBlockLength(31);                                         # Number of keys
@@ -5156,8 +5199,9 @@ $$p{pos}->errNL;
 $i->errNL;
     PushR my @save = (zmm31, zmm30,  zmm29);
     $iter->tree->getKeysData($C, 31, 30);                                       # Load keys and data
+PrintErrRegisterInHex zmm31, zmm30;
     my $l = $iter->tree->getBlockLength(31);                                    # Length of keys
-    my $n = $iter->tree->getUpFromData (30);                                    # Parent
+    my $n = $iter->tree->getLoop (30);                                    # Parent
 
 PrintErrStringNL "AAAAAAAAA";
 $$p{pos}->errNL;
@@ -5194,9 +5238,7 @@ PrintErrStringNL "CCCC9999";
            $iter->data, $iter->count, $iter->more);
 
 PrintErrStringNL "CCCCAAAA";
-lll "AAAA", dump($iter->pos); exit;
 $iter->pos->errNL("pppp");
-Exit(0);
   $iter                                                                         # Return the iterator
  }
 
@@ -14368,7 +14410,7 @@ if (1) {                                                                        
 END
  }
 
-latest:
+#latest:
 if (1) {                                                                        #TNasm::X86::ByteString::chain
   my $format = Rd(map{4*$_+24} 0..64);
 
@@ -14395,25 +14437,23 @@ if (1) {                                                                        
       sub {PrintOutStringNL "D is minus one"},
       sub {PrintOutStringNL "D is NOT minus one"},
      );
+
     $$p{e} += 1;
     $$p{e}->outNL('E: ');
 
-lll "FFFF1111", dump($$p{f});
+    $$p{f}->outNL('F1: ');
     $$p{f}++;
-lll "FFFF2222", dump($$p{f});
-    $$p{f}->outNL('F: ');
+    $$p{f}->outNL('F2: ');
 
    } name=> 'aaa', in => {c => 3}, io => {d => 3, e => 3, f => 3};
 
-  my $c = Cq(d, -1);
+  my $c = Cq(c, -1);
   my $d = Cq(d, -1);
-  my $e = Cq(e,  1);
-  my $f = Cq(f,  2);
-lll "ffff3333", dump($F);
-
-   $f = $f + 1; $f->outNL;
+  my $e = Vq(e,  1);
+  my $f = Vq(f,  2);
 
   $sub->call($c, $d, $e, $f);
+  $f->outNL('F3: ');
 
   ok Assemble(debug => 1, eq => <<END);
 chain1: 0000 0000 0000 001C
@@ -14430,9 +14470,10 @@ Byte String
 C is minus one
 D is minus one
 E: 0000 0000 0000 0002
-F: 0000 0000 0000 0003
+F1: 0000 0000 0000 0002
+F2: 0000 0000 0000 0003
+F3: 0000 0000 0000 0003
 END
-exit;
  }
 
 #latest:
