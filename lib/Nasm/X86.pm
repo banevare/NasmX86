@@ -5207,180 +5207,6 @@ sub Nasm::X86::BlockMultiWayTree::by($&)                                        
   SetLabel $end;                                                                # End of the loop
  }
 
-sub Nasm::X86::BlockMultiWayTree::pop($@)                                       # Pop an element from an array
- {my ($blockArray, @variables) = @_;                                            # Block array descriptor, variables
-  @_ >= 2 or confess;
-  my $b = $blockArray->bs;                                                      # Underlying byte string
-  my $W = RegisterSize zmm0;                                                    # The size of a block
-  my $w = $blockArray->width;                                                   # The size of an entry in a block
-  my $n = $blockArray->slots1;                                                  # The number of slots per block
-  my $N = $blockArray->slots2;                                                  # The number of slots per block
-
-  my $s = Subroutine
-   {my ($p) = @_;                                                               # Parameters
-    my $success = Label;                                                        # Short circuit if ladders by jumping directly to the end after a successful push
-
-    my $B = $$p{bs};                                                            # Byte string
-    my $F = $$p{first};                                                         # First block
-    my $E = $$p{element};                                                       # The element being popped
-
-    PushR my @save = (zmm31);
-    $b->getBlock($B, $F, 31);                                                   # Get the first block
-    my $size = getDFromZmmAsVariable(31, 0);                                    # Size of array
-
-    If ($size > 0, sub                                                          # Array has elements
-     {If ($size <= $n, sub                                                      # In the first block
-       {$E       ->getDFromZmm(31, $size * $w);                                 # Get element
-        ($size-1)->putDIntoZmm(31, 0);                                          # Update size
-        $b       ->putBlock($B, $F, 31);                                        # Put the first block back into memory
-        Jmp $success;                                                           # Element successfully retrieved from secondary block
-       });
-
-      If ($size == $N, sub                                                      # Migrate the second block to the first block now that the last slot is empty
-       {PushR my @save = (rax, k7, zmm30);
-        my $S = getDFromZmmAsVariable(31, $w);                                  # Offset of second block in first block
-        $b->getBlock($B, $S, 30);                                               # Get the second block
-        $E->getDFromZmm(30, $n * $w);                                           # Get element from second block
-        Mov rax, -2;                                                            # Load expansion mask
-        Kmovq k7, rax;                                                          # Set  expansion mask
-        Vpexpandd "zmm31{k7}{z}", zmm30;                                        # Expand second block into first block
-        ($size-1)->putDIntoZmm(31, 0);                                          # Save new size in first block
-        $b  -> putBlock($B, $F, 31);                                            # Save the first block
-        $b  ->freeBlock($B, offset=>$S);                                        # Free the now redundant second block
-        PopR @save;
-        Jmp $success;                                                           # Element successfully retrieved from secondary block
-       });
-
-      If ($size <= $N * ($N - 1), sub                                           # Still within two levels
-       {If ($size % $N == 1, sub                                                # Secondary block can be freed
-         {PushR my @save = (rax, zmm30);
-          my $S = getDFromZmmAsVariable(31, ($size / $N + 1) * $w);             # Address secondary block from first block
-          $b       ->getBlock($B, $S, 30);                                      # Load secondary block
-          $E->getDFromZmm(30, 0);                                               # Get first element from secondary block
-          Vq(zero, 0)->putDIntoZmm(31, ($size / $N + 1) * $w);                  # Zero at offset of secondary block in first block
-          ($size-1)->putDIntoZmm(31, 0);                                        # Save new size in first block
-          $b       ->freeBlock($B, offset=>$S);                                 # Free the secondary block
-          $b       ->putBlock ($B, $F, 31);                                     # Put the first  block back into memory
-          PopR @save;
-          Jmp $success;                                                         # Element successfully retrieved from secondary block
-         });
-
-        if (1)                                                                  # Continue with existing secondary block
-         {PushR my @save = (rax, r14, zmm30);
-          my $S = getDFromZmmAsVariable(31, (($size-1) / $N + 1) * $w);             # Offset of secondary block in first block
-          $b       ->getBlock($B, $S, 30);                                      # Get the secondary block
-          $E       ->getDFromZmm(30, (($size - 1)  % $N) * $w);             # Get element from secondary block
-          ($size-1)->putDIntoZmm(31, 0);                                        # Save new size in first block
-          $b       ->putBlock($B, $S, 30);                                      # Put the secondary block back into memory
-          $b       ->putBlock($B, $F, 31);                                      # Put the first  block back into memory
-          PopR @save;
-          Jmp $success;                                                         # Element successfully retrieved from secondary block
-         }
-       });
-     });
-
-    SetLabel $success;
-    PopR @save;
-   }  in => {bs => 3, first => 3}, out => {element => 3};
-
-  $s->call($blockArray->address, $blockArray->first, @variables);
- }
-
-sub Nasm::X86::BlockMultiWayTree::get($@)                                              # Get an element from the array
- {my ($blockArray, @variables) = @_;                                            # Block array descriptor, variables
-  @_ >= 3 or confess;
-  my $b = $blockArray->bs;                                                      # Underlying byte string
-  my $W = RegisterSize zmm0;                                                    # The size of a block
-  my $w = $blockArray->width;                                                   # The size of an entry in a block
-  my $n = $blockArray->slots1;                                                  # The number of slots in the first block
-  my $N = $blockArray->slots2;                                                  # The number of slots in the secondary blocks
-
-  my $s = Subroutine
-   {my ($p) = @_;                                                               # Parameters
-    my $success = Label;                                                        # Short circuit if ladders by jumping directly to the end after a successful push
-
-    my $B = $$p{bs};                                                            # Byte string
-    my $F = $$p{first};                                                         # First block
-    my $E = $$p{element};                                                       # The element to be returned
-    my $I = $$p{index};                                                         # Index of the element to be returned
-
-    PushR my @save = (zmm31);
-    $b->getBlock($B, $F, 31);                                                   # Get the first block
-    my $size = getDFromZmmAsVariable(31, 0);                                    # Size of array
-
-    If ($I < $size, sub                                                         # Index is in array
-     {If ($size <= $n, sub                                                      # Element is in the first block
-       {$E->getDFromZmm(31, ($I + 1) * $w);                                     # Get element
-        Jmp $success;                                                           # Element successfully inserted in first block
-       });
-
-      If ($size <= $N * ($N - 1), sub                                           # Still within two levels
-       {my $S = getDFromZmmAsVariable(31, ($I / $N + 1) * $w);                  # Offset of second block in first block
-        $b->getBlock($B, $S, 31);                                               # Get the second block
-        $E->getDFromZmm(31, ($I % $N) * $w);                                    # Offset of element in second block
-        Jmp $success;                                                           # Element successfully inserted in second block
-       });
-     });
-
-    PrintErrString "Index out of bounds on get from array, ";                   # Array index out of bounds
-    $I->err("Index: "); PrintErrString "  "; $size->errNL("Size: ");
-    Exit(1);
-
-    SetLabel $success;
-    PopR @save;
-   }  in => {bs => 3, first => 3, index => 3}, out => {element => 3};
-
-  $s->call($blockArray->address, $blockArray->first, @variables);
- }
-
-sub Nasm::X86::BlockMultiWayTree::put($@)                                              # Put an element into an array as long as it is with in its limits established by pushing.
- {my ($blockArray, @variables) = @_;                                            # Block array descriptor, variables
-  @_ >= 3 or confess;
-  my $b = $blockArray->bs;                                                      # Underlying byte string
-  my $W = RegisterSize zmm0;                                                    # The size of a block
-  my $w = $blockArray->width;                                                   # The size of an entry in a block
-  my $n = $blockArray->slots1;                                                  # The number of slots in the first block
-  my $N = $blockArray->slots2;                                                  # The number of slots in the secondary blocks
-
-  my $s = Subroutine
-   {my ($p) = @_;                                                               # Parameters
-    my $success = Label;                                                        # Short circuit if ladders by jumping directly to the end after a successful push
-
-    my $B = $$p{bs};                                                            # Byte string
-    my $F = $$p{first};                                                         # First block
-    my $E = $$p{element};                                                       # The element to be added
-    my $I = $$p{index};                                                         # Index of the element to be inserted
-
-    PushR my @save = (zmm31);
-    $b->getBlock($B, $F, 31);                                                   # Get the first block
-    my $size = getDFromZmmAsVariable(31, 0);                                    # Size of array
-    If ($I < $size, sub                                                         # Index is in array
-     {If ($size <= $n, sub                                                      # Element is in the first block
-       {$E->putDIntoZmm(31, ($I + 1) * $w);                                     # Put element
-        $b->putBlock($B, $F, 31);                                               # Get the first block
-        Jmp $success;                                                           # Element successfully inserted in first block
-       });
-
-      If ($size <= $N * ($N - 1), sub                                           # Still within two levels
-       {my $S = getDFromZmmAsVariable(31, ($I / $N + 1) * $w);                  # Offset of second block in first block
-        $b->getBlock($B, $S, 31);                                               # Get the second block
-        $E->putDIntoZmm(31, ($I % $N) * $w);                                    # Put the element into the second block in first block
-        $b->putBlock($B, $S, 31);                                               # Get the first block
-        Jmp $success;                                                           # Element successfully inserted in second block
-       });
-     });
-
-    PrintErrString "Index out of bounds on put to array, ";                     # Array index out of bounds
-    $I->err("Index: "); PrintErrString "  "; $size->errNL("Size: ");
-    Exit(1);
-
-    SetLabel $success;
-    PopR @save;
-   }  in => {bs => 3, first => 3, index => 3, element => 3};
-
-  $s->call($blockArray->address, $blockArray->first, @variables);
- }
-
 #D1 Assemble                                                                    # Assemble generated code
 
 sub CallC($@)                                                                   # Call a C subroutine
@@ -14479,7 +14305,7 @@ aaaa: 89AB CDEF 0123 4567
 END
  }
 
-latest:
+#latest:
 if (1) {                                                                        #TNasm::X86::ByteString::CreateBlockMultiWayTree
   my $b = CreateByteString;
   my $t = $b->CreateBlockMultiWayTree;
@@ -14582,6 +14408,41 @@ key: 0000 0000 0000 BFFB data: 0000 0000 0000 B77B
 key: 0000 0000 0000 CFFC data: 0000 0000 0000 C77C
 key: 0000 0000 0000 DFFD data: 0000 0000 0000 D77D
 key: 0000 0000 0000 EFFE data: 0000 0000 0000 E77E
+END
+ }
+
+latest:
+if (1) {
+  my $b = CreateByteString;
+  my $t = $b->CreateBlockMultiWayTree;
+
+  Vq(count, 15)->for(sub
+   {my ($index, $start, $next, $end) = @_;
+    my $k = $index; my $d = $k + 0x100;
+    $t->insert(key=>$k, data=>$d);
+   });
+
+  $t->by(sub
+   {my ($iter, $end) = @_;
+    $iter->key ->out('key: ');
+    $iter->data->outNL(' data: ');
+   });
+
+  ok Assemble(debug => 1, eq => <<END);
+key: 0000 0000 0000 0000 data: 0000 0000 0000 0100
+key: 0000 0000 0000 0001 data: 0000 0000 0000 0101
+key: 0000 0000 0000 0002 data: 0000 0000 0000 0102
+key: 0000 0000 0000 0003 data: 0000 0000 0000 0103
+key: 0000 0000 0000 0004 data: 0000 0000 0000 0104
+key: 0000 0000 0000 0005 data: 0000 0000 0000 0105
+key: 0000 0000 0000 0006 data: 0000 0000 0000 0106
+key: 0000 0000 0000 0007 data: 0000 0000 0000 0107
+key: 0000 0000 0000 0008 data: 0000 0000 0000 0108
+key: 0000 0000 0000 0009 data: 0000 0000 0000 0109
+key: 0000 0000 0000 000A data: 0000 0000 0000 010A
+key: 0000 0000 0000 000B data: 0000 0000 0000 010B
+key: 0000 0000 0000 000C data: 0000 0000 0000 010C
+key: 0000 0000 0000 000D data: 0000 0000 0000 010D
 END
  }
 
