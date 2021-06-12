@@ -4971,35 +4971,22 @@ sub Nasm::X86::BlockMultiWayTree::leftOrRightMost($$@)                          
 
     my $B = $$p{bs};                                                            # Byte string
     my $F = $$p{node};                                                          # Starting keys blockFirst keys block
-$F->errNL("FFFFF");
     PushR my @save = (rax, zmm29, zmm30, zmm31);
     ForEver
-     {PrintErrStringNL "LLLLL 1111";
-      $B->errNL("bs: ");
-      $F->errNL("F: ");
-      $bmt->getKeysData($F, 31, 30);                                           # Get the first keys block
-      PrintErrStringNL "LLLLL 4444";
+     {$bmt->getKeysData($F, 31, 30);                                            # Get the first keys block
       my $n = $bmt->getLoop(30);                                                # Get the node block offset from the data block loop
-      PrintErrStringNL "LLLLL 5555";
       If ($n == 0, sub                                                          # Reached the end so return the containing block
        {$$p{offset}->copy($F);
-      PrintErrStringNL "LLLLL 6666";
-      $F->errNL;
         Jmp $success;
        });
-      PrintErrStringNL "LLLLL 7777";
       $b->getBlock($B, $n, 29);                                                 # Get the node block
-PrintErrRegisterInHex zmm29;
-      PrintErrStringNL "LLLLL 8888";
       if ($dir == 0)                                                            # Left most
-       {my $l = getDFromXmmAsVariable(29, 0);                                   # Get the left most node
+       {my $l = getDFromZmmAsVariable(29, 0);                                   # Get the left most node
         $F->copy($l);                                                           # Continue with the next level
-        PrintErrStringNL "LLLLL 9999";
-        $F->errNL;
        }
       else                                                                      # Right most
        {my $l = $bmt->getBlockLength(31);                                       # Length of the node
-        my $r = getDFromXmmAsVariable(31, $l);                                  # Get the right most child
+        my $r = getDFromZmmAsVariable(31, $l);                                  # Get the right most child
         $F->copy($r);                                                           # Continue with the next level
        }
      };
@@ -5108,16 +5095,11 @@ sub Nasm::X86::BlockMultiWayTree::Iterator::next($)                             
       PushR my @save = (zmm31, zmm30,  zmm29);
       $$p{node}->copy($node);                                                   # Set current node
       $$p{pos} ->copy($pos);                                                    # Set current position in node
-PrintErrStringNL "DDDD11111";
-$node->errNL;
       $iter->tree->getKeysData($node, 31, 30);                                  # Load keys and data
-PrintErrStringNL "DDDD2222";
 
       my $offset = $pos * $iter->tree->width;                                   # Load key and data
       $$p{key} ->copy(getDFromZmmAsVariable(31, $offset));
       $$p{data}->copy(getDFromZmmAsVariable(30, $offset));
-$$p{key}->errNL('Key: ');
-$$p{data}->errNL('Data: ');
       PopR @save;
      };
 
@@ -5127,41 +5109,26 @@ $$p{data}->errNL('Data: ');
       $$p{more}->getReg(rax);
       PopR rax;
       };
-PrintErrStringNL "CCCC0000";
-$$p{pos}->errNL('POS: ');
 
     If ($$p{pos} == -1,  sub                                                    # Initial descent
      {my $t = $iter->tree;
-PrintErrStringNL "CCCC1111 ";
 
       PushR my @save = (zmm31, zmm30,  zmm29);
-PrintErrStringNL "CCCC2222 ";
       $t->getKeysData($C, 31, 30);                                              # Load keys and data
       my $nodes = $t->getLoop(30);                                              # Nodes
-$nodes->errNL('CCCC3333 ');
-$C->errNL;
       If ($nodes, sub                                                           # Go left if there are child nodes
        {$t->leftMost($t->address, $C, my $l = Vq(offset));
-$nodes->errNL('CCCC44444 ');
         &$new($l, Cq(zero, 0));
-$nodes->errNL('CCCC44444-2222');
        },
       sub
        {my $l = $t->getBlockLength(31);                                         # Number of keys
-PrintErrStringNL "DDDD4444";
         If ($l, sub                                                             # Start with the current node as it is a leaf
          {&$new($C, Cq(zero, 0));
-$nodes->errNL('CCCC5555');
-$$p{pos}->errNL('POS: ');
          },
         sub
-         {
-$nodes->errNL('CCCC6666');
-           &$done;
-$nodes->errNL('CCCC7777');
+         {&$done;
          });
        });
-$nodes->errNL('CCCC8888');
       PopR @save;
       Jmp $success;                                                             # Return with iterator loaded
      });
@@ -5201,21 +5168,11 @@ $nodes->errNL('CCCC8888');
 
     my $i = ++$$p{pos};
 
-PrintErrStringNL "AAAAA";
-$$p{pos}->errNL;
-$i->errNL;
     PushR my @save = (zmm31, zmm30,  zmm29);
-    $iter->tree->getKeysData($C, 31, 30);                                       # Load keys and data
-PrintErrRegisterInHex zmm31, zmm30;
+    $iter->tree->getKeysData($C,        31, 30);                                # Load keys and data
     my $l = $iter->tree->getBlockLength(31);                                    # Length of keys
-    my $n = $iter->tree->getLoop (30);                                    # Parent
+    my $n = $iter->tree->getLoop           (30);                                # Parent
 
-PrintErrStringNL "AAAAAAAAA";
-$$p{pos}->errNL;
-$$p{node}->errNL;
-$l->errNL("lllll: ");
-$n->errNL("nnnnn: ");
-$i->errNL("iiii: ");
     If ($n == 0, sub                                                            # Leaf
      {If ($i < $l, sub
        {&$new($C, $i);
@@ -5238,13 +5195,10 @@ $i->errNL("iiii: ");
 
     PopR @save;
     SetLabel $success;
-PrintErrStringNL "CCCC9999";
    }  io => {node => 3, pos => 3, key => 3, data => 3, count => 3, more => 3};
 
   $s->call($iter->node, $iter->pos,   $iter->key,                               # Call with iterator variables
            $iter->data, $iter->count, $iter->more);
-
-PrintErrStringNL "CCCCAAAA";
 $iter->pos->errNL("pppp");
   $iter                                                                         # Return the iterator
  }
@@ -14531,7 +14485,7 @@ aaaa: 89AB CDEF 0123 4567
 END
  }
 
-#latest:
+latest:
 if (1) {                                                                        #TNasm::X86::ByteString::CreateBlockMultiWayTree
   my $b = CreateByteString;
   my $t = $b->CreateBlockMultiWayTree;
