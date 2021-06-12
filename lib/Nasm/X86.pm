@@ -4963,20 +4963,14 @@ sub Nasm::X86::BlockMultiWayTree::leftOrRightMost($$@)                          
     my $B = $$p{bs};                                                            # Byte string
     my $F = $$p{node};                                                          # Starting keys blockFirst keys block
 $F->errNL("FFFFF");
-    PushR my @save = (rax, zmm31);
+    PushR my @save = (rax, zmm29, zmm30, zmm31);
     ForEver
      {PrintErrStringNL "LLLLL 1111";
       $B->errNL("bs: ");
       $F->errNL("F: ");
-      $b->getBlock($B, $F, 31);                                                 # Get the first keys block
-      PrintErrStringNL "LLLLL 2222";
-      my $d = $bmt->getLoop(30);                                                # Get the data block offset from the key block loop
-      PrintErrStringNL "LLLLL 3333";
-      $B->errNL('LLLL3333-1111 ');
-      $d->errNL('LLLL3333-2222 ');
-      $b->getBlock($B, $d, 31);                                                 # Get the data block
+      $bmt->getKeysData($F, 31, 30);                                           # Get the first keys block
       PrintErrStringNL "LLLLL 4444";
-      my $n = $bmt->getLoop(31);                                                # Get the node block offset from the data block loop
+      my $n = $bmt->getLoop(30);                                                # Get the node block offset from the data block loop
       PrintErrStringNL "LLLLL 5555";
       If ($n == 0, sub                                                          # Reached the end so return the containing block
        {$$p{offset}->copy($F);
@@ -4985,11 +4979,14 @@ $F->errNL("FFFFF");
         Jmp $success;
        });
       PrintErrStringNL "LLLLL 7777";
-      $b->getBlock($B, $n, 31);                                                 # Get the node block
+      $b->getBlock($B, $n, 29);                                                 # Get the node block
+PrintErrRegisterInHex zmm29;
       PrintErrStringNL "LLLLL 8888";
       if ($dir == 0)                                                            # Left most
-       {my $l = getDFromXmmAsVariable(31, 0);                                   # Get the left most node
+       {my $l = getDFromXmmAsVariable(29, 0);                                   # Get the left most node
         $F->copy($l);                                                           # Continue with the next level
+        PrintErrStringNL "LLLLL 9999";
+        $F->errNL;
        }
       else                                                                      # Right most
        {my $l = $bmt->getBlockLength(31);                                       # Length of the node
@@ -5103,14 +5100,16 @@ sub Nasm::X86::BlockMultiWayTree::Iterator::next($)                             
       PushR my @save = (zmm31, zmm30,  zmm29);
       $$p{node}->copy($node);                                                   # Set current node
       $$p{pos} ->copy($pos);                                                    # Set current position in node
-PrintErrStringNL "DDDD 11111";
+PrintErrStringNL "DDDD11111";
 $node->errNL;
       $iter->tree->getKeysData($node, 31, 30);                                  # Load keys and data
-PrintErrStringNL "DDDD 2222";
+PrintErrStringNL "DDDD2222";
 
       my $offset = $pos * $iter->tree->width;                                   # Load key and data
-      $$p{key}   = getDFromZmmAsVariable(31, $offset);
-      $$p{data}  = getDFromZmmAsVariable(30, $offset);
+      $$p{key} ->copy(getDFromZmmAsVariable(31, $offset));
+      $$p{data}->copy(getDFromZmmAsVariable(30, $offset));
+$$p{key}->errNL('Key: ');
+$$p{data}->errNL('Data: ');
       PopR @save;
      };
 
@@ -5125,17 +5124,17 @@ $$p{pos}->errNL('POS: ');
 
     If ($$p{pos} == -1,  sub                                                    # Initial descent
      {my $t = $iter->tree;
-PrintErrStringNL "CCCC1111";
+PrintErrStringNL "CCCC1111 ";
 
       PushR my @save = (zmm31, zmm30,  zmm29);
-PrintErrStringNL "CCCC2222";
+PrintErrStringNL "CCCC2222 ";
       $t->getKeysData($C, 31, 30);                                              # Load keys and data
       my $nodes = $t->getLoop(30);                                              # Nodes
-$nodes->errNL('CCCC3333');
+$nodes->errNL('CCCC3333 ');
 $C->errNL;
       If ($nodes, sub                                                           # Go left if there are child nodes
        {$t->leftMost($t->address, $C, my $l = Vq(offset));
-$nodes->errNL('CCCC44444');
+$nodes->errNL('CCCC44444 ');
         &$new($l, Cq(zero, 0));
 $nodes->errNL('CCCC44444-2222');
        },
