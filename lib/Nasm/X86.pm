@@ -1566,6 +1566,7 @@ sub Nasm::X86::Variable::clone($$)                                              
     Mov r15, $var->address;
     Mov $new->address, r15;
     PopR @save;
+    $new->reference = $var->reference;
     return $new;
    }
 
@@ -5133,8 +5134,7 @@ sub Nasm::X86::BlockMultiWayTree::Iterator::next($)                             
 
     my $up = sub                                                                # Iterate up to next node that has not been visited
      {my $top = Label;                                                          # Reached the top of the tree
-      my $n = Vq('current');
-         $n->copy($C);
+      my $n = $C->clone;
       my $zmmNK = 31; my $zmmPK = 28; my $zmmTest = 25;
       my $zmmND = 30; my $zmmPD = 27;
       my $zmmNN = 29; my $zmmPN = 26;
@@ -5146,11 +5146,11 @@ sub Nasm::X86::BlockMultiWayTree::Iterator::next($)                             
         my $p = $t->getUpFromData($zmmND);
         If ($p == 0, sub{Jmp $end});                                            # Jump to the end if we have reached the top of the tree
         $t->getKeysDataNode($p, $zmmPK, $zmmPD, $zmmPN);                        # Load keys, data and children nodes for parent which must have children
-        $n->setReg(r15);
+        $n->setReg(r15);                                                        # Offset of child
         Vpbroadcastd "zmm".$zmmTest, r15d;                                      # Current node broadcasted
         Vpcmpud k7, "zmm".$zmmPN, "zmm".$zmmTest, 0;                            # Check for equal offset - one of them will match to create the single insertion point in k6
         Kmovw r14d, k7;                                                         # Bit mask ready for count
-        Lzcnt r14, r14;                                                         # Number of leading zeros gives us the position of the child in the parent
+        Tzcnt r14, r14;                                                         # Number of leading zeros gives us the position of the child in the parent
         my $i = Vq(indexInParent, r14);                                         # Index in parent
         my $l = $t->getBlockLength($zmmPK);                                     # Length of parent
         If ($i < $l, sub                                                        # Continue with this node if all the keys have yet to be finished
@@ -5170,11 +5170,6 @@ sub Nasm::X86::BlockMultiWayTree::Iterator::next($)                             
     $iter->tree->getKeysData($C,        31, 30);                                # Load keys and data
     my $l = $iter->tree->getBlockLength(31);                                    # Length of keys
     my $n = $iter->tree->getLoop           (30);                                # Parent
-
-PrintErrStringNL "AAAAAAAAA";
-$i->errNL('i');
-$l->errNL('l');
-$n->errNL('n');
     If ($n == 0, sub                                                            # Leaf
      {If ($i < $l, sub
        {&$new($C, $i);
@@ -5184,15 +5179,10 @@ $n->errNL('n');
        });
      },
     sub                                                                         # Node
-     {If ($i < $l, sub
-       {$iter->tree->getKeysDataNode($C, 31, 30, 29);
-        my $offsetAtI = getDFromZmmAsVariable(29, $i * $iter->tree->width);
-        $iter->tree->leftMost(node=>$offsetAtI, my $l = Vq(offset));
-        &$new($l, Cq(zero, 0));
-       },
-      sub
-       {&$up;
-       });
+     {$iter->tree->getKeysDataNode($C, 31, 30, 29);
+      my $offsetAtI = getDFromZmmAsVariable(29, $i * $iter->tree->width);
+      $iter->tree->leftMost(node=>$offsetAtI, my $l = Vq(offset));
+      &$new($l, Cq(zero, 0));
      });
 
     PopR @save;
@@ -5201,7 +5191,6 @@ $n->errNL('n');
 
   $s->call($iter->node, $iter->pos,   $iter->key,                               # Call with iterator variables
            $iter->data, $iter->count, $iter->more);
-$iter->pos->errNL("pppp");
   $iter                                                                         # Return the iterator
  }
 
@@ -14490,7 +14479,7 @@ aaaa: 89AB CDEF 0123 4567
 END
  }
 
-#latest:
+latest:
 if (1) {                                                                        #TNasm::X86::ByteString::CreateBlockMultiWayTree
   my $b = CreateByteString;
   my $t = $b->CreateBlockMultiWayTree;
@@ -14586,6 +14575,13 @@ key: 0000 0000 0000 4FF4 data: 0000 0000 0000 4774
 key: 0000 0000 0000 5FF5 data: 0000 0000 0000 5775
 key: 0000 0000 0000 6FF6 data: 0000 0000 0000 6776
 key: 0000 0000 0000 7FF7 data: 0000 0000 0000 7777
+key: 0000 0000 0000 8FF8 data: 0000 0000 0000 8778
+key: 0000 0000 0000 9FF9 data: 0000 0000 0000 9779
+key: 0000 0000 0000 AFFA data: 0000 0000 0000 A77A
+key: 0000 0000 0000 BFFB data: 0000 0000 0000 B77B
+key: 0000 0000 0000 CFFC data: 0000 0000 0000 C77C
+key: 0000 0000 0000 DFFD data: 0000 0000 0000 D77D
+key: 0000 0000 0000 EFFE data: 0000 0000 0000 E77E
 END
  }
 
