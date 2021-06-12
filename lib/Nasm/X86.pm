@@ -1900,14 +1900,27 @@ sub Nasm::X86::Variable::getReg($$@)                                            
 
 sub Nasm::X86::Variable::incDec($$)                                             # Increment or decrement a variable
  {my ($left, $op) = @_;                                                         # Left variable operator, address of operator to perform inc or dec
-  my $l = $left ->address;
+  my $l = $left->address;
   if ($left->size == 3)
-   {PushR r15;
-    Mov r15, $l;
-    &$op(r15);
-    Mov $l, r15;
-    PopR r15;
-    return $left;
+   {if ($left->reference)
+     {PushR my @save = (r14, r15);
+lll "IDIDIDID", dump($left);
+      Mov r15, $l;
+      KeepFree r15;
+      Mov r14, "[r15]";
+      &$op(r14);
+      Mov "[r15]", r14;
+      PopR @save;
+      return $left;
+     }
+    else
+     {PushR r15;
+      Mov r15, $l;
+      &$op(r15);
+      Mov $l, r15;
+      PopR r15;
+      return $left;
+     }
    }
   confess "Need more code";
  }
@@ -4631,16 +4644,21 @@ sub Nasm::X86::BlockMultiWayTree::splitFullNode($$$@)                           
 
     if (1)                                                                      # Transfer data and keys to new nodes
      {LoadConstantIntoMasKRegister(k7, eval "0b".'1'x$leftLength);              # Constant mask up to the split point
-      Vmovdqu8 "zmm".$zmmLK."{k7}", "zmm".$zmmKeys;                             # Split keys left
-      Vmovdqu8 "zmm".$zmmLD."{k7}", "zmm".$zmmData;                             # Split data left
-      $bmt->setBlockLength($zmmLK, Vq(leftLength, $leftLength));                # Length of left node
+      Vmovdqu32 "zmm".$zmmLK."{k7}", "zmm".$zmmKeys;                            # Split keys left
+      Vmovdqu32 "zmm".$zmmLD."{k7}", "zmm".$zmmData;                            # Split data left
+      $bmt->setBlockLength($zmmLK, Cq(leftLength, $leftLength));                # Length of left node
       my $mr = eval "0b".('1'x$rightLength).('0'x($leftLength+1));              # Right mask
-      LoadConstantIntoMasKRegister(k7, $mr);                                    # Constant mask from one beyond split point to end of keys
-      Vmovdqu8 "zmm".$zmmRK."{k7}", "zmm".$zmmKeys;                             # Split keys right
-      Vmovdqu8 "zmm".$zmmRD."{k7}", "zmm".$zmmData;                             # Split data right
-      $bmt->setBlockLength($zmmRK, Vq(rightLength, $rightLength));              # Length of right node
-     }
+      LoadConstantIntoMasKRegister(k6, $mr);                                    # Constant mask from one beyond split point to end of keys
+      LoadConstantIntoMasKRegister(k7, eval "0b".'1'x$rightLength);             # Constant mask for compressed right keys
+      Vmovdqu32   "zmm".$zmmTest."{k6}{z}", "zmm".$zmmKeys;                     # Split keys right
+      Vpcompressd "zmm".$zmmTest."{k6}",    "zmm".$zmmTest;                     # Compress right keys right
+      Vmovdqu32   "zmm".$zmmRK.  "{k7}",    "zmm".$zmmTest;                     # Split keys right
 
+      Vmovdqu32   "zmm".$zmmTest."{k6}{z}", "zmm".$zmmData;                     # Split data right
+      Vpcompressd "zmm".$zmmTest."{k6}",    "zmm".$zmmTest;                     # Compress right keys right
+      Vmovdqu32   "zmm".$zmmRD.  "{k7}",    "zmm".$zmmTest;                     # Split data right
+      $bmt->setBlockLength($zmmRK, Cq(rightLength, $rightLength));              # Length of right node
+     }
 
     if (1)                                                                      # Reparent children of new left and right nodes
      {my $node = $bmt->getLoop($zmmData);                                       # Child nodes for this node
@@ -4713,22 +4731,28 @@ sub Nasm::X86::BlockMultiWayTree::splitFullNode($$$@)                           
       Mov rax, 1;
       Kmovq k7, rax;                                                            # Position of key, data and first node
       $k->zBroadCastD($zmmTest);                                                # Broadcast keys
-      Vmovdqu32 "zmm".$zmmKeys."{k7}", "zmm".$zmmTest;                          # Insert key
+      my $dataOffset = $bmt->getLoop($zmmKeys);                                 # Get offset of data
+      Vmovdqu32 "zmm".$zmmKeys."{k7}{z}", "zmm".$zmmTest;                       # Insert key
+      $bmt->setBlockLength($zmmKeys, Cq(one,  1));                              # Set length of root keys
+      $bmt->putLoop($dataOffset, $zmmKeys);                                     # Set offset of data
+
       $d->zBroadCastD($zmmTest);                                                # Broadcast data
-      Vmovdqu32 "zmm".$zmmData."{k7}", "zmm".$zmmTest;                          # Insert data
+      Vmovdqu32 "zmm".$zmmData."{k7}{z}", "zmm".$zmmTest;                       # Insert data
+      $bmt->setUpIntoData (Cq(zero, 0), $zmmData);                              # Root has no parent
 
       $lk->zBroadCastD($zmmTest);                                               # Broadcast left child
-      Vmovdqu32 "zmm".$zmmNode."{k7}", "zmm".$zmmTest;                          # Insert left hand child as first node
+      Vmovdqu32 "zmm".$zmmNode."{k7}{z}", "zmm".$zmmTest;                       # Insert left hand child as first node
 
       Kshiftlw k7, k7, 1;                                                       # Position of second data
       $rk->zBroadCastD($zmmTest);                                               # Broadcast right child
       Vmovdqu32 "zmm".$zmmNode."{k7}", "zmm".$zmmTest;                          # Insert right hand child as second node
 
-      my $one = Vq(one, 1);
-      $bmt->setBlockLength($zmmKeys, Vq(one,  1));                              # Set length of root keys
-      $bmt->setUpIntoData (Vq(zero, 0), $zmmData);                              # Parent has no root
       $bmt->putKeysData($lk, $zmmLK, $zmmLD);                                   # Save left  block
       $bmt->putKeysData($rk, $zmmRK, $zmmRD);                                   # Save right block
+
+      my $root = $bmt->allocBlock;
+      $bmt->putLoop($root, $zmmData);                                           # Set offset of node
+      $bmt->putKeysDataNode($root, $zmmKeys, $zmmData, $zmmNode);               # Save root
       PopR @save;
      });
 
@@ -4909,19 +4933,22 @@ sub Nasm::X86::BlockMultiWayTree::leftOrRightMost($$@)                          
       $F->errNL("F: ");
       $b->getBlock($B, $F, 31);                                                 # Get the first keys block
       PrintErrStringNL "LLLLL 2222";
-      my $d = $bmt->getLoop(31);                                                # Get the data block offset from the key block loop
+      my $d = $bmt->getLoop(30);                                                # Get the data block offset from the key block loop
       PrintErrStringNL "LLLLL 3333";
+      $B->errNL('LLLL3333-1111 ');
+      $d->errNL('LLLL3333-2222 ');
       $b->getBlock($B, $d, 31);                                                 # Get the data block
       PrintErrStringNL "LLLLL 4444";
       my $n = $bmt->getLoop(31);                                                # Get the node block offset from the data block loop
       PrintErrStringNL "LLLLL 5555";
       If ($n == 0, sub                                                          # Reached the end so return the containing block
        {$$p{offset}->copy($F);
+      PrintErrStringNL "LLLLL 6666";
         Jmp $success;
        });
-      PrintErrStringNL "LLLLL 6666";
-      $b->getBlock($B, $n, 31);                                                 # Get the node block
       PrintErrStringNL "LLLLL 7777";
+      $b->getBlock($B, $n, 31);                                                 # Get the node block
+      PrintErrStringNL "LLLLL 8888";
       if ($dir == 0)                                                            # Left most
        {my $l = getDFromXmmAsVariable(31, 0);                                   # Get the left most node
         $F->copy($l);                                                           # Continue with the next level
@@ -5052,36 +5079,39 @@ sub Nasm::X86::BlockMultiWayTree::Iterator::next($)                             
       $$p{more}->getReg(rax);
       PopR rax;
       };
-PrintErrStringNL "CCCC1112";
-$$p{pos}->errNL;
-my $eqmo = $$p{pos} == -1;
-$eqmo->errNL;
-
-    If ($eqmo,  sub                                                             # Initial descent
-     {PrintErrStringNL "CCCC22222";
-     });
+PrintErrStringNL "CCCC0000";
+$$p{pos}->errNL('POS: ');
 
     If ($$p{pos} == -1,  sub                                                    # Initial descent
      {my $t = $iter->tree;
-PrintErrStringNL "CCCC4444";
+PrintErrStringNL "CCCC1111";
+
       PushR my @save = (zmm31, zmm30,  zmm29);
-PrintErrStringNL "CCCC5555";
+PrintErrStringNL "CCCC2222";
       $t->getKeysData($C, 31, 30);                                              # Load keys and data
-      my $bl = $t->getBlockLength(30);                                          # Block length
-$bl->errNL('CCCC6666');
-      If ($t->getBlockLength(30), sub                                           # Go left if there are child nodes
+      my $nodes = $t->getLoop(30);                                              # Nodes
+$nodes->errNL('CCCC3333');
+      If ($nodes, sub                                                           # Go left if there are child nodes
        {$t->leftMost($t->address, $C, my $l = Vq(offset));
-        &$new($l, $zero);
+$nodes->errNL('CCCC44444');
+        &$new($l, Cq(zero, 0));
        },
       sub
        {my $l = $t->getBlockLength(31);                                         # Number of keys
+PrintErrStringNL "DDDD4444";
         If ($l, sub                                                             # Start with the current node as it is a leaf
-         {&$new($C, $zero);
+         {&$new($C, Cq(zero, 0));
+$nodes->errNL('CCCC5555');
+$$p{pos}->errNL('POS: ');
          },
         sub
-         {&$done;
+         {
+$nodes->errNL('CCCC6666');
+           &$done;
+$nodes->errNL('CCCC7777');
          });
        });
+$nodes->errNL('CCCC8888');
       PopR @save;
       Jmp $success;                                                             # Return with iterator loaded
      });
@@ -5157,11 +5187,16 @@ $i->errNL("iiii: ");
 
     PopR @save;
     SetLabel $success;
+PrintErrStringNL "CCCC9999";
    }  io => {node => 3, pos => 3, key => 3, data => 3, count => 3, more => 3};
 
   $s->call($iter->node, $iter->pos,   $iter->key,                               # Call with iterator variables
            $iter->data, $iter->count, $iter->more);
 
+PrintErrStringNL "CCCCAAAA";
+lll "AAAA", dump($iter->pos); exit;
+$iter->pos->errNL("pppp");
+Exit(0);
   $iter                                                                         # Return the iterator
  }
 
@@ -14333,7 +14368,7 @@ if (1) {                                                                        
 END
  }
 
-#latest:
+latest:
 if (1) {                                                                        #TNasm::X86::ByteString::chain
   my $format = Rd(map{4*$_+24} 0..64);
 
@@ -14360,11 +14395,27 @@ if (1) {                                                                        
       sub {PrintOutStringNL "D is minus one"},
       sub {PrintOutStringNL "D is NOT minus one"},
      );
-   } name=> 'aaa', in => {c => 3}, io => {d => 3};
+    $$p{e} += 1;
+    $$p{e}->outNL('E: ');
 
-  $sub->call(c=>Cq(c,-1), d=>Cq(d,-1));
+lll "FFFF1111", dump($$p{f});
+    $$p{f}++;
+lll "FFFF2222", dump($$p{f});
+    $$p{f}->outNL('F: ');
 
-  ok Assemble(eq => <<END);
+   } name=> 'aaa', in => {c => 3}, io => {d => 3, e => 3, f => 3};
+
+  my $c = Cq(d, -1);
+  my $d = Cq(d, -1);
+  my $e = Cq(e,  1);
+  my $f = Cq(f,  2);
+lll "ffff3333", dump($F);
+
+   $f = $f + 1; $f->outNL;
+
+  $sub->call($c, $d, $e, $f);
+
+  ok Assemble(debug => 1, eq => <<END);
 chain1: 0000 0000 0000 001C
 chain2: 0000 0000 0000 0020
 chain3: 0000 0000 0000 0024
@@ -14378,7 +14429,10 @@ Byte String
 00C0: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
 C is minus one
 D is minus one
+E: 0000 0000 0000 0002
+F: 0000 0000 0000 0003
 END
+exit;
  }
 
 #latest:
@@ -14429,7 +14483,7 @@ aaaa: 89AB CDEF 0123 4567
 END
  }
 
-#latest:
+latest:
 if (1) {                                                                        #TNasm::X86::ByteString::CreateBlockMultiWayTree
   my $b = CreateByteString;
   my $t = $b->CreateBlockMultiWayTree;
@@ -14481,11 +14535,11 @@ if (1) {                                                                        
 
   $b->dump(8);
 
-#  $t->by(sub
-#   {my ($iter, $end) = @_;
-#    $iter->key->out('key: ');
-#    $iter->data->outNL(' data: ');
-#   });
+  $t->by(sub
+   {my ($iter, $end) = @_;
+    $iter->key->out('key: ');
+    $iter->data->outNL(' data: ');
+   });
 
   ok Assemble(debug => 1, eq => <<END);
 LeftMost : 0000 0000 0000 0018
