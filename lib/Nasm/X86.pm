@@ -14534,14 +14534,14 @@ aaaa: 89AB CDEF 0123 4567
 END
  }
 
-#latest:
+latest:
 if (1) {
   my $b = CreateByteString;
   my $t = $b->CreateBlockMultiWayTree;
   my $d = Vq(data);
   my $f = Vq(found);
 
-  Vq(count, 15)->for(sub
+  Vq(count, 21)->for(sub
    {my ($index, $start, $next, $end) = @_;
     my $k = $index; my $d = $k + 0x100;
     $t->insert(key=>$k, data=>$d);
@@ -14559,7 +14559,7 @@ if (1) {
   $t->find(key => Vq(key, 0xffff), $d, $f);  $f->outNL('Found: ');
   $t->find(key => Vq(key, 0xd),    $d, $f);  $f->outNL('Found: ');
 
-  ok Assemble(debug => 0, eq => <<END);
+  ok Assemble(debug => 1, eq => <<END);
 key: 0000 0000 0000 0000 data: 0000 0000 0000 0100 found: 0000 0000 0000 0001 data: 0000 0000 0000 0100
 key: 0000 0000 0000 0001 data: 0000 0000 0000 0101 found: 0000 0000 0000 0001 data: 0000 0000 0000 0101
 key: 0000 0000 0000 0002 data: 0000 0000 0000 0102 found: 0000 0000 0000 0001 data: 0000 0000 0000 0102
@@ -14575,6 +14575,12 @@ key: 0000 0000 0000 000B data: 0000 0000 0000 010B found: 0000 0000 0000 0001 da
 key: 0000 0000 0000 000C data: 0000 0000 0000 010C found: 0000 0000 0000 0001 data: 0000 0000 0000 010C
 key: 0000 0000 0000 000D data: 0000 0000 0000 010D found: 0000 0000 0000 0001 data: 0000 0000 0000 010D
 key: 0000 0000 0000 000E data: 0000 0000 0000 010E found: 0000 0000 0000 0001 data: 0000 0000 0000 010E
+key: 0000 0000 0000 000F data: 0000 0000 0000 010F found: 0000 0000 0000 0001 data: 0000 0000 0000 010F
+key: 0000 0000 0000 0010 data: 0000 0000 0000 0110 found: 0000 0000 0000 0001 data: 0000 0000 0000 0110
+key: 0000 0000 0000 0011 data: 0000 0000 0000 0111 found: 0000 0000 0000 0001 data: 0000 0000 0000 0111
+key: 0000 0000 0000 0012 data: 0000 0000 0000 0112 found: 0000 0000 0000 0001 data: 0000 0000 0000 0112
+key: 0000 0000 0000 0013 data: 0000 0000 0000 0113 found: 0000 0000 0000 0001 data: 0000 0000 0000 0113
+key: 0000 0000 0000 0014 data: 0000 0000 0000 0114 found: 0000 0000 0000 0001 data: 0000 0000 0000 0114
 Found: 0000 0000 0000 0000
 Found: 0000 0000 0000 0001
 END
