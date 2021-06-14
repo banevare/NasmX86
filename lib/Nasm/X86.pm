@@ -4702,10 +4702,8 @@ sub Nasm::X86::BlockMultiWayTree::splitFullNode($$$@)                           
                     $zmmPK, $zmmPD, $zmmPN);
 
     If ($bmt->getBlockLength($zmmKeys) != $bmt->maxKeys, sub                    # Only split full blocks
-     {$$parameters{split}->copy(Cq(zero, 0));                                   # Show that we did not split the block
-      Jmp $success;
+     {Jmp $success;
      });
-    $$parameters{split}->copy(Cq(one, 1));                                      # We are going to split the block
 
     my $lk = $bmt->allocBlock;                                                  # New left keys
     my $ld = $bmt->allocBlock;                                                  # New left data
@@ -4840,7 +4838,7 @@ sub Nasm::X86::BlockMultiWayTree::splitFullNode($$$@)                           
 
     SetLabel $success;                                                          # Insert completed successfully
     PopR @save;
-   }  in => {bs => 3, node => 3}, out => {split => 3};
+   }  in => {bs => 3, node => 3};
 
   $s->call($bmt->address, node => $bmt->first, @variables);
  } # splitFullNode
@@ -4916,7 +4914,7 @@ sub Nasm::X86::BlockMultiWayTree::findAndSplit($@)                              
        {$bmt->getNode($node, $zmmNode);
        });
 
-      $bmt->splitFullNode($zmmKeys, $zmmData, $zmmNode, my $split=Vq('split')); # Split full node
+      $bmt->splitFullNode($zmmKeys, $zmmData, $zmmNode);                        # Split full node
 
       my $l = $bmt->getBlockLength($zmmKeys);                                   # Length of the block
       $l->setMaskFirst($lengthMask);                                            # Set the length mask
@@ -5139,7 +5137,7 @@ sub Nasm::X86::BlockMultiWayTree::insert($@)                                    
       Vpbroadcastd "zmm30{k7}", r14d;                                           # Load data
       $bmt->setBlockLength(31, $length + 1);                                    # Set the new length of the block
       $bmt->putKeysData($offset, 31, 30);                                       # Rewrite data and keys
-      $bmt->splitFullNode(31, 30, 29, my $split = Vq('split'));                 # Split if the leaf has got too big
+      $bmt->splitFullNode(31, 30, 29);                                          # Split if the leaf has got too big
      });
 
     SetLabel $success;                                                          # Insert completed successfully
@@ -12256,7 +12254,7 @@ Test::More->builder->output("/dev/null") if $localTest;                         
 
 if ($^O =~ m(bsd|linux|cygwin)i)                                                # Supported systems
  {if (confirmHasCommandLineCommand(q(nasm)) and LocateIntelEmulator)            # Network assembler and Intel Software Development emulator
-   {plan tests => 115;
+   {plan tests => 114;
    }
   else
    {plan skip_all => qq(Nasm or Intel 64 emulator not available);
@@ -14466,7 +14464,7 @@ if (1) {                                                                        
   $sub->call($c, $d, $e, $f);
   $f->outNL('F3: ');
 
-  ok Assemble(debug => 1, eq => <<END);
+  ok Assemble(debug => 0, eq => <<END);
 chain1: 0000 0000 0000 001C
 chain2: 0000 0000 0000 0020
 chain3: 0000 0000 0000 0024
@@ -14537,112 +14535,6 @@ END
  }
 
 #latest:
-if (1) {                                                                        #TNasm::X86::ByteString::CreateBlockMultiWayTree
-  my $b = CreateByteString;
-  my $t = $b->CreateBlockMultiWayTree;
-
-  $t->leftMost(node => $t->first, my $l = Vq(offset));
-  $l->outNL('LeftMost : ');
-
-  $t->rightMost(node => $t->first, my $r = Vq(offset));
-  $r->outNL('RightMost: ');
-
-  $t->bs->getBlock($t->address, $t->first, 31);
-  $t->full(31)   ->outNL('Full     : ');
-  $t->half(31)   ->outNL('Half     : ');
-  $t->getLoop(31)->outNL('Loop     : ');
-
-  $t->insert(Vq(key, 0xbFFb), Vq(data, 0xb77b));  $b->chain($t->first, 56)->outNL('Length: ');
-  $t->insert(Vq(key, 0x6FF6), Vq(data, 0x6776));  $b->chain($t->first, 56)->outNL('Length: ');
-  $t->insert(Vq(key, 0xaFFa), Vq(data, 0xa77a));  $b->chain($t->first, 56)->outNL('Length: ');
-  $t->insert(Vq(key, 0x3FF3), Vq(data, 0x3773));  $b->chain($t->first, 56)->outNL('Length: ');
-  $t->insert(Vq(key, 0xcFFc), Vq(data, 0xc77c));  $b->chain($t->first, 56)->outNL('Length: ');
-  $t->insert(Vq(key, 0x4FF4), Vq(data, 0x4774));  $b->chain($t->first, 56)->outNL('Length: ');
-  $t->insert(Vq(key, 0x5FF5), Vq(data, 0x5775));  $b->chain($t->first, 56)->outNL('Length: ');
-  $t->insert(Vq(key, 0xeFFe), Vq(data, 0xe77e));  $b->chain($t->first, 56)->outNL('Length: ');
-  $t->insert(Vq(key, 0x2FF2), Vq(data, 0x2772));  $b->chain($t->first, 56)->outNL('Length: ');
-  $t->insert(Vq(key, 0x7FF7), Vq(data, 0x7777));  $b->chain($t->first, 56)->outNL('Length: ');
-  $t->insert(Vq(key, 0xdFFd), Vq(data, 0xd77d));  $b->chain($t->first, 56)->outNL('Length: ');
-  $t->insert(Vq(key, 0x8FF8), Vq(data, 0x8778));  $b->chain($t->first, 56)->outNL('Length: ');
-  $t->insert(Vq(key, 0x1FF1), Vq(data, 0x1771));  $b->chain($t->first, 56)->outNL('Length: ');
-  $t->insert(Vq(key, 0x9FF9), Vq(data, 0x9779));  $b->chain($t->first, 56)->outNL('Length: ');
-
-  $t->getKeysData($t->first, 31, 30);
-  $t->splitFullNode(31, 30, 29);
-  $t->putKeysDataNode($t->first, 31, 30, 29);
-
-  $t->insert(Vq(key, 0x1EE1), Vq(data, 0x1661));
-  $t->insert(Vq(key, 0x2EE2), Vq(data, 0x2662));
-  $t->insert(Vq(key, 0x3EE3), Vq(data, 0x3663));
-  $t->insert(Vq(key, 0x4EE4), Vq(data, 0x4664));
-  $t->insert(Vq(key, 0x5EE5), Vq(data, 0x5665));
-  $t->insert(Vq(key, 0x6EE6), Vq(data, 0x6666));
-  $t->insert(Vq(key, 0x7EE7), Vq(data, 0x7667));
-  $t->insert(Vq(key, 0x8EE8), Vq(data, 0x8668));
-  $t->insert(Vq(key, 0x9EE9), Vq(data, 0x9669));
-  $t->insert(Vq(key, 0xaEEa), Vq(data, 0xa66a));
-  $t->insert(Vq(key, 0xbEEb), Vq(data, 0xb66b));
-  $t->insert(Vq(key, 0xcEEc), Vq(data, 0xc66c));
-  $t->insert(Vq(key, 0xdEEd), Vq(data, 0xd66d));
-  $t->insert(Vq(key, 0xeEEe), Vq(data, 0xe66e));
-
-  $b->dump(8);
-
-  $t->by(sub
-   {my ($iter, $end) = @_;
-    $iter->key->out('key: ');
-    $iter->data->outNL(' data: ');
-   });
-
-  ok Assemble(debug => 1, eq => <<END);
-LeftMost : 0000 0000 0000 0018
-RightMost: 0000 0000 0000 0018
-Full     : 0000 0000 0000 0000
-Half     : 0000 0000 0000 0000
-Loop     : 0000 0000 0000 0058
-Length: 0000 0000 0000 0001
-Length: 0000 0000 0000 0002
-Length: 0000 0000 0000 0003
-Length: 0000 0000 0000 0004
-Length: 0000 0000 0000 0005
-Length: 0000 0000 0000 0006
-Length: 0000 0000 0000 0007
-Length: 0000 0000 0000 0008
-Length: 0000 0000 0000 0009
-Length: 0000 0000 0000 000A
-Length: 0000 0000 0000 000B
-Length: 0000 0000 0000 000C
-Length: 0000 0000 0000 000D
-Length: 0000 0000 0000 000E
-Byte String
-  Size: 0000 0000 0000 1000
-  Used: 0000 0000 0000 0218
-0000: 0010 0000 0000 00001802 0000 0000 00000000 0000 0000 0000F88F 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
-0040: 0000 0000 0000 00000000 0000 0000 00000100 0000 5800 00007887 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
-0080: 0000 0000 0000 00000000 0000 0000 00000000 0000 D801 0000F11F 0000 F22F 0000F33F 0000 F44F 0000F55F 0000 F66F 0000F77F 0000 0000 00000000 0000 0000 0000
-00C0: 0000 0000 0000 00000000 0000 0000 00000700 0000 D800 00007117 0000 7227 00007337 0000 7447 00007557 0000 7667 00007777 0000 0000 00000000 0000 0000 0000
-0100: 0000 0000 0000 00000000 0000 0000 00001800 0000 0000 0000F99F 0000 FAAF 0000FBBF 0000 FCCF 0000FDDF 0000 FEEF 00000000 0000 0000 00000000 0000 0000 0000
-0140: 0000 0000 0000 00000000 0000 0000 00000600 0000 5801 00007997 0000 7AA7 00007BB7 0000 7CC7 00007DD7 0000 7EE7 00000000 0000 0000 00000000 0000 0000 0000
-0180: 0000 0000 0000 00000000 0000 0000 00001800 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
-01C0: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00009800 0000 1801 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
-key: 0000 0000 0000 1FF1 data: 0000 0000 0000 1771
-key: 0000 0000 0000 2FF2 data: 0000 0000 0000 2772
-key: 0000 0000 0000 3FF3 data: 0000 0000 0000 3773
-key: 0000 0000 0000 4FF4 data: 0000 0000 0000 4774
-key: 0000 0000 0000 5FF5 data: 0000 0000 0000 5775
-key: 0000 0000 0000 6FF6 data: 0000 0000 0000 6776
-key: 0000 0000 0000 7FF7 data: 0000 0000 0000 7777
-key: 0000 0000 0000 8FF8 data: 0000 0000 0000 8778
-key: 0000 0000 0000 9FF9 data: 0000 0000 0000 9779
-key: 0000 0000 0000 AFFA data: 0000 0000 0000 A77A
-key: 0000 0000 0000 BFFB data: 0000 0000 0000 B77B
-key: 0000 0000 0000 CFFC data: 0000 0000 0000 C77C
-key: 0000 0000 0000 DFFD data: 0000 0000 0000 D77D
-key: 0000 0000 0000 EFFE data: 0000 0000 0000 E77E
-END
- }
-
-latest:
 if (1) {
   my $b = CreateByteString;
   my $t = $b->CreateBlockMultiWayTree;
