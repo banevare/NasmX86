@@ -14594,7 +14594,7 @@ if (1) {
   $t->find(key => Vq(key, 0xffff), $d, $f);  $f->outNL('Found: ');
   $t->find(key => Vq(key, 0xd),    $d, $f);  $f->outNL('Found: ');
 
-  ok Assemble(debug => 1, eq => <<END);
+  ok Assemble(debug => 0, eq => <<END);
 key: 0000 0000 0000 0000 data: 0000 0000 0000 0100 found: 0000 0000 0000 0001 data: 0000 0000 0000 0100 depth: 0000 0000 0000 0002
 key: 0000 0000 0000 0001 data: 0000 0000 0000 0101 found: 0000 0000 0000 0001 data: 0000 0000 0000 0101 depth: 0000 0000 0000 0002
 key: 0000 0000 0000 0002 data: 0000 0000 0000 0102 found: 0000 0000 0000 0001 data: 0000 0000 0000 0102 depth: 0000 0000 0000 0002
