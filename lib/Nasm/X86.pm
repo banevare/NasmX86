@@ -4988,7 +4988,7 @@ sub Nasm::X86::BlockMultiWayTree::find($@)                                      
     Vpbroadcastd "zmm$zmmTest", r15d;
     KeepFree r15;
 
-    Cq(loop,9)->for(sub                                                         # Step down through tree
+    Cq(loop, 99)->for(sub                                                         # Step down through tree
      {my ($index, $start, $next, $end) = @_;
       $bmt->getKeysData($tree, $zmmKeys, $zmmData);                             # Get the keys block
       my $l = $bmt->getBlockLength($zmmKeys);                                   # Length of the block
@@ -5282,6 +5282,40 @@ sub Nasm::X86::BlockMultiWayTree::allocBlock($)                                 
   @_ == 1 or confess;
   $bmt->bs->allocBlock                                                          # Allocate a block and return its offset as a variable
  }
+
+sub Nasm::X86::BlockMultiWayTree::depth($)                                      # Return the depth of a node within a tree.
+ {my ($bmt, @variables) = @_;                                                   # Block multi way tree descriptor
+  @_ >= 2 or confess;
+
+  my $s = Subroutine
+   {my ($parameters) = @_;                                                      # Parameters
+    my $success = Label;                                                        # Short circuit if ladders by jumping directly to the end after a successful push
+
+    my $B = $$parameters{bs};                                                   # Byte string
+    my $N = $$parameters{node};                                                 # Starting node
+
+    PushR my @save = (r14, r15, zmm30, zmm31);
+    my $tree = $N->clone;                                                       # Start at the specified node
+
+    Cq(loop, 9)->for(sub                                                        # Step up through tree
+     {my ($index, $start, $next, $end) = @_;
+      $bmt->getKeysData($tree, 31, 30);                                         # Get the keys block
+      my $p = $bmt->getUpFromData(30);                                          # Parent
+      If ($p == 0, sub                                                          # Empty tree so we have not found the key
+       {$$parameters{depth}->copy($index+1);                                    # Key not found
+        Jmp $success;                                                           # Return
+       });
+      $tree->copy($p);                                                          # Up to next level
+     });
+    PrintErrStringNL "Stuck in depth";                                          # We seem to be looping endlessly
+    Exit(1);
+
+    SetLabel $success;                                                          # Insert completed successfully
+    PopR @save;
+   }  in => {bs => 3, node => 3}, out => {depth => 3};
+
+  $s->call($bmt->address, @variables);
+ } # depth
 
 sub Nasm::X86::BlockMultiWayTree::iterator($)                                   # Iterate through a multi way tree
  {my ($b) = @_;                                                                 # Block multi way tree
@@ -14541,7 +14575,7 @@ if (1) {
   my $d = Vq(data);
   my $f = Vq(found);
 
-  Vq(count, 21)->for(sub
+  Vq(count, 21)->for(sub       # 21
    {my ($index, $start, $next, $end) = @_;
     my $k = $index; my $d = $k + 0x100;
     $t->insert(key=>$k, data=>$d);
@@ -14551,36 +14585,37 @@ if (1) {
    {my ($iter, $end) = @_;
     $iter->key ->out('key: ');
     $iter->data->out(' data: ');
+    $iter->tree->depth($iter->node, my $D = Vq(depth));
 
     $t->find(key => $iter->key, $d, $f);
-    $f->out(' found: '); $d->outNL(' data: ');
+    $f->out(' found: '); $d->out(' data: '); $D->outNL(' depth: ');
    });
 
   $t->find(key => Vq(key, 0xffff), $d, $f);  $f->outNL('Found: ');
   $t->find(key => Vq(key, 0xd),    $d, $f);  $f->outNL('Found: ');
 
   ok Assemble(debug => 1, eq => <<END);
-key: 0000 0000 0000 0000 data: 0000 0000 0000 0100 found: 0000 0000 0000 0001 data: 0000 0000 0000 0100
-key: 0000 0000 0000 0001 data: 0000 0000 0000 0101 found: 0000 0000 0000 0001 data: 0000 0000 0000 0101
-key: 0000 0000 0000 0002 data: 0000 0000 0000 0102 found: 0000 0000 0000 0001 data: 0000 0000 0000 0102
-key: 0000 0000 0000 0003 data: 0000 0000 0000 0103 found: 0000 0000 0000 0001 data: 0000 0000 0000 0103
-key: 0000 0000 0000 0004 data: 0000 0000 0000 0104 found: 0000 0000 0000 0001 data: 0000 0000 0000 0104
-key: 0000 0000 0000 0005 data: 0000 0000 0000 0105 found: 0000 0000 0000 0001 data: 0000 0000 0000 0105
-key: 0000 0000 0000 0006 data: 0000 0000 0000 0106 found: 0000 0000 0000 0001 data: 0000 0000 0000 0106
-key: 0000 0000 0000 0007 data: 0000 0000 0000 0107 found: 0000 0000 0000 0001 data: 0000 0000 0000 0107
-key: 0000 0000 0000 0008 data: 0000 0000 0000 0108 found: 0000 0000 0000 0001 data: 0000 0000 0000 0108
-key: 0000 0000 0000 0009 data: 0000 0000 0000 0109 found: 0000 0000 0000 0001 data: 0000 0000 0000 0109
-key: 0000 0000 0000 000A data: 0000 0000 0000 010A found: 0000 0000 0000 0001 data: 0000 0000 0000 010A
-key: 0000 0000 0000 000B data: 0000 0000 0000 010B found: 0000 0000 0000 0001 data: 0000 0000 0000 010B
-key: 0000 0000 0000 000C data: 0000 0000 0000 010C found: 0000 0000 0000 0001 data: 0000 0000 0000 010C
-key: 0000 0000 0000 000D data: 0000 0000 0000 010D found: 0000 0000 0000 0001 data: 0000 0000 0000 010D
-key: 0000 0000 0000 000E data: 0000 0000 0000 010E found: 0000 0000 0000 0001 data: 0000 0000 0000 010E
-key: 0000 0000 0000 000F data: 0000 0000 0000 010F found: 0000 0000 0000 0001 data: 0000 0000 0000 010F
-key: 0000 0000 0000 0010 data: 0000 0000 0000 0110 found: 0000 0000 0000 0001 data: 0000 0000 0000 0110
-key: 0000 0000 0000 0011 data: 0000 0000 0000 0111 found: 0000 0000 0000 0001 data: 0000 0000 0000 0111
-key: 0000 0000 0000 0012 data: 0000 0000 0000 0112 found: 0000 0000 0000 0001 data: 0000 0000 0000 0112
-key: 0000 0000 0000 0013 data: 0000 0000 0000 0113 found: 0000 0000 0000 0001 data: 0000 0000 0000 0113
-key: 0000 0000 0000 0014 data: 0000 0000 0000 0114 found: 0000 0000 0000 0001 data: 0000 0000 0000 0114
+key: 0000 0000 0000 0000 data: 0000 0000 0000 0100 found: 0000 0000 0000 0001 data: 0000 0000 0000 0100 depth: 0000 0000 0000 0002
+key: 0000 0000 0000 0001 data: 0000 0000 0000 0101 found: 0000 0000 0000 0001 data: 0000 0000 0000 0101 depth: 0000 0000 0000 0002
+key: 0000 0000 0000 0002 data: 0000 0000 0000 0102 found: 0000 0000 0000 0001 data: 0000 0000 0000 0102 depth: 0000 0000 0000 0002
+key: 0000 0000 0000 0003 data: 0000 0000 0000 0103 found: 0000 0000 0000 0001 data: 0000 0000 0000 0103 depth: 0000 0000 0000 0002
+key: 0000 0000 0000 0004 data: 0000 0000 0000 0104 found: 0000 0000 0000 0001 data: 0000 0000 0000 0104 depth: 0000 0000 0000 0002
+key: 0000 0000 0000 0005 data: 0000 0000 0000 0105 found: 0000 0000 0000 0001 data: 0000 0000 0000 0105 depth: 0000 0000 0000 0002
+key: 0000 0000 0000 0006 data: 0000 0000 0000 0106 found: 0000 0000 0000 0001 data: 0000 0000 0000 0106 depth: 0000 0000 0000 0002
+key: 0000 0000 0000 0007 data: 0000 0000 0000 0107 found: 0000 0000 0000 0001 data: 0000 0000 0000 0107 depth: 0000 0000 0000 0001
+key: 0000 0000 0000 0008 data: 0000 0000 0000 0108 found: 0000 0000 0000 0001 data: 0000 0000 0000 0108 depth: 0000 0000 0000 0002
+key: 0000 0000 0000 0009 data: 0000 0000 0000 0109 found: 0000 0000 0000 0001 data: 0000 0000 0000 0109 depth: 0000 0000 0000 0002
+key: 0000 0000 0000 000A data: 0000 0000 0000 010A found: 0000 0000 0000 0001 data: 0000 0000 0000 010A depth: 0000 0000 0000 0002
+key: 0000 0000 0000 000B data: 0000 0000 0000 010B found: 0000 0000 0000 0001 data: 0000 0000 0000 010B depth: 0000 0000 0000 0002
+key: 0000 0000 0000 000C data: 0000 0000 0000 010C found: 0000 0000 0000 0001 data: 0000 0000 0000 010C depth: 0000 0000 0000 0002
+key: 0000 0000 0000 000D data: 0000 0000 0000 010D found: 0000 0000 0000 0001 data: 0000 0000 0000 010D depth: 0000 0000 0000 0002
+key: 0000 0000 0000 000E data: 0000 0000 0000 010E found: 0000 0000 0000 0001 data: 0000 0000 0000 010E depth: 0000 0000 0000 0002
+key: 0000 0000 0000 000F data: 0000 0000 0000 010F found: 0000 0000 0000 0001 data: 0000 0000 0000 010F depth: 0000 0000 0000 0002
+key: 0000 0000 0000 0010 data: 0000 0000 0000 0110 found: 0000 0000 0000 0001 data: 0000 0000 0000 0110 depth: 0000 0000 0000 0002
+key: 0000 0000 0000 0011 data: 0000 0000 0000 0111 found: 0000 0000 0000 0001 data: 0000 0000 0000 0111 depth: 0000 0000 0000 0002
+key: 0000 0000 0000 0012 data: 0000 0000 0000 0112 found: 0000 0000 0000 0001 data: 0000 0000 0000 0112 depth: 0000 0000 0000 0002
+key: 0000 0000 0000 0013 data: 0000 0000 0000 0113 found: 0000 0000 0000 0001 data: 0000 0000 0000 0113 depth: 0000 0000 0000 0002
+key: 0000 0000 0000 0014 data: 0000 0000 0000 0114 found: 0000 0000 0000 0001 data: 0000 0000 0000 0114 depth: 0000 0000 0000 0002
 Found: 0000 0000 0000 0000
 Found: 0000 0000 0000 0001
 END
