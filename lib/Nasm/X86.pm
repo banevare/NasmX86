@@ -4693,14 +4693,15 @@ sub Nasm::X86::BlockMultiWayTree::allocKeysDataNodeIR($$$$@)                    
    {my ($parameters) = @_;                                                      # Parameters
 
     my $B = $$parameters{bs};                                                   # Byte string
-    my $k = $bmt->bs->allocBlock($B);                                           # Keys
-    my $d = $bmt->bs->allocBlock($B);                                           # Data
-    my $n = $bmt->bs->allocBlock($B);                                           # Children
+    $bmt->bs->allocZmmBlock($B, my $k = Vq(offset));                            # Keys
+    $bmt->bs->allocZmmBlock($B, my $d = Vq(offset));                            # Data
+    $bmt->bs->allocZmmBlock($B, my $n = Vq(offset));                            # Children
 
     $bmt->putLoop($d, $K);                                                      # Set the link from key to data
     $bmt->putLoop($n, $D);                                                      # Set the link from data to node
     $bmt->putLoop($k, $N);                                                      # Set the link from node  to key
-   }  in => {bs => 3};
+   }  name=>qq(Nasm::X86::BlockMultiWayTree::allocKeysDataNodeIR::${K}::${D}::${N}),  # Create a subroutine for each combination of registers encountered
+      in => {bs => 3};
 
   $s->call($bmt->address, @variables);
  } # allocKeysDataNodeIR
@@ -4891,34 +4892,35 @@ PrintErrRegisterInHex "zmm".$zmmTest;
   $s->call($bmt->address, node => $bmt->first, @variables);
  } # splitFullNode
 
-sub Nasm::X86::BlockMultiWayTree::reParentIR($$$@)                              #P Reparent the children of a node held in registers. The children are in the backing byte string not registers.
- {my ($bmt, $PK, $PD, $PN, @variables) = @_;                                    # Block multi way tree descriptor, numbered zmm key node, numbered zmm data node, numbered zmm child node
-  @_ >= 4 or confess;
+sub Nasm::X86::BlockMultiWayTree::reParentIR($$$$$@)                            #P Reparent the children of a node held in registers. The children are in the backing byte string not registers.
+ {my ($bmt, $bs, $PK, $PD, $PN, @variables) = @_;                               # Block multi way tree descriptor, numbered zmm key node, numbered zmm data node, numbered zmm child node
+  @_ >= 5 or confess;
   my $b = $bmt->bs;                                                             # Underlying byte string
 
   my $s = Subroutine
    {my ($parameters) = @_;                                                      # Parameters
-    my $success = Label;                                                        # Short circuit if ladders by jumping directly to the end after a successful push
 
     my $B = $$parameters{bs};                                                   # Byte string
-    my $L = $bmt->getBlockLength($PK);                                          # Length of node
-    my $p = $bmt->getUpFromData ($PD);                                          # Parent node offset as a variable
-
-    PushRR rax, "zmm$PN";                                                       # Nodes on stack
+    my $L = $bmt->getBlockLength($PK) + 1;                                      # Number of children
+    my $p = $bmt->getLoop($PN);                                                 # Parent node offset as a variable
+    PushR my @save = (rax, rdi);                                                # Nodes on stack
+    Mov rdi, rsp;
+    PushRR "zmm$PN";                                                            # Child nodes on stack
     my $w = $bmt->width; my $l = $bmt->loop; my $u = $bmt->up;                  # Steps we will make along the chain
-
+    my $s = Vq(start);
     $L->for(sub                                                                 # Each child
      {my ($index, $start, $next, $end) = @_;
-      &PopEax;                                                                   # The nodes are double words but we cannot pop a double word from the stack in 64 bit long mode using pop
-      $start->getReg(rax);
+      &PopEax;                                                                  # The nodes are double words but we cannot pop a double word from the stack in 64 bit long mode using pop
+      $s->getReg(rax);
       KeepFree rax;
-      $b->putChain($B, $start, $p, $l, $u);
+      $b->putChain($B, $s, $p, $l, $u);
      });
 
-    SetLabel $success;                                                          # Insert completed successfully
+    Mov rsp, rdi;                                                               # Level stack
+    PopR @save;
    }  in => {bs => 3};
 
-  $s->call($bmt->address, node => $bmt->first, @variables);
+  $s->call($bmt->address, @variables);
  } # reParentIR
 
 sub zmm(@)                                                                      # Add zmm to the front of a list of register expressions
@@ -12700,7 +12702,7 @@ Test::More->builder->output("/dev/null") if $localTest;                         
 
 if ($^O =~ m(bsd|linux|cygwin)i)                                                # Supported systems
  {if (confirmHasCommandLineCommand(q(nasm)) and LocateIntelEmulator)            # Network assembler and Intel Software Development emulator
-   {plan tests => 118;
+   {plan tests => 119;
    }
   else
    {plan skip_all => qq(Nasm or Intel 64 emulator not available);
@@ -15206,49 +15208,39 @@ if (1) {                                                                        
 END
  }
 
-latest:
-if (0) {                                                                        #TNasm::X86::BlockMultiWayTree::reParentIR
-  my $tk = Rd(1..12, 0, 0, 12,      0xC1);
-  my $td = Rd(1..12, 0, 0,  0,      0xC2);
-  my $tn = Rd(0xBB, 2, 3..13, 0, 0, 0xCC);
-
-  my $lk = Rd(17..30, 14,   0xA1);
-  my $ld = Rd(17..30, 0xCC, 0xA2);
-  my $ln = Rd(17..31,       0xAA);
-
-  my $rk = Rd(17..30, 14,   0xB1);
-  my $rd = Rd(17..30, 0xCC, 0xB2);
-  my $rn = Rd(17..31,       0xBB);
-
+#latest:
+if (1) {                                                                        #TNasm::X86::BlockMultiWayTree::reParentIR
   my $b = CreateByteString;
   my $t = $b->CreateBlockMultiWayTree;
 
-  Vmovdqu8 zmm31, "[$tk]";
-  Vmovdqu8 zmm30, "[$td]";
-  Vmovdqu8 zmm29, "[$tn]";
+  $t->allocKeysDataNodeIR(31, 30, 29);
+  $t->allocKeysDataNodeIR(28, 27, 26);
+  $t->allocKeysDataNodeIR(25, 24, 23);
 
-  Vmovdqu8 zmm28, "[$lk]";
-  Vmovdqu8 zmm27, "[$ld]";
-  Vmovdqu8 zmm26, "[$ln]";
+  my ($p, $l, $r) = map {getDFromZmmAsVariable($_, 60)} 29, 26, 23;             # Offset of each block
+  Cq(one,1)->putDIntoZmm($_, 56) for 31, 28, 25;                                # Length of each node
+  $l->putDIntoZmm(29, 0);  $r->putDIntoZmm(29, 4);                              # Children
 
-  Vmovdqu8 zmm25, "[$rk]";
-  Vmovdqu8 zmm24, "[$rd]";
-  Vmovdqu8 zmm23, "[$rn]";
+  $t->putKeysDataNode($l, 28, 27, 26);
+  $t->putKeysDataNode($r, 25, 24, 23);
 
-  $t->splitFullRightNodeIR;
+  $t->reParentIR($b->bs, 31, 30, 29);                                           # Reparent the children
+
+  $t->getKeysDataNode($l, 28, 27, 26);
+  $t->getKeysDataNode($r, 25, 24, 23);
 
   PrintOutRegisterInHex reverse zmm(23..31);
 
-  ok Assemble(debug => 0, eq => <<END);
- zmm31: 0000 00C1 0000 000D   0000 0000 0000 000C   0000 000B 0000 000A   0000 0009 0000 0008   0000 0007 0000 0006   0000 0005 0000 0004   0000 0003 0000 0002   0000 0001 0000 0018
- zmm30: 0000 00C2 0000 0000   0000 0000 0000 000C   0000 000B 0000 000A   0000 0009 0000 0008   0000 0007 0000 0006   0000 0005 0000 0004   0000 0003 0000 0002   0000 0001 0000 0018
- zmm29: 0000 00CC 0000 0000   0000 000D 0000 000C   0000 000B 0000 000A   0000 0009 0000 0008   0000 0007 0000 0006   0000 0005 0000 0004   0000 0003 0000 0002   0000 00BB 0000 00AA
- zmm28: 0000 00A1 0000 0007   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0017   0000 0016 0000 0015   0000 0014 0000 0013   0000 0012 0000 0011
- zmm27: 0000 00A2 0000 00CC   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0017   0000 0016 0000 0015   0000 0014 0000 0013   0000 0012 0000 0011
- zmm26: 0000 00AA 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0017   0000 0016 0000 0015   0000 0014 0000 0013   0000 0012 0000 0011
- zmm25: 0000 00B1 0000 0006   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 001E 0000 001D   0000 001C 0000 001B   0000 001A 0000 0019
- zmm24: 0000 00B2 0000 00CC   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 001E 0000 001D   0000 001C 0000 001B   0000 001A 0000 0019
- zmm23: 0000 00BB 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 001E 0000 001D   0000 001C 0000 001B   0000 001A 0000 0019
+  ok Assemble(debug => 1, eq => <<END);
+ zmm31: 0000 00D8 0000 0001   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+ zmm30: 0000 0118 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+ zmm29: 0000 0098 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0218 0000 0158
+ zmm28: 0000 0198 0000 0001   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+ zmm27: 0000 01D8 0000 0098   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+ zmm26: 0000 0158 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+ zmm25: 0000 0258 0000 0001   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+ zmm24: 0000 0298 0000 0098   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+ zmm23: 0000 0218 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
 END
  }
 
