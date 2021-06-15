@@ -5262,7 +5262,9 @@ sub Nasm::X86::BlockMultiWayTree::getKeysDataNode($$$$$)                        
   @_ == 5 or confess;
   $bmt->getKeysData($offset, $zmmKeys, $zmmData);                               # Get keys and data
   my $node = $bmt->getLoop($zmmData);                                           # Get the offset of the corresponding node block
-  $bmt->bs->getBlock($bmt->bs->bs, $node, $zmmNode);                            # Get the node block
+  If ($node, sub                                                                # Check for optional node block
+   {$bmt->bs->getBlock($bmt->bs->bs, $node, $zmmNode);                          # Get the node block
+   });
  }
 
 sub Nasm::X86::BlockMultiWayTree::putKeysDataNode($$$$$)                        # Save the keys, data and child nodes for a node
@@ -5270,7 +5272,9 @@ sub Nasm::X86::BlockMultiWayTree::putKeysDataNode($$$$$)                        
   @_ == 5 or confess;
   $bmt->putKeysData($offset, $zmmKeys, $zmmData);                               # Put keys and data
   my $node = $bmt->getLoop($zmmData);                                           # Get the offset of the corresponding node block
-  $bmt->bs->putBlock($bmt->bs->bs, $node, $zmmNode);                            # Put the node block
+  If ($node, sub                                                                # Check for optional node block
+   {$bmt->bs->putBlock($bmt->bs->bs, $node, $zmmNode);                          # Put the node block
+   });
  }
 
 sub Nasm::X86::BlockMultiWayTree::findAndSplit($@)                              #P Find a key in a tree which is known to contain at least one key splitting full nodes along the path to the key.
