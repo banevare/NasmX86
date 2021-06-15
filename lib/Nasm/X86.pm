@@ -4875,7 +4875,7 @@ sub zmm(@)                                                                      
  {map {"zmm$_"} @_;
  }
 
-sub Nasm::X86::BlockMultiWayTree::splitFullRoot($)                              #P Split a full root block held in 31..29 and place the left block in 28..26 and the right block in 25..23.
+sub Nasm::X86::BlockMultiWayTree::splitFullRoot($)                              #P Split a full root block held in 31..29 and place the left block in 28..26 and the right block in 25..23. Thhe lefft and right blocks should have their loop offsets set so they can be inserted into the root.
  {my ($bmt) = @_;                                                               # Block multi way tree descriptor
   @_ == 1 or confess;
   my $length      = $bmt->maxKeys;                                              # Length of block to split
@@ -4897,9 +4897,21 @@ sub Nasm::X86::BlockMultiWayTree::splitFullRoot($)                              
      {Jmp $success;
      });
 
-    my $n = $bmt->getLoop($TD);                                                 # Offset of node block or zero if there is no node block
+    my $n  = $bmt->getLoop($TD);                                                # Offset of node block or zero if there is no node block
+    my $to = $bmt->getLoop($TN);                                                # Offset of root block
+    my $lo = $bmt->getLoop($LN);                                                # Offset of left block
+    my $ro = $bmt->getLoop($RN);                                                # Offset of right block
 
-    ClearRegisters zmm 22..28;                                                  # Clear new children
+    LoadConstantIntoMaskRegister(k7, eval "0b11".'0'x$length);                  # Area to clear preserving loop and up/length
+    &Vmovdqu32   (zmm $LK."{k7}{z}",   $LK);                                    # Clear left
+    &Vmovdqu32   (zmm $LD."{k7}{z}",   $LD);
+    &Vmovdqu32   (zmm $RK."{k7}{z}",   $RK);                                    # Clear right
+    &Vmovdqu32   (zmm $RD."{k7}{z}",   $RD);
+
+    LoadConstantIntoMaskRegister(k7, eval "0b10".'0'x$length);                  # Area to clear preserving loop
+    &Vmovdqu32   (zmm $LN."{k7}{z}",   $LN);                                    # Clear left
+    &Vmovdqu32   (zmm $RK."{k7}{z}",   $RK);                                    # Clear right
+
     LoadConstantIntoMaskRegister(k7, eval "0b".'1'x$leftLength);                # Constant mask up to the split point
     &Vmovdqu32   (zmm $LK."{k7}",      $TK);                                    # Split keys left
     &Vmovdqu32   (zmm $LD."{k7}",      $TD);                                    # Split data left
@@ -4937,13 +4949,19 @@ sub Nasm::X86::BlockMultiWayTree::splitFullRoot($)                              
     &Vmovdqu32 (zmm $TK."{k7}{z}",  $TK);                                       # Clear unused keys in root
     &Vmovdqu32 (zmm $TD."{k7}{z}",  $TD);                                       # Clear unused data in root
     If ($n, sub
-     {LoadConstantIntoMaskRegister(k7, eval "0b1".('0'x($length)).'1');        # Unused fields
+     {LoadConstantIntoMaskRegister(k7, eval "0b1".('0'x($length)).'1');         # Unused fields
       &Vmovdqu32 (zmm $TN."{k7}{z}",  $TN);                                     # Clear unused node in root
      });
 
     $bmt->setBlockLength($TK, Cq(one,  1));                                     # Set length of root keys
     $bmt->setBlockLength($LK, Cq(leftLength,  $leftLength));                    # Length of left node
     $bmt->setBlockLength($RK, Cq(rightLength, $rightLength));                   # Length of right node
+
+    $bmt->setUpIntoData($to, $LD);                                              # Set parent of left node
+    $bmt->setUpIntoData($to, $RD);                                              # Set parent of right node
+
+    $lo->putDIntoZmm($TN, 0);                                                   # Insert offset of left node in root nodes
+    $ro->putDIntoZmm($TN, $w);                                                  # Insert offset of right node in root nodes
 
     SetLabel $success;                                                          # Insert completed successfully
     PopR @save;
@@ -14907,11 +14925,17 @@ aaaa: 89AB CDEF 0123 4567
 END
  }
 
-#latest:
+latest:
 if (1) {                                                                        #TNasm::X86::BlockMultiWayTree::splitFullRoot
   my $sk = Rd(1..14, 14,   0xFF);
   my $sd = Rd(1..14, 0xDD, 0xEE);
   my $sn = Rd(1..15,       0xCC);
+  my $lk = Rd((0)x15, 0xA1);
+  my $ld = Rd((0)x15, 0xA2);
+  my $ln = Rd((0)x15, 0xAA);
+  my $rk = Rd((0)x15, 0xB1);
+  my $rl = Rd((0)x15, 0xB2);
+  my $rn = Rd((0)x15, 0xBB);
 
   my $b = CreateByteString;
   my $t = $b->CreateBlockMultiWayTree;
@@ -14919,21 +14943,27 @@ if (1) {                                                                        
   Vmovdqu8 zmm31, "[$sk]";
   Vmovdqu8 zmm30, "[$sd]";
   Vmovdqu8 zmm29, "[$sn]";
+  Vmovdqu8 zmm28, "[$lk]";
+  Vmovdqu8 zmm27, "[$ld]";
+  Vmovdqu8 zmm26, "[$ln]";
+  Vmovdqu8 zmm25, "[$rk]";
+  Vmovdqu8 zmm24, "[$rl]";
+  Vmovdqu8 zmm23, "[$rn]";
 
-   $t->splitFullRoot();
+  $t->splitFullRoot;
 
   PrintOutRegisterInHex reverse zmm(23..31);
 
-  ok Assemble(debug => 0, eq => <<END);
+  ok Assemble(debug => 1, eq => <<END);
  zmm31: 0000 00FF 0000 0001   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0008
  zmm30: 0000 00EE 0000 00DD   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0008
- zmm29: 0000 00CC 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0001
- zmm28: 0000 0000 0000 0007   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0007   0000 0006 0000 0005   0000 0004 0000 0003   0000 0002 0000 0001
- zmm27: 0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0007   0000 0006 0000 0005   0000 0004 0000 0003   0000 0002 0000 0001
- zmm26: 0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0007   0000 0006 0000 0005   0000 0004 0000 0003   0000 0002 0000 0001
- zmm25: 0000 0000 0000 0006   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 000E 0000 000D   0000 000C 0000 000B   0000 000A 0000 0009
- zmm24: 0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 000E 0000 000D   0000 000C 0000 000B   0000 000A 0000 0009
- zmm23: 0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 000E 0000 000D   0000 000C 0000 000B   0000 000A 0000 0009
+ zmm29: 0000 00CC 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 00BB 0000 00AA
+ zmm28: 0000 00A1 0000 0007   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0007   0000 0006 0000 0005   0000 0004 0000 0003   0000 0002 0000 0001
+ zmm27: 0000 00A2 0000 00CC   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0007   0000 0006 0000 0005   0000 0004 0000 0003   0000 0002 0000 0001
+ zmm26: 0000 00AA 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0007   0000 0006 0000 0005   0000 0004 0000 0003   0000 0002 0000 0001
+ zmm25: 0000 00B1 0000 0006   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 000E 0000 000D   0000 000C 0000 000B   0000 000A 0000 0009
+ zmm24: 0000 00B2 0000 00CC   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 000E 0000 000D   0000 000C 0000 000B   0000 000A 0000 0009
+ zmm23: 0000 00BB 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 000E 0000 000D   0000 000C 0000 000B   0000 000A 0000 0009
 END
  }
 
