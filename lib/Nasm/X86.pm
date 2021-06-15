@@ -3244,12 +3244,12 @@ sub CreateByteString(%)                                                         
    );
  }
 
-sub Nasm::X86::ByteString::chain($$@)                                           # Return a variable with the end point of a chain of double words in the byte string starting at the specified variable.
- {my ($byteString, $variable, @offsets) = @_;                                   # Byte string descriptor, start variable,  offsets chain
-  @_ >= 2 or confess;
+sub Nasm::X86::ByteString::chain($$$@)                                          # Return a variable with the end point of a chain of double words in the byte string starting at the specified variable.
+ {my ($byteString, $bs, $variable, @offsets) = @_;                              # Byte string descriptor, byte string locator, start variable,  offsets chain
+  @_ >= 3 or confess;
 
   PushR my @save = (r14, r15);                                                  # 14 is the byte string address, 15 the current offset in the byte string
-  $byteString->bs->setReg(r14);
+  $bs->setReg(r14);
   $variable->setReg(r15);
   for my $o(@offsets)                                                           # Each offset
    {KeepFree r15;
@@ -3260,12 +3260,12 @@ sub Nasm::X86::ByteString::chain($$@)                                           
   $r
  }
 
-sub Nasm::X86::ByteString::putChain($$$@)                                       # Write the double word in the specified variable to the double word location at the the specified offset in the specified byte string.
- {my ($byteString, $start, $value, @offsets) = @_;                              # Byte string descriptor, start variable, value to put as a variable,  offsets chain
-  @_ >= 2 or confess;
+sub Nasm::X86::ByteString::putChain($$$$@)                                      # Write the double word in the specified variable to the double word location at the the specified offset in the specified byte string.
+ {my ($byteString, $bs,  $start, $value, @offsets) = @_;                        # Byte string descriptor, byute string locator variable, start variable, value to put as a variable,  offsets chain
+  @_ >= 5 or confess;
 
   PushR my @save = (r14, r15);                                                  # 14 is the byte string address, 15 the current offset in the byte string
-  $byteString->bs->setReg(r14);
+  $bs->setReg(r14);
   $start->setReg(r15);
   for my $i(keys @offsets)                                                      # Each offset
    {my $o = $offsets[$i];
@@ -4777,12 +4777,12 @@ PrintErrRegisterInHex "zmm".$zmmTest;
           Push ax; Push ax; Pop rax;                                            # The nodes are double words but we cannot pop a double word from the stack in 64 bit long mode
           $start->getReg(rax);
           KeepFree rax;
-          $b->putChain($start, $lk, $bmt->width * $n, $bmt->loop, $bmt->up);
+          $b->putChain($B, $start, $lk, $bmt->width * $n, $bmt->loop, $bmt->up);
          }
         for my $n($leftLength+2..$bmt->maxNodes - 1)                            # Reparent children of right node
          {Push ax, Push ax; Pop rax;                                            # The nodes are double words but we cannot pop a double word from the stack in 64 bit long mode
           $start->getReg(rax);
-          $b->putChain($start, $rk, $bmt->width * $n, $bmt->loop, $bmt->up);
+          $b->putChain($B, $start, $rk, $bmt->width * $n, $bmt->loop, $bmt->up);
          }
         Pop ax; Pop ax, Pop rax;                                                # Level the stack
        },
@@ -4870,6 +4870,36 @@ PrintErrRegisterInHex "zmm".$zmmTest;
 
   $s->call($bmt->address, node => $bmt->first, @variables);
  } # splitFullNode
+
+sub Nasm::X86::BlockMultiWayTree::reParentIR($$$@)                              #P Reparent the children of a node held in registers. The children are in the backing byte string not registers.
+ {my ($bmt, $PK, $PD, $PN, @variables) = @_;                                    # Block multi way tree descriptor, numbered zmm key node, numbered zmm data node, numbered zmm child node
+  @_ >= 4 or confess;
+  my $b = $bmt->bs;                                                             # Underlying byte string
+
+  my $s = Subroutine
+   {my ($parameters) = @_;                                                      # Parameters
+    my $success = Label;                                                        # Short circuit if ladders by jumping directly to the end after a successful push
+
+    my $B = $$parameters{bs};                                                   # Byte string
+    my $L = $bmt->getBlockLength($PK);                                          # Length of node
+    my $p = $bmt->getUpFromData ($PD);                                          # Parent node offset as a variable
+
+    PushRR rax, "zmm$PN";                                                       # Nodes on stack
+    my $w = $bmt->width; my $l = $bmt->loop; my $u = $bmt->up;                  # Steps we will make along the chain
+
+    $L->for(sub                                                                 # Each child
+     {my ($index, $start, $next, $end) = @_;
+      &PopEax;                                                                   # The nodes are double words but we cannot pop a double word from the stack in 64 bit long mode using pop
+      $start->getReg(rax);
+      KeepFree rax;
+      $b->putChain($B, $start, $p, $l, $u);
+     });
+
+    SetLabel $success;                                                          # Insert completed successfully
+   }  in => {bs => 3};
+
+  $s->call($bmt->address, node => $bmt->first, @variables);
+ } # reParentIR
 
 sub zmm(@)                                                                      # Add zmm to the front of a list of register expressions
  {map {"zmm$_"} @_;
@@ -14821,12 +14851,12 @@ if (1) {                                                                        
   my $a = $b->allocBlock;
   Vmovdqu8 zmm31, "[$format]";
   $b->putBlock($b->bs, $a, 31);
-  my $r = $b->chain(Vq(start, 0x18), 4);       $r->outNL("chain1: ");
-  my $s = $b->chain($r, 4);                    $s->outNL("chain2: ");
-  my $t = $b->chain($s, 4);                    $t->outNL("chain3: ");
-  my $A = $b->chain(Vq(start, 0x18), 4, 4, 4); $A->outNL("chain4: ");           # Get a long chain
+  my $r = $b->chain($b->bs, Vq(start, 0x18), 4);       $r->outNL("chain1: ");
+  my $s = $b->chain($b->bs, $r, 4);                    $s->outNL("chain2: ");
+  my $t = $b->chain($b->bs, $s, 4);                    $t->outNL("chain3: ");
+  my $A = $b->chain($b->bs, Vq(start, 0x18), 4, 4, 4); $A->outNL("chain4: ");           # Get a long chain
 
-  $b->putChain(Vq(start,0x18), Vq(end,0xff), 4, 4, 4);                          # Put at the end of a long chain
+  $b->putChain($b->bs, Vq(start, 0x18), Vq(end, 0xff), 4, 4, 4);                # Put at the end of a long chain
 
   $b->dump;
 
@@ -15112,6 +15142,52 @@ END
 
 #latest:
 if (1) {                                                                        # Insert at start rather than insert in middle
+  my $tk = Rd(1..12, 0, 0, 12,      0xC1);
+  my $td = Rd(1..12, 0, 0,  0,      0xC2);
+  my $tn = Rd(0xBB, 2, 3..13, 0, 0, 0xCC);
+
+  my $lk = Rd(17..30, 14,   0xA1);
+  my $ld = Rd(17..30, 0xCC, 0xA2);
+  my $ln = Rd(17..31,       0xAA);
+
+  my $rk = Rd(17..30, 14,   0xB1);
+  my $rd = Rd(17..30, 0xCC, 0xB2);
+  my $rn = Rd(17..31,       0xBB);
+
+  my $b = CreateByteString;
+  my $t = $b->CreateBlockMultiWayTree;
+
+  Vmovdqu8 zmm31, "[$tk]";
+  Vmovdqu8 zmm30, "[$td]";
+  Vmovdqu8 zmm29, "[$tn]";
+
+  Vmovdqu8 zmm28, "[$lk]";
+  Vmovdqu8 zmm27, "[$ld]";
+  Vmovdqu8 zmm26, "[$ln]";
+
+  Vmovdqu8 zmm25, "[$rk]";
+  Vmovdqu8 zmm24, "[$rd]";
+  Vmovdqu8 zmm23, "[$rn]";
+
+  $t->splitFullRightNodeIR;
+
+  PrintOutRegisterInHex reverse zmm(23..31);
+
+  ok Assemble(debug => 0, eq => <<END);
+ zmm31: 0000 00C1 0000 000D   0000 0000 0000 000C   0000 000B 0000 000A   0000 0009 0000 0008   0000 0007 0000 0006   0000 0005 0000 0004   0000 0003 0000 0002   0000 0001 0000 0018
+ zmm30: 0000 00C2 0000 0000   0000 0000 0000 000C   0000 000B 0000 000A   0000 0009 0000 0008   0000 0007 0000 0006   0000 0005 0000 0004   0000 0003 0000 0002   0000 0001 0000 0018
+ zmm29: 0000 00CC 0000 0000   0000 000D 0000 000C   0000 000B 0000 000A   0000 0009 0000 0008   0000 0007 0000 0006   0000 0005 0000 0004   0000 0003 0000 0002   0000 00BB 0000 00AA
+ zmm28: 0000 00A1 0000 0007   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0017   0000 0016 0000 0015   0000 0014 0000 0013   0000 0012 0000 0011
+ zmm27: 0000 00A2 0000 00CC   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0017   0000 0016 0000 0015   0000 0014 0000 0013   0000 0012 0000 0011
+ zmm26: 0000 00AA 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0017   0000 0016 0000 0015   0000 0014 0000 0013   0000 0012 0000 0011
+ zmm25: 0000 00B1 0000 0006   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 001E 0000 001D   0000 001C 0000 001B   0000 001A 0000 0019
+ zmm24: 0000 00B2 0000 00CC   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 001E 0000 001D   0000 001C 0000 001B   0000 001A 0000 0019
+ zmm23: 0000 00BB 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 001E 0000 001D   0000 001C 0000 001B   0000 001A 0000 0019
+END
+ }
+
+#latest:
+if (0) {                                                                        #TNasm::X86::BlockMultiWayTree::reParentIR
   my $tk = Rd(1..12, 0, 0, 12,      0xC1);
   my $td = Rd(1..12, 0, 0,  0,      0xC2);
   my $tn = Rd(0xBB, 2, 3..13, 0, 0, 0xCC);
