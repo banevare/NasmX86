@@ -4706,6 +4706,61 @@ sub Nasm::X86::BlockMultiWayTree::allocKeysDataNodeIR($$$$@)                    
   $s->call($bmt->address, @variables);
  } # allocKeysDataNodeIR
 
+sub Nasm::X86::BlockMultiWayTree::splitNode($$$$@)                              #P Split a node given its offset in a byte string retaining the key being inserted in the node split while putting the remainder to the left or right .
+ {my ($bmt, $bs, $node, $key, @variables) = @_;                                 # Block multi way tree descriptor, backing byte string, offset of node
+  @_ >= 4 or confess;
+
+  my $K = 31; my $D = 30; my $N = 29;                                           # Key, data, node blocks
+
+  my $s = Subroutine
+   {my ($parameters) = @_;                                                      # Parameters
+    my $success = Label;                                                        # Short circuit if ladders by jumping directly to the end after a successful push
+
+    my $b = $$parameters{bs};                                                   # Byte string
+    my $k = $$parameters{key};                                                  # Key we are looking for
+    my $n = $$parameters{node};                                                 # Node to split
+
+    PushR my @save = (zmm $K, $D, $N);
+    $bmt->getKeysDataNode($n, $K, $D, $N);                                      # Load root node
+
+    If ($bmt->getBlockLength($K) != $bmt->maxKeys, sub                          # Only split full blocks
+     {Jmp $success;
+     });
+
+    my $p = $bmt->getUpFromData($D);                                            # Parent
+    If ($p, sub                                                                 # Not the root
+     {my $s = getDFromZmmAsVariable($K, ($bmt->minKeys + 1) * $bmt->width);     # Splitting key
+      If ($k < $s, sub                                                          # Split left node pushing remainder right so that we keep the key we are looking for in the left node
+       {Vmovdqu64 zmm28, zmm31;
+        Vmovdqu64 zmm27, zmm30;
+        Vmovdqu64 zmm26, zmm29;
+        $bmt->splitFullLeftNodeIR;
+       },
+      sub                                                                       # Split right node pushing remainder left  so that we keep the key we are looking for in the right node
+       {Vmovdqu64 zmm25, zmm31;
+        Vmovdqu64 zmm24, zmm30;
+        Vmovdqu64 zmm23, zmm29;
+        $bmt->splitFullRightNodeIR;
+       });
+     },
+    sub
+     {$bmt->splitFullRootIR;                                                    # Root
+      my $l = getDFromZmmAsVariable($N, 0);
+      my $r = getDFromZmmAsVariable($N, $bmt->width);
+      $bmt->putKeysDataNode($n, $K, $D, $N);                                    # Save root
+      $bmt->putKeysDataNode($l, 28, 27, 26);                                    # Save left
+      $bmt->putKeysDataNode($r, 25, 24, 23);                                    # Save right
+     });
+
+    $bmt->putKeysDataNode($n, $K, $D, $N);                                      # Save root
+
+    SetLabel $success;                                                          # Insert completed successfully
+    PopR @save;
+   }  in => {bs => 3, node => 3, key => 3};
+
+  $s->call(bs=>$bs, node=>$node, key=>$key, @variables);
+ } # splitNode
+
 sub Nasm::X86::BlockMultiWayTree::splitFullNode($$$@)                           #P Split a node whose keys are held in the numbered zmm  if it is full.
  {my ($bmt, $zmmKeys, $zmmData, $zmmNode, @variables) = @_;                     # Block multi way tree descriptor, numbered zmm holding keys of node to split, numbered zmm holding data of node to split, numbered zmm containing node offsets of node to split, variables
   @_ >= 2 or confess;
@@ -4927,7 +4982,7 @@ sub zmm(@)                                                                      
  {map {"zmm$_"} @_;
  }
 
-sub Nasm::X86::BlockMultiWayTree::splitFullRootIR($)                              #P Split a full root block held in 31..29 and place the left block in 28..26 and the right block in 25..23. Thhe lefft and right blocks should have their loop offsets set so they can be inserted into the root.
+sub Nasm::X86::BlockMultiWayTree::splitFullRootIR($)                            #P Split a full root block held in 31..29 and place the left block in 28..26 and the right block in 25..23. Thhe lefft and right blocks should have their loop offsets set so they can be inserted into the root.
  {my ($bmt) = @_;                                                               # Block multi way tree descriptor
   @_ == 1 or confess;
   my $length      = $bmt->maxKeys;                                              # Length of block to split
@@ -5299,16 +5354,12 @@ sub Nasm::X86::BlockMultiWayTree::findAndSplit($@)                              
     Vpbroadcastd "zmm$zmmTest", r15d;
     KeepFree r15;
 
+    $bmt->splitNode($B, $F, $K);                                                # Split the root
+
     ForEver                                                                     # Step down through tree
      {my ($start, $end) = @_;                                                   # Parameters
-      $bmt->getKeysData($tree, $zmmKeys, $zmmData);                             # Get the keys block
+      $bmt->getKeysDataNode($tree, $zmmKeys, $zmmData, $zmmNode);               # Get the keys/data/nodes block
       my $node = $bmt->getLoop($zmmData);                                       # Offset to node block
-
-      If ($node, sub                                                            # Load node block if we are not on on a leaf
-       {$bmt->getNode($node, $zmmNode);
-       });
-
-      $bmt->splitFullNode($zmmKeys, $zmmData, $zmmNode);                        # Split full node
 
       my $l = $bmt->getBlockLength($zmmKeys);                                   # Length of the block
       $l->setMaskFirst($lengthMask);                                            # Set the length mask
@@ -5339,17 +5390,15 @@ sub Nasm::X86::BlockMultiWayTree::findAndSplit($@)                              
         Jmp $start;                                                             # Loop
        };
 
-      if (1)                                                                    # Check for leaf
-       {my $node = $bmt->getLoop($zmmData);                                     # Offset of node block
-        If ($node == 0, sub                                                     # We have reached a leaf
+      if (1)                                                                    # Key greater than all keys in block
+       {If ($node == 0, sub                                                     # We have reached a leaf
          {$$p{compare}->copy(Cq(plusOne, +1));                                  # Key greater than last key
           $$p{index}  ->copy($l-1);                                             # Index of last key which we are greater than
           $$p{offset} ->copy($tree);                                            # Offset of matching block
           Jmp $success
          });
        };
-      $bmt->putKeysDataNode($tree, $zmmKeys, $zmmData, $zmmNode);               # Save the block before we move to the next one
-      $tree->copy(getDFromZmmAsVariable($zmmNode, $l * $bmt->width));           # Less than all keys so jump to node zero
+      $tree->copy(getDFromZmmAsVariable($zmmNode, $l * $bmt->width));           # Greater than all keys so step through last child node
      };
 
     SetLabel $success;                                                          # Insert completed successfully
