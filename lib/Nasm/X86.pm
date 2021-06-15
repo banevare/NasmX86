@@ -4685,6 +4685,26 @@ sub Nasm::X86::ByteString::CreateBlockMultiWayTree($)                           
   $s                                                                            # Description of block array
  }
 
+sub Nasm::X86::BlockMultiWayTree::allocKeysDataNodeIR($$$$@)                    #P Allocate a keys/data/node block and place it in the numbered zmm registers
+ {my ($bmt, $K, $D, $N, @variables) = @_;                                       # Block multi way tree descriptor, numbered zmm for keys, numbered zmm for data, numbered zmm for children
+  @_ >= 4 or confess;
+
+  my $s = Subroutine
+   {my ($parameters) = @_;                                                      # Parameters
+
+    my $B = $$parameters{bs};                                                   # Byte string
+    my $k = $bmt->bs->allocBlock($B);                                           # Keys
+    my $d = $bmt->bs->allocBlock($B);                                           # Data
+    my $n = $bmt->bs->allocBlock($B);                                           # Children
+
+    $bmt->putLoop($d, $K);                                                      # Set the link from key to data
+    $bmt->putLoop($n, $D);                                                      # Set the link from data to node
+    $bmt->putLoop($k, $N);                                                      # Set the link from node  to key
+   }  in => {bs => 3};
+
+  $s->call($bmt->address, @variables);
+ } # allocKeysDataNodeIR
+
 sub Nasm::X86::BlockMultiWayTree::splitFullNode($$$@)                           #P Split a node whose keys are held in the numbered zmm  if it is full.
  {my ($bmt, $zmmKeys, $zmmData, $zmmNode, @variables) = @_;                     # Block multi way tree descriptor, numbered zmm holding keys of node to split, numbered zmm holding data of node to split, numbered zmm containing node offsets of node to split, variables
   @_ >= 2 or confess;
@@ -15186,7 +15206,7 @@ if (1) {                                                                        
 END
  }
 
-#latest:
+latest:
 if (0) {                                                                        #TNasm::X86::BlockMultiWayTree::reParentIR
   my $tk = Rd(1..12, 0, 0, 12,      0xC1);
   my $td = Rd(1..12, 0, 0,  0,      0xC2);
