@@ -16243,7 +16243,7 @@ if (1) {
     PrintOutRegisterInHex "k$_";
    }
 
-  ok Assemble(debug => 1, eq => <<END);
+  ok Assemble(debug => 0, eq => <<END);
     k0: 0000 0000 0000 0001
     k1: 0000 0000 0000 0002
     k2: 0000 0000 0000 0004
