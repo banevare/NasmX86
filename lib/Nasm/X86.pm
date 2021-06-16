@@ -25,9 +25,9 @@ my @extern;                                                                     
 my @link;                                                                       # Specify libraries which to link against in the final assembly stage
 my $interpreter = q(-I /usr/lib64/ld-linux-x86-64.so.2);                        # The ld command needs an interpreter if we are linking with C.
 
-my $stdin  = 0;                                                                 # File descriptor for standard input
-my $stdout = 1;                                                                 # File descriptor for standard output
-my $stderr = 2;                                                                 # File descriptor for standard error
+our $stdin  = 0;                                                                # File descriptor for standard input
+our $stdout = 1;                                                                # File descriptor for standard output
+our $stderr = 2;                                                                # File descriptor for standard error
 
 my %Registers;                                                                  # The names of all the registers
 my %RegisterContaining;                                                         # The largest register containing a register
