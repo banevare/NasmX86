@@ -990,7 +990,7 @@ sub Nasm::X86::Sub::call($%)                                                    
  {my ($sub, @parameters) = @_;                                                  # Subroutine descriptor, parameter variables
 
   my %p;
-  while(@parameters)                                                            # Namify parameters supplied by the caller
+  while(@parameters)                                                            # Copy parameters supplied by the caller
    {my $p = shift @parameters;                                                  # Check parameters provided by caller
     my $n = ref($p) ? $p->name : $p;
     defined($n) or confess "No name or variable";
