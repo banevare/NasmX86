@@ -810,6 +810,16 @@ END
    }
  }
 
+sub Then(&)                                                                     # Then body for an If statement
+ {my ($body) = @_;                                                              # Then body
+  $body;
+ }
+
+sub Else(&)                                                                     # Else body for an If statement
+ {my ($body) = @_;                                                              # Else body
+  $body;
+ }
+
 sub IfEq(&;&)                                                                   # If equal execute the then body else the else body
  {my ($then, $else) = @_;                                                       # Then - required , else - optional
   If(q(Jne), $then, $else);                                                     # Opposite code
@@ -4976,7 +4986,6 @@ sub Nasm::X86::BlockMultiWayTree::splitFullLeftNode($$)                         
     &Vmovdqu32   (zmm $Test."{k6}{z}", $LD);                                    # Split out right data
     &Vpcompressd (zmm $Test."{k6}",    $Test);                                  # Compress right data
     &Vmovdqu32   (zmm $RD.  "{k7}",    $Test);                                  # Save right data
-
     If ($n, sub                                                                 # Split nodes right
      {&Vmovdqu32   (zmm $Test."{k6}{z}", $LN);                                  # Split right nodes
       &Vpcompressd (zmm $Test."{k6}",    $Test);                                # Compress right node
@@ -5357,17 +5366,19 @@ sub Nasm::X86::BlockMultiWayTree::insert($@)                                    
     $bmt->getKeysDataNode($F, 31, 30, 29);                                      # Get the first block
 
     my $l = $bmt->getLengthInKeys(31);                                          # Length of the block
-    If ($l == 0, sub                                                            # Empty tree
+    If  $l == 0,
+    Then                                                                        # Empty tree
      {$K->putDIntoZmm      (31, 0);                                             # Write key
       $bmt->putLengthInKeys (31, Cq(one, 1));                                   # Set the length of the block
       $D->putDIntoZmm      (30, 0);                                             # Write data
       $bmt->putKeysData($F, 31, 30);                                            # Write the data block back into the underlying byte string
       Jmp $success;                                                             # Insert completed successfully
-     });
+     };
 
     my $n = $bmt->getLoop(30);                                                  # Get the offset of the node block
-    If (($n == 0) & ($l < $bmt->maxKeys), sub                                   # Node is root with no children and space for more keys
-     {$l->setMaskFirst(k7);                                                     # Set the compare  bits
+    If (($n == 0) & ($l < $bmt->maxKeys),
+    Then                                                                        # Node is root with no children and space for more keys
+     {$l->setMaskFirst(k7);                                                     # Set the compare bits
       $K->setReg(r15);                                                          # Key to search for
       Vpbroadcastd zmm22, r15d;                                                 # Load key
       KeepFree r15;
@@ -5386,7 +5397,7 @@ sub Nasm::X86::BlockMultiWayTree::insert($@)                                    
 
       Vpcmpud "k6{k7}", zmm22, zmm31, 1;                                        # Check for elements that are greater
       Ktestw   k6, k6;
-      IfEq(sub                                                                  # K6 zero implies the latest key goes at the end
+      IfEq (sub                                                                 # K6 zero implies the latest key goes at the end
        {Kshiftlw k6, k7, 1;                                                     # Reach next empty field
         Kandnw   k6, k7, k6;                                                    # Remove back fill to leave a single bit at the next empty field
        },
@@ -5399,16 +5410,20 @@ sub Nasm::X86::BlockMultiWayTree::insert($@)                                    
         Vpexpandd    "zmm31{k5}", zmm31;                                        # Shift up keys
         Vpexpandd    "zmm30{k5}", zmm30;                                        # Shift up data
        });
+
       Vpbroadcastd "zmm31{k6}", r15d;                                           # Load key
       $D->setReg(r14);                                                          # Corresponding data
       Vpbroadcastd "zmm30{k6}", r14d;                                           # Load data
       KeepFree r14;
       $bmt->putLengthInKeys( 31, $l + 1);                                       # Set the length of the block
-      If ($l + 1 == $bmt->maxKeys, sub                                          # Root is now full so we have to allocate node block for it and chain it in
+
+      If $l + 1 == $bmt->maxKeys,
+      Then                                                                      # Root is now full so we have to allocate node block for it and chain it in
        {$bmt->bs->allocZmmBlock($B, my $n = Vq(offset));                        # Children
         $bmt->putLoop($n, 30);                                                  # Set the link from data to node
         $bmt->putLoop($F, 29);                                                  # Set the link from node to key
-       });
+       };
+
       $bmt->putKeysDataNode($F, 31, 30, 29);                                    # Write the data block back into the underlying byte string
       $bmt->splitNode($B, $F, $K);                                              # Split if the leaf has got too big
       Jmp $success;                                                             # Insert completed successfully
@@ -5421,22 +5436,29 @@ sub Nasm::X86::BlockMultiWayTree::insert($@)                                    
 
     KeepFree zmm 29;
     $bmt->getKeysDataNode($offset, 31, 30, 29);
-    If ($compare == 0, sub                                                      # Found an equal key so update the data
+
+    If $compare == 0,
+    Then                                                                        # Found an equal key so update the data
      {$D->putDIntoZmm(30, $index * $bmt->width);                                # Update data at key
       $bmt->putKeysDataNode($offset, 31, 30, 29);                               # Rewrite data and keys
      },
-    sub                                                                         # We have room for the insert because each block has been split to make it non full
-     {If ($compare > 0, sub{$index = $index + 1});                              # Position at which to insert new key
+    Else                                                                        # We have room for the insert because each block has been split to make it non full
+     {If $compare > 0,
+      Then                                                                      # Position at which to insert new key if it ois greater than the indexed key
+       {++$index;
+       };
 
       my $length = $bmt->getLengthInKeys(31);                                   # Number of keys
-      If ($index < $length, sub                                                 # Need to expand as we cannot push
+      If $index < $length,
+      Then                                                                      # Need to expand as we cannot push
        {$length->setMaskFirst(k7);                                              # Length as bits
         Kshiftlw k6, k7, 1;                                                     # Length plus one as bits with a  trailing zero
         Korw     k6, k6, k7;                                                    # Length plus one as bits with no trailing zero
         $index->clearMaskBit(k6);                                               # Zero at the index
         Vpexpandd    "zmm31{k6}", zmm31;                                        # Shift up keys
         Vpexpandd    "zmm30{k6}", zmm30;                                        # Shift up data
-       });
+       };
+
       ClearRegisters k7;
       $index->setMaskBit(k7);                                                   # Set bit at insertion point
       $K->setReg(r15);                                                          # Corresponding data
@@ -5446,7 +5468,7 @@ sub Nasm::X86::BlockMultiWayTree::insert($@)                                    
       $bmt->putLengthInKeys(31, $length + 1);                                   # Set the new length of the block
       $bmt->putKeysDataNode($offset, 31, 30, 29);                               # Rewrite data and keys
       $bmt->splitNode($B, $offset, $K);                                         # Split if the leaf has got too big
-     });
+     };
 
     SetLabel $success;                                                          # Insert completed successfully
     PopR @save;
@@ -13580,7 +13602,7 @@ Test::More->builder->output("/dev/null") if $localTest;                         
 
 if ($^O =~ m(bsd|linux|cygwin)i)                                                # Supported systems
  {if (confirmHasCommandLineCommand(q(nasm)) and LocateIntelEmulator)            # Network assembler and Intel Software Development emulator
-   {plan tests => 118;
+   {plan tests => 119;
    }
   else
    {plan skip_all => qq(Nasm or Intel 64 emulator not available);
@@ -16209,6 +16231,110 @@ key: 0000 0000 0000 0015 data: 0000 0000 0000 0115 found: 0000 0000 0000 0001 da
 key: 0000 0000 0000 0016 data: 0000 0000 0000 0116 found: 0000 0000 0000 0001 data: 0000 0000 0000 0116 depth: 0000 0000 0000 0002
 key: 0000 0000 0000 0017 data: 0000 0000 0000 0117 found: 0000 0000 0000 0001 data: 0000 0000 0000 0117 depth: 0000 0000 0000 0002
 key: 0000 0000 0000 0018 data: 0000 0000 0000 0118 found: 0000 0000 0000 0001 data: 0000 0000 0000 0118 depth: 0000 0000 0000 0002
+Found: 0000 0000 0000 0000
+Found: 0000 0000 0000 0001
+END
+ }
+
+#latest:
+if (1) {
+  for (0..7)
+   {ClearRegisters "k$_";
+    Cq($_,$_)->setMaskBit("k$_");
+    PrintOutRegisterInHex "k$_";
+   }
+
+  ok Assemble(debug => 1, eq => <<END);
+    k0: 0000 0000 0000 0001
+    k1: 0000 0000 0000 0002
+    k2: 0000 0000 0000 0004
+    k3: 0000 0000 0000 0008
+    k4: 0000 0000 0000 0010
+    k5: 0000 0000 0000 0020
+    k6: 0000 0000 0000 0040
+    k7: 0000 0000 0000 0080
+END
+ }
+
+latest:
+if (1) {
+  my $b = CreateByteString;
+  my $t = $b->CreateBlockMultiWayTree;
+  my $d = Vq(data);
+  my $f = Vq(found);
+
+  my $N = 24;
+  Vq(count, $N)->for(sub
+   {my ($index, $start, $next, $end) = @_;
+    if (1)
+     {my $k = $index * 2 +   1;     my $d = $k + 0x100;
+      $t->insert(key => $k, data => $d);
+     }
+    if (1)
+     {my $k = $index * -2 + 2 * $N; my $d = $k + 0x100;
+      $t->insert(key => $k, data => $d);
+     }
+   });
+
+  $t->getKeysDataNode($t->first, 31, 30, 29);
+  PrintOutStringNL "Root"; $t->first->outNL('First: ');
+  PrintOutRegisterInHex zmm31, zmm30, zmm29;
+
+  KeepFree zmm 26;
+  $t->getKeysDataNode(Vq(offset, 0x258), 28,27,26);
+  PrintOutStringNL "Left";
+  PrintOutRegisterInHex zmm28, zmm27, zmm26;
+
+  KeepFree zmm 26;
+  $t->getKeysDataNode(Vq(offset, 0x3d8), 28,27,26);
+  PrintOutStringNL "Left";
+  PrintOutRegisterInHex zmm28, zmm27, zmm26;
+
+  KeepFree zmm 26;
+  $t->getKeysDataNode(Vq(offset, 0x318), 28,27,26);
+  PrintOutStringNL "Left";
+  PrintOutRegisterInHex zmm28, zmm27, zmm26;
+
+  KeepFree zmm 26;
+  $t->getKeysDataNode(Vq(offset, 0xd8), 28,27,26);
+  PrintOutStringNL "Left";
+  PrintOutRegisterInHex zmm28, zmm27, zmm26;
+
+  KeepFree zmm 26;
+  $t->getKeysDataNode(Vq(offset, 0x198), 28,27,26);
+  PrintOutStringNL "Left";
+  PrintOutRegisterInHex zmm28, zmm27, zmm26;
+
+
+  $t->find(key => Vq(key, 0xffff), $d, $f);  $f->outNL('Found: ');
+  $t->find(key => Vq(key, 0x1b),   $d, $f);  $f->outNL('Found: ');
+
+  ok Assemble(debug => 0, eq => <<END);
+Root
+First: 0000 0000 0000 0018
+ zmm31: 0000 0058 0000 0004   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0024 0000 001A   0000 000F 0000 0008
+ zmm30: 0000 0098 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0124 0000 011A   0000 010F 0000 0108
+ zmm29: 0000 0018 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0198   0000 00D8 0000 0318   0000 03D8 0000 0258
+Left
+ zmm28: 0000 0298 0000 0007   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0007   0000 0006 0000 0005   0000 0004 0000 0003   0000 0002 0000 0001
+ zmm27: 0000 02D8 0000 0018   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0107   0000 0106 0000 0105   0000 0104 0000 0103   0000 0102 0000 0101
+ zmm26: 0000 0258 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+Left
+ zmm28: 0000 0418 0000 0006   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 000E 0000 000D   0000 000C 0000 000B   0000 000A 0000 0009
+ zmm27: 0000 0458 0000 0018   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 010E 0000 010D   0000 010C 0000 010B   0000 010A 0000 0109
+ zmm26: 0000 03D8 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+Left
+ zmm28: 0000 0358 0000 000A   0000 0000 0000 0000   0000 0000 0000 0000   0000 0019 0000 0018   0000 0017 0000 0016   0000 0015 0000 0014   0000 0013 0000 0012   0000 0011 0000 0010
+ zmm27: 0000 0398 0000 0018   0000 0000 0000 0000   0000 0000 0000 0000   0000 0119 0000 0118   0000 0117 0000 0116   0000 0115 0000 0114   0000 0113 0000 0112   0000 0111 0000 0110
+ zmm26: 0000 0318 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+Left
+ zmm28: 0000 0118 0000 0009   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0023   0000 0022 0000 0021   0000 0020 0000 001F   0000 001E 0000 001D   0000 001C 0000 001B
+ zmm27: 0000 0158 0000 0018   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0123   0000 0122 0000 0121   0000 0120 0000 011F   0000 011E 0000 011D   0000 011C 0000 011B
+ zmm26: 0000 00D8 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+Left
+ zmm28: 0000 01D8 0000 000C   0000 0000 0000 0000   0000 0030 0000 002F   0000 002E 0000 002D   0000 002C 0000 002B   0000 002A 0000 0029   0000 0028 0000 0027   0000 0026 0000 0025
+ zmm27: 0000 0218 0000 0018   0000 0000 0000 0000   0000 0130 0000 012F   0000 012E 0000 012D   0000 012C 0000 012B   0000 012A 0000 0129   0000 0128 0000 0127   0000 0126 0000 0125
+ zmm26: 0000 0198 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
 Found: 0000 0000 0000 0000
 Found: 0000 0000 0000 0001
 END
