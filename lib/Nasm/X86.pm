@@ -293,15 +293,14 @@ END
 sub Rs(@)                                                                       # Layout bytes in read only memory and return their label
  {my (@d) = @_;                                                                 # Data to be laid out
   my $d = join '', @_;
-     $d =~ s(') (\')gs;
-  my $D = $rodatas{$d};
-  return $D if defined $D;                                                      # Data already exists so return it
-  my $l = Label;
   my @e;
   for my $e(split //, $d)
-   {if ($e =~ m(\A(\n|\t)\Z)) {push @e, ord($e)} else {push @e, qq('$e')}
+   {if ($e =~ m(\A(\n|\t|'|")\Z)) {push @e, ord($e)} else {push @e, qq('$e')}
    }
   my $e = join ', ', @e;
+  my $L = $rodatas{$e};
+  return $L if defined $L;                                                      # Data already exists so return it
+  my $l = Label;                                                                # New label for new data
   $rodatas{$e} = $l;                                                            # Record label
   push @rodata, <<END;                                                          # Define bytes
   $l: db  $e, 0;
@@ -13602,7 +13601,7 @@ Test::More->builder->output("/dev/null") if $localTest;                         
 
 if ($^O =~ m(bsd|linux|cygwin)i)                                                # Supported systems
  {if (confirmHasCommandLineCommand(q(nasm)) and LocateIntelEmulator)            # Network assembler and Intel Software Development emulator
-   {plan tests => 119;
+   {plan tests => 120;
    }
   else
    {plan skip_all => qq(Nasm or Intel 64 emulator not available);
