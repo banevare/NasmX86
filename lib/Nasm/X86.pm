@@ -1451,17 +1451,17 @@ sub Vb(*;$%)                                                                    
   &Variable(0, @_)
  }
 
-sub Vw(*;$%)                                                                     # Define a word variable
+sub Vw(*;$%)                                                                    # Define a word variable
  {my ($name, $expr, %options) = @_;                                             # Name of variable, initializing expression, options
   &Variable(1, @_)
  }
 
-sub Vd(*;$%)                                                                     # Define a double word variable
+sub Vd(*;$%)                                                                    # Define a double word variable
  {my ($name, $expr, %options) = @_;                                             # Name of variable, initializing expression, options
   &Variable(2, @_)
  }
 
-sub Vq(*;$%)                                                                     # Define a quad variable
+sub Vq(*;$%)                                                                    # Define a quad variable
  {my ($name, $expr, %options) = @_;                                             # Name of variable, initializing expression, options
   &Variable(3, @_)
  }
@@ -1935,7 +1935,7 @@ sub Nasm::X86::Variable::setReg($$@)                                            
      {Mov $registers[$i], $variable->address(($i + 1) * RegisterSize rax);
      }
    }
-  else                                                                          #
+  else
    {confess "More code needed";
    }
   $register
@@ -1963,7 +1963,7 @@ sub Nasm::X86::Variable::getReg($$@)                                            
      {Mov $variable->address(($i + 1) * RegisterSize rax), $registers[$i];
      }
    }
-  else                                                                          #
+  else
    {confess "More code needed";
    }
  }
@@ -2360,11 +2360,11 @@ sub Nasm::X86::Variable::zBroadCastD($$)                                        
 sub Nasm::X86::Variable::push($)                                                # Push a variable onto the stack
  {my ($variable) = @_;                                                          # Variable
   $variable->size == 3 or confess "Wrong size";
-  PushR rax; Push rax;                                                           # Make a slot on the stack and save rax
+  PushR rax; Push rax;                                                          # Make a slot on the stack and save rax
   $variable->setReg(rax);                                                       # Variable to rax
   my $s = RegisterSize rax;                                                     # Size of rax
   Mov "[rsp+$s]", rax;                                                          # Move variable to slot
-  PopR rax;                                                                      # Remove rax to leave variable on top of the stack
+  PopR rax;                                                                     # Remove rax to leave variable on top of the stack
  }
 
 sub Nasm::X86::Variable::pop($)                                                 # Pop a variable from the stack
@@ -4546,9 +4546,9 @@ sub Nasm::X86::BlockArray::pop($@)                                              
 
         if (1)                                                                  # Continue with existing secondary block
          {PushR my @save = (rax, r14, zmm30);
-          my $S = getDFromZmmAsVariable(31, (($size-1) / $N + 1) * $w);             # Offset of secondary block in first block
+          my $S = getDFromZmmAsVariable(31, (($size-1) / $N + 1) * $w);         # Offset of secondary block in first block
           $b       ->getBlock($B, $S, 30);                                      # Get the secondary block
-          $E       ->getDFromZmm(30, (($size - 1)  % $N) * $w);             # Get element from secondary block
+          $E       ->getDFromZmm(30, (($size - 1)  % $N) * $w);                 # Get element from secondary block
           ($size-1)->putDIntoZmm(31, 0);                                        # Save new size in first block
           $b       ->putBlock($B, $S, 30);                                      # Put the secondary block back into memory
           $b       ->putBlock($B, $F, 31);                                      # Put the first  block back into memory
@@ -4697,7 +4697,7 @@ sub Nasm::X86::ByteString::CreateBlockMultiWayTree($)                           
   $s                                                                            # Description of block array
  }
 
-sub Nasm::X86::BlockMultiWayTree::allocKeysDataNodeIR($$$$@)                    #P Allocate a keys/data/node block and place it in the numbered zmm registers
+sub Nasm::X86::BlockMultiWayTree::allocKeysDataNode($$$$@)                      #P Allocate a keys/data/node block and place it in the numbered zmm registers
  {my ($bmt, $K, $D, $N, @variables) = @_;                                       # Block multi way tree descriptor, numbered zmm for keys, numbered zmm for data, numbered zmm for children
   @_ >= 4 or confess;
 
@@ -4712,11 +4712,12 @@ sub Nasm::X86::BlockMultiWayTree::allocKeysDataNodeIR($$$$@)                    
     $bmt->putLoop($d, $K);                                                      # Set the link from key to data
     $bmt->putLoop($n, $D);                                                      # Set the link from data to node
     $bmt->putLoop($k, $N);                                                      # Set the link from node  to key
-   }  name=>qq(Nasm::X86::BlockMultiWayTree::allocKeysDataNodeIR::${K}::${D}::${N}),  # Create a subroutine for each combination of registers encountered
-      in => {bs => 3};
+   }
+  name=>qq(Nasm::X86::BlockMultiWayTree::allocKeysDataNode::${K}::${D}::${N}),  # Create a subroutine for each combination of registers encountered
+  in => {bs => 3};
 
   $s->call($bmt->address, @variables);
- } # allocKeysDataNodeIR
+ } # allocKeysDataNode
 
 sub Nasm::X86::BlockMultiWayTree::splitNode($$$$@)                              #P Split a node given its offset in a byte string retaining the key being inserted in the node split while putting the remainder to the left or right .
  {my ($bmt, $bs, $node, $key, @variables) = @_;                                 # Block multi way tree descriptor, backing byte string, offset of node
@@ -4746,35 +4747,35 @@ sub Nasm::X86::BlockMultiWayTree::splitNode($$$$@)                              
        {Vmovdqu64 zmm28, zmm31;                                                 # Load left node
         Vmovdqu64 zmm27, zmm30;
         Vmovdqu64 zmm26, zmm29;
-        $bmt->allocKeysDataNodeIR(25, 24, 23);                                  # Create new right node
+        $bmt->allocKeysDataNode(25, 24, 23);                                    # Create new right node
 
         KeepFree zmm $N;                                                        # Reloading root
         $bmt->getKeysDataNode($p, $K, $D, $N);                                  # Load parent
-        $bmt->splitFullLeftNodeIR($b);
+        $bmt->splitFullLeftNode($b);
         $bmt->putKeysDataNode($p, $K, $D, $N);                                  # Save parent
         $bmt->putKeysDataNode($n, 28, 27, 26);                                  # Save left
-        my $r = $bmt->getLoop(23);                                              # Offset of right keys
-        $bmt->setUpIntoData($p, 24);                                            # Reparent new block
+        my $r = $bmt->getLoop    (23);                                          # Offset of right keys
+        $bmt->setUpIntoData  ($p, 24);                                          # Reparent new block
         $bmt->putKeysDataNode($r, 25, 24, 23);                                  # Save right back into node we just split
        },
       sub                                                                       # Split right node pushing remainder left  so that we keep the key we are looking for in the right node
        {Vmovdqu64 zmm25, zmm31;                                                 # Load right node
         Vmovdqu64 zmm24, zmm30;
         Vmovdqu64 zmm23, zmm29;
-        $bmt->allocKeysDataNodeIR(28, 27, 26);                                  # Create new left node
+        $bmt->allocKeysDataNode(28, 27, 26);                                    # Create new left node
 
         KeepFree zmm $N;                                                        # Reloading root
         $bmt->getKeysDataNode($p, $K, $D, $N);                                  # Load parent
-        $bmt->splitFullRightNodeIR($b);
+        $bmt->splitFullRightNode($b);
         $bmt->putKeysDataNode($p, $K, $D, $N);                                  # Save parent
-        my $l = $bmt->getLoop(26);                                              # Offset of left keys
-        $bmt->setUpIntoData($p, 27);                                            # Reparent new block
+        my $l = $bmt->getLoop    (26);                                          # Offset of left keys
+        $bmt->setUpIntoData  ($p, 27);                                          # Reparent new block
         $bmt->putKeysDataNode($l, 28, 27, 26);                                  # Save left
         $bmt->putKeysDataNode($n, 25, 24, 23);                                  # Save right back into node we just split
        });
      },
     sub
-     {$bmt->splitFullRootIR($b);                                                # Root
+     {$bmt->splitFullRoot($b);                                                  # Root
       my $l = getDFromZmmAsVariable($N, 0);
       my $r = getDFromZmmAsVariable($N, $bmt->width);
       $bmt->putKeysDataNode($n, $K, $D, $N);                                    # Save root
@@ -4789,7 +4790,7 @@ sub Nasm::X86::BlockMultiWayTree::splitNode($$$$@)                              
   $s->call(bs=>$bs, node=>$node, key=>$key, @variables);
  } # splitNode
 
-sub Nasm::X86::BlockMultiWayTree::reParentIR($$$$$@)                            #P Reparent the children of a node held in registers. The children are in the backing byte string not registers.
+sub Nasm::X86::BlockMultiWayTree::reParent($$$$$@)                              #P Reparent the children of a node held in registers. The children are in the backing byte string not registers.
  {my ($bmt, $bs, $PK, $PD, $PN, @variables) = @_;                               # Block multi way tree descriptor, numbered zmm key node, numbered zmm data node, numbered zmm child node
   @_ >= 5 or confess;
   my $b = $bmt->bs;                                                             # Underlying byte string
@@ -4821,9 +4822,9 @@ sub Nasm::X86::BlockMultiWayTree::reParentIR($$$$$@)                            
    }  in => {bs => 3};
 
   $s->call($bmt->address, @variables);
- } # reParentIR
+ } # reParent
 
-sub Nasm::X86::BlockMultiWayTree::splitFullRootIR($$)                           #P Split a full root block held in 31..29 and place the left block in 28..26 and the right block in 25..23. Thhe lefft and right blocks should have their loop offsets set so they can be inserted into the root.
+sub Nasm::X86::BlockMultiWayTree::splitFullRoot($$)                           #P Split a full root block held in 31..29 and place the left block in 28..26 and the right block in 25..23. Thhe lefft and right blocks should have their loop offsets set so they can be inserted into the root.
  {my ($bmt, $bs) = @_;                                                          # Block multi way tree descriptor, byte string locator
   @_ == 2 or confess;
   my $length      = $bmt->maxKeys;                                              # Length of block to split
@@ -4846,14 +4847,14 @@ sub Nasm::X86::BlockMultiWayTree::splitFullRootIR($$)                           
      {Jmp $success;
      });
 # Here we allocte the children of the root owrite the the children of the root for the forst time
-    $bmt->allocKeysDataNodeIR(28, 27, 26);
+    $bmt->allocKeysDataNode(28, 27, 26);
     my $l = $bmt->getLoop(26);
     $bmt->putKeysDataNode($l, 28, 27, 26);
-    $bmt->allocKeysDataNodeIR(25, 24, 23);
+    $bmt->allocKeysDataNode(25, 24, 23);
     my $r = $bmt->getLoop(23);
     $bmt->putKeysDataNode($l, 25, 24, 23);
-    $bmt->reParentIR($B, 28, 27, 26);
-    $bmt->reParentIR($B, 25, 24, 23);
+    $bmt->reParent($B, 28, 27, 26);
+    $bmt->reParent($B, 25, 24, 23);
 
     my $n  = $bmt->getLoop($TD);                                                # Offset of node block or zero if there is no node block
     my $to = $bmt->getLoop($TN);                                                # Offset of root block
@@ -4926,9 +4927,9 @@ sub Nasm::X86::BlockMultiWayTree::splitFullRootIR($$)                           
    } in => {bs => 3};
 
   $s->call (bs => $bs);
- } # splitFullRootIR
+ } # splitFullRoot
 
-sub Nasm::X86::BlockMultiWayTree::splitFullLeftNodeIR($$)                       #P Split a full left node block held in 28..26 whose parent is in 31..29 and place the new right block in 25..23. The parent is assumed to be not full. The loop and length fields are assumed to be authorative and hence are preserved.
+sub Nasm::X86::BlockMultiWayTree::splitFullLeftNode($$)                       #P Split a full left node block held in 28..26 whose parent is in 31..29 and place the new right block in 25..23. The parent is assumed to be not full. The loop and length fields are assumed to be authorative and hence are preserved.
  {my ($bmt, $bs) = @_;                                                          # Block multi way tree descriptor, byte string locator
   @_ == 2 or confess;
 
@@ -5023,9 +5024,9 @@ sub Nasm::X86::BlockMultiWayTree::splitFullLeftNodeIR($$)                       
    } in => {bs => 3};
 
   $s->call (bs => $bs);
- } # splitFullLeftNodeIR
+ } # splitFullLeftNode
 
-sub Nasm::X86::BlockMultiWayTree::splitFullRightNodeIR($$)                      #P Split a full right node block held in 25..23 whose parent is in 31..29 and place the new left block in 25..23.  The loop and length fields are assumed to be authorative and hence are preserved.
+sub Nasm::X86::BlockMultiWayTree::splitFullRightNode($$)                      #P Split a full right node block held in 25..23 whose parent is in 31..29 and place the new left block in 25..23.  The loop and length fields are assumed to be authorative and hence are preserved.
  {my ($bmt, $bs) = @_;                                                          # Block multi way tree descriptor, byte string locator
   @_ == 2 or confess;
   my $length      = $bmt->maxKeys;                                              # Length of block to split
@@ -5137,7 +5138,7 @@ sub Nasm::X86::BlockMultiWayTree::splitFullRightNodeIR($$)                      
    } in => {bs => 3};
 
   $s->call (bs => $bs);
- } # splitFullRightNodeIR
+ } # splitFullRightNode
 
 sub Nasm::X86::BlockMultiWayTree::getKeysData($$$$)                             # Load the keys and data blocks for a node
  {my ($bmt, $offset, $zmmKeys, $zmmData) = @_;                                  # Block multi way tree descriptor, offset as a variable, numbered zmm for keys, numbered data for keys
@@ -5547,38 +5548,11 @@ sub Nasm::X86::BlockMultiWayTree::rightMost($@)                                 
   $bmt->leftOrRightMost(1, @variables)                                          # Return the right most node
  }
 
-sub Nasm::X86::BlockMultiWayTree::full($$)                                      #P Confirm that the block held in the numbered zmm is full by returning a variable containing a non zero value else a variable with a zero value.
- {my ($bmt, $zmm) = @_;                                                         # Block multi way tree descriptor, zmm
-  @_ == 2 or confess;
-  my $l = $bmt->getBlockLength($zmm);                                           # Length of the node
-  $l == $bmt->maxKeys;                                                          # Check length
- }
-
-sub Nasm::X86::BlockMultiWayTree::half($)                                       #P Confirm that a node is half full.
- {my ($bmt, $zmm) = @_;                                                         # Block multi way tree descriptor, numbered zmm containing keys
-  @_ == 2 or confess;
-  my $l = $bmt->getBlockLength($zmm);                                           # Length of the node
-  $l == $bmt->minKeys;                                                          # Check length
- }
-
-sub Nasm::X86::BlockMultiWayTree::dataFromKey($$$)                              # Load the the data block into the numbered zmm corresponding to the key block held in the numbered zmm.
- {my ($bmt, $keys, $data) = @_;                                                 # Block multi way tree descriptor, numbered zmm containing keys, numbered zmm to hold data block
-  @_ == 3 or confess;
-  my $loop = $bmt->getLoop($keys);                                              # Get loop offset from keys
-  $bmt->getBlock($bmt->address, $loop, $data);                                  # Data
- }
-
 sub Nasm::X86::BlockMultiWayTree::nodeFromData($$$)                             # Load the the node block into the numbered zmm corresponding to the data block held in the numbered zmm.
  {my ($bmt, $data, $node) = @_;                                                 # Block multi way tree descriptor, numbered zmm containing data, numbered zmm to hold node block
   @_ == 3 or confess;
   my $loop = $bmt->getLoop($data);                                              # Get loop offset from data
   $bmt->getBlock($bmt->address, $loop, $node);                                  # Node
- }
-
-sub Nasm::X86::BlockMultiWayTree::leaf($$)                                      # Whether the data block in the numbered zmm indicates that we are on a leaf.
- {my ($bmt, $data) = @_;                                                        # Block multi way tree descriptor, numbered zmm containing data
-  @_ == 2 or confess;
-  $bmt->getLoop($data);                                                         # Get the loop offset which will act as a boolean variable
  }
 
 sub Nasm::X86::BlockMultiWayTree::address($)                                    # Address of the byte string containing a block multi way tree
@@ -5713,6 +5687,7 @@ sub Nasm::X86::BlockMultiWayTree::Iterator::next($)                             
       my $zmmNN = 29; my $zmmPN = 26;
       PushR my @save = (k7, r14, r15, map {"zmm$_"} 25..31);
       my $t = $iter->tree;
+
       ForEver                                                                   # Up through the tree
        {my ($start, $end) = @_;                                                 # Parameters
         $t->getKeysData($n, $zmmNK, $zmmND);                                    # Load keys and data for current node
@@ -5726,6 +5701,7 @@ sub Nasm::X86::BlockMultiWayTree::Iterator::next($)                             
         Tzcnt r14, r14;                                                         # Number of leading zeros gives us the position of the child in the parent
         my $i = Vq(indexInParent, r14);                                         # Index in parent
         my $l = $t->getBlockLength($zmmPK);                                     # Length of parent
+
         If ($i < $l, sub                                                        # Continue with this node if all the keys have yet to be finished
          {&$new($p, $i);
           Jmp $top;
@@ -5737,8 +5713,7 @@ sub Nasm::X86::BlockMultiWayTree::Iterator::next($)                             
       PopR @save;
      };
 
-    $$p{pos}->copy($$p{pos} + 1);                                       # Next position in block being scanned
-    my $i = $$p{pos};
+    $$p{pos}->copy(my $i = $$p{pos} + 1);                                       # Next position in block being scanned
     PushR my @save = (zmm31, zmm30, zmm29);
     $iter->tree->getKeysDataNode($C,    31, 30, 29);                            # Load keys and data
     my $l = $iter->tree->getBlockLength(31);                                    # Length of keys
@@ -14903,7 +14878,7 @@ END
  }
 
 #latest:
-if (0) {                                                                        #TNasm::X86::BlockMultiWayTree::splitFullRootIR
+if (0) {                                                                        #TNasm::X86::BlockMultiWayTree::splitFullRoot
   my $sk = Rd(1..14, 14,   0xFF);
   my $sd = Rd(1..14, 0xDD, 0xEE);
   my $sn = Rd(1..15,       0xCC);
@@ -14927,7 +14902,7 @@ if (0) {                                                                        
   Vmovdqu8 zmm24, "[$rd]";
   Vmovdqu8 zmm23, "[$rn]";
 
-  $t->splitFullRootIR($b->bs);
+  $t->splitFullRoot($b->bs);
 
   PrintOutRegisterInHex reverse zmm(23..31);
 
@@ -14945,7 +14920,7 @@ END
  }
 
 #latest:
-if (1) {                                                                        #TNasm::X86::BlockMultiWayTree::splitFullLeftNodeIR
+if (1) {                                                                        #TNasm::X86::BlockMultiWayTree::splitFullLeftNode
   my $Sk = Rd(17..28, 0, 0, 12,   0xFF);
   my $Sd = Rd(17..28, 0, 0, 0xDD, 0xEE);
   my $Sn = Rd(1..13,     0, 0,    0xCC);
@@ -14973,7 +14948,7 @@ if (1) {                                                                        
   Vmovdqu8 zmm24, "[$rd]";
   Vmovdqu8 zmm23, "[$rn]";
 
-   $t->splitFullLeftNodeIR($b->bs);
+   $t->splitFullLeftNode($b->bs);
 
   PrintOutRegisterInHex reverse zmm(23..31);
 
@@ -15019,7 +14994,7 @@ if (1) {                                                                        
   Vmovdqu8 zmm24, "[$rd]";
   Vmovdqu8 zmm23, "[$rn]";
 
-  $t->splitFullLeftNodeIR($b->bs);
+  $t->splitFullLeftNode($b->bs);
 
   PrintOutRegisterInHex reverse zmm(23..31);
 
@@ -15037,7 +15012,7 @@ END
  }
 
 #latest:
-if (1) {                                                                        #TNasm::X86::BlockMultiWayTree::splitFullRightNodeIR
+if (1) {                                                                        #TNasm::X86::BlockMultiWayTree::splitFullRightNode
   my $tk = Rd(1..12, 0, 0, 12,      0xC1);
   my $td = Rd(1..12, 0, 0,  0,      0xC2);
   my $tn = Rd(1, 0xBB, 3..13, 0, 0, 0xCC);
@@ -15065,7 +15040,7 @@ if (1) {                                                                        
   Vmovdqu8 zmm24, "[$rd]";
   Vmovdqu8 zmm23, "[$rn]";
 
-  $t->splitFullRightNodeIR($b->bs);
+  $t->splitFullRightNode($b->bs);
 
   PrintOutRegisterInHex reverse zmm(23..31);
 
@@ -15111,7 +15086,7 @@ if (1) {                                                                        
   Vmovdqu8 zmm24, "[$rd]";
   Vmovdqu8 zmm23, "[$rn]";
 
-  $t->splitFullRightNodeIR($b->bs);
+  $t->splitFullRightNode($b->bs);
 
   PrintOutRegisterInHex reverse zmm(23..31);
 
@@ -15129,13 +15104,13 @@ END
  }
 
 #latest:
-if (0) {                                                                        #TNasm::X86::BlockMultiWayTree::reParentIR
+if (0) {                                                                        #TNasm::X86::BlockMultiWayTree::reParent
   my $b = CreateByteString;
   my $t = $b->CreateBlockMultiWayTree;
 
-  $t->allocKeysDataNodeIR(31, 30, 29);
-  $t->allocKeysDataNodeIR(28, 27, 26);
-  $t->allocKeysDataNodeIR(25, 24, 23);
+  $t->allocKeysDataNode(31, 30, 29);
+  $t->allocKeysDataNode(28, 27, 26);
+  $t->allocKeysDataNode(25, 24, 23);
 
   my ($p, $l, $r) = map {getDFromZmmAsVariable($_, 60)} 29, 26, 23;             # Offset of each block
   Cq(one,1)->putDIntoZmm($_, 56) for 31, 28, 25;                                # Length of each node
@@ -15144,7 +15119,7 @@ if (0) {                                                                        
   $t->putKeysDataNode($l, 28, 27, 26);
   $t->putKeysDataNode($r, 25, 24, 23);
 
-  $t->reParentIR($b->bs, 31, 30, 29);                                           # Reparent the children
+  $t->reParent($b->bs, 31, 30, 29);                                           # Reparent the children
 
   $t->getKeysDataNode($l, 28, 27, 26);
   $t->getKeysDataNode($r, 25, 24, 23);
