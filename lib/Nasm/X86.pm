@@ -1781,7 +1781,7 @@ sub Nasm::X86::Variable::boolean($$$$)                                          
      {KeepFree r15;
       Mov r15, "[r15]";
      }
-    if (ref($right) and $right->reference)                                      # Dereference on right if necesssary
+    if (ref($right) and $right->reference)                                      # Dereference on right if necessary
      {PushR r14;
       Mov r14, $right ->address;
       KeepFree r14;
@@ -3276,7 +3276,7 @@ sub Nasm::X86::ByteString::chain($$$@)                                          
  }
 
 sub Nasm::X86::ByteString::putChain($$$$@)                                      # Write the double word in the specified variable to the double word location at the the specified offset in the specified byte string.
- {my ($byteString, $bs,  $start, $value, @offsets) = @_;                        # Byte string descriptor, byute string locator variable, start variable, value to put as a variable,  offsets chain
+ {my ($byteString, $bs,  $start, $value, @offsets) = @_;                        # Byte string descriptor, byte string locator variable, start variable, value to put as a variable,  offsets chain
   @_ >= 5 or confess;
 
   PushR my @save = (r14, r15);                                                  # 14 is the byte string address, 15 the current offset in the byte string
@@ -4688,7 +4688,7 @@ sub Nasm::X86::ByteString::CreateBlockMultiWayTree($)                           
     up        => $b - $o * 2,                                                   # Offset of up in data block
     head      => undef,                                                         # Offset of header block
    );
-  confess "Maximum keys must be 14" unless $s->maxKeys == 14;                   # Maximum number fo keys is expected to be 14
+  confess "Maximum keys must be 14" unless $s->maxKeys == 14;                   # Maximum number of keys is expected to be 14
 
   my $keys = $s->first = $s->allocBlock;                                        # Allocate first keys block
   my $data = $s->allocBlock;                                                    # Allocate first data block
@@ -4827,7 +4827,7 @@ sub Nasm::X86::BlockMultiWayTree::reParent($$$$$@)                              
   $s->call($bmt->address, @variables);
  } # reParent
 
-sub Nasm::X86::BlockMultiWayTree::splitFullRoot($$)                             #P Split a full root block held in 31..29 and place the left block in 28..26 and the right block in 25..23. Thhe lefft and right blocks should have their loop offsets set so they can be inserted into the root.
+sub Nasm::X86::BlockMultiWayTree::splitFullRoot($$)                             #P Split a full root block held in 31..29 and place the left block in 28..26 and the right block in 25..23. The left and right blocks should have their loop offsets set so they can be inserted into the root.
  {my ($bmt, $bs) = @_;                                                          # Block multi way tree descriptor, byte string locator
   @_ == 2 or confess;
   my $length      = $bmt->maxKeys;                                              # Length of block to split
@@ -4932,7 +4932,7 @@ sub Nasm::X86::BlockMultiWayTree::splitFullRoot($$)                             
   $s->call (bs => $bs);
  } # splitFullRoot
 
-sub Nasm::X86::BlockMultiWayTree::splitFullLeftNode($$)                         #P Split a full left node block held in 28..26 whose parent is in 31..29 and place the new right block in 25..23. The parent is assumed to be not full. The loop and length fields are assumed to be authorative and hence are preserved.
+sub Nasm::X86::BlockMultiWayTree::splitFullLeftNode($$)                         #P Split a full left node block held in 28..26 whose parent is in 31..29 and place the new right block in 25..23. The parent is assumed to be not full. The loop and length fields are assumed to be authoritative and hence are preserved.
  {my ($bmt, $bs) = @_;                                                          # Block multi way tree descriptor, byte string locator
   @_ == 2 or confess;
 
@@ -5748,7 +5748,7 @@ sub Nasm::X86::BlockMultiWayTree::by($&)                                        
   If ($iter->more == 0, sub {Jmp $end});                                        # Jump to end if there are no more elements to process
   &$body($iter, $end);                                                          # Perform the body parameterized by the iterator and the end label
   $iter->next;                                                                  # Next element
-  Jmp $start;                                                                   # Pocess next element
+  Jmp $start;                                                                   # Process next element
   SetLabel $end;                                                                # End of the loop
  }
 
