@@ -5282,7 +5282,7 @@ sub Nasm::X86::BlockMultiWayTree::find($@)                                      
         $tree->copy(getDFromZmm($zmmNode, "r14*$W"));                           # Corresponding node
         Jmp $next;                                                              # Loop
        };
-      $tree->copy(getDFromZmm($zmmNode, $l * $W));                              # Greater than al keys
+      $tree->copy(getDFromZmm($zmmNode, $l * $W));                              # Greater than all keys
      });
     PrintErrStringNL "Stuck in find";                                           # We seem to be looping endlessly
     Exit(1);
