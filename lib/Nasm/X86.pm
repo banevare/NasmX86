@@ -5149,7 +5149,6 @@ sub Nasm::X86::BlockMultiWayTree::splitFullRightNode($$)                        
   $s->call (bs => $bs);
  } # splitFullRightNode
 
-
 sub Nasm::X86::BlockMultiWayTree::getKeysDataNode($$$$$)                        # Load the keys, data and child nodes for a node
  {my ($bmt, $offset, $zmmKeys, $zmmData, $zmmNode) = @_;                        # Block multi way tree descriptor, offset as a variable, numbered zmm for keys, numbered data for keys, numbered numbered for keys
   @_ == 5 or confess;
