@@ -5149,61 +5149,6 @@ sub Nasm::X86::BlockMultiWayTree::splitFullRightNode($$)                        
   $s->call (bs => $bs);
  } # splitFullRightNode
 
-sub Nasm::X86::BlockMultiWayTree::getKeysData($$$$)                             # Load the keys and data blocks for a node
- {my ($bmt, $offset, $zmmKeys, $zmmData) = @_;                                  # Block multi way tree descriptor, offset as a variable, numbered zmm for keys, numbered data for keys
-  @_ == 4 or confess;
-  my $b = $bmt->bs;                                                             # Underlying byte string
-  $b->getBlock($b->bs, $offset, $zmmKeys);                                      # Get the keys block
-  my $data = $bmt->getLoop($zmmKeys);                                           # Get the offset of the corresponding data block
-  $b->getBlock($b->bs, $data, $zmmData);                                        # Get the data block
- }
-
-sub Nasm::X86::BlockMultiWayTree::putKeysData($$$$)                             # Save the key and data blocks for a node
- {my ($bmt, $offset, $zmmKeys, $zmmData) = @_;                                  # Block multi way tree descriptor, offset as a variable, numbered zmm for keys, numbered data for keys
-  @_ == 4 or confess;
-  my $b = $bmt->bs;                                                             # Underlying byte string
-  $b->putBlock($b->bs, $offset, $zmmKeys);                                      # Put the keys block
-  my $data = $bmt->getLoop($zmmKeys);                                           # Get the offset of the corresponding data block
-  my $up   = $bmt->getUpFromData($zmmData);                                     #DEBUG Check up pointer
-  If ($up >= $offset, sub
-   {PrintErrStringNL "Up is not less than node";
-    Exit(0);
-   });
-  $b->putBlock($b->bs, $data, $zmmData);                                        # Put the data block
- }
-
-sub Nasm::X86::BlockMultiWayTree::getNode($$$)                                  # Load the child nodes for a node
- {my ($bmt, $offset, $zmmNode) = @_;                                            # Block multi way tree descriptor, offset of nodes, numbered zmm for keys
-  @_ == 3 or confess;
-  $bmt->bs->getBlock($bmt->bs->bs, $offset, $zmmNode);                          # Get the node block
- }
-
-sub Nasm::X86::BlockMultiWayTree::getKeysDataNode($$$$$)                        # Load the keys, data and child nodes for a node
- {my ($bmt, $offset, $zmmKeys, $zmmData, $zmmNode) = @_;                        # Block multi way tree descriptor, offset as a variable, numbered zmm for keys, numbered data for keys, numbered numbered for keys
-  @_ == 5 or confess;
-  my $b = $bmt->bs;                                                             # Underlying byte string
-  $b->getBlock($b->bs, $offset, $zmmKeys);                                      # Get the keys block
-  my $data = $bmt->getLoop($zmmKeys);                                           # Get the offset of the corresponding data block
-  $b->getBlock($b->bs, $data, $zmmData);                                        # Get the data block
-  my $node = $bmt->getLoop($zmmData);                                           # Get the offset of the corresponding node block
-  If ($node, sub                                                                # Check for optional node block
-   {$b->getBlock($b->bs, $node, $zmmNode);                                      # Get the node block
-   },
-  sub                                                                           # No children
-   {ClearRegisters zmm $zmmNode;                                                # Clear the child block to signal that there was not one - if there were it would have child nodes in it which would be none zero
-   });
- }
-
-sub Nasm::X86::BlockMultiWayTree::putKeysDataNode($$$$$)                        # Save the keys, data and child nodes for a node
- {my ($bmt, $offset, $zmmKeys, $zmmData, $zmmNode) = @_;                        # Block multi way tree descriptor, offset as a variable, numbered zmm for keys, numbered data for keys, numbered numbered for keys
-  @_ == 5 or confess;
-  $bmt->putKeysData($offset, $zmmKeys, $zmmData);                               # Put keys and data
-  my $node = $bmt->getLoop($zmmData);                                           # Get the offset of the corresponding node block
-  If ($node, sub                                                                # Check for optional node block
-   {$bmt->bs->putBlock($bmt->bs->bs, $node, $zmmNode);                          # Put the node block
-   });
- }
-
 sub Nasm::X86::BlockMultiWayTree::findAndSplit($@)                              #P Find a key in a tree which is known to contain at least one key splitting full nodes along the path to the key.
  {my ($bmt, @variables) = @_;                                                   # Block multi way tree descriptor, variables
   @_ >= 3 or confess;
@@ -5478,6 +5423,61 @@ sub Nasm::X86::BlockMultiWayTree::insert($@)                                    
 
   $s->call($bmt->address, first => $bmt->first, @variables);
  } # insert
+
+sub Nasm::X86::BlockMultiWayTree::getKeysData($$$$)                             # Load the keys and data blocks for a node
+ {my ($bmt, $offset, $zmmKeys, $zmmData) = @_;                                  # Block multi way tree descriptor, offset as a variable, numbered zmm for keys, numbered data for keys
+  @_ == 4 or confess;
+  my $b = $bmt->bs;                                                             # Underlying byte string
+  $b->getBlock($b->bs, $offset, $zmmKeys);                                      # Get the keys block
+  my $data = $bmt->getLoop($zmmKeys);                                           # Get the offset of the corresponding data block
+  $b->getBlock($b->bs, $data, $zmmData);                                        # Get the data block
+ }
+
+sub Nasm::X86::BlockMultiWayTree::putKeysData($$$$)                             # Save the key and data blocks for a node
+ {my ($bmt, $offset, $zmmKeys, $zmmData) = @_;                                  # Block multi way tree descriptor, offset as a variable, numbered zmm for keys, numbered data for keys
+  @_ == 4 or confess;
+  my $b = $bmt->bs;                                                             # Underlying byte string
+  $b->putBlock($b->bs, $offset, $zmmKeys);                                      # Put the keys block
+  my $data = $bmt->getLoop($zmmKeys);                                           # Get the offset of the corresponding data block
+  my $up   = $bmt->getUpFromData($zmmData);                                     #DEBUG Check up pointer
+  If ($up >= $offset, sub
+   {PrintErrStringNL "Up is not less than node";
+    Exit(0);
+   });
+  $b->putBlock($b->bs, $data, $zmmData);                                        # Put the data block
+ }
+
+sub Nasm::X86::BlockMultiWayTree::getNode($$$)                                  # Load the child nodes for a node
+ {my ($bmt, $offset, $zmmNode) = @_;                                            # Block multi way tree descriptor, offset of nodes, numbered zmm for keys
+  @_ == 3 or confess;
+  $bmt->bs->getBlock($bmt->bs->bs, $offset, $zmmNode);                          # Get the node block
+ }
+
+sub Nasm::X86::BlockMultiWayTree::getKeysDataNode($$$$$)                        # Load the keys, data and child nodes for a node
+ {my ($bmt, $offset, $zmmKeys, $zmmData, $zmmNode) = @_;                        # Block multi way tree descriptor, offset as a variable, numbered zmm for keys, numbered data for keys, numbered numbered for keys
+  @_ == 5 or confess;
+  my $b = $bmt->bs;                                                             # Underlying byte string
+  $b->getBlock($b->bs, $offset, $zmmKeys);                                      # Get the keys block
+  my $data = $bmt->getLoop($zmmKeys);                                           # Get the offset of the corresponding data block
+  $b->getBlock($b->bs, $data, $zmmData);                                        # Get the data block
+  my $node = $bmt->getLoop($zmmData);                                           # Get the offset of the corresponding node block
+  If ($node, sub                                                                # Check for optional node block
+   {$b->getBlock($b->bs, $node, $zmmNode);                                      # Get the node block
+   },
+  sub                                                                           # No children
+   {ClearRegisters zmm $zmmNode;                                                # Clear the child block to signal that there was not one - if there were it would have child nodes in it which would be none zero
+   });
+ }
+
+sub Nasm::X86::BlockMultiWayTree::putKeysDataNode($$$$$)                        # Save the keys, data and child nodes for a node
+ {my ($bmt, $offset, $zmmKeys, $zmmData, $zmmNode) = @_;                        # Block multi way tree descriptor, offset as a variable, numbered zmm for keys, numbered data for keys, numbered numbered for keys
+  @_ == 5 or confess;
+  $bmt->putKeysData($offset, $zmmKeys, $zmmData);                               # Put keys and data
+  my $node = $bmt->getLoop($zmmData);                                           # Get the offset of the corresponding node block
+  If ($node, sub                                                                # Check for optional node block
+   {$bmt->bs->putBlock($bmt->bs->bs, $node, $zmmNode);                          # Put the node block
+   });
+ }
 
 sub Nasm::X86::BlockMultiWayTree::getLengthInKeys($$)                           # Get the length of the keys block in the numbered zmm and return it as a variable
  {my ($bmt, $zmm) = @_;                                                         # Block multi way tree descriptor, zmm number
