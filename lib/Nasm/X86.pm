@@ -5149,6 +5149,14 @@ sub Nasm::X86::BlockMultiWayTree::splitFullRightNode($$)                        
   $s->call (bs => $bs);
  } # splitFullRightNode
 
+sub Nasm::X86::BlockMultiWayTree::getKeysData($$$$)                             # Load the keys and data blocks for a node
+ {my ($bmt, $offset, $zmmKeys, $zmmData) = @_;                                  # Block multi way tree descriptor, offset as a variable, numbered zmm for keys, numbered data for keys
+  @_ == 4 or confess;
+  my $b = $bmt->bs;                                                             # Underlying byte string
+  $b->getBlock($b->bs, $offset, $zmmKeys);                                      # Get the keys block
+  my $data = $bmt->getLoop($zmmKeys);                                           # Get the offset of the corresponding data block
+  $b->getBlock($b->bs, $data, $zmmData);                                        # Get the data block
+ }
 
 sub Nasm::X86::BlockMultiWayTree::putKeysData($$$$)                             # Save the key and data blocks for a node
  {my ($bmt, $offset, $zmmKeys, $zmmData) = @_;                                  # Block multi way tree descriptor, offset as a variable, numbered zmm for keys, numbered data for keys
