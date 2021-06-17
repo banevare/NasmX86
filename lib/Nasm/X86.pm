@@ -3882,7 +3882,7 @@ sub Nasm::X86::BlockString::allocBlock($)                                       
   $blockString->bs->allocBlock;                                                 # Allocate block and return its offset as a variable
  }
 
-sub Nasm::X86::BlockString::getBlockLengthInZmm($$)                             # Get the block length of the numbered zmm and return it in a variable
+sub Nasm::X86::BlockString::getBlockLength($$)                                  # Get the block length of the numbered zmm and return it in a variable
  {my ($blockString, $zmm) = @_;                                                 # Block string descriptor, number of zmm register
   @_ == 2 or confess;
   getBFromZmm $zmm, 0;                                                          # Block length
@@ -3914,7 +3914,7 @@ sub Nasm::X86::BlockString::getNextAndPrevBlockOffsetFromZmm($$)                
   @_ == 2 or confess;
   my $l = $blockString->links;                                                  # Location of links
   PushR my @regs = (r14, r15);                                                  # Work registers
-  my $L = getQFromZmm($zmm, $blockString->links);                     # Links in one register
+  my $L = getQFromZmm($zmm, $blockString->links);                               # Links in one register
   $L->setReg(r15);                                                              # Links
   Mov r14d, r15d;                                                               # Next
   Shr r15, RegisterSize(r14d) * 8;                                              # Prev
@@ -3962,7 +3962,7 @@ sub Nasm::X86::BlockString::dump($)                                             
     PushR my @save = (zmm31);
     my $block  = $$p{first};                                                    # The first block
                  $blockString->getBlock($$p{bs}, $block, 31);                   # The first block in zmm31
-    my $length = $blockString->getBlockLengthInZmm(31);                         # Length of block
+    my $length = $blockString->getBlockLength(31);                              # Length of block
     PrintOutStringNL "Block String Dump";
     $block ->out("Offset: ");
     PrintOutString "   ";
@@ -3973,7 +3973,7 @@ sub Nasm::X86::BlockString::dump($)                                             
       my ($next, $prev) = $blockString->getNextAndPrevBlockOffsetFromZmm(31);   # Get links from current block
       If ($next == $block, sub{Jmp $end});                                      # Next block is the first block so we have printed the block string
       $blockString->getBlock($$p{bs}, $next, 31);                               # Next block in zmm
-      my $length = $blockString->getBlockLengthInZmm(31);                       # Length of block
+      my $length = $blockString->getBlockLength(31);                            # Length of block
       $next  ->out("Offset: ");                                                 # Print block
       PrintOutString "   ";
       $length->outNL("Length: "); PrintOutRegisterInHex zmm31;
@@ -3996,14 +3996,14 @@ sub Nasm::X86::BlockString::len($$)                                             
     PushR my @save = (zmm31);
     my $block  = $$p{first};                                                    # The first block
                  $blockString->getBlock($$p{bs}, $block, 31);                   # The first block in zmm31
-    my $length = $blockString->getBlockLengthInZmm(31);                         # Length of block
+    my $length = $blockString->getBlockLength(31);                              # Length of block
 
     ForEver                                                                     # Each block in string
      {my ($start, $end) = @_;                                                   #
       my ($next, $prev) = $blockString->getNextAndPrevBlockOffsetFromZmm(31);   # Get links from current block
       If ($next == $block, sub{Jmp $end});                                      # Next block is the first block so we have printed the block string
       $blockString->getBlock($$p{bs}, $next, 31);                               # Next block in zmm
-      $length += $blockString->getBlockLengthInZmm(31);                         # Add length of block
+      $length += $blockString->getBlockLength(31);                              # Add length of block
      };
     $$p{size}->copy($length);
     PopR @save;
@@ -4076,7 +4076,7 @@ sub Nasm::X86::BlockString::insertChar($@)                                      
     my $P = $$p{position};                                                      # The position in the block string at which we want to insert the character
     $blockString->getBlock($B, $F, 31);                                         # The first source block
     my $C = Vq('Current character position', 0);                                # Current character position
-    my $L = $blockString->getBlockLengthInZmm(31);                              # Length of last block
+    my $L = $blockString->getBlockLength(31);                                   # Length of last block
     my $M   = Vq('Block length', $blockString->length);                         # Maximum length of a block
     my $One = Vq('One', 1);                                                     # Literal one
     my $current = $F;                                                           # Current position in scan of block chain
@@ -4134,7 +4134,7 @@ sub Nasm::X86::BlockString::insertChar($@)                                      
 
       $current->copy($next);
       $blockString->getBlock($B, $current, 31);                                 # Next block
-      $L = $blockString->getBlockLengthInZmm(31);                               # Length of block
+      $L = $blockString->getBlockLength(31);                                    # Length of block
       $C += $L;                                                                 # Current character position at the start of this block
      };
 
@@ -4157,7 +4157,7 @@ sub Nasm::X86::BlockString::deleteChar($@)                                      
     my $P = $$p{position};                                                      # The position in the block string at which we want to insert the character
     $blockString->getBlock($B, $F, 31);                                         # The first source block
     my $C = Vq('Current character position', 0);                                # Current character position
-    my $L = $blockString->getBlockLengthInZmm(31);                              # Length of last block
+    my $L = $blockString->getBlockLength(31);                                   # Length of last block
     my $current = $F;                                                           # Current position in scan of block chain
 
     ForEver                                                                     # Each block in source string
@@ -4177,7 +4177,7 @@ sub Nasm::X86::BlockString::deleteChar($@)                                      
       my ($next, $prev) = $blockString->getNextAndPrevBlockOffsetFromZmm(31);   # Get links from current source block
       $blockString->getBlock($B, $next, 31);                                    # Next block
       $current->copy($next);
-      $L = $blockString->getBlockLengthInZmm(31);                               # Length of block
+      $L = $blockString->getBlockLength(31);                                    # Length of block
       $C += $L;                                                                 # Current character position at the start of this block
      };
 
@@ -4200,7 +4200,7 @@ sub Nasm::X86::BlockString::getCharacter($@)                                    
     my $P = $$p{position};                                                      # The position in the block string at which we want to insert the character
     $blockString->getBlock($B, $F, 31);                                         # The first source block
     my $C = Vq('Current character position', 0);                                # Current character position
-    my $L = $blockString->getBlockLengthInZmm(31);                              # Length of last block
+    my $L = $blockString->getBlockLength(31);                                   # Length of last block
 
     ForEver                                                                     # Each block in source string
      {my ($start, $end) = @_;                                                   # Start and end labels
@@ -4218,7 +4218,7 @@ sub Nasm::X86::BlockString::getCharacter($@)                                    
 
       my ($next, $prev) = $blockString->getNextAndPrevBlockOffsetFromZmm(31);   # Get links from current source block
       $blockString->getBlock($B, $next, 31);                                    # Next block
-      $L = $blockString->getBlockLengthInZmm(31);                               # Length of block
+      $L = $blockString->getBlockLength(31);                                    # Length of block
       $C += $L;                                                                 # Current character position at the start of this block
      };
 
@@ -4249,7 +4249,7 @@ sub Nasm::X86::BlockString::append($@)                                          
       $blockString->getBlock($B, $first, 29);                                   # Get the first block
       my ($second, $last) = $blockString->getNextAndPrevBlockOffsetFromZmm(29); # Get the offsets of the second and last blocks
       $blockString->getBlock($B, $last,  31);                                   # Get the last block
-      my $lengthLast      = $blockString->getBlockLengthInZmm(31);              # Length of last block
+      my $lengthLast      = $blockString->getBlockLength(31);                   # Length of last block
       my $spaceLast       = $L - $lengthLast;                                   # Space in last block
       my $toCopy          = $spaceLast->min($size);                             # Amount of data required to fill first block
       my $startPos        = $O + $lengthLast;                                   # Start position in zmm
