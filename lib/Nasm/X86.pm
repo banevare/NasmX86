@@ -466,8 +466,6 @@ sub UnReorderSyscallRegisters(@)                                                
   PopR  @syscallSequence[0..$#registers];
  }
 
-my @xmmRegisters = map {"xmm$_"} 0..31;                                         # The xmm registers
-
 sub RegisterSize($)                                                             # Return the size of a register
  {my ($r) = @_;                                                                 # Register
 
@@ -483,12 +481,6 @@ sub ClearRegisters(@)                                                           
     Kxorq  $r, $r, $r if $size == 8 and $r =~ m(\Ak);
     Vpxorq $r, $r     if $size  > 8;
    }
- }
-
-sub SetRegisterToMinusOne($)                                                    # Set the specified register to -1
- {my ($register) = @_;                                                          # Register to set
-  @_ == 1 or confess;
-  &Copy($register, -1);
  }
 
 sub SetMaskRegister($$$)                                                        # Set the mask register to ones starting at the specified position for the specified length and zeroes elsewhere
@@ -14330,13 +14322,6 @@ offset: 0000 0000 0000 0068
 END
  }
 
-if (1) {                                                                        #TSetRegisterToMinusOne
-  SetRegisterToMinusOne rax;
-  PrintOutRegisterInHex rax;
-
-  ok Assemble =~ m(rax: FFFF FFFF FFFF FFFF);
- }
-
 # It is one of the happiest characteristics of this glorious country that official utterances are invariably regarded as unanswerable
 
 if (1) {                                                                        #TPrintOutZF #TSetZF #TClearZF
@@ -14506,7 +14491,7 @@ if (1) {                                                                        
   Vmovdqu8 zmm2,"[$s]";
   Vmovdqu8 zmm3,"[$s]";
 
-  SetRegisterToMinusOne rax;                                                    # Insert some ones
+  Mov rax, -1;                                                                  # Insert some ones
   InsertIntoXyz xmm0, 2, 4;
   InsertIntoXyz ymm1, 4, 5;
   InsertIntoXyz zmm2, 8, 6;
