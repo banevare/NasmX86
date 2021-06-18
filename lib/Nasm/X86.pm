@@ -13751,7 +13751,7 @@ Test::More->builder->output("/dev/null") if $localTest;                         
 
 if ($^O =~ m(bsd|linux|cygwin)i)                                                # Supported systems
  {if (confirmHasCommandLineCommand(q(nasm)) and LocateIntelEmulator)            # Network assembler and Intel Software Development emulator
-   {plan tests => 122;
+   {plan tests => 121;
    }
   else
    {plan skip_all => qq(Nasm or Intel 64 emulator not available);
@@ -16517,7 +16517,7 @@ if (1) {                                                                        
   NidaClassifyChar in=>$out, $class, $fail;
   $class->outNL('class: ');
 
-  my $subroutine = $NidaClassifyChar{subroutine};
+  my $subroutine = $NidaClassifyChar{subroutine};                               # 𝒙 is part of a subroutine name
 
   ok Assemble(debug => 1, eq => <<END);
 out  : 0000 0000 0001 0348
