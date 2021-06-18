@@ -5,7 +5,7 @@
 #-------------------------------------------------------------------------------
 # podDocumentation
 package Nasm::X86;
-our $VERSION = "20210614";
+our $VERSION = "20210618";
 use warnings FATAL => qw(all);
 use strict;
 use Carp qw(confess cluck);
@@ -13755,7 +13755,7 @@ Test::More->builder->output("/dev/null") if $localTest;                         
 
 if ($^O =~ m(bsd|linux|cygwin)i)                                                # Supported systems
  {if (confirmHasCommandLineCommand(q(nasm)) and LocateIntelEmulator)            # Network assembler and Intel Software Development emulator
-   {plan tests => 121;
+   {plan tests => 119;
    }
   else
    {plan skip_all => qq(Nasm or Intel 64 emulator not available);
@@ -14291,35 +14291,11 @@ if (1) {                                                                        
   is_deeply stringMd5Sum($r), fileMd5Sum($0);                                   # Output contains this file
  }
 
-if (0) {                                                                        # Print rdi in hex into a byte string #TByteString::rdiInHex
-  my $s = CreateByteString;                                                     # Create a string
-  Mov rdi, 0x88776655;
-  Shl rdi, 32;
-  Or  rdi, 0x44332211;
-
-  $s->rdiInHex;                                                                 # Append a constant to the byte string
-  $s->out;
-
-  ok Assemble =~ m(8877665544332211);
- }
-
 if (1) {                                                                        # Print rdi in hex into a byte string #TGetPidInHex
   GetPidInHex;
   PrintOutRegisterInHex rax;
 
   ok Assemble =~ m(rax: 00);
- }
-
-if (0) {                                                                        # Write a hex string to a temporary file
-  my $s = CreateByteString;                                                     # Create a string
-  Mov rdi, 0x88776655;                                                          # Write into string
-  Shl rdi, 32;
-  Or  rdi, 0x44332211;
-  $s->rdiInHex;                                                                 # Append a constant to the byte string
-  $s->write;                                                                    # Write the byte string to a temporary file
-  $s->out;                                                                      # Write the name of the temporary file
-
-  ok Assemble =~ m(tmp);
  }
 
 if (1) {                                                                        # Execute the content of a byte string #TexecuteFileViaBash #TByteString::write #TByteString::out #TunlinkFile #TByteString::ql
@@ -14467,65 +14443,6 @@ if (1) {                                                                        
 END
 
   ok 8 == RegisterSize rax;
- }
-
-if (0) {                                                                        #TGenTree #TUnReorderXmmRegisters #TReorderXmmRegisters #TPrintOutStringNL #Tcxr #TByteString::dump
-  my $t = GenTree(2,2);                                                         # Tree description
-  $t->node->();                                                                 # Root
-  Movdqa xmm1, xmm0;                                                            # Root is in xmm1
-
-  if (1)                                                                        # New left node
-   {$t->node->();                                                               # Node in xmm0
-    Movdqa xmm2, xmm0;                                                          # Left is in xmm2
-
-    cxr {$t->insertLeft->()} 1,2;                                               # Insert left under root
-    cxr {$t->dump->("Left")} 2;                                                 # Left node after insertion
-   }
-
-  if (1)                                                                        # New right node in xmm0
-   {$t->node->();
-    Movdqa xmm3, xmm0;                                                          # Right is in xmm3
-
-    cxr {$t->insertRight->()} 1,3;                                              # Insert left under root
-    cxr {$t->dump->("Right")} 3;                                                # Right node after insertion
-   }
-
-  cxr
-   {$t->dump->("Root");                                                         # Root node after insertions
-    $t->isRoot->();
-    IfNz {PrintOutStringNL "root"} sub {PrintOutStringNL "NOT root"};
-   } 1;
-
-  PushRR xmm0;                                                                  # Dump underlying  byte string
-  PopRR rdi, rax;
-  $t->byteString->dump;
-
-  Exit;                                                                         # Return to operating system
-
-  is_deeply Assemble, <<END;                                                    # Test tree so produced
-Left
-ArenaTreeNode at: 0000 0000 0000 00B0
-   up: 0000 0000 0000 0010
- left: 0000 0000 0000 0000
-right: 0000 0000 0000 0000
-Right
-ArenaTreeNode at: 0000 0000 0000 0150
-   up: 0000 0000 0000 0010
- left: 0000 0000 0000 0000
-right: 0000 0000 0000 0000
-Root
-ArenaTreeNode at: 0000 0000 0000 0010
-   up: 0000 0000 0000 0000
- left: 0000 0000 0000 00B0
-right: 0000 0000 0000 0150
-root
-Byte String
-  Size: 0000 0000 0000 1000
-  Used: 0000 0000 0000 01E0
-END
- }
-else
- {ok 1;
  }
 
 if (1) {                                                                        #TRb #TRd #TRq #TRw #TDb #TDd #TDq #TDw #TCopyMemory
@@ -14793,29 +14710,6 @@ if (1) {                                                                        
 3 gt 2
 3 ge 2
 END
- }
-
-if (0) {                                                                        # Concatenate string of length 1 to itself 4 times
-  my $s = Rb(4, 1..4);
-  LoadShortStringFromMemoryToZmm 0, $s;
-  ConcatenateShortStrings(0, 0);
-  ConcatenateShortStrings(0, 0);
-  ConcatenateShortStrings(0, 0);
-
-  my $b = CreateByteString;                                                     # Create a string
-  $b->allocBlock;
-  $b->putBlock(0);
-  $b->getBlock(1);
-  PrintOutRegisterInHex ymm0;
-  PrintOutRegisterInHex ymm1;
-
-  is_deeply Assemble, <<END;
-  ymm0: 0302 0104 0302 0104   0302 0104 0302 0104   0302 0104 0302 0104   0302 0104 0302 0120
-  ymm1: 0302 0104 0302 0104   0302 0104 0302 0104   0302 0104 0302 0104   0302 0104 0302 0120
-END
- }
-else
- {ok 1;
  }
 
 if (1) {                                                                        #TSetMaskRegister
@@ -16036,48 +15930,6 @@ END
  }
 
 #latest:
-if (0) {                                                                        #TNasm::X86::BlockMultiWayTree::splitFullRoot
-  my $sk = Rd(1..14, 14,   0xFF);
-  my $sd = Rd(1..14, 0xDD, 0xEE);
-  my $sn = Rd(1..15,       0xCC);
-  my $lk = Rd((0)x14, 0xA1, 0xA3);
-  my $ld = Rd((0)x14, 0xA2, 0xA4);
-  my $ln = Rd((0)x15, 0xAA);
-  my $rk = Rd((0)x14, 0xB1, 0xB3);
-  my $rd = Rd((0)x14, 0xB2, 0xB4);
-  my $rn = Rd((0)x15, 0xBB);
-
-  my $b = CreateByteString;
-  my $t = $b->CreateBlockMultiWayTree;
-
-  Vmovdqu8 zmm31, "[$sk]";
-  Vmovdqu8 zmm30, "[$sd]";
-  Vmovdqu8 zmm29, "[$sn]";
-  Vmovdqu8 zmm28, "[$lk]";
-  Vmovdqu8 zmm27, "[$ld]";
-  Vmovdqu8 zmm26, "[$ln]";
-  Vmovdqu8 zmm25, "[$rk]";
-  Vmovdqu8 zmm24, "[$rd]";
-  Vmovdqu8 zmm23, "[$rn]";
-
-  $t->splitFullRoot($b->bs);
-
-  PrintOutRegisterInHex reverse zmm(23..31);
-
-  ok Assemble(debug => 0, eq => <<END);
- zmm31: 0000 00FF 0000 0001   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0008
- zmm30: 0000 00EE 0000 00DD   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0008
- zmm29: 0000 00CC 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 00BB 0000 00AA
- zmm28: 0000 00A3 0000 0007   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0007   0000 0006 0000 0005   0000 0004 0000 0003   0000 0002 0000 0001
- zmm27: 0000 00A4 0000 00CC   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0007   0000 0006 0000 0005   0000 0004 0000 0003   0000 0002 0000 0001
- zmm26: 0000 00AA 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0007   0000 0006 0000 0005   0000 0004 0000 0003   0000 0002 0000 0001
- zmm25: 0000 00B3 0000 0006   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 000E 0000 000D   0000 000C 0000 000B   0000 000A 0000 0009
- zmm24: 0000 00B4 0000 00CC   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 000E 0000 000D   0000 000C 0000 000B   0000 000A 0000 0009
- zmm23: 0000 00BB 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 000E 0000 000D   0000 000C 0000 000B   0000 000A 0000 0009
-END
- }
-
-#latest:
 if (1) {                                                                        #TNasm::X86::BlockMultiWayTree::splitFullLeftNode
   my $Sk = Rd(17..28, 0, 0, 12,   0xFF);
   my $Sd = Rd(17..28, 0, 0, 0xDD, 0xEE);
@@ -16258,42 +16110,6 @@ if (1) {                                                                        
  zmm25: 0000 00B1 0000 0006   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 001E 0000 001D   0000 001C 0000 001B   0000 001A 0000 0019
  zmm24: 0000 00B2 0000 00CC   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 001E 0000 001D   0000 001C 0000 001B   0000 001A 0000 0019
  zmm23: 0000 00BB 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 001E 0000 001D   0000 001C 0000 001B   0000 001A 0000 0019
-END
- }
-
-#latest:
-if (0) {                                                                        #TNasm::X86::BlockMultiWayTree::reParent
-  my $b = CreateByteString;
-  my $t = $b->CreateBlockMultiWayTree;
-
-  $t->allocKeysDataNode(31, 30, 29);
-  $t->allocKeysDataNode(28, 27, 26);
-  $t->allocKeysDataNode(25, 24, 23);
-
-  my ($p, $l, $r) = map {getDFromZmm($_, 60)} 29, 26, 23;             # Offset of each block
-  Cq(one,1)->putDIntoZmm($_, 56) for 31, 28, 25;                                # Length of each node
-  $l->putDIntoZmm(29, 0);  $r->putDIntoZmm(29, 4);                              # Children
-
-  $t->putKeysDataNode($l, 28, 27, 26);
-  $t->putKeysDataNode($r, 25, 24, 23);
-
-  $t->reParent($b->bs, 31, 30, 29);                                           # Reparent the children
-
-  $t->getKeysDataNode($l, 28, 27, 26);
-  $t->getKeysDataNode($r, 25, 24, 23);
-
-  PrintOutRegisterInHex reverse zmm(23..31);
-
-  ok Assemble(debug => 1, eq => <<END);
- zmm31: 0000 00D8 0000 0001   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
- zmm30: 0000 0118 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
- zmm29: 0000 0098 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0218 0000 0158
- zmm28: 0000 0198 0000 0001   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
- zmm27: 0000 01D8 0000 0098   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
- zmm26: 0000 0158 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
- zmm25: 0000 0258 0000 0001   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
- zmm24: 0000 0298 0000 0098   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
- zmm23: 0000 0218 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
 END
  }
 
@@ -16493,7 +16309,7 @@ Found: 0000 0000 0000 0001
 END
  }
 
-latest:
+#latest:
 if (1) {                                                                        #TConvertUtf8ToUtf32
 
   my $out = Vq(out); my $size = Vq(size); my $fail = Vq("fail");
