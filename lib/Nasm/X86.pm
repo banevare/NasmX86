@@ -1539,7 +1539,9 @@ sub ConvertUtf8ToUtf32(@)                                                       
     Comment "Convert utf8 to utf32";
 
     PushR my @save = (rax, r12, r13, r14, r15);
-    $$p{in}->setReg(rax);
+    $$p{fail}->getConst(0);                                                     # Clear failure indicator
+    KeepFree rax;
+    $$p{in}->setReg(rax);                                                       # Character to convert
 
     my $success = Label;                                                        # https://en.wikipedia.org/wiki/UTF-8
     Mov r15, rax;
@@ -1564,8 +1566,6 @@ sub ConvertUtf8ToUtf32(@)                                                       
       Jmp $success;
      };
 
-# 1010 1100 1000 0010 1110 0010
-# A    C    8    2    E    2
     Shr r15, 1;
     Cmp r15, 0xe;
     IfZ                                                                         # 3 bytes
@@ -1595,17 +1595,70 @@ sub ConvertUtf8ToUtf32(@)                                                       
       Jmp $success;
      };
 
-    Mov r15, rax; Shl r15, 57; Shr r15, 57;                                     # 1 bytes
-    $$p{out}->getReg(r15);
-    $$p{size}->copy(Vq(one, 1));
+    Shr r15, 2;
+    Cmp r15, 0;
+    IfZ                                                                         # 1 byte
+     {Mov r15, rax; Shl r15, 57; Shr r15, 57;
+      $$p{out}->getReg(r15);
+      $$p{size}->copy(Vq(one, 1));
+      KeepFree rax, r15, r14, r13, r12;
+      Jmp $success;
+     };
+    $$p{fail}->getConst(1);                                                     # Conversion failed
 
     SetLabel $success;
 
     PopR @save;
-   } in => {in => 3}, out => {out => 3, size => 3};
+   } in => {in => 3}, out => {out => 3, size => 3, fail => 3};
 
   $s->call(@parameters);
  } # ConvertUtf8ToUtf32
+
+
+our %NidaClassifyChar;                                                          # The possible lexical items in the Nida language
+sub NidaClassifyChar(@)                                                         # Classify a unicode character as a lexical item
+ {my (@parameters) = @_;                                                        # Parameters
+  @_ >= 1 or confess;
+
+  my $s = Subroutine
+   {my ($p) = @_;                                                               # Parameters
+    Comment "Classify a unicode character as a Nida lexical item";
+    my $finish = Label;                                                         # https://en.wikipedia.org/wiki/UTF-8
+
+    my sub class(*$$)                                                           # Classify a character
+     {my ($name, $a, $b) = @_;                                                  # Name of the parameter, start of range, end of range
+      Cmp r15, $b;
+      IfLe                                                                      # Start or above
+       {Cmp r15, $a;
+        IfGe                                                                    # End or below
+         {my $n = $NidaClassifyChar{$name} // 1 + keys %NidaClassifyChar;       # Create or continue lexical classification
+          $$p{class}->getConst($NidaClassifyChar{$name} = $n);
+          $$p{fail}->getConst(0);                                               # Successs
+          Jmp $finish;
+         },
+        sub                                                                     # Not in this range and as ranges are ordered it cannot be in any other range
+         {$$p{fail}->getConst(1);
+          Jmp $finish;
+        };
+       }
+     }
+
+    PushR my @save = (r15);
+    $$p{in}->setReg(r15);
+    class(string,         0x0,    0x7f);
+    class(dyad,       0x1d400, 0x1d433);                                        # https://www.compart.com/en/unicode/block/U+1D400
+    class(variable,   0x1d434, 0x1d467);
+    class(subroutine, 0x1d468, 0x1d49b);
+    $$p{fail}->getConst(2);                                                     # Failed
+
+    SetLabel $finish;
+    PopR @save;
+   } in => {in => 3}, out => {class => 3, fail => 3};
+
+  $s->call(@parameters);
+ } # NidaClassifyChar
+
+
 
 #D2 Operations                                                                  # Variable operations
 
@@ -2053,6 +2106,21 @@ sub Nasm::X86::Variable::getReg($$@)                                            
     for my $i(keys @registers)
      {Mov $variable->address(($i + 1) * RegisterSize rax), $registers[$i];
      }
+   }
+  else
+   {confess "More code needed";
+   }
+ }
+
+sub Nasm::X86::Variable::getConst($$)                                           # Load the variable from a constant in effect setting a variable to a specified value
+ {my ($variable, $constant) = @_;                                               # Variable, constant to load
+  if ($variable->size == 3)
+   {PushR my @save = (r14, r15);
+    Comment "Load constant $constant into variable: ".$variable->name;
+    Mov r15, $constant;
+    Lea r14, $variable->address;
+    Mov "[r14]", r15;
+    PopR @save;
    }
   else
    {confess "More code needed";
@@ -13683,7 +13751,7 @@ Test::More->builder->output("/dev/null") if $localTest;                         
 
 if ($^O =~ m(bsd|linux|cygwin)i)                                                # Supported systems
  {if (confirmHasCommandLineCommand(q(nasm)) and LocateIntelEmulator)            # Network assembler and Intel Software Development emulator
-   {plan tests => 121;
+   {plan tests => 122;
    }
   else
    {plan skip_all => qq(Nasm or Intel 64 emulator not available);
@@ -16424,29 +16492,46 @@ END
 latest:
 if (1) {                                                                        #TConvertUtf8ToUtf32
 
-  my $out = Vq(out); my $size = Vq(size);
+  my $out = Vq(out); my $size = Vq(size); my $fail = Vq("fail");
+  my $class = Vq(class);
 
-  ConvertUtf8ToUtf32 Vq(in, 0x888d90f0), $out, $size;
-  $out->outNL('out : ');     $size->outNL('size: ');
+  ConvertUtf8ToUtf32 Vq(in, 0x888d90f0), $out, $size, $fail;
 
-  ConvertUtf8ToUtf32 Vq(in, 0xAC82E2),   $out, $size;                           # Little endian Euro symbol
-  $out->outNL('out : ');     $size->outNL('size: ');
+  $out->outNL('out  : ');     $size->outNL('size : ');
 
-  ConvertUtf8ToUtf32 Vq(in, 0xa2c2),     $out, $size;
-  $out->outNL('out : ');     $size->outNL('size: ');
+  ConvertUtf8ToUtf32 Vq(in, 0xAC82E2),   $out, $size, $fail;                    # Little endian Euro symbol
+  $out->outNL('out  : ');     $size->outNL('size : ');
 
-  ConvertUtf8ToUtf32 Vq(in, 0x24),       $out, $size;
-  $out->outNL('out : ');     $size->outNL('size: ');
+  ConvertUtf8ToUtf32 Vq(in, 0xa2c2),     $out, $size, $fail;
+  $out->outNL('out  : ');     $size->outNL('size : ');
+
+  ConvertUtf8ToUtf32 Vq(in, 0x24),       $out, $size, $fail;
+  $out->outNL('out  : ');     $size->outNL('size : ');
+
+  ConvertUtf8ToUtf32 Vq(in, 0x80),       $out, $size, $fail;                    # Invalid
+  $out->outNL('fail : ');
+
+  ConvertUtf8ToUtf32 Vq(in, 0x99929df0),   $out, $size, $fail;                  # https://www.compart.com/en/unicode/U+1D499
+  $out->outNL('out  : ');     $size->outNL('size : ');
+
+  NidaClassifyChar in=>$out, $class, $fail;
+  $class->outNL('class: ');
+
+  my $subroutine = $NidaClassifyChar{subroutine};
 
   ok Assemble(debug => 1, eq => <<END);
-out : 0000 0000 0001 0348
-size: 0000 0000 0000 0004
-out : 0000 0000 0000 20AC
-size: 0000 0000 0000 0003
-out : 0000 0000 0000 00A2
-size: 0000 0000 0000 0002
-out : 0000 0000 0000 0024
-size: 0000 0000 0000 0001
+out  : 0000 0000 0001 0348
+size : 0000 0000 0000 0004
+out  : 0000 0000 0000 20AC
+size : 0000 0000 0000 0003
+out  : 0000 0000 0000 00A2
+size : 0000 0000 0000 0002
+out  : 0000 0000 0000 0024
+size : 0000 0000 0000 0001
+fail : 0000 0000 0000 0024
+out  : 0000 0000 0001 D499
+size : 0000 0000 0000 0004
+class: 0000 0000 0000 000$subroutine
 END
  }
 
