@@ -16422,7 +16422,7 @@ END
  }
 
 latest:
-if (1) {
+if (1) {                                                                        #TConvertUtf8ToUtf32
 
   my $out = Vq(out); my $size = Vq(size);
 
