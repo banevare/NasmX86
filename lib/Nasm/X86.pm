@@ -1528,6 +1528,85 @@ sub Vr(*;$)                                                                     
   $r                                                                            # Size of the referenced variable
  }
 
+#D1 Unicode                                                                     # Convert utf8 to utf32
+
+sub ConvertUtf8ToUtf32(@)                                                       # Convert a variable containing some utf8 to utf32 and return the width of the input converted
+ {my (@parameters) = @_;                                                        # Parameters
+  @_ >= 1 or confess;
+
+  my $s = Subroutine
+   {my ($p) = @_;                                                               # Parameters
+    Comment "Convert utf8 to utf32";
+
+    PushR my @save = (rax, r12, r13, r14, r15);
+    $$p{in}->setReg(rax);
+
+    my $success = Label;                                                        # https://en.wikipedia.org/wiki/UTF-8
+    Mov r15, rax;
+    Shl r15, 56;
+    Shr r15, 59;
+    Cmp r15, 0x1e;
+    KeepFree r15;
+
+    IfZ                                                                         # 4 bytes
+     {Mov r15, rax; Shl r15, 61; Shr r15, 61; Shr rax, 8;
+      Mov r14, rax; Shl r14, 58; Shr r14, 58; Shr rax, 8;
+      Mov r13, rax; Shl r13, 58; Shr r13, 58; Shr rax, 8;
+      Mov r12, rax; Shl r12, 58; Shr r12, 58;
+      KeepFree rax;
+      Shl r15, 18; Mov rax, r15;
+      Shl r14, 12; Or  rax, r14;
+      Shl r13,  6; Or  rax, r13;
+                   Or  rax, r12;
+      $$p{out}->getReg(rax);
+      $$p{size}->copy(Vq(four, 4));
+      KeepFree rax, r15, r14, r13, r12;
+      Jmp $success;
+     };
+
+# 1010 1100 1000 0010 1110 0010
+# A    C    8    2    E    2
+    Shr r15, 1;
+    Cmp r15, 0xe;
+    IfZ                                                                         # 3 bytes
+     {Mov r15, rax; Shl r15, 60; Shr r15, 60; Shr rax, 8;
+      Mov r14, rax; Shl r14, 58; Shr r14, 58; Shr rax, 8;
+      Mov r13, rax; Shl r13, 58; Shr r13, 58;
+
+      Shl r15, 12; Mov rax, r15;
+      Shl r14,  6; Or rax, r14;
+                   Or rax, r13;
+      $$p{out}->getReg(rax);
+      $$p{size}->copy(Vq(three, 3));
+      KeepFree rax, r15, r14, r13, r12;
+      Jmp $success;
+     };
+
+    Shr r15, 1;
+    Cmp r15, 0x6;
+    IfZ                                                                         # 2 bytes
+     {Mov r15, rax; Shl r15, 59; Shr r15, 59; Shr rax, 8;
+      Mov r14, rax; Shl r14, 58; Shr r14, 58;
+      Shl r15,  6; Mov rax, r15;
+                   Or  rax, r14;
+      $$p{out}->getReg(rax);
+      $$p{size}->copy(Vq(two, 2));
+      KeepFree rax, r15, r14, r13, r12;
+      Jmp $success;
+     };
+
+    Mov r15, rax; Shl r15, 57; Shr r15, 57;                                     # 1 bytes
+    $$p{out}->getReg(r15);
+    $$p{size}->copy(Vq(one, 1));
+
+    SetLabel $success;
+
+    PopR @save;
+   } in => {in => 3}, out => {out => 3, size => 3};
+
+  $s->call(@parameters);
+ } # ConvertUtf8ToUtf32
+
 #D2 Operations                                                                  # Variable operations
 
 if (1)                                                                          # Define operator overloading for Variables
@@ -13604,7 +13683,7 @@ Test::More->builder->output("/dev/null") if $localTest;                         
 
 if ($^O =~ m(bsd|linux|cygwin)i)                                                # Supported systems
  {if (confirmHasCommandLineCommand(q(nasm)) and LocateIntelEmulator)            # Network assembler and Intel Software Development emulator
-   {plan tests => 120;
+   {plan tests => 121;
    }
   else
    {plan skip_all => qq(Nasm or Intel 64 emulator not available);
@@ -16258,7 +16337,7 @@ if (1) {
 END
  }
 
-latest:
+#latest:
 if (1) {
   my $b = CreateByteString;
   my $t = $b->CreateBlockMultiWayTree;
@@ -16339,6 +16418,35 @@ Left
  zmm26: 0000 0198 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
 Found: 0000 0000 0000 0000
 Found: 0000 0000 0000 0001
+END
+ }
+
+latest:
+if (1) {
+
+  my $out = Vq(out); my $size = Vq(size);
+
+  ConvertUtf8ToUtf32 Vq(in, 0x888d90f0), $out, $size;
+  $out->outNL('out : ');     $size->outNL('size: ');
+
+  ConvertUtf8ToUtf32 Vq(in, 0xAC82E2),   $out, $size;                           # Little endian Euro symbol
+  $out->outNL('out : ');     $size->outNL('size: ');
+
+  ConvertUtf8ToUtf32 Vq(in, 0xa2c2),     $out, $size;
+  $out->outNL('out : ');     $size->outNL('size: ');
+
+  ConvertUtf8ToUtf32 Vq(in, 0x24),       $out, $size;
+  $out->outNL('out : ');     $size->outNL('size: ');
+
+  ok Assemble(debug => 1, eq => <<END);
+out : 0000 0000 0001 0348
+size: 0000 0000 0000 0004
+out : 0000 0000 0000 20AC
+size: 0000 0000 0000 0003
+out : 0000 0000 0000 00A2
+size: 0000 0000 0000 0002
+out : 0000 0000 0000 0024
+size: 0000 0000 0000 0001
 END
  }
 
