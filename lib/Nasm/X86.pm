@@ -5999,6 +5999,7 @@ my $LocateIntelEmulator;                                                        
 
 sub LocateIntelEmulator()                                                       #P Locate the Intel Software Development Emulator
  {my @locations = qw(/var/isde/sde64 sde/sde64 ./sde64);                        # Locations at which we might find the emulator
+  my $downloads = q(/home/phil/Downloads);                                      # Downloads folder
 
   return $LocateIntelEmulator if defined $LocateIntelEmulator;                  # Location has already been discovered
 
@@ -6009,20 +6010,23 @@ sub LocateIntelEmulator()                                                       
   if (qx(sde64 -version) =~ m(Intel.R. Software Development Emulator))          # Try path
    {return $LocateIntelEmulator = "sde64";
    }
-i:;
-  my $install = <<END =~ s(\n) (  && )gsr;                                      # Install sde
-cd /home/phil/Downloads
+
+  return undef unless -e $downloads;                                            # Skip local install if not developing
+  my $install = <<END =~ s(\n) (  && )gsr =~ s(&&\s*\Z) ()sr;                   # Install sde
+cd $downloads
 curl https://software.intel.com/content/dam/develop/external/us/en/documents/downloads/sde-external-8.63.0-2021-01-18-lin.tar.bz2 > sde.tar.bz2
 tar -xf sde.tar.bz2
 sudo mkdir -p /var/isde/
 sudo cp -r * /var/isde/
 ls -ls /var/isde/
 END
-  $install =~ s(&&\s*\Z) ();
 
-  say STDERR qx($install);
+  say STDERR qx($install);                                                      # Execute install
 
-  q(/var/isde/sde64)
+  for my $l(@locations)                                                         # Retry install locations after install
+   {return $LocateIntelEmulator = $l if -e $l;                                  # Found it - cache and return
+   }
+  undef                                                                         # Still not found - give up
  }
 
 my $assembliesPerformed = 0;                                                    # Number of assemblies performed
