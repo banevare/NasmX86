@@ -468,19 +468,6 @@ sub UnReorderSyscallRegisters(@)                                                
 
 my @xmmRegisters = map {"xmm$_"} 0..31;                                         # The xmm registers
 
-sub ReorderXmmRegisters(@)                                                      # Map the list of xmm registers provided to 0-31
- {my (@registers) = map {"xmm$_"} @_;                                           # Registers
-  my    @r = @xmmRegisters; $#r = $#registers;
-  PushRR @r, @registers;
-  PopRR  @r;
- }
-
-sub UnReorderXmmRegisters(@)                                                    # Recover the initial values in the xmm registers that were reordered
- {my (@registers) = @_;                                                         # Registers
-  my   @r = @xmmRegisters; $#r = $#registers;
-  PopRR @r;
- }
-
 sub RegisterSize($)                                                             # Return the size of a register
  {my ($r) = @_;                                                                 # Register
 
@@ -1041,13 +1028,6 @@ sub cr(&@)                                                                      
   ReorderSyscallRegisters   @registers;
   &$body;
   UnReorderSyscallRegisters @registers;
- }
-
-sub cxr(&@)                                                                     # Call a subroutine with a reordering of the xmm registers.
- {my ($body, @registers) = @_;                                                  # Code to execute with reordered registers, registers to reorder
-  ReorderXmmRegisters   @registers;
-  &$body;
-  UnReorderXmmRegisters @registers;
  }
 
 sub Comment(@)                                                                  # Insert a comment into the assembly code
@@ -16339,7 +16319,7 @@ if (1) {                                                                        
 
   my $subroutine = $NidaClassifyChar{subroutine};                               # 𝒙 is part of a subroutine name
 
-  ok Assemble(debug => 1, eq => <<END);
+  ok Assemble(debug => 0, eq => <<END);
 out  : 0000 0000 0001 0348
 size : 0000 0000 0000 0004
 out  : 0000 0000 0000 20AC
