@@ -2426,6 +2426,8 @@ sub Nasm::X86::Variable::freeMemory($)                                          
   PopR @save;
  }
 
+#D2 Structured Programming with variables                                       # Structured programming operations driven off variables.
+
 sub Nasm::X86::Variable::for($&)                                                # Iterate the body limit times.
  {my ($limit, $body) = @_;                                                      # Limit, Body
   @_ == 2 or confess;
@@ -14566,6 +14568,7 @@ if (1)                                                                          
   ScopeEnd;
  }
 
+#latest:;
 if (1) {                                                                        #TVq  #TNasm::X86::Variable::print #TNasm::X86::Variable::add
   my $a = Vq(a, 3);   $a->print;
   my $c = $a +  2;    $c->print;
@@ -14577,8 +14580,10 @@ if (1) {                                                                        
   my $i = $a %  2;    $i->print;
 
   If ($a == 3, sub{PrintOutStringNL "a == 3"});
+  ++$a; $a->print;
+  --$a; $a->print;
 
-  is_deeply Assemble, <<END;
+  ok Assemble(debug => 0, eq => <<END);
 0300 0000 0000 0000
 0500 0000 0000 0000
 0200 0000 0000 0000
@@ -14588,6 +14593,8 @@ if (1) {                                                                        
 0300 0000 0000 0000
 0100 0000 0000 0000
 a == 3
+0400 0000 0000 0000
+0300 0000 0000 0000
 END
  }
 
@@ -14601,6 +14608,7 @@ if (1) {                                                                        
   my $g = $a *  $b; $g->outNL;
   my $h = $g /  $b; $h->outNL;
   my $i = $a %  $b; $i->outNL;
+
   is_deeply Assemble, <<END;
 a: 0000 0000 0000 0003
 b: 0000 0000 0000 0002
