@@ -609,50 +609,6 @@ sub LoadConstantIntoMaskRegister($$)                                            
   PopR rax;
  }
 
-#D2 Zmm                                                                         # Operations on zmm registers
-
-sub InsertIntoXyz($$$)                                                          # Shift and insert the specified word, double, quad from rax or the contents of xmm0 into the specified xyz register at the specified position shifting data above it to the left towards higher order bytes.
- {my ($reg, $unit, $pos) = @_;                                                  # Register to insert into, width of insert, position of insert in units from least significant byte starting at 0
-
-  Keep my $k = k7;                                                              # Choose a mask register
-  PushR $reg;                                                                   # Save register to be modified
-  Kxnorq $k, $k, $k;                                                            # Mask to all ones
-  Kshiftlq $k, $k, $pos * $unit;                                                # Zero mask data we are going to keep in position
-
-  my $a = $unit == 2 ? q(ax) : $unit == 4 ? q(eax): $unit == 8 ? q(rax) : xmm0; # Source of inserted value
-  my $u = $unit < 16 ? \&Mov : \&Vmovdqu8;                                      # Move instruction
-  &$u("[rsp+$pos*$unit-$unit]", $a);                                            # Insert data into stack
-  Vmovdqu8 "${reg}{$k}", "[rsp-$unit]";                                         # Reload data shifted over
-  Add rsp, RegisterSize $reg;                                                   # Skip over target register on stack
-  KeepFree $k;                                                                  # Release mask register
- }
-
-sub LoadTargetZmmFromSourceZmm($$$$$)                                           # Load bytes into the numbered target zmm register at a register specified offset with source bytes from a numbered source zmm register at a specified register offset for a specified register length.
- {my ($target, $targetOffset, $source, $sourceOffset, $length) = @_;            # Number of zmm register to load, register containing start or 0 if from the start, numbered source zmm register, register containing length, optional offset from stack top
-  @_ == 5 or confess;
-  SetMaskRegister(k7, $targetOffset, $length);                                  # Set mask for target
-  PushRR "zmm$source";                                                          # Stack source
-  Sub rsp, $targetOffset;                                                       # Position stack for target
-  Add rsp, $sourceOffset;                                                       # Position stack for source
-  Vmovdqu8 "zmm${target}{k7}", "[rsp]";                                         # Read from stack
-  Add rsp, $targetOffset;                                                       # Restore stack from target
-  Sub rsp, $sourceOffset;                                                       # Restore stack from source
- }
-
-sub LoadZmmFromMemory($$$$)                                                     # Load bytes into the numbered target zmm register at a register specified offset with source bytes from memory addressed by a specified register for a specified register length from memory addressed by a specified register.
- {my ($target, $targetOffset, $length, $source) = @_;                           # Number of zmm register to load, register containing start or 0 if from the start, register containing length, register addressing memory to load from
-  @_ == 4 or confess;
-  Comment "Load Target Zmm from Memory";
-  SetMaskRegister(k7, $targetOffset, $length);                                  # Set mask for target
-  PushR r15;
-  Mov r15, $source;
-  Sub r15, $targetOffset;                                                       # Position memory for target
-  Vmovdqu8 "zmm${target}{k7}", "[r15]";                                         # Read from memory
-  Add $targetOffset, $length;                                                   # Increment position in target
-  Add $source,       $length;                                                   # Increment position in source
-  PopR r15;
- }
-
 #D1 Structured Programming                                                      # Structured programming constructs
 
 sub If($$;$)                                                                    # If
@@ -13635,7 +13591,7 @@ Test::More->builder->output("/dev/null") if $localTest;                         
 
 if ($^O =~ m(bsd|linux|cygwin)i)                                                # Supported systems
  {if (confirmHasCommandLineCommand(q(nasm)) and LocateIntelEmulator)            # Network assembler and Intel Software Development emulator
-   {plan tests => 114;
+   {plan tests => 110;
    }
   else
    {plan skip_all => qq(Nasm or Intel 64 emulator not available);
@@ -14390,33 +14346,6 @@ if (1) {                                                                        
   zmm0: 0101 0101 0101 0101   0101 0101 0101 0101   0101 0101 0101 0101   0101 0101 0101 0101   0101 0101 0101 0101   0101 0101 0101 0101   0101 0101 0101 0101   0101 0101 0101 0101
   zmm1: 0101 0101 0000 0000   0101 0101 0101 0101   0101 0101 0101 0101   0101 0101 0101 0101   0101 0101 0101 0101   0101 0101 0101 0101   0101 0101 0101 0101   0101 0101 0101 0101
 END
- }
-
-if (1) {                                                                        #TInsertIntoXyz
-  my $s    = Rb 0..63;
-  Vmovdqu8 xmm0,"[$s]";                                                         # Number each byte
-  Vmovdqu8 ymm1,"[$s]";
-  Vmovdqu8 zmm2,"[$s]";
-  Vmovdqu8 zmm3,"[$s]";
-
-  Mov rax, -1;                                                                  # Insert some ones
-  InsertIntoXyz xmm0, 2, 4;
-  InsertIntoXyz ymm1, 4, 5;
-  InsertIntoXyz zmm2, 8, 6;
-
-  PrintOutRegisterInHex xmm0;                                                   # Print the insertions
-  PrintOutRegisterInHex ymm1;
-  PrintOutRegisterInHex zmm2;
-
-  ClearRegisters xmm0;                                                          # Insert some zeroes
-  InsertIntoXyz zmm3, 16, 2;
-  PrintOutRegisterInHex zmm3;
-
-  my $r = Assemble;
-  ok $r =~ m(xmm0: 0D0C 0B0A 0908 FFFF   0706 0504 0302 0100);
-  ok $r =~ m(ymm1: 1B1A 1918 1716 1514   FFFF FFFF 1312 1110   0F0E 0D0C 0B0A 0908   0706 0504 0302 0100);
-  ok $r =~ m(zmm2: 3736 3534 3332 3130   FFFF FFFF FFFF FFFF   2F2E 2D2C 2B2A 2928   2726 2524 2322 2120   1F1E 1D1C 1B1A 1918   1716 1514 1312 1110   0F0E 0D0C 0B0A 0908   0706 0504 0302 0100);
-  ok $r =~ m(zmm3: 2F2E 2D2C 2B2A 2928   2726 2524 2322 2120   0000 0000 0000 0000   0000 0000 0000 0000   1F1E 1D1C 1B1A 1918   1716 1514 1312 1110   0F0E 0D0C 0B0A 0908   0706 0504 0302 0100);
  }
 
 if (1) {
