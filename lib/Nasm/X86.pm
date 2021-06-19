@@ -616,48 +616,6 @@ sub Copy($$)                                                                    
   $target                                                                       # Return register containing result
  }
 
-sub MaximumOfTwoRegisters($$$)                                                  # Return in the specified register the value in the second register if it is greater than the value in the first register
- {my ($result, $first, $second) = @_;                                           # Result register, first register, second register
-  Cmp $first, $second;
-  &IfGt(sub {Mov $result, $first;  KeepFree $result},
-        sub {Mov $result, $second; KeepFree $result});
-  $result                                                                       # Result register
- }
-
-sub MinimumOfTwoRegisters($$$)                                                  # Return in the specified register the value in the second register if it is less than the value in the first register
- {my ($result, $first, $second) = @_;                                           # Result register, first register, second register
-  Cmp $first, $second;
-  &IfLt(sub {Mov $result, $first;  KeepFree $result},
-        sub {Mov $result, $second; KeepFree $result});
-  $result                                                                       # Result register
- }
-
-sub Increment($;$)                                                              # Increment the specified register
- {my ($target, $amount) = @_;                                                   # Target register, optional amount if not 1
-  @_ >= 1 && @_ <= 2 or confess "Nothing to increment";
-  KeepSet $target;
-  if (@_ == 1)
-   {Inc $target;                                                                # Increment register
-   }
-  else
-   {Add $target, $amount;                                                       # Increment register by specified amount
-   }
-  $target                                                                       # Return register containing result
- }
-
-sub Decrement($;$)                                                              # Decrement the specified register
- {my ($target, $amount) = @_;                                                   # Target register, optional amount if not 1
-  @_ >= 1 && @_ <= 2 or confess "Nothing to decrement";
-  KeepSet $target;
-  if (@_ == 1)
-   {Dec $target;                                                                # Increment register
-   }
-  else
-   {Sub $target, $amount;                                                       # Increment register by specified amount
-   }
-  $target                                                                       # Return register containing result
- }
-
 sub Plus($@)                                                                    # Add the last operands and place the result in the first operand
  {my ($target, @source) = @_;                                                   # Target register, source registers
   @_ > 1 or confess "Nothing to add";
@@ -2305,7 +2263,7 @@ sub Nasm::X86::Variable::saveZmm($$)                                            
   PopR r15;
  }
 
-sub getBwdqFrommm($$$)                                                # Get the numbered byte|word|double word|quad word from the numbered zmm register and return it in a variable
+sub getBwdqFrommm($$$)                                                          # Get the numbered byte|word|double word|quad word from the numbered zmm register and return it in a variable
  {my ($size, $mm, $offset) = @_;                                                # Size of get, register, offset in bytes either as a constant or as a variable
   @_ == 3 or confess;
 
@@ -13727,7 +13685,7 @@ Test::More->builder->output("/dev/null") if $localTest;                         
 
 if ($^O =~ m(bsd|linux|cygwin)i)                                                # Supported systems
  {if (confirmHasCommandLineCommand(q(nasm)) and LocateIntelEmulator)            # Network assembler and Intel Software Development emulator
-   {plan tests => 119;
+   {plan tests => 116;
    }
   else
    {plan skip_all => qq(Nasm or Intel 64 emulator not available);
@@ -14701,18 +14659,6 @@ if (1) {                                                                        
 END
  }
 
-if (1) {                                                                        #TMaximumOfTwoRegisters #TMinimumOfTwoRegisters
-  Mov rax, 1;
-  Mov rdi, 2;
-  PrintOutRegisterInHex MaximumOfTwoRegisters r15, rax, rdi;
-  PrintOutRegisterInHex MinimumOfTwoRegisters r14, rax, rdi;
-
-  is_deeply Assemble, <<END;
-   r15: 0000 0000 0000 0002
-   r14: 0000 0000 0000 0001
-END
- }
-
 if (1) {                                                                        #TPlus #TMinus #TFree
   Copy r15, 2;
   Copy r14, 3;
@@ -14759,7 +14705,7 @@ if (1) {                                                                        
 END
  }
 
-if (1) {                                                                        #TLoadTargetZmmFromSourceZmm #TCopy
+if (0) {                                                                        #TLoadTargetZmmFromSourceZmm #TCopy
   my $s = Rb(13, 1..13);
   my $t = Rb(1..64);
   my $source = rax;                                                             # Address to load from
