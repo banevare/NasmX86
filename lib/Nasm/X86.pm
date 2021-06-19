@@ -1236,6 +1236,7 @@ sub Variable($$;$%)                                                             
    {if ($Registers{$expr})
      {$const and confess "Cannot use a register to initialize a constant";
      }
+#   elsif (ref($expr)) {}                                                       # Reference a variable
     else
      {$init = $expr;
      }
@@ -1269,6 +1270,7 @@ sub Variable($$;$%)                                                             
      {$const and confess "Cannot use a register to initialize a constant";
       Mov $t, $expr;
      }
+#   elsif (ref($expr)) {}                                                       # Reference a variable
     elsif (!$const)
      {PushR r15;
       Mov r15, $expr;
@@ -1287,6 +1289,7 @@ sub Variable($$;$%)                                                             
     laneSize  => undef,                                                         # Size of the lanes in this variable
     name      => $name,                                                         # Name of the variable
     purpose   => undef,                                                         # Purpose of this variable
+#   reference => ref($expr) ? $expr->size : undef,                              # Reference to another variable
     reference => undef,                                                         # Reference to another variable
     saturate  => undef,                                                         # Computations should saturate rather then wrap if true
     signed    => undef,                                                         # Elements of x|y|zmm registers are signed if true
@@ -1407,7 +1410,7 @@ sub Nasm::X86::Variable::copy($$)                                               
   if ($left->size == 3 and $right->size == 3)
    {my $lr = $left ->reference;
     my $rr = $right->reference;
-    Comment "Copy ".$right->name.' to '.$left->name;
+    Comment "Copy variable: ".$right->name.' to '.$left->name;
     PushR my @save = (r15);
     Mov r15, $r;
     if ($rr)
@@ -2245,16 +2248,23 @@ sub Nasm::X86::Variable::pop($)                                                 
 
 sub Nasm::X86::Variable::clearMemory($)                                         # Clear the memory described in this variable
  {my ($address, $size) = @_;                                                    # Address of memory to clear, size of the memory to clear
+  $address->name eq q(address) or confess "Need address";
+  $size->name eq q(size) or confess "Need size";
   &ClearMemory(size=>$size, address=>$address);                                 # Free the memory
  }
 
 sub Nasm::X86::Variable::copyMemory($$$)                                        # Copy from one block of memory to another
- {my ($target, $source, $length) = @_;                                          # address of target, address of source, length to copy
-  &CopyMemory(target => $target, source => $source, length => $length);         # Copy the memory
+ {my ($target, $source, $size) = @_;                                            # Address of target, address of source, length to copy
+  $target->name eq q(target) or confess "Need target";
+  $source->name eq q(source) or confess "Need source";
+  $size  ->name eq q(size)   or confess "Need size";
+  &CopyMemory(target => $target, source => $source, size => $size);             # Copy the memory
  }
 
-sub Nasm::X86::Variable::printOutMemoryInHex($)                                 # Print allocated memory in hex
+sub Nasm::X86::Variable::printOutMemoryInHexNL($)                                 # Print allocated memory in hex
  {my ($address, $size) = @_;                                                    # Address of  memory, length of memory
+  $address->name eq q(address) or confess "Need address";
+  $size   ->name eq q(size)    or confess "Need size";
   PushR my @save = (rax, rdi);
   $address->setReg(rax);
   $size   ->setReg(rdi);
@@ -2264,12 +2274,15 @@ sub Nasm::X86::Variable::printOutMemoryInHex($)                                 
 
 sub Nasm::X86::Variable::freeMemory($)                                          # Free the memory addressed by this variable for the specified length
  {my ($address, $size) = @_;                                                    # Address of memory to free, size of the memory to free
+  $address->name eq q(address) or confess "Need address";
+  $size   ->name eq q(size)    or confess "Need size";
   &FreeMemory(size=>$size, address=>$address);                                  # Free the memory
  }
 
 sub Nasm::X86::Variable::allocateMemory(@)                                      # Allocate the specified amount of memory via mmap and return its address
  {my ($size) = @_;                                                              # Size
   @_ >= 1 or confess;
+  $size->name eq q(size) or confess "Need size";
   &AllocateMemory(size => $size, my $a = Vq(address));
   $a
  }
@@ -13666,14 +13679,15 @@ if (1) {                                                                        
   ok $r =~ m(0001 0200 0300 00000400 0000 0000 0000);
  }
 
+#latest:;
 if (1) {                                                                        #TAllocateMemory #TPrintOutMemoryInHexNL #TCopyMemory
   my $N = 256;
   my $s = Rb 0..$N-1;
-  AllocateMemory(Vq(size, $N), my $a = Vq(address));
+  AllocateMemory(Cq(size, $N), my $a = Vq(address));
   CopyMemory(Vq(source, $s), Vq(size, $N), target => $a);
 
-  AllocateMemory(Vq(size, $N), my $b = Vq(address));
-  CopyMemory(source => $a, target => $b, Vq(size, $N));
+  AllocateMemory(Cq(size, $N), my $b = Vq(address));
+  CopyMemory(source => $a, target => $b, Cq(size, $N));
 
   $b->setReg(rax);
   Mov rdi, $N;
