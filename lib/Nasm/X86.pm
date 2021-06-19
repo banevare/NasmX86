@@ -599,56 +599,6 @@ sub KeepFree(@)                                                                 
   $target[0]                                                                    # Return first register
  }
 
-#D2 Arithmetic                                                                  # Arithmetic operations on registers
-
-sub Copy($$)                                                                    # Copy the source to the target register
- {my ($target, $source) = @_;                                                   # Target register, source expression
-
-  $Registers{$source} and !$Keep{$source} and confess "$source not set";        # Check that the register has been initialized
-
-  if ($target =~ m(\A(x|y|z)mm\d{1,2}\Z))                                       # Copy x|y|z mm register
-   {Keep $target;
-    Vmovdqu64 $target, $source;
-   }
-  else                                                                          # Normal register
-   {Mov $target, $source;
-   }
-  $target                                                                       # Return register containing result
- }
-
-sub Plus($@)                                                                    # Add the last operands and place the result in the first operand
- {my ($target, @source) = @_;                                                   # Target register, source registers
-  @_ > 1 or confess "Nothing to add";
-
-  my $s = shift @source;
-  Mov $target, $s unless $target eq $s;                                         # Move first source to target unless they are the same register
-  my %source = map {$_=>1} @source;                                             # Hash of sources
-  confess "Target $target in source list" if $source{$target};                  # Cannot have target on rhs as well
-  Add $target, shift @source while @source;                                     # Add remaining sources
-  $target                                                                       # Return register containing result
- }
-
-sub Minus($$$)                                                                  # Subtract the third operand from the second operand and place the result in the first operand
- {my ($target, $s1, $s2) = @_;                                                  # Target register, register to subtract from, register to subtract
-  @_ == 3 or confess;
-
-  if ($target ne $s1 and $target ne $s2)                                        # Target different from sources
-   {Mov $target, $s1;
-    Sub $target, $s2;
-   }
-  elsif ($target eq $s1)                                                        # Target is to be subtracted from
-   {Sub $target, $s2;
-   }
-  elsif ($target eq $s2)                                                        # Target is amount to subtract
-   {Neg $target;
-    Add $target, $s1;
-   }
-  else                                                                          # All the same
-   {confess "Use ClearRegisters instead";
-   }
-  $target                                                                       # Return register containing result
- }
-
 #D2 Mask                                                                        # Operations on mask registers
 
 sub LoadConstantIntoMaskRegister($$)                                            # Load a constant into a mask register
@@ -13685,7 +13635,7 @@ Test::More->builder->output("/dev/null") if $localTest;                         
 
 if ($^O =~ m(bsd|linux|cygwin)i)                                                # Supported systems
  {if (confirmHasCommandLineCommand(q(nasm)) and LocateIntelEmulator)            # Network assembler and Intel Software Development emulator
-   {plan tests => 116;
+   {plan tests => 114;
    }
   else
    {plan skip_all => qq(Nasm or Intel 64 emulator not available);
@@ -14656,84 +14606,6 @@ if (1) {                                                                        
     k5: 0000 0000 0000 1F00
     k6: 0000 0000 0000 3F00
     k7: 0000 0000 0000 7F00
-END
- }
-
-if (1) {                                                                        #TPlus #TMinus #TFree
-  Copy r15, 2;
-  Copy r14, 3;
-  KeepFree r15;
-  Plus(r15, r15, r14);
-  PrintOutRegisterInHex r15;
-  Copy r13, 4;
-  Minus(r12, r15, r13);
-  PrintOutRegisterInHex r12;
-
-  is_deeply Assemble, <<END;
-   r15: 0000 0000 0000 0005
-   r12: 0000 0000 0000 0001
-END
- }
-
-if (1) {                                                                        #TLoadTargetZmmFromSourceZmm #TCopyZmm
-  my $s = Rb(17, 1..17);
-  LoadShortStringFromMemoryToZmm 0, $s;                                         # Load a sample string
-  Keep zmm0;
-  PrintOutRegisterInHex xmm0;
-  LoadTargetZmmFromSourceZmm 1, Copy(rdi, 3), 0, Copy(rdx, 8), Copy(rsi, 2);
-  PrintOutRegisterInHex xmm1;
-  KeepFree rdi;
-
-  LoadTargetZmmFromSourceZmm 2, Copy(rdi, 4), 0, rdx, rsi;
-  PrintOutRegisterInHex xmm2;
-
-  Copy(zmm3, zmm0);
-  PrintOutRegisterInHex xmm3;
-
-  ClearRegisters zmm4;
-  Lea rax, "[$s+4]";
-  LoadZmmFromMemory 4, rdx, rsi, rax;
-  Sub rax, 4;
-  PrintOutRegisterInHex xmm4;
-
-  is_deeply Assemble, <<END;
-  xmm0: 0F0E 0D0C 0B0A 0908   0706 0504 0302 0111
-  xmm1: 0000 0000 0000 0000   0000 0009 0800 0000
-  xmm2: 0000 0000 0000 0000   0000 0908 0000 0000
-  xmm3: 0F0E 0D0C 0B0A 0908   0706 0504 0302 0111
-  xmm4: 0000 0000 0000 0504   0000 0000 0000 0000
-END
- }
-
-if (0) {                                                                        #TLoadTargetZmmFromSourceZmm #TCopy
-  my $s = Rb(13, 1..13);
-  my $t = Rb(1..64);
-  my $source = rax;                                                             # Address to load from
-  my $start  = rsi;                                                             # Start position in the zmm register
-  my $length = rdi;                                                             # Length of copy
-
-  Copy $source, $s;
-  LoadShortStringFromMemoryToZmm 0, $s;                                         # Load a sample string
-  KeepFree $source;
-  PrintOutRegisterInHex xmm0;
-
-  LoadZmmFromMemory 0, Increment(GetLengthOfShortString($start, 0)), Copy($length, 1), Copy($source, $t);
-  PrintOutRegisterInHex xmm0;
-
-  LoadZmmFromMemory 0, $start, $length, $source;
-  PrintOutRegisterInHex xmm0;
-
-  KeepFree $length;
-  LoadZmmFromMemory 0, $start, Minus($length, Copy(r13, 56), $start), $source;
-  SetLengthOfShortString 0, sil;                                                # Set current length of zmm0
-  PrintOutRegisterInHex xmm0, zmm0;
-
-  is_deeply Assemble, <<END;
-  xmm0: 0000 0D0C 0B0A 0908   0706 0504 0302 010D
-  xmm0: 0001 0D0C 0B0A 0908   0706 0504 0302 010D
-  xmm0: 0201 0D0C 0B0A 0908   0706 0504 0302 010D
-  xmm0: 0201 0D0C 0B0A 0908   0706 0504 0302 0138
-  zmm0: 0000 0000 0000 0000   2A29 2827 2625 2423   2221 201F 1E1D 1C1B   1A19 1817 1615 1413   1211 100F 0E0D 0C0B   0A09 0807 0605 0403   0201 0D0C 0B0A 0908   0706 0504 0302 0138
 END
  }
 
