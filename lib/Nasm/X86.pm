@@ -2023,7 +2023,7 @@ sub Nasm::X86::Variable::loadZmm($$)                                            
    }
  }
 
-sub Nasm::X86::Variable::saveZmm($$)                                            # Save bytes into the memory addressed by the target variable from the numbered zmm register.
+sub Nasm::X86::Variable::saveZmm2222($$)                                        # Save bytes into the memory addressed by the target variable from the numbered zmm register.
  {my ($target, $zmm) = @_;                                                      # Variable containing the address of the source, number of zmm to put
   @_ == 2 or confess;
   Comment "Save zmm$zmm into memory addressed by ".$target->name;
@@ -2033,7 +2033,7 @@ sub Nasm::X86::Variable::saveZmm($$)                                            
   PopR r15;
  }
 
-sub getBwdqFrommm($$$)                                                          # Get the numbered byte|word|double word|quad word from the numbered zmm register and return it in a variable
+sub getBwdqFromMm($$$)                                                          # Get the numbered byte|word|double word|quad word from the numbered zmm register and return it in a variable
  {my ($size, $mm, $offset) = @_;                                                # Size of get, register, offset in bytes either as a constant or as a variable
   @_ == 3 or confess;
 
@@ -2051,7 +2051,7 @@ sub getBwdqFrommm($$$)                                                          
    }
 
   PushR r15;
-  PushRR $mm;                                                                   # Push source register
+  PushRR $mm;    ##Rewrite using masked move rather than stack                  # Push source register
 
   if ($size !~ m(q))                                                            # Clear the register if necessary
    {ClearRegisters r15; KeepFree r15;
@@ -2074,62 +2074,62 @@ sub getBwdqFrommm($$$)                                                          
 
 sub getBFromXmm($$)                                                             # Get the byte from the numbered xmm register and return it in a variable
  {my ($xmm, $offset) = @_;                                                      # Numbered xmm, offset in bytes
-  getBwdqFrommm('b', "xmm$xmm", $offset)                                        # Get the numbered byte|word|double word|quad word from the numbered xmm register and return it in a variable
+  getBwdqFromMm('b', "xmm$xmm", $offset)                                        # Get the numbered byte|word|double word|quad word from the numbered xmm register and return it in a variable
  }
 
 sub getWFromXmm($$)                                                             # Get the word from the numbered xmm register and return it in a variable
  {my ($xmm, $offset) = @_;                                                      # Numbered xmm, offset in bytes
-  getBwdqFrommm('w', "xmm$xmm", $offset)                                        # Get the numbered byte|word|double word|quad word from the numbered xmm register and return it in a variable
+  getBwdqFromMm('w', "xmm$xmm", $offset)                                        # Get the numbered byte|word|double word|quad word from the numbered xmm register and return it in a variable
  }
 
 sub getDFromXmm($$)                                                             # Get the double word from the numbered xmm register and return it in a variable
  {my ($xmm, $offset) = @_;                                                      # Numbered xmm, offset in bytes
-  getBwdqFrommm('d', "xmm$xmm", $offset)                                        # Get the numbered byte|word|double word|quad word from the numbered xmm register and return it in a variable
+  getBwdqFromMm('d', "xmm$xmm", $offset)                                        # Get the numbered byte|word|double word|quad word from the numbered xmm register and return it in a variable
  }
 
 sub getQFromXmm($$)                                                             # Get the quad word from the numbered xmm register and return it in a variable
  {my ($xmm, $offset) = @_;                                                      # Numbered xmm, offset in bytes
-  getBwdqFrommm('q', "xmm$xmm", $offset)                                        # Get the numbered byte|word|double word|quad word from the numbered xmm register and return it in a variable
+  getBwdqFromMm('q', "xmm$xmm", $offset)                                        # Get the numbered byte|word|double word|quad word from the numbered xmm register and return it in a variable
  }
 
 sub getBFromZmm($$)                                                             # Get the byte from the numbered zmm register and return it in a variable
  {my ($zmm, $offset) = @_;                                                      # Numbered zmm, offset in bytes
-  getBwdqFrommm('b', "zmm$zmm", $offset)                                        # Get the numbered byte|word|double word|quad word from the numbered zmm register and return it in a variable
+  getBwdqFromMm('b', "zmm$zmm", $offset)                                        # Get the numbered byte|word|double word|quad word from the numbered zmm register and return it in a variable
  }
 
 sub getWFromZmm($$)                                                             # Get the word from the numbered zmm register and return it in a variable
  {my ($zmm, $offset) = @_;                                                      # Numbered zmm, offset in bytes
-  getBwdqFrommm('w', "zmm$zmm", $offset)                                        # Get the numbered byte|word|double word|quad word from the numbered zmm register and return it in a variable
+  getBwdqFromMm('w', "zmm$zmm", $offset)                                        # Get the numbered byte|word|double word|quad word from the numbered zmm register and return it in a variable
  }
 
 sub getDFromZmm($$)                                                             # Get the double word from the numbered zmm register and return it in a variable
  {my ($zmm, $offset) = @_;                                                      # Numbered zmm, offset in bytes
-  getBwdqFrommm('d', "zmm$zmm", $offset)                                        # Get the numbered byte|word|double word|quad word from the numbered zmm register and return it in a variable
+  getBwdqFromMm('d', "zmm$zmm", $offset)                                        # Get the numbered byte|word|double word|quad word from the numbered zmm register and return it in a variable
  }
 
 sub getQFromZmm($$)                                                             # Get the quad word from the numbered zmm register and return it in a variable
  {my ($zmm, $offset) = @_;                                                      # Numbered zmm, offset in bytes
-  getBwdqFrommm('q', "zmm$zmm", $offset)                                        # Get the numbered byte|word|double word|quad word from the numbered zmm register and return it in a variable
+  getBwdqFromMm('q', "zmm$zmm", $offset)                                        # Get the numbered byte|word|double word|quad word from the numbered zmm register and return it in a variable
  }
 
 sub Nasm::X86::Variable::getBFromZmm($$$)                                       # Get the byte from the numbered zmm register and put it in a variable
  {my ($variable, $zmm, $offset) = @_;                                           # Variable, numbered zmm, offset in bytes
-  $variable->copy(getBwdqFrommm('b', "zmm$zmm", $offset))                       # Get the numbered byte|word|double word|quad word from the numbered zmm register and put it in a variable
+  $variable->copy(getBwdqFromMm('b', "zmm$zmm", $offset))                       # Get the numbered byte|word|double word|quad word from the numbered zmm register and put it in a variable
  }
 
 sub Nasm::X86::Variable::getWFromZmm($$$)                                       # Get the word from the numbered zmm register and put it in a variable
  {my ($variable, $zmm, $offset) = @_;                                           # Variable, numbered zmm, offset in bytes
-  $variable->copy(getBwdqFrommm('w', "zmm$zmm", $offset))                       # Get the numbered byte|word|double word|quad word from the numbered zmm register and put it in a variable
+  $variable->copy(getBwdqFromMm('w', "zmm$zmm", $offset))                       # Get the numbered byte|word|double word|quad word from the numbered zmm register and put it in a variable
  }
 
 sub Nasm::X86::Variable::getDFromZmm($$$)                                       # Get the double word from the numbered zmm register and put it in a variable
  {my ($variable, $zmm, $offset) = @_;                                           # Variable, numbered zmm, offset in bytes
-  $variable->copy(getBwdqFrommm('d', "zmm$zmm", $offset))                       # Get the numbered byte|word|double word|quad word from the numbered zmm register and put it in a variable
+  $variable->copy(getBwdqFromMm('d', "zmm$zmm", $offset))                       # Get the numbered byte|word|double word|quad word from the numbered zmm register and put it in a variable
  }
 
 sub Nasm::X86::Variable::getQFromZmm($$$)                                       # Get the quad word from the numbered zmm register and put it in a variable
  {my ($variable, $zmm, $offset) = @_;                                           # Variable, numbered zmm, offset in bytes
-  $variable->copy(getBwdqFrommm('q', "zmm$zmm", $offset))                       # Get the numbered byte|word|double word|quad word from the numbered zmm register and put it in a variable
+  $variable->copy(getBwdqFromMm('q', "zmm$zmm", $offset))                       # Get the numbered byte|word|double word|quad word from the numbered zmm register and put it in a variable
  }
 
 sub Nasm::X86::Variable::putBwdqIntoMm($$$$)                                    # Place the value of the content variable at the byte|word|double word|quad word in the numbered zmm register
@@ -9226,7 +9226,7 @@ Save bytes into the memory addressed by the target variable from the numbered zm
   1  $target    Variable containing the address of the source
   2  $zmm       Number of zmm to put
 
-=head3 getBwdqFrommm($size, $mm, $offset)
+=head3 getBwdqFromMm($size, $mm, $offset)
 
 Get the numbered byte|word|double word|quad word from the numbered zmm register and return it in a variable
 
@@ -12423,7 +12423,7 @@ Total size in bytes of all files assembled during testing
 
 38 L<getBFromZmm|/getBFromZmm> - Get the byte from the numbered zmm register and return it in a variable
 
-39 L<getBwdqFrommm|/getBwdqFrommm> - Get the numbered byte|word|double word|quad word from the numbered zmm register and return it in a variable
+39 L<getBwdqFromMm|/getBwdqFromMm> - Get the numbered byte|word|double word|quad word from the numbered zmm register and return it in a variable
 
 40 L<getDFromXmm|/getDFromXmm> - Get the double word from the numbered xmm register and return it in a variable
 
