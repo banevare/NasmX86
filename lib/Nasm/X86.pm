@@ -2742,17 +2742,26 @@ sub ClearMemory(@)                                                              
     SaveFirstFour;
     $$p{address}->setReg(rax);
     $$p{size}   ->setReg(rdi);
-    PushR zmm0;                                                                 # Pump zeros with this register
-    Lea rdi, "[rax+rdi-$size]";                                                 # Address of upper limit of buffer
+    Lea rdx, "[rax+rdi-$size]";                                                 # Address of upper limit of buffer
+
+    PushR my @save = (k7, zmm0);                                                # Pump zeros with this register
     ClearRegisters zmm0;                                                        # Clear the register that will be written into memory
 
-    For                                                                         # Clear memory
-     {Vmovdqu64 "[rax]", zmm0;
-PrintErrStringNL "AAAA";
-     } rax, rdi, $size;
-PrintErrStringNL "BBBB";
+    Mov rsi, rdi;                                                               # Modulus the size of zmm
+    And rsi, 0x3f;
+    Test rsi, rsi;
+    IfNz sub                                                                    # Need to align so that the rest of the clear can be done in full zmm blocks
+     {Vq(align, rsi)->setMaskFirst(k7);                                         # Set mask bits
+      Vmovdqu8 "[rax]{k7}", zmm0;                                               # Masked move to memory
+      Add rax, rsi;                                                             # Update point to clear from
+      Sub rdi, rsi;                                                             # Reduce clear length
+     };
 
-    PopR zmm0;
+    For                                                                         # Clear remaining memory in full zmm blocks
+     {Vmovdqu64 "[rax]", zmm0;
+     } rax, rdx, $size;
+
+    PopR @save;
     RestoreFirstFour;
    } in => {size => 3, address => 3};
 
@@ -15514,6 +15523,7 @@ out  : 0000 0000 0001 D499
 size : 0000 0000 0000 0004
 class: 0000 0000 0000 000$subroutine
 F09D 96BA 20F0 9D918EF0 9D91 A0F0 9D91A0F0 9D91 96F0 9D9194F0 9D91 9B20 F09D96BB 20F0 9D90 A9F09D90 A5F0 9D90 AEF09D90 AC20 F09D 96BC
+0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
 END
  }
 
