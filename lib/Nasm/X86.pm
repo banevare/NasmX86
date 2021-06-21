@@ -2149,7 +2149,7 @@ sub Nasm::X86::Variable::putBwdqIntoMm($$$$)                                    
     $offset =~ m(r15) and confess "Cannot pass offset: '$offset', in r15, choose another register";
    }
 
-  PushR my @save=(r15, $mm);                                                    # Push target register
+  PushR my @save=(r15, $mm);   # Rewrite using masked move                      # Push target register
   $content->setReg(r15);
   Mov   "[rsp+$o]", r15b if $size =~ m(b);                                      # Write byte register
   Mov   "[rsp+$o]", r15w if $size =~ m(w);                                      # Write word register
@@ -2739,12 +2739,11 @@ sub ClearMemory(@)                                                              
 
   my $s = Subroutine
    {my ($p) = @_;                                                               # Parameters
-    SaveFirstFour;
+   PushR my @save = (k7, zmm0, rax, rdi, rsi, rdx);
     $$p{address}->setReg(rax);
     $$p{size}   ->setReg(rdi);
     Lea rdx, "[rax+rdi-$size]";                                                 # Address of upper limit of buffer
 
-    PushR my @save = (k7, zmm0);                                                # Pump zeros with this register
     ClearRegisters zmm0;                                                        # Clear the register that will be written into memory
 
     Mov rsi, rdi;                                                               # Modulus the size of zmm
@@ -2762,8 +2761,48 @@ sub ClearMemory(@)                                                              
      } rax, rdx, $size;
 
     PopR @save;
-    RestoreFirstFour;
    } in => {size => 3, address => 3};
+
+  $s->call(@variables);
+ }
+
+sub MaskMemory(@)                                                               # Write the specified byte into locations in the target mask that correspond to the locations in the source that contain the specified byte.
+ {my (@variables) = @_;                                                         # Variables
+  @_ >= 2 or confess;
+  Comment "Clear memory";
+
+  my $size = RegisterSize zmm0;
+
+  my $s = Subroutine
+   {my ($p) = @_;                                                               # Parameters
+    SaveFirstFour;
+    $$p{source}->setReg(rax);
+    $$p{mask}  ->setReg(rdx);
+    $$p{match} ->setReg(rsi);
+    $$p{set}   ->setReg(rdi);
+    Lea rdx, "[rax+rdi-$size]";                                                 # Address of upper limit of buffer
+
+    PushR my @save = (k7, zmm0, zmm1);                                          # Pump zeros with this register
+    ClearRegisters zmm0;                                                        # Clear the register that will be written into memory
+    Vpbroadcastb zmm1,
+
+    Mov rsi, rdi;                                                               # Modulus the size of zmm
+    And rsi, 0x3f;
+    Test rsi, rsi;
+    IfNz sub                                                                    # Need to align so that the rest of the clear can be done in full zmm blocks
+     {Vq(align, rsi)->setMaskFirst(k7);                                         # Set mask bits
+      Vmovdqu8 "[rax]{k7}", zmm0;                                               # Masked move to memory
+      Add rax, rsi;                                                             # Update point to clear from
+      Sub rdi, rsi;                                                             # Reduce clear length
+     };
+
+    For                                                                         # Clear remaining memory in full zmm blocks
+     {Vmovdqu64 "[rax]", zmm0;
+     } rax, rdx, $size;
+
+    PopR @save;
+    RestoreFirstFour;
+   } in => {size => 3, source => 3, mask => 3, match => 3, set => 3};           # Match is the character to match on in the source, set is the character to write into the mask at the corresponding position.
 
   $s->call(@variables);
  }
@@ -15509,7 +15548,7 @@ if (1) {                                                                        
   $address->clearMemory($l);
   $address->printOutMemoryInHexNL($l);
 
-  ok Assemble(debug => 1, eq => <<END);
+  ok Assemble(debug => 0, eq => <<END);
 out  : 0000 0000 0001 0348
 size : 0000 0000 0000 0004
 out  : 0000 0000 0000 20AC
