@@ -2739,7 +2739,7 @@ sub ClearMemory(@)                                                              
 
   my $s = Subroutine
    {my ($p) = @_;                                                               # Parameters
-   PushR my @save = (k7, zmm0, rax, rdi, rsi, rdx);
+    PushR my @save = (k7, zmm0, rax, rdi, rsi, rdx);
     $$p{address}->setReg(rax);
     $$p{size}   ->setReg(rdi);
     Lea rdx, "[rax+rdi-$size]";                                                 # Address of upper limit of buffer
@@ -2775,33 +2775,41 @@ sub MaskMemory(@)                                                               
 
   my $s = Subroutine
    {my ($p) = @_;                                                               # Parameters
-    SaveFirstFour;
+    PushR my @save = (k6, k7, rax, rdi, rsi, rdx, r8, r9, r10, r14, r15, zmm0, zmm1, zmm2);
     $$p{source}->setReg(rax);
     $$p{mask}  ->setReg(rdx);
     $$p{match} ->setReg(rsi);
     $$p{set}   ->setReg(rdi);
-    Lea rdx, "[rax+rdi-$size]";                                                 # Address of upper limit of buffer
+    $$p{size}  ->setReg(r8);
+    Lea r9, "[rax+r8-$size]";                                                   # Address of upper limit of source
 
-    PushR my @save = (k7, zmm0, zmm1);                                          # Pump zeros with this register
-    ClearRegisters zmm0;                                                        # Clear the register that will be written into memory
-    Vpbroadcastb zmm1,
+    Vpbroadcastb zmm1, rsi;                                                     # Character to match
+    Vpbroadcastb zmm2, rdi;                                                     # Character to write into mask
 
-    Mov rsi, rdi;                                                               # Modulus the size of zmm
-    And rsi, 0x3f;
-    Test rsi, rsi;
+    Mov r10, r8;                                                                # Modulus the size of zmm
+    And r10, 0x3f;
+    Test r10, r10;
     IfNz sub                                                                    # Need to align so that the rest of the clear can be done in full zmm blocks
-     {Vq(align, rsi)->setMaskFirst(k7);                                         # Set mask bits
-      Vmovdqu8 "[rax]{k7}", zmm0;                                               # Masked move to memory
-      Add rax, rsi;                                                             # Update point to clear from
-      Sub rdi, rsi;                                                             # Reduce clear length
+     {Vq(align, r10)->setMaskFirst(k7);                                         # Set mask bits
+      Vmovdqu8 "zmm0\{k7}", "[rax]";                                            # Load first incomplete block of source
+      Vpcmpub  "k6{k7}", zmm0, zmm1, 0;                                      # Characters in source that match
+PrintErrStringNL "AAAA";
+PrintErrRegisterInHex rax, rdx, k6, k7, zmm0, zmm1, zmm2;
+      Vmovdqu8 "[rdx]{k6}", zmm2;                                               # Write set byte into mask at match points
+PrintErrStringNL "BBBB";
+      Add rax, r10;                                                             # Update point to mask from
+      Add rdx, r10;                                                             # Update point to mask to
+      Sub  r8, r10;                                                             # Reduce mask length
      };
 
     For                                                                         # Clear remaining memory in full zmm blocks
-     {Vmovdqu64 "[rax]", zmm0;
-     } rax, rdx, $size;
+     {Vmovdqu8 zmm0, "[rax]";                                                   # Load complete block of source
+      Vpcmpub  "k7", zmm0, zmm1, 0;                                             # Characters in source that match
+      Vmovdqu8 "[rdx]{k7}", zmm2;                                               # Write set byte into mask at match points
+      Add rdx, $size;                                                           # Update point to mask to
+     } rax, r9, $size;
 
     PopR @save;
-    RestoreFirstFour;
    } in => {size => 3, source => 3, mask => 3, match => 3, set => 3};           # Match is the character to match on in the source, set is the character to write into the mask at the corresponding position.
 
   $s->call(@variables);
@@ -15548,6 +15556,9 @@ if (1) {                                                                        
   $address->clearMemory($l);
   $address->printOutMemoryInHexNL($l);
 
+  MaskMemory $l, source=>$s, mask=>$address, Cq('set', 0x01), Cq(match, 0x20);
+  $address->printOutMemoryInHexNL($l);
+
   ok Assemble(debug => 0, eq => <<END);
 out  : 0000 0000 0001 0348
 size : 0000 0000 0000 0004
@@ -15563,6 +15574,7 @@ size : 0000 0000 0000 0004
 class: 0000 0000 0000 000$subroutine
 F09D 96BA 20F0 9D918EF0 9D91 A0F0 9D91A0F0 9D91 96F0 9D9194F0 9D91 9B20 F09D96BB 20F0 9D90 A9F09D90 A5F0 9D90 AEF09D90 AC20 F09D 96BC
 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+0000 0000 0100 00000000 0000 0000 00000000 0000 0000 00000000 0000 0001 00000000 0100 0000 00000000 0000 0000 00000000 0001 0000 0000
 END
  }
 
