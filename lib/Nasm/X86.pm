@@ -295,7 +295,7 @@ sub Rs(@)                                                                       
   my $d = join '', @_;
   my @e;
   for my $e(split //, $d)
-   {if ($e !~ m([A-Z0-9])i) {push @e, ord($e)} else {push @e, qq('$e')}
+   {if ($e !~ m([A-Z0-9])i) {push @e, sprintf("0x%x", ord($e))} else {push @e, qq('$e')}
    }
   my $e = join ', ', @e;
   my $L = $rodatas{$e};
@@ -2792,7 +2792,7 @@ sub MaskMemory(@)                                                               
     IfNz sub                                                                    # Need to align so that the rest of the clear can be done in full zmm blocks
      {Vq(align, r10)->setMaskFirst(k7);                                         # Set mask bits
       Vmovdqu8 "zmm0\{k7}", "[rax]";                                            # Load first incomplete block of source
-      Vpcmpub  "k6{k7}", zmm0, zmm1, 0;                                      # Characters in source that match
+      Vpcmpub  "k6{k7}", zmm0, zmm1, 0;                                         # Characters in source that match
 PrintErrStringNL "AAAA";
 PrintErrRegisterInHex rax, rdx, k6, k7, zmm0, zmm1, zmm2;
       Vmovdqu8 "[rdx]{k6}", zmm2;                                               # Write set byte into mask at match points
@@ -15514,7 +15514,7 @@ Found: 0000 0000 0000 0001
 END
  }
 
-#latest:
+latest:
 if (1) {                                                                        #TConvertUtf8ToUtf32
   my @p = my ($out, $size, $fail) = (Vq(out), Vq(size), Vq("fail"));
   my $class = Vq(class);
@@ -15543,7 +15543,7 @@ if (1) {                                                                        
 
   my $subroutine = $ClassifyChar{subroutine};                                   # 𝒙 is part of a subroutine name
 
-  my $statement = qq(𝖺 𝑎𝑠𝑠𝑖𝑔𝑛 𝖻 𝐩𝐥𝐮𝐬 𝖼\n);                                            # A sample sentence to parse
+  my $statement = qq(𝖺 𝑎𝑠𝑠𝑖𝑔𝑛 𝖻 𝐩𝐥𝐮𝐬 𝖼\nAAAAAA);                                            # A sample sentence to parse
   my $s = Cq(statement, Rs($statement));
   my $l = Cq(size, length($statement));
 
@@ -15551,15 +15551,17 @@ if (1) {                                                                        
   CopyMemory(source => $s, target => $address, $l);
 
   GetNextUtf8Char in=>$address, @p;
+PrintOutStringNL "DDDDD";
   $address->printOutMemoryInHexNL($l);
 
   $address->clearMemory($l);
-  $address->printOutMemoryInHexNL($l);
 
   MaskMemory $l, source=>$s, mask=>$address, Cq('set', 0x01), Cq(match, 0x20);
+  MaskMemory $l, source=>$s, mask=>$address, Cq('set', 0x02), Cq(match, 0x0A);
+PrintOutStringNL "EEEE";
   $address->printOutMemoryInHexNL($l);
 
-  ok Assemble(debug => 0, eq => <<END);
+  ok Assemble(debug => 1, eq => <<END);
 out  : 0000 0000 0001 0348
 size : 0000 0000 0000 0004
 out  : 0000 0000 0000 20AC
