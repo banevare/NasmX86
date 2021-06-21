@@ -2598,7 +2598,7 @@ sub ReadTimeStampCounter()                                                      
 
 #D2 Memory                                                                      # Allocate and print memory
 
-sub PrintMemoryInHex($)                                                         # Dump memory from the address in rax for the length in rdi on the specified channel
+sub PrintMemoryInHex($)                                                         # Dump memory from the address in rax for the length in rdi on the specified channel. As this method prints in blocks of 8 up to 7 bytes will be missing from the end unless the length is a multiple of 8 .
  {my ($channel) = @_;                                                           # Channel
   @_ == 1 or confess;
   Comment "Print out memory in hex on channel: $channel";
@@ -2606,7 +2606,7 @@ sub PrintMemoryInHex($)                                                         
   Call Macro
    {my $size = RegisterSize rax;
     SaveFirstFour;
-    Mov rsi,rax;                                                                # Position in memory
+    Mov rsi, rax;                                                               # Position in memory
     Lea rdi,"[rax+rdi-$size+1]";                                                # Upper limit of printing with an 8 byte register
     For                                                                         # Print string in blocks
      {Mov rax, "[rsi]";
@@ -2735,14 +2735,12 @@ sub ClearMemory(@)                                                              
   @_ >= 2 or confess;
   Comment "Clear memory";
 
-  my $size = RegisterSize zmm0;
-
   my $s = Subroutine
    {my ($p) = @_;                                                               # Parameters
     PushR my @save = (k7, zmm0, rax, rdi, rsi, rdx);
     $$p{address}->setReg(rax);
     $$p{size}   ->setReg(rdi);
-    Lea rdx, "[rax+rdi-$size]";                                                 # Address of upper limit of buffer
+    Lea rdx, "[rax+rdi]";                                                       # Address of upper limit of buffer
 
     ClearRegisters zmm0;                                                        # Clear the register that will be written into memory
 
@@ -2758,7 +2756,7 @@ sub ClearMemory(@)                                                              
 
     For                                                                         # Clear remaining memory in full zmm blocks
      {Vmovdqu64 "[rax]", zmm0;
-     } rax, rdx, $size;
+     } rax, rdx, RegisterSize zmm0;
 
     PopR @save;
    } in => {size => 3, address => 3};
@@ -2781,7 +2779,7 @@ sub MaskMemory(@)                                                               
     $$p{match} ->setReg(rsi);
     $$p{set}   ->setReg(rdi);
     $$p{size}  ->setReg(r8);
-    Lea r9, "[rax+r8-$size]";                                                   # Address of upper limit of source
+    Lea r9, "[rax+r8]";                                                         # Address of upper limit of source
 
     Vpbroadcastb zmm1, rsi;                                                     # Character to match
     Vpbroadcastb zmm2, rdi;                                                     # Character to write into mask
@@ -2793,10 +2791,7 @@ sub MaskMemory(@)                                                               
      {Vq(align, r10)->setMaskFirst(k7);                                         # Set mask bits
       Vmovdqu8 "zmm0\{k7}", "[rax]";                                            # Load first incomplete block of source
       Vpcmpub  "k6{k7}", zmm0, zmm1, 0;                                         # Characters in source that match
-PrintErrStringNL "AAAA";
-PrintErrRegisterInHex rax, rdx, k6, k7, zmm0, zmm1, zmm2;
       Vmovdqu8 "[rdx]{k6}", zmm2;                                               # Write set byte into mask at match points
-PrintErrStringNL "BBBB";
       Add rax, r10;                                                             # Update point to mask from
       Add rdx, r10;                                                             # Update point to mask to
       Sub  r8, r10;                                                             # Reduce mask length
@@ -15543,7 +15538,7 @@ if (1) {                                                                        
 
   my $subroutine = $ClassifyChar{subroutine};                                   # 𝒙 is part of a subroutine name
 
-  my $statement = qq(𝖺 𝑎𝑠𝑠𝑖𝑔𝑛 𝖻 𝐩𝐥𝐮𝐬 𝖼\nAAAAAA);                                            # A sample sentence to parse
+  my $statement = qq(𝖺 𝑎𝑠𝑠𝑖𝑔𝑛 𝖻 𝐩𝐥𝐮𝐬 𝖼\nAAAAAAAA);                                   # A sample sentence to parse
   my $s = Cq(statement, Rs($statement));
   my $l = Cq(size, length($statement));
 
@@ -15551,17 +15546,16 @@ if (1) {                                                                        
   CopyMemory(source => $s, target => $address, $l);
 
   GetNextUtf8Char in=>$address, @p;
-PrintOutStringNL "DDDDD";
   $address->printOutMemoryInHexNL($l);
 
   $address->clearMemory($l);
+  $address->printOutMemoryInHexNL($l);
 
   MaskMemory $l, source=>$s, mask=>$address, Cq('set', 0x01), Cq(match, 0x20);
   MaskMemory $l, source=>$s, mask=>$address, Cq('set', 0x02), Cq(match, 0x0A);
-PrintOutStringNL "EEEE";
   $address->printOutMemoryInHexNL($l);
 
-  ok Assemble(debug => 1, eq => <<END);
+  ok Assemble(debug => 0, eq => <<END);
 out  : 0000 0000 0001 0348
 size : 0000 0000 0000 0004
 out  : 0000 0000 0000 20AC
@@ -15574,9 +15568,9 @@ fail : 0000 0000 0000 0024
 out  : 0000 0000 0001 D499
 size : 0000 0000 0000 0004
 class: 0000 0000 0000 000$subroutine
-F09D 96BA 20F0 9D918EF0 9D91 A0F0 9D91A0F0 9D91 96F0 9D9194F0 9D91 9B20 F09D96BB 20F0 9D90 A9F09D90 A5F0 9D90 AEF09D90 AC20 F09D 96BC
-0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
-0000 0000 0100 00000000 0000 0000 00000000 0000 0000 00000000 0000 0001 00000000 0100 0000 00000000 0000 0000 00000000 0001 0000 0000
+F09D 96BA 20F0 9D918EF0 9D91 A0F0 9D91A0F0 9D91 96F0 9D9194F0 9D91 9B20 F09D96BB 20F0 9D90 A9F09D90 A5F0 9D90 AEF09D90 AC20 F09D 96BC0A41 4141 4141 4141
+0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+0000 0000 0100 00000000 0000 0000 00000000 0000 0000 00000000 0000 0001 00000000 0100 0000 00000000 0000 0000 00000000 0001 0000 00000200 0000 0000 0000
 END
  }
 
