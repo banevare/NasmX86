@@ -295,7 +295,7 @@ sub Rs(@)                                                                       
   my $d = join '', @_;
   my @e;
   for my $e(split //, $d)
-   {if ($e =~ m(\A(\n|\t|'|")\Z)) {push @e, ord($e)} else {push @e, qq('$e')}
+   {if ($e !~ m([A-Z0-9])i) {push @e, ord($e)} else {push @e, qq('$e')}
    }
   my $e = join ', ', @e;
   my $L = $rodatas{$e};
@@ -1682,14 +1682,7 @@ sub Nasm::X86::Variable::lt($$)                                                 
   Nasm::X86::Variable::boolean(\&IfLt, q(lt), $left, $right);
  }
 
-sub Nasm::X86::Variable::print($)                                               # Write the value of a variable on stdout
- {my ($left) = @_;                                                              # Left variable
-  PushR my @regs = (rax, rdi);
-  Mov rax, $left->label;
-  Mov rdi, 8;
-  &PrintOutMemoryInHexNL();
-  PopR @regs;
- }
+#D2 Print variables                                                             # Print the values of variables or the memory addressed by them
 
 sub Nasm::X86::Variable::dump($$$;$$)                                           # Dump the value of a variable to the specified channel adding an optional title and new line if requested
  {my ($left, $channel, $newLine, $title1, $title2) = @_;                        # Left variable, channel, new line required, optional leading title, optional trailing title
@@ -2261,15 +2254,26 @@ sub Nasm::X86::Variable::copyMemory($$$)                                        
   &CopyMemory(target => $target, source => $source, size => $size);             # Copy the memory
  }
 
-sub Nasm::X86::Variable::printOutMemoryInHexNL($)                                 # Print allocated memory in hex
- {my ($address, $size) = @_;                                                    # Address of  memory, length of memory
+sub Nasm::X86::Variable::printMemoryInHexNL($$$)                                # Write the memory addressed by a variable to stdout or sdterr
+ {my ($address, $channel, $size) = @_;                                          # Address of memory, channel to print on, number of bytes to print
   $address->name eq q(address) or confess "Need address";
   $size   ->name eq q(size)    or confess "Need size";
   PushR my @save = (rax, rdi);
   $address->setReg(rax);
-  $size   ->setReg(rdi);
-  &PrintOutMemoryInHexNL();                                                     # Print the memory
+  $size->setReg(rdi);
+  &PrintMemoryInHex($channel);
+  &PrintNL($channel);
   PopR @save;
+ }
+
+sub Nasm::X86::Variable::printErrMemoryInHexNL($$)                              # Write the memory addressed by a variable to stderr
+ {my ($address, $size) = @_;                                                    # Address of memory, channel to print on, number of bytes to print
+  $address->printMemoryInHexNL($stderr, $size);
+ }
+
+sub Nasm::X86::Variable::printOutMemoryInHexNL($$)                              # Write the memory addressed by a variable to stdout
+ {my ($address, $size) = @_;                                                    # Address of memory, channel to print on, number of bytes to print
+  $address->printMemoryInHexNL($stdout, $size);
  }
 
 sub Nasm::X86::Variable::freeMemory($)                                          # Free the memory addressed by this variable for the specified length
@@ -2744,7 +2748,9 @@ sub ClearMemory(@)                                                              
 
     For                                                                         # Clear memory
      {Vmovdqu64 "[rax]", zmm0;
+PrintErrStringNL "AAAA";
      } rax, rdi, $size;
+PrintErrStringNL "BBBB";
 
     PopR zmm0;
     RestoreFirstFour;
@@ -3103,8 +3109,68 @@ sub ConvertUtf8ToUtf32(@)                                                       
   $s->call(@parameters);
  } # ConvertUtf8ToUtf32
 
+sub GetNextUtf8Char(@)                                                          # Get the next utf8 encoded character from the addressed memory
+ {my (@parameters) = @_;                                                        # Parameters
+  @_ >= 1 or confess;
 
-our %ClassifyChar;                                                              # Possible lexical items
+  my $s = Subroutine
+   {my ($p) = @_;                                                               # Parameters
+    Comment "Get next Utf8 char";
+
+    PushR my @save = (r14, r15);
+    $$p{fail}->getConst(0);                                                     # Clear failure indicator
+    $$p{in}->setReg(r15);                                                       # Character to convert
+    Mov r14, "[r15]";
+
+    my $success = Label;                                                        # https://en.wikipedia.org/wiki/UTF-8
+
+    KeepFree r15;
+    Mov r15, r14;                                                               # Full register
+    And r15, 0xFF;                                                              # First byte
+    Cmp r15, 0x1f;                                                              # Ascii
+    IfLe
+     {$$p{out}->getReg(r15);
+      $$p{size}->copy(Cq(one, 1));
+      Jmp $success;
+     };
+
+    Cmp r15, 0xDf;                                                              # 2 bytes
+    IfLe
+     {And r14, 0x0000ffff;
+      $$p{out}->getReg(r14);
+      $$p{size}->copy(Cq(two, 2));
+      Jmp $success;
+     };
+
+    Cmp r15, 0xEf;                                                              # 3 bytes
+    IfLe
+     {And r14, 0x00ffffff;
+      $$p{out}->getReg(r14);
+      $$p{size}->copy(Cq(three, 3));
+      Jmp $success;
+     };
+
+    Cmp r15, 0xF7;                                                              # 4 bytes
+    IfLe
+     {KeepFree r15;
+      Mov r15d, r14d;
+      $$p{out}->getReg(r15);
+      $$p{size}->copy(Cq(four, 4));
+      Jmp $success;
+     };
+
+    $$p{fail}->getConst(1);                                                     # Conversion failed
+
+    SetLabel $success;
+
+    PopR @save;
+   } in => {in => 3}, out => {out => 3, size => 3, fail => 3};
+
+  $s->call(@parameters);
+ } # GetNextUtf8Char
+
+
+our %ClassifyChar;                                                               # Possible lexical items
 sub ClassifyChar(@)                                                             # Classify a unicode character as a lexical item
  {my (@parameters) = @_;                                                        # Parameters
   @_ >= 1 or confess;
@@ -3135,9 +3201,11 @@ sub ClassifyChar(@)                                                             
     PushR my @save = (r15);
     $$p{in}->setReg(r15);
     class(string,         0x0,    0x7f);
-    class(dyad,       0x1d400, 0x1d433);                                        # https://www.compart.com/en/unicode/block/U+1D400
-    class(variable,   0x1d434, 0x1d467);
+    class(variable,   0x1d400, 0x1d433);                                        # https://www.compart.com/en/unicode/block/U+1D400
+    class(dyad1,      0x1d434, 0x1d467);
     class(subroutine, 0x1d468, 0x1d49b);
+    class(unknown,    0x1d5a0, 0x1d5d3);
+    class(dyad2,      0x1d5d4, 0x1d607);
     $$p{fail}->getConst(2);                                                     # Failed
 
     SetLabel $finish;
@@ -13951,35 +14019,6 @@ if (1)                                                                          
  }
 
 #latest:;
-if (1) {                                                                        #TVq  #TNasm::X86::Variable::print #TNasm::X86::Variable::add
-  my $a = Vq(a, 3);   $a->print;
-  my $c = $a +  2;    $c->print;
-  my $d = $c -  $a;   $d->print;
-  my $e = $d == 2;    $e->print;
-  my $f = $d != 2;    $f->print;
-  my $g = $a *  2;    $g->print;
-  my $h = $g /  2;    $h->print;
-  my $i = $a %  2;    $i->print;
-
-  If ($a == 3, sub{PrintOutStringNL "a == 3"});
-  ++$a; $a->print;
-  --$a; $a->print;
-
-  ok Assemble(debug => 0, eq => <<END);
-0300 0000 0000 0000
-0500 0000 0000 0000
-0200 0000 0000 0000
-0100 0000 0000 0000
-0000 0000 0000 0000
-0600 0000 0000 0000
-0300 0000 0000 0000
-0100 0000 0000 0000
-a == 3
-0400 0000 0000 0000
-0300 0000 0000 0000
-END
- }
-
 if (1) {                                                                        #TNasm::X86::Variable::dump  #TNasm::X86::Variable::print
   my $a = Vq(a, 3); $a->outNL;
   my $b = Vq(b, 2); $b->outNL;
@@ -13991,7 +14030,11 @@ if (1) {                                                                        
   my $h = $g /  $b; $h->outNL;
   my $i = $a %  $b; $i->outNL;
 
-  is_deeply Assemble, <<END;
+  If ($a == 3, sub{PrintOutStringNL "a == 3"});
+  ++$a; $a->outNL;
+  --$a; $a->outNL;
+
+  ok Assemble(debug => 0, eq => <<END);
 a: 0000 0000 0000 0003
 b: 0000 0000 0000 0002
 (a add b): 0000 0000 0000 0005
@@ -14001,26 +14044,30 @@ b: 0000 0000 0000 0002
 (a times b): 0000 0000 0000 0006
 ((a times b) / b): 0000 0000 0000 0003
 (a % b): 0000 0000 0000 0001
+a == 3
+a: 0000 0000 0000 0004
+a: 0000 0000 0000 0003
 END
  }
 
+#latest:;
 if (1) {                                                                        #TNasm::X86::Variable::for
   Vq(limit,10)->for(sub
    {my ($i, $start, $next, $end) = @_;
-    $i->print;
+    $i->outNL;
    });
 
   is_deeply Assemble, <<END;
-0000 0000 0000 0000
-0100 0000 0000 0000
-0200 0000 0000 0000
-0300 0000 0000 0000
-0400 0000 0000 0000
-0500 0000 0000 0000
-0600 0000 0000 0000
-0700 0000 0000 0000
-0800 0000 0000 0000
-0900 0000 0000 0000
+index: 0000 0000 0000 0000
+index: 0000 0000 0000 0001
+index: 0000 0000 0000 0002
+index: 0000 0000 0000 0003
+index: 0000 0000 0000 0004
+index: 0000 0000 0000 0005
+index: 0000 0000 0000 0006
+index: 0000 0000 0000 0007
+index: 0000 0000 0000 0008
+index: 0000 0000 0000 0009
 END
  }
 
@@ -15411,29 +15458,28 @@ Found: 0000 0000 0000 0001
 END
  }
 
-#latest:
+latest:
 if (1) {                                                                        #TConvertUtf8ToUtf32
-
-  my $out = Vq(out); my $size = Vq(size); my $fail = Vq("fail");
+  my @p = my ($out, $size, $fail) = (Vq(out), Vq(size), Vq("fail"));
   my $class = Vq(class);
 
-  ConvertUtf8ToUtf32 Vq(in, 0x888d90f0), $out, $size, $fail;
+  ConvertUtf8ToUtf32 Vq(in, 0x888d90f0),   $out, $size, $fail;
 
   $out->outNL('out  : ');     $size->outNL('size : ');
 
-  ConvertUtf8ToUtf32 Vq(in, 0xAC82E2),   $out, $size, $fail;                    # Little endian Euro symbol
+  ConvertUtf8ToUtf32 Vq(in, 0xAC82E2),     $out, $size, $fail;                  # Little endian Euro symbol
   $out->outNL('out  : ');     $size->outNL('size : ');
 
-  ConvertUtf8ToUtf32 Vq(in, 0xa2c2),     $out, $size, $fail;
+  ConvertUtf8ToUtf32 Vq(in, 0xa2c2),       $out, $size, $fail;
   $out->outNL('out  : ');     $size->outNL('size : ');
 
-  ConvertUtf8ToUtf32 Vq(in, 0x24),       $out, $size, $fail;
+  ConvertUtf8ToUtf32 Vq(in, 0x24),         $out, $size, $fail;
   $out->outNL('out  : ');     $size->outNL('size : ');
 
-  ConvertUtf8ToUtf32 Vq(in, 0x80),       $out, $size, $fail;                    # Invalid
+  ConvertUtf8ToUtf32 Vq(in, 0x80),         $out, $size, $fail;                  # Invalid
   $out->outNL('fail : ');
 
-  ConvertUtf8ToUtf32 Vq(in, 0x99929df0),   $out, $size, $fail;                  # https://www.compart.com/en/unicode/U+1D499
+  ConvertUtf8ToUtf32 Vq(in, 0x99929df0),   $out, $size, $fail;                  # 𝒙   https://www.compart.com/en/unicode/U+1D499
   $out->outNL('out  : ');     $size->outNL('size : ');
 
   ClassifyChar in=>$out, $class, $fail;
@@ -15441,7 +15487,20 @@ if (1) {                                                                        
 
   my $subroutine = $ClassifyChar{subroutine};                                   # 𝒙 is part of a subroutine name
 
-  ok Assemble(debug => 0, eq => <<END);
+  my $statement = qq(𝖺 𝑎𝑠𝑠𝑖𝑔𝑛 𝖻 𝐩𝐥𝐮𝐬 𝖼\n);                                            # A sample sentence to parse
+  my $s = Cq(statement, Rs($statement));
+  my $l = Cq(size, length($statement));
+
+  AllocateMemory($l, my $address = Vq(address));                                # Allocate enough memory for a copy of the string
+  CopyMemory(source => $s, target => $address, $l);
+
+  GetNextUtf8Char in=>$address, @p;
+  $address->printOutMemoryInHexNL($l);
+
+  $address->clearMemory($l);
+  $address->printOutMemoryInHexNL($l);
+
+  ok Assemble(debug => 1, eq => <<END);
 out  : 0000 0000 0001 0348
 size : 0000 0000 0000 0004
 out  : 0000 0000 0000 20AC
@@ -15454,6 +15513,7 @@ fail : 0000 0000 0000 0024
 out  : 0000 0000 0001 D499
 size : 0000 0000 0000 0004
 class: 0000 0000 0000 000$subroutine
+F09D 96BA 20F0 9D918EF0 9D91 A0F0 9D91A0F0 9D91 96F0 9D9194F0 9D91 9B20 F09D96BB 20F0 9D90 A9F09D90 A5F0 9D90 AEF09D90 AC20 F09D 96BC
 END
  }
 
