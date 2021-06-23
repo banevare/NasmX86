@@ -351,7 +351,7 @@ END
 
 sub Rb(@)                                                                       # Layout bytes in the data segment and return their label
  {my (@bytes) = @_;                                                             # Bytes to layout
-  Rbwdq 'b', map {sprintf "0x%x", $_ } @_;
+  Rbwdq 'b', @_;
  }
 sub Rw(@)                                                                       # Layout words in the data segment and return their label
  {my (@words) = @_;                                                             # Words to layout
@@ -15645,7 +15645,7 @@ Found: 0000 0000 0000 0001
 END
  }
 
-latest:
+#latest:
 if (1) {                                                                        #TConvertUtf8ToUtf32
   my @p = my ($out, $size, $fail) = (Vq(out), Vq(size), Vq('fail'));
   my $class = Vq(class);
