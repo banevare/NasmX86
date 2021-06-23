@@ -2773,7 +2773,7 @@ sub MaskMemory(@)                                                               
 
   my $s = Subroutine
    {my ($p) = @_;                                                               # Parameters
-    PushR my @save = (k6, k7, rax, rdi, rsi, rdx, r8, r9, r10, r14, r15, zmm0, zmm1, zmm2);
+    PushR my @save = (k6, k7, rax, rdi, rsi, rdx, r8, r9, r10, zmm0, zmm1, zmm2);
     $$p{source}->setReg(rax);
     $$p{mask}  ->setReg(rdx);
     $$p{match} ->setReg(rsi);
@@ -2809,6 +2809,94 @@ sub MaskMemory(@)                                                               
 
   $s->call(@variables);
  }
+
+sub MaskMemoryInRange4(@)                                                       # Write the specified byte into locations in the target mask that correspond to the locations in the source that contain 4 bytes in the specified range.
+ {my (@variables) = @_;                                                         # Variables
+  @_ >= 6 or confess;
+  Comment "Clear memory";
+
+  my $size = RegisterSize zmm0;
+
+  my $s = Subroutine
+   {my ($p) = @_;                                                               # Parameters
+    PushR my @save = (k4, k5, k6, k7, zmm(0..9), map{"r$_"} qw(ax di si dx), 8..15);
+    $$p{source}->setReg(rax);
+    $$p{mask}  ->setReg(rdx);
+    $$p{low}   ->setReg(r10);
+    $$p{high}  ->setReg(r11);
+    $$p{set}   ->setReg(rdi);
+    $$p{size}  ->setReg(rsi);
+
+    Vpbroadcastb zmm1, rdi;                                                     # Character to write into mask
+                Vpbroadcastb zmm2, r10;                                         # Character 1 low
+    Shr r10, 8; Vpbroadcastb zmm3, r10;                                         # Character 2 low
+    Shr r10, 8; Vpbroadcastb zmm4, r10;                                         # Character 3 low
+    Shr r10, 8; Vpbroadcastb zmm5, r10;                                         # Character 4 low
+                Vpbroadcastb zmm6, r11;                                         # Character 1 high
+    Shr r11, 8; Vpbroadcastb zmm7, r11;                                         # Character 2 high
+    Shr r11, 8; Vpbroadcastb zmm8, r11;                                         # Character 3 high
+    Shr r11, 8; Vpbroadcastb zmm9, r11;                                         # Character 4 high
+    KeepFree r10, r11;
+    Lea r8, "[rax+rsi]";                                                        # Address of upper limit of source
+PrintErrRegisterInHex zmm 2..9;
+
+    my sub check($$)                                                            # Check a character
+     {my ($z, $f) = @_;                                                         # First zmm, finished label
+      my $Z = $z + 4;
+PrintErrRegisterInHex zmm($z, $Z), k7;
+      Vpcmpub  "k6{k7}", zmm0, "zmm$z", 5;                                      # Greater than or equal
+      Vpcmpub  "k7{k6}", zmm0, "zmm$Z", 2;                                      # Less than or equal
+PrintErrRegisterInHex k6, k7;
+      Ktestq k7, k7;
+      Jz $f;                                                                    # No match
+      Kshiftlq k7, k7, 1;                                                       # Match - move up to next character
+     };
+
+    my sub last4()                                                              # Expand each set bit four times
+     {Kshiftlq k6, k7, 1;  Kandq k7, k6, k7;                                    # We have found a character in the specified range
+      Kshiftlq k6, k7, 2;  Kandq k7, k6, k7;                                    # Last four
+     };
+
+PrintErrStringNL "AAAA";
+PrintErrRegisterInHex rsi;
+    For                                                                         # Mask remaining memory in full zmm blocks
+     {my $finished = Label;                                                     # Point where we have finished the initial comparisons
+      Vmovdqu8 zmm0, "[rax]";                                                   # Load complete block of source
+      Kxnorq k7, k7, k7;                                                        # Complete block - sets register to all ones
+PrintErrStringNL "BBBB";
+PrintErrRegisterInHex k7, zmm0;
+      check($_, $finished) for 2..5;  last4;                                    # Check a range
+
+PrintErrStringNL "CCCC";
+PrintErrRegisterInHex k7, zmm1;
+      Vmovdqu8 "[rdx]{k7}", zmm1;                                               # Write set byte into mask at match points
+      Add rdx, $size;                                                           # Update point to mask to
+      SetLabel $finished;
+     } rax, r8, $size;
+
+
+    Mov r10, rsi; And r10, 0x3f;                                                # Modulus the size of zmm
+    Test r10, r10;
+PrintErrStringNL "DDDD";
+    IfNz sub                                                                    # Need to align so that the rest of the mask can be done in full zmm blocks
+     {my $finished = Label;                                                     # Point where we have finished the initial comparisons
+      Vq(align, r10)->setMaskFirst(k7);                                         # Set mask bits
+      Vmovdqu8 "zmm0\{k7}", "[rax]";                                            # Load first incomplete block of source
+PrintErrStringNL "EEEE";
+PrintErrRegisterInHex k7, r10, zmm0;
+      check($_, $finished) for 2..5;  last4;                                    # Check a range
+      Vmovdqu8 "[rdx]{k7}", zmm1;                                               # Write set byte into mask at match points
+      Add rax, r10;                                                             # Update point to mask from
+      Add rdx, r10;                                                             # Update point to mask to
+      Sub  r8, r10;                                                             # Reduce mask length
+      SetLabel $finished;
+     };
+
+    PopR @save;
+   } in => {size => 3, source => 3, mask => 3, set => 3, low => 3, high => 3};
+
+  $s->call(@variables);
+ } # MaskMemoryInRange4
 
 sub CopyMemory(@)                                                               # Copy memory, the target is addressed by rax, the length is in rdi, the source is addressed by rsi
  {my (@variables) = @_;                                                         # Variables
@@ -3076,7 +3164,7 @@ sub Hash()                                                                      
 
 #D1 Unicode                                                                     # Convert utf8 to utf32
 
-sub ConvertUtf8ToUtf32(@)                                                       # Convert a variable containing some utf8 to utf32 and return the width of the input converted
+sub ConvertUtf8ToUtf32(@)                                                       # Convert a variable containing a valid utf8  encoded character to utf32 and return the width of the input converted
  {my (@parameters) = @_;                                                        # Parameters
   @_ >= 1 or confess;
 
@@ -3085,77 +3173,99 @@ sub ConvertUtf8ToUtf32(@)                                                       
     Comment "Convert utf8 to utf32";
 
     PushR my @save = (rax, r12, r13, r14, r15);
-    $$p{fail}->getConst(0);                                                     # Clear failure indicator
     KeepFree rax;
     $$p{in}->setReg(rax);                                                       # Character to convert
 
     my $success = Label;                                                        # https://en.wikipedia.org/wiki/UTF-8
     Mov r15, rax;
-    Shl r15, 56;
-    Shr r15, 59;
-    Cmp r15, 0x1e;
+    And r15, 0xff;                                                              # First byte is lowest byte in register
     KeepFree r15;
 
-    IfZ                                                                         # 4 bytes
-     {Mov r15, rax; Shl r15, 61; Shr r15, 61; Shr rax, 8;
-      Mov r14, rax; Shl r14, 58; Shr r14, 58; Shr rax, 8;
-      Mov r13, rax; Shl r13, 58; Shr r13, 58; Shr rax, 8;
-      Mov r12, rax; Shl r12, 58; Shr r12, 58;
-      KeepFree rax;
-      Shl r15, 18; Mov rax, r15;
-      Shl r14, 12; Or  rax, r14;
-      Shl r13,  6; Or  rax, r13;
-                   Or  rax, r12;
+    Cmp r15, 0x7f;
+    IfLe                                                                        # 1 byte
+     {Shl rax, 57; Shr rax, 57;
       $$p{out}->getReg(rax);
-      $$p{size}->copy(Vq(four, 4));
+      $$p{size}->copy(Cq(one, 1));
       KeepFree rax, r15, r14, r13, r12;
       Jmp $success;
      };
 
-    Shr r15, 1;
-    Cmp r15, 0xe;
-    IfZ                                                                         # 3 bytes
-     {Mov r15, rax; Shl r15, 60; Shr r15, 60; Shr rax, 8;
-      Mov r14, rax; Shl r14, 58; Shr r14, 58; Shr rax, 8;
-      Mov r13, rax; Shl r13, 58; Shr r13, 58;
+    Mov r15, rax;                                                               # 2 byte code
+    Shr r15, 8;                                                                 # First byte is lowest byte in register
+    Cmp r15, 0xdf;
+    KeepFree r15;
+    IfLe                                                                        # 2 bytes
+     {And r15, 0x1f;                                                            # Chop
+      Shl r15, 6;                                                               # Position in result
 
-      Shl r15, 12; Mov rax, r15;
-      Shl r14,  6; Or rax, r14;
-                   Or rax, r13;
-      $$p{out}->getReg(rax);
-      $$p{size}->copy(Vq(three, 3));
-      KeepFree rax, r15, r14, r13, r12;
-      Jmp $success;
-     };
-
-    Shr r15, 1;
-    Cmp r15, 0x6;
-    IfZ                                                                         # 2 bytes
-     {Mov r15, rax; Shl r15, 59; Shr r15, 59; Shr rax, 8;
-      Mov r14, rax; Shl r14, 58; Shr r14, 58;
-      Shl r15,  6; Mov rax, r15;
-                   Or  rax, r14;
-      $$p{out}->getReg(rax);
-      $$p{size}->copy(Vq(two, 2));
-      KeepFree rax, r15, r14, r13, r12;
-      Jmp $success;
-     };
-
-    Shr r15, 2;
-    Cmp r15, 0;
-    IfZ                                                                         # 1 byte
-     {Mov r15, rax; Shl r15, 57; Shr r15, 57;
+      Mov r14, rax;                                                             # Copy
+      And r14, 0x3f;                                                            # Chop
+      Or  r15, r14;                                                             # Combine with first byte
       $$p{out}->getReg(r15);
-      $$p{size}->copy(Vq(one, 1));
+      $$p{size}->copy(Cq(two, 2));
       KeepFree rax, r15, r14, r13, r12;
       Jmp $success;
      };
-    $$p{fail}->getConst(1);                                                     # Conversion failed
+
+    Mov r15, rax;                                                               # 3 byte code
+    Shr r15, 16;                                                                # First byte is lowest byte in register
+    Cmp r15, 0xef;
+    KeepFree r15;
+    IfLe                                                                        # 2 bytes
+     {And r15, 0x1f;                                                            # Chop
+      Shl r15, 12;                                                              # Position in result
+
+      Mov r14, rax;                                                             # Copy
+      Shr r14, 8;                                                               # Second byte is lowest byte in register
+      And r14, 0x3f;                                                            # Chop
+      Shl r14, 6;                                                               # Position in result
+
+      Mov r13, rax;                                                             # Copy
+      And r13, 0x3f;                                                            # Chop
+
+      Or  r15, r14;                                                             # Combine with second byte
+      Or  r15, r13;                                                             # Combine with first byte
+      $$p{out}->getReg(r15);
+      $$p{size}->copy(Cq(three, 3));
+      KeepFree rax, r15, r14, r13, r12;
+      Jmp $success;
+     };
+
+    Mov r15, rax;                                                               # 4 byte code
+    Shr r15, 24;                                                                # First byte is lowest byte in register
+    Cmp r15, 0xf7;
+    KeepFree r15;
+    IfLe                                                                        # 2 bytes
+     {And r15, 0x07;                                                            # Chop
+      Shl r15, 18;                                                              # Position in result
+
+      Mov r14, rax;                                                             # Copy
+      Shr r14, 16;                                                              # Second byte is lowest byte in register
+      And r14, 0x3f;                                                            # Chop
+      Shl r14, 12;                                                              # Position in result
+
+      Mov r13, rax;                                                             # Copy
+      Shr r13, 8;                                                               # Third byte is lowest byte in register
+      And r13, 0x3f;                                                            # Chop
+      Shl r13, 6;                                                               # Position in result
+
+      Mov r12, rax;                                                             # Copy
+      And r12, 0x3f;                                                            # Chop
+
+      Or  r15, r14;                                                             # Combine with second byte
+      Or  r15, r13;                                                             # Combine with first byte
+      Or  r15, r12;                                                             # Combine with first byte
+
+      $$p{out}->getReg(r15);
+      $$p{size}->copy(Cq(three, 3));
+      KeepFree rax, r15, r14, r13, r12;
+      Jmp $success;
+     };
 
     SetLabel $success;
 
     PopR @save;
-   } in => {in => 3}, out => {out => 3, size => 3, fail => 3};
+   } in => {in => 3}, out => {out => 3, size => 3};
 
   $s->call(@parameters);
  } # ConvertUtf8ToUtf32
@@ -13884,7 +13994,7 @@ if (1) {
     k7: FFFF FFFF FFFF FFFF
    rax: 0000 0000 0000 00$P
 END
-#   0 eq    1 gt    2 ge    4 ne    4 le    4 lt   comparisons
+#   0 eq    1 lt    2 le    4 ne    5 ge    6 gt   comparisons
  }
 
 if (1) {                                                                        #TCstrlen
@@ -15511,32 +15621,24 @@ END
 
 latest:
 if (1) {                                                                        #TConvertUtf8ToUtf32
-  my @p = my ($out, $size, $fail) = (Vq(out), Vq(size), Vq("fail"));
+  my @p = my ($out, $size) = (Vq(out), Vq(size));
   my $class = Vq(class);
 
-  ConvertUtf8ToUtf32 Vq(in, 0x888d90f0),   $out, $size, $fail;
-
+  ConvertUtf8ToUtf32 Vq(in, 0x24),         $out, $size;                         # $
   $out->outNL('out  : ');     $size->outNL('size : ');
 
-  ConvertUtf8ToUtf32 Vq(in, 0xAC82E2),     $out, $size, $fail;                  # Little endian Euro symbol
+  ConvertUtf8ToUtf32 Vq(in, 0xc2a2),       $out, $size;                         # ¢  UTF-8 Encoding: 0xC2 0xA2           UTF-32 Encoding: 0x000000a2
   $out->outNL('out  : ');     $size->outNL('size : ');
 
-  ConvertUtf8ToUtf32 Vq(in, 0xa2c2),       $out, $size, $fail;
+  ConvertUtf8ToUtf32 Vq(in, 0xc991),       $out, $size;                         # 𝝰     UTF-8 Encoding: 0xC9 0x91           UTF-32 Encoding: 0x00000251
   $out->outNL('out  : ');     $size->outNL('size : ');
 
-  ConvertUtf8ToUtf32 Vq(in, 0x24),         $out, $size, $fail;
+  ConvertUtf8ToUtf32 Vq(in, 0xE282AC),     $out, $size;                         # €  UTF-8 Encoding: 0xE2 0x82 0xAC      UTF-32 Encoding: 0x000020AC
   $out->outNL('out  : ');     $size->outNL('size : ');
 
-  ConvertUtf8ToUtf32 Vq(in, 0x80),         $out, $size, $fail;                  # Invalid
-  $out->outNL('fail : ');
-
-  ConvertUtf8ToUtf32 Vq(in, 0x99929df0),   $out, $size, $fail;                  # 𝒙   https://www.compart.com/en/unicode/U+1D499
+  ConvertUtf8ToUtf32 Vq(in, 0xf0908d88),   $out, $size;                         # 𐍈  UTF-8 Encoding:   0xF0 0x90 0x8D 0x88 UTF-32 Encoding: 0x00010348
   $out->outNL('out  : ');     $size->outNL('size : ');
 
-  ClassifyChar in=>$out, $class, $fail;
-  $class->outNL('class: ');
-
-  my $subroutine = $ClassifyChar{subroutine};                                   # 𝒙 is part of a subroutine name
 
   my $statement = qq(𝖺 𝑎𝑠𝑠𝑖𝑔𝑛 𝖻 𝐩𝐥𝐮𝐬 𝖼\nAAAAAAAA);                                   # A sample sentence to parse
   my $s = Cq(statement, Rs($statement));
@@ -15545,32 +15647,29 @@ if (1) {                                                                        
   AllocateMemory($l, my $address = Vq(address));                                # Allocate enough memory for a copy of the string
   CopyMemory(source => $s, target => $address, $l);
 
-  GetNextUtf8Char in=>$address, @p;
-  $address->printOutMemoryInHexNL($l);
+#  GetNextUtf8Char in=>$address, @p, my $fail = Vq(fail);
+#  $address->printOutMemoryInHexNL($l);
 
   $address->clearMemory($l);
   $address->printOutMemoryInHexNL($l);
 
   MaskMemory $l, source=>$s, mask=>$address, Cq('set', 0x01), Cq(match, 0x20);
   MaskMemory $l, source=>$s, mask=>$address, Cq('set', 0x02), Cq(match, 0x0A);
-  $address->printOutMemoryInHexNL($l);
 
-  ok Assemble(debug => 0, eq => <<END);
-out  : 0000 0000 0001 0348
-size : 0000 0000 0000 0004
-out  : 0000 0000 0000 20AC
-size : 0000 0000 0000 0003
-out  : 0000 0000 0000 00A2
-size : 0000 0000 0000 0002
+#  $address->printOutMemoryInHexNL($l);
+
+  ok Assemble(debug => 1, eq => <<END);
 out  : 0000 0000 0000 0024
 size : 0000 0000 0000 0001
-fail : 0000 0000 0000 0024
-out  : 0000 0000 0001 D499
-size : 0000 0000 0000 0004
-class: 0000 0000 0000 000$subroutine
-F09D 96BA 20F0 9D918EF0 9D91 A0F0 9D91A0F0 9D91 96F0 9D9194F0 9D91 9B20 F09D96BB 20F0 9D90 A9F09D90 A5F0 9D90 AEF09D90 AC20 F09D 96BC0A41 4141 4141 4141
+out  : 0000 0000 0000 00A2
+size : 0000 0000 0000 0002
+out  : 0000 0000 0000 0251
+size : 0000 0000 0000 0002
+out  : 0000 0000 0000 20AC
+size : 0000 0000 0000 0003
+out  : 0000 0000 0001 0348
+size : 0000 0000 0000 0003
 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
-0000 0000 0100 00000000 0000 0000 00000000 0000 0000 00000000 0000 0001 00000000 0100 0000 00000000 0000 0000 00000000 0001 0000 00000200 0000 0000 0000
 END
  }
 
