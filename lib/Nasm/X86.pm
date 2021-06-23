@@ -351,7 +351,7 @@ END
 
 sub Rb(@)                                                                       # Layout bytes in the data segment and return their label
  {my (@bytes) = @_;                                                             # Bytes to layout
-  Rbwdq 'b', @_;
+  Rbwdq 'b', map {sprintf "0x%x", $_ } @_;
  }
 sub Rw(@)                                                                       # Layout words in the data segment and return their label
  {my (@words) = @_;                                                             # Words to layout
@@ -3270,7 +3270,7 @@ sub ConvertUtf8ToUtf32(@)                                                       
   $s->call(@parameters);
  } # ConvertUtf8ToUtf32
 
-sub GetNextUtf8Char(@)                                                          # Get the next utf8 encoded character from the addressed memory
+sub GetNextUtf8CharAsUtf32(@)                                                   # Get the next utf8 encoded character from the addressed memory and return it as a utf32 char
  {my (@parameters) = @_;                                                        # Parameters
   @_ >= 1 or confess;
 
@@ -3278,46 +3278,72 @@ sub GetNextUtf8Char(@)                                                          
    {my ($p) = @_;                                                               # Parameters
     Comment "Get next Utf8 char";
 
-    PushR my @save = (r14, r15);
+    PushR my @save = (r11, r12, r13, r14, r15);
     $$p{fail}->getConst(0);                                                     # Clear failure indicator
     $$p{in}->setReg(r15);                                                       # Character to convert
-    Mov r14, "[r15]";
-
+    ClearRegisters r14;                                                         # Move to byte register below does not clear the entire register
+    KeepFree r14;
+    Mov r14b, "[r15]";
     my $success = Label;                                                        # https://en.wikipedia.org/wiki/UTF-8
 
     KeepFree r15;
-    Mov r15, r14;                                                               # Full register
-    And r15, 0xFF;                                                              # First byte
-    Cmp r15, 0x1f;                                                              # Ascii
+    Cmp r14, 0x7f;                                                              # Ascii
     IfLe
-     {$$p{out}->getReg(r15);
+     {$$p{out}->getReg(r14);
       $$p{size}->copy(Cq(one, 1));
       Jmp $success;
+      KeepFree rax, r11, r12, r13, r14, r15;
      };
 
-    Cmp r15, 0xDf;                                                              # 2 bytes
+    Cmp r14, 0xdf;                                                              # 2 bytes
     IfLe
-     {And r14, 0x0000ffff;
+     {Mov r13b, "[r15+1]";
+      And r13, 0x3f;
+      And r14, 0x1f;
+      Shl r14, 6;
+      Or  r14,  r13;
       $$p{out}->getReg(r14);
       $$p{size}->copy(Cq(two, 2));
       Jmp $success;
+      KeepFree rax, r11, r12, r13, r14, r15;
      };
 
-    Cmp r15, 0xEf;                                                              # 3 bytes
+    Cmp r14, 0xef;                                                              # 3 bytes
     IfLe
-     {And r14, 0x00ffffff;
+     {Mov r12b, "[r15+2]";
+      And r12, 0x3f;
+      Mov r13b, "[r15+1]";
+      And r13, 0x3f;
+      And r14, 0x0f;
+      Shl r13,  6;
+      Shl r14, 12;
+      Or  r14,  r13;
+      Or  r14,  r12;
       $$p{out}->getReg(r14);
       $$p{size}->copy(Cq(three, 3));
       Jmp $success;
+      KeepFree rax, r11, r12, r13, r14, r15;
      };
 
-    Cmp r15, 0xF7;                                                              # 4 bytes
+    Cmp r14, 0xf7;                                                              # 4 bytes
     IfLe
-     {KeepFree r15;
-      Mov r15d, r14d;
-      $$p{out}->getReg(r15);
+     {Mov r11b, "[r15+3]";
+      And r11, 0x3f;
+      Mov r12b, "[r15+2]";
+      And r12, 0x3f;
+      Mov r13b, "[r15+1]";
+      And r13, 0x3f;
+      And r14, 0x07;
+      Shl r12,  6;
+      Shl r13, 12;
+      Shl r14, 18;
+      Or  r14,  r13;
+      Or  r14,  r12;
+      Or  r14,  r11;
+      $$p{out}->getReg(r14);
       $$p{size}->copy(Cq(four, 4));
       Jmp $success;
+      KeepFree rax, r11, r12, r13, r14, r15;
      };
 
     $$p{fail}->getConst(1);                                                     # Conversion failed
@@ -3328,7 +3354,7 @@ sub GetNextUtf8Char(@)                                                          
    } in => {in => 3}, out => {out => 3, size => 3, fail => 3};
 
   $s->call(@parameters);
- } # GetNextUtf8Char
+ } # GetNextUtf8CharAsUtf32
 
 
 our %ClassifyChar;                                                               # Possible lexical items
@@ -15621,24 +15647,27 @@ END
 
 latest:
 if (1) {                                                                        #TConvertUtf8ToUtf32
-  my @p = my ($out, $size) = (Vq(out), Vq(size));
+  my @p = my ($out, $size, $fail) = (Vq(out), Vq(size), Vq('fail'));
   my $class = Vq(class);
 
-  ConvertUtf8ToUtf32 Vq(in, 0x24),         $out, $size;                         # $
-  $out->outNL('out  : ');     $size->outNL('size : ');
+  my $Chars = Rb(0x24, 0xc2, 0xa2, 0xc9, 0x91, 0xE2, 0x82, 0xAC, 0xF0, 0x90, 0x8D, 0x88);
+  Mov r15, $Chars;
+  my $chars = Vq(chars, r15);
 
-  ConvertUtf8ToUtf32 Vq(in, 0xc2a2),       $out, $size;                         # ¢  UTF-8 Encoding: 0xC2 0xA2           UTF-32 Encoding: 0x000000a2
-  $out->outNL('out  : ');     $size->outNL('size : ');
+  GetNextUtf8CharAsUtf32 in=>$chars, @p;                                        # Dollar               UTF-8 Encoding: 0x24                UTF-32 Encoding: 0x00000024
+  $out->out('out1 : ');     $size->outNL(' size : ');
 
-  ConvertUtf8ToUtf32 Vq(in, 0xc991),       $out, $size;                         # 𝝰     UTF-8 Encoding: 0xC9 0x91           UTF-32 Encoding: 0x00000251
-  $out->outNL('out  : ');     $size->outNL('size : ');
+  GetNextUtf8CharAsUtf32 in=>$chars+1, @p;                                      # Cents                UTF-8 Encoding: 0xC2 0xA2           UTF-32 Encoding: 0x000000a2
+  $out->out('out2 : ');     $size->outNL(' size : ');
 
-  ConvertUtf8ToUtf32 Vq(in, 0xE282AC),     $out, $size;                         # €  UTF-8 Encoding: 0xE2 0x82 0xAC      UTF-32 Encoding: 0x000020AC
-  $out->outNL('out  : ');     $size->outNL('size : ');
+  GetNextUtf8CharAsUtf32 in=>$chars+3, @p;                                      # Alpha                UTF-8 Encoding: 0xC9 0x91           UTF-32 Encoding: 0x00000251
+  $out->out('out3 : ');     $size->outNL(' size : ');
 
-  ConvertUtf8ToUtf32 Vq(in, 0xf0908d88),   $out, $size;                         # 𐍈  UTF-8 Encoding:   0xF0 0x90 0x8D 0x88 UTF-32 Encoding: 0x00010348
-  $out->outNL('out  : ');     $size->outNL('size : ');
+  GetNextUtf8CharAsUtf32 in=>$chars+5, @p;                                      # Euro                 UTF-8 Encoding: 0xE2 0x82 0xAC      UTF-32 Encoding: 0x000020AC
+  $out->out('out4 : ');     $size->outNL(' size : ');
 
+  GetNextUtf8CharAsUtf32 in=>$chars+8, @p;                                      # Gothic Letter Hwair  UTF-8 Encoding  0xF0 0x90 0x8D 0x88 UTF-32 Encoding: 0x00010348
+  $out->out('out5 : ');     $size->outNL(' size : ');
 
   my $statement = qq(𝖺 𝑎𝑠𝑠𝑖𝑔𝑛 𝖻 𝐩𝐥𝐮𝐬 𝖼\nAAAAAAAA);                                   # A sample sentence to parse
   my $s = Cq(statement, Rs($statement));
@@ -15647,28 +15676,43 @@ if (1) {                                                                        
   AllocateMemory($l, my $address = Vq(address));                                # Allocate enough memory for a copy of the string
   CopyMemory(source => $s, target => $address, $l);
 
-#  GetNextUtf8Char in=>$address, @p, my $fail = Vq(fail);
-#  $address->printOutMemoryInHexNL($l);
+  GetNextUtf8CharAsUtf32 in=>$address, @p;
+  $out->out('outA : ');     $size->outNL(' size : ');
+
+  GetNextUtf8CharAsUtf32 in=>$address+4, @p;
+  $out->out('outB : ');     $size->outNL(' size : ');
+
+  GetNextUtf8CharAsUtf32 in=>$address+5, @p;
+  $out->out('outC : ');     $size->outNL(' size : ');
+
+  GetNextUtf8CharAsUtf32 in=>$address+30, @p;
+  $out->out('outD : ');     $size->outNL(' size : ');
+
+  GetNextUtf8CharAsUtf32 in=>$address+35, @p;
+  $out->out('outE : ');     $size->outNL(' size : ');
+
+  $address->printOutMemoryInHexNL($l);
 
   $address->clearMemory($l);
   $address->printOutMemoryInHexNL($l);
-
-  MaskMemory $l, source=>$s, mask=>$address, Cq('set', 0x01), Cq(match, 0x20);
-  MaskMemory $l, source=>$s, mask=>$address, Cq('set', 0x02), Cq(match, 0x0A);
+#
+#  MaskMemory $l, source=>$s, mask=>$address, Cq('set', 0x01), Cq(match, 0x20);
+#  MaskMemory $l, source=>$s, mask=>$address, Cq('set', 0x02), Cq(match, 0x0A);
 
 #  $address->printOutMemoryInHexNL($l);
 
-  ok Assemble(debug => 1, eq => <<END);
-out  : 0000 0000 0000 0024
-size : 0000 0000 0000 0001
-out  : 0000 0000 0000 00A2
-size : 0000 0000 0000 0002
-out  : 0000 0000 0000 0251
-size : 0000 0000 0000 0002
-out  : 0000 0000 0000 20AC
-size : 0000 0000 0000 0003
-out  : 0000 0000 0001 0348
-size : 0000 0000 0000 0003
+  ok Assemble(debug => 0, eq => <<END);
+out1 : 0000 0000 0000 0024 size : 0000 0000 0000 0001
+out2 : 0000 0000 0000 00A2 size : 0000 0000 0000 0002
+out3 : 0000 0000 0000 0251 size : 0000 0000 0000 0002
+out4 : 0000 0000 0000 20AC size : 0000 0000 0000 0003
+out5 : 0000 0000 0001 0348 size : 0000 0000 0000 0004
+outA : 0000 0000 0001 D5BA size : 0000 0000 0000 0004
+outB : 0000 0000 0000 0020 size : 0000 0000 0000 0001
+outC : 0000 0000 0001 D44E size : 0000 0000 0000 0004
+outD : 0000 0000 0001 D5BB size : 0000 0000 0000 0004
+outE : 0000 0000 0001 D429 size : 0000 0000 0000 0004
+F09D 96BA 20F0 9D918EF0 9D91 A0F0 9D91A0F0 9D91 96F0 9D9194F0 9D91 9B20 F09D96BB 20F0 9D90 A9F09D90 A5F0 9D90 AEF09D90 AC20 F09D 96BC0A41 4141 4141 4141
 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
 END
  }
