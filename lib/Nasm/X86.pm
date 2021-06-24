@@ -15671,7 +15671,7 @@ if (1) {                                                                        
 
   $address->printOutMemoryInHexNL($l);
 
-  Cq('newLine', 0x0A)->putBIntoZmm(0, 0);
+  Cq('newLine', 0x0A)->putBIntoZmm(0, 0);                                       # Single character classifications
   Cq('newLine', 0x01)->putBIntoZmm(0, 3);
   Cq('space',   0x20)->putBIntoZmm(0, 4);
   Cq('space',   0x02)->putBIntoZmm(0, 7);
@@ -15711,7 +15711,7 @@ if (1) {                                                                        
       PrintOutRegisterInHex r15;
      });
 
-    Cq('variable', 0x0)     ->putDIntoZmm(0,  0);
+    Cq('variable', 0x0)     ->putDIntoZmm(0,  0);                               # Range classifications
     Cq('variable', 0x03)    ->putBIntoZmm(0,  3);
     Cq('variable', 0x01D5A0)->putDIntoZmm(0,  4);
     Cq('variable', 0x04)    ->putBIntoZmm(0,  7);
