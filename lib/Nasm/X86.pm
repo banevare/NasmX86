@@ -1225,6 +1225,7 @@ sub Variable($$;$%)                                                             
   my $const = $options{constant} // 0;                                          # Whether the variable is in fact a constant
   if ($const)                                                                   # Comment in appropriate section
    {defined($expr) or confess "Value required for constant";
+    defined($name) or confess "Name required";
     RComment qq(Constant name: "$name", size: $size, value $expr);
    }
   else
@@ -3356,7 +3357,6 @@ sub GetNextUtf8CharAsUtf32(@)                                                   
   $s->call(@parameters);
  } # GetNextUtf8CharAsUtf32
 
-
 our %ClassifyChar;                                                               # Possible lexical items
 sub ClassifyChar(@)                                                             # Classify a unicode character as a lexical item
  {my (@parameters) = @_;                                                        # Parameters
@@ -3401,6 +3401,48 @@ sub ClassifyChar(@)                                                             
 
   $s->call(@parameters);
  } # ClassifyChar
+
+sub ClassifyCharacters4(@)                                                      # Classify the utf32 characters in a block of memory of specified length using zmm0 formatted in double words with each word having the classification in the highest 8 bits and the utf32 character in the lower 21 bits.  The classification bits are copied into each utf32 character in the block of memory.
+ {my (@parameters) = @_;                                                        # Parameters
+  @_ >= 1 or confess;
+
+  my $s = Subroutine
+   {my ($p) = @_;                                                               # Parameters
+    Comment "Classify characters in utf32 format";
+    my $finish = Label;
+
+    my $blocks = $$p{size} / 16;                                                # 16 double words in a zmm
+    PushR my @save =  (r14, r15, k6, k7, zmm 29..31);
+
+    Mov r15, 0x88888888;                                                        # Create a mask for the classification bytes
+    Kmovq k7, r15;
+    KeepFree r15;
+    Kshiftlq k6, k7, 32;                                                        # Move mask into upper half of register
+    Korq  k7, k6, k7;                                                           # Classification bytes masked by k7
+
+    Knotq k7, k7;                                                               # Utf32 characters mask
+    Vmovdqu8   "zmm31\{k7}{z}", zmm0;                                           # utf32 characters to match
+
+    $$p{address}->setReg(r15);                                                  # Address of first utf32 character
+    $$p{size}->for(sub                                                          # Process each utf32 character in the block of memory
+     {my ($index, $start, $next, $end) = @_;
+
+      Mov r14d, "[r15]";                                                        # Load utf32 character
+      Add r15, RegisterSize r14d;                                               # Move up to next utf32 character
+      Vpbroadcastd zmm30, r14d;                                                 # 16 copies of the utf32  character to be processed
+      Vpcmpud  k7, zmm30, zmm31, 0;                                             # Look for one matching character
+      Ktestw k7, k7;                                                            # Was there a match
+      IfZ {Jmp $next};                                                          # No character was matched
+      Vpcompressd "zmm29\{k7}", zmm0;                                           # Place classification byte at start of xmm28
+      Vpextrb "[r15-1]", xmm29, 3;                                              # Extract classification character
+     });
+
+    SetLabel $finish;
+    PopR @save;
+   } in => {address => 3, size => 3};
+
+  $s->call(@parameters);
+ } # ClassifyCharacters4
 
 #D1 Short Strings                                                               # Operations on Short Strings
 
@@ -15645,14 +15687,13 @@ Found: 0000 0000 0000 0001
 END
  }
 
-#latest:
+latest:
 if (1) {                                                                        #TConvertUtf8ToUtf32
   my @p = my ($out, $size, $fail) = (Vq(out), Vq(size), Vq('fail'));
   my $class = Vq(class);
 
   my $Chars = Rb(0x24, 0xc2, 0xa2, 0xc9, 0x91, 0xE2, 0x82, 0xAC, 0xF0, 0x90, 0x8D, 0x88);
-  Mov r15, $Chars;
-  my $chars = Vq(chars, r15);
+  my $chars = Vq(chars, $Chars);
 
   GetNextUtf8CharAsUtf32 in=>$chars, @p;                                        # Dollar               UTF-8 Encoding: 0x24                UTF-32 Encoding: 0x00000024
   $out->out('out1 : ');     $size->outNL(' size : ');
@@ -15671,7 +15712,7 @@ if (1) {                                                                        
 
   my $statement = qq(𝖺 𝑎𝑠𝑠𝑖𝑔𝑛 𝖻 𝐩𝐥𝐮𝐬 𝖼\nAAAAAAAA);                                   # A sample sentence to parse
   my $s = Cq(statement, Rs($statement));
-  my $l = Cq(size, length($statement));
+  my $l = Cq(size,  length($statement));
 
   AllocateMemory($l, my $address = Vq(address));                                # Allocate enough memory for a copy of the string
   CopyMemory(source => $s, target => $address, $l);
@@ -15695,13 +15736,28 @@ if (1) {                                                                        
 
   $address->clearMemory($l);
   $address->printOutMemoryInHexNL($l);
-#
-#  MaskMemory $l, source=>$s, mask=>$address, Cq('set', 0x01), Cq(match, 0x20);
-#  MaskMemory $l, source=>$s, mask=>$address, Cq('set', 0x02), Cq(match, 0x0A);
 
-#  $address->printOutMemoryInHexNL($l);
+  Cq('newLine', 0x0A)->putBIntoZmm(0, 0);
+  Cq('newLine', 0x01)->putBIntoZmm(0, 3);
+  Cq('space',   0x20)->putBIntoZmm(0, 4);
+  Cq('space',   0x02)->putBIntoZmm(0, 7);
 
-  ok Assemble(debug => 0, eq => <<END);
+  if (1)                                                                        # Classify a utf32 string
+   {my $a = Dd(0x0001d5ba, 0x00000020, 0x0001d44e, 0x0000000a, 0x0001d5bb, 0x0001d429);
+    my $t = Cq('test', $a);
+    my $s = Cq('size', 6);
+
+    ClassifyCharacters4 address=>$t, size=>$s;
+    $s->for(sub
+     {my ($index, $start, $next, $end) = @_;
+      my $a = $t+$index * 4;
+      $a->setReg(r15); KeepFree r15;
+      Mov r15d, "[r15]";
+      PrintOutRegisterInHex r15;
+     });
+   }
+
+  ok Assemble(debug => 1, eq => <<END);
 out1 : 0000 0000 0000 0024 size : 0000 0000 0000 0001
 out2 : 0000 0000 0000 00A2 size : 0000 0000 0000 0002
 out3 : 0000 0000 0000 0251 size : 0000 0000 0000 0002
@@ -15714,6 +15770,12 @@ outD : 0000 0000 0001 D5BB size : 0000 0000 0000 0004
 outE : 0000 0000 0001 D429 size : 0000 0000 0000 0004
 F09D 96BA 20F0 9D918EF0 9D91 A0F0 9D91A0F0 9D91 96F0 9D9194F0 9D91 9B20 F09D96BB 20F0 9D90 A9F09D90 A5F0 9D90 AEF09D90 AC20 F09D 96BC0A41 4141 4141 4141
 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+   r15: 0000 0000 0001 D5BA
+   r15: 0000 0000 0200 0020
+   r15: 0000 0000 0001 D44E
+   r15: 0000 0000 0100 000A
+   r15: 0000 0000 0001 D5BB
+   r15: 0000 0000 0001 D429
 END
  }
 
