@@ -15647,7 +15647,7 @@ if (1) {                                                                        
   GetNextUtf8CharAsUtf32 in=>$chars+8, @p;                                      # Gothic Letter Hwair  UTF-8 Encoding  0xF0 0x90 0x8D 0x88 UTF-32 Encoding: 0x00010348
   $out->out('out5 : ');     $size->outNL(' size : ');
 
-  my $statement = qq(𝖺 𝑎𝑠𝑠𝑖𝑔𝑛 𝖻 𝐩𝐥𝐮𝐬 𝖼\nAAAAAAAA);                                   # A sample sentence to parse
+  my $statement = qq(𝖺 𝑎𝑠𝑠𝑖𝑔𝑛 【𝖻 𝐩𝐥𝐮𝐬 𝖼】\nAAAAAAAA);                                # A sample sentence to parse
   my $s = Cq(statement, Rs($statement));
   my $l = Cq(size,  length($statement));
 
@@ -15740,6 +15740,23 @@ if (1) {                                                                        
       KeepFree r15;
       PrintOutRegisterInHex r15;
      });
+
+    my $bl = Rd(0x10002045, 0x12002329, 0x1400276c, 0x16002770, 0x1c0027e6, 0x24002983, 0x26002987, 0x380029fc, 0x3a003008, 0x3e003010, 0x40003014, 0x4800ff3b, 0x4900ff3d, 0x4a00ff5b, 0x4b00ff5d, 0); # From zzz/brackets/brackets.pl
+    my $bh = Rd(0x12002046, 0x1400232a, 0x1600276d, 0x1c002775, 0x240027ed, 0x26002984, 0x38002998, 0x3a0029fd, 0x3e00300b, 0x40003011, 0x4800301b, 0x4900ff3b, 0x4a00ff3d, 0x4b00ff5b, 0x4c00ff5d, 0);
+    Vmovdqu8 zmm0, "[$bl]";
+    Vmovdqu8 zmm1, "[$bh]";
+    ClassifyRange address=>$u32, size=>$count;
+
+    PrintOutStringNL "Convert test statement - brackets";
+    $count->for(sub
+     {my ($index, $start, $next, $end) = @_;
+      my $a = $u32 + $index * 4;
+      $a->setReg(r15);
+      KeepFree r15;
+      Mov r15d, "[r15]";
+      KeepFree r15;
+      PrintOutRegisterInHex r15;
+     });
    }
 
   $address->clearMemory($l);
@@ -15754,9 +15771,9 @@ out5 : 0000 0000 0001 0348 size : 0000 0000 0000 0004
 outA : 0000 0000 0001 D5BA size : 0000 0000 0000 0004
 outB : 0000 0000 0000 0020 size : 0000 0000 0000 0001
 outC : 0000 0000 0001 D44E size : 0000 0000 0000 0004
-outD : 0000 0000 0001 D5BB size : 0000 0000 0000 0004
-outE : 0000 0000 0001 D429 size : 0000 0000 0000 0004
-F09D 96BA 20F0 9D918EF0 9D91 A0F0 9D91A0F0 9D91 96F0 9D9194F0 9D91 9B20 F09D96BB 20F0 9D90 A9F09D90 A5F0 9D90 AEF09D90 AC20 F09D 96BC0A41 4141 4141 4141
+outD : 0000 0000 0000 3010 size : 0000 0000 0000 0003
+outE : 0000 0000 0000 05BB size : 0000 0000 0000 0002
+F09D 96BA 20F0 9D918EF0 9D91 A0F0 9D91A0F0 9D91 96F0 9D9194F0 9D91 9B20 E38090F0 9D96 BB20 F09D90A9 F09D 90A5 F09D90AE F09D 90AC 20F09D96 BCE3 8091 0A41
 Convert some utf8 to utf32
    r15: 0000 0000 0001 D5BA
    r15: 0000 0000 0200 0020
@@ -15774,6 +15791,7 @@ Convert test statement - special characters
    r15: 0000 0000 0001 D454
    r15: 0000 0000 0001 D45B
    r15: 0000 0000 0200 0020
+   r15: 0000 0000 0000 3010
    r15: 0000 0000 0001 D5BB
    r15: 0000 0000 0200 0020
    r15: 0000 0000 0001 D429
@@ -15782,6 +15800,7 @@ Convert test statement - special characters
    r15: 0000 0000 0001 D42C
    r15: 0000 0000 0200 0020
    r15: 0000 0000 0001 D5BC
+   r15: 0000 0000 0000 3011
    r15: 0000 0000 0100 000A
    r15: 0000 0000 0000 0041
    r15: 0000 0000 0000 0041
@@ -15801,6 +15820,7 @@ Convert test statement - ranges
    r15: 0000 0000 0501 D454
    r15: 0000 0000 0501 D45B
    r15: 0000 0000 0200 0020
+   r15: 0000 0000 0000 3010
    r15: 0000 0000 0401 D5BB
    r15: 0000 0000 0200 0020
    r15: 0000 0000 0601 D429
@@ -15809,6 +15829,36 @@ Convert test statement - ranges
    r15: 0000 0000 0601 D42C
    r15: 0000 0000 0200 0020
    r15: 0000 0000 0401 D5BC
+   r15: 0000 0000 0000 3011
+   r15: 0000 0000 0100 000A
+   r15: 0000 0000 0300 0041
+   r15: 0000 0000 0300 0041
+   r15: 0000 0000 0300 0041
+   r15: 0000 0000 0300 0041
+   r15: 0000 0000 0300 0041
+   r15: 0000 0000 0300 0041
+   r15: 0000 0000 0300 0041
+   r15: 0000 0000 0300 0041
+Convert test statement - brackets
+   r15: 0000 0000 0401 D5BA
+   r15: 0000 0000 0200 0020
+   r15: 0000 0000 0501 D44E
+   r15: 0000 0000 0501 D460
+   r15: 0000 0000 0501 D460
+   r15: 0000 0000 0501 D456
+   r15: 0000 0000 0501 D454
+   r15: 0000 0000 0501 D45B
+   r15: 0000 0000 0200 0020
+   r15: 0000 0000 3E00 3010
+   r15: 0000 0000 0401 D5BB
+   r15: 0000 0000 0200 0020
+   r15: 0000 0000 0601 D429
+   r15: 0000 0000 0601 D425
+   r15: 0000 0000 0601 D42E
+   r15: 0000 0000 0601 D42C
+   r15: 0000 0000 0200 0020
+   r15: 0000 0000 0401 D5BC
+   r15: 0000 0000 3E00 3011
    r15: 0000 0000 0100 000A
    r15: 0000 0000 0300 0041
    r15: 0000 0000 0300 0041
