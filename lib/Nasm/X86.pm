@@ -3260,7 +3260,6 @@ sub ClassifyCharacters4(@)                                                      
     Comment "Classify characters in utf32 format";
     my $finish = Label;
 
-    my $blocks = $$p{size} / 16;                                                # 16 double words in a zmm
     PushR my @save =  (r14, r15, k6, k7, zmm 29..31);
 
     Mov r15, 0x88888888;                                                        # Create a mask for the classification bytes
@@ -3292,6 +3291,52 @@ sub ClassifyCharacters4(@)                                                      
 
   $s->call(@parameters);
  } # ClassifyCharacters4
+
+sub ConvertUtf8ToUtf32(@)                                                       # Convert a string of utf8 to an allocated block of utf32 and return its address and length.
+ {my (@parameters) = @_;                                                        # Parameters
+  @_ >= 1 or confess;
+
+  my $s = Subroutine
+   {my ($p) = @_;                                                               # Parameters
+    Comment "Convert utf8 to utf32";
+
+    PushR my @save =  (r10, r11, r12, r13, r14, r15);
+
+    my $size = $$p{size8} * 4;                                                  # Estimated length for utf32
+    AllocateMemory size => $size, my $address = Vq(address);
+
+     $$p{u8}            ->setReg(r14);                                          # Current position in input string
+    ($$p{u8}+$$p{size8})->setReg(r15);                                          # Upper limit of input string
+    $address->setReg(r13);                                                      # Current position in output string
+    ClearRegisters r12;                                                         # Number of characters in output string
+
+    ForEver sub                                                                 # Loop through input string  converting each utf8 sequence to utf32
+     {my ($start, $end) = @_;
+      my @p = my ($out, $size, $fail) = (Vq(out), Vq(size), Vq('fail'));
+      GetNextUtf8CharAsUtf32 Vq(in, r14), @p;                                   # Get next utf 8 character and convert it to utf32
+      If ($fail, sub
+       {PrintErrStringNL "Invalid utf8 character";
+        Exit(1);
+       });
+
+      Inc r12;                                                                  # Count characters converted
+      $out->setReg(r11);                                                        # Output character
+      Mov  "[r13]",  r11d;
+      Add    r13,    RegisterSize eax;                                          # Move up 32 bits output string
+      $size->setReg(r10);                                                       # Decoded this many bytes
+      Add   r14, r10;                                                           # Move up in input string
+      Cmp   r14, r15;
+      IfGe {Jmp $end};                                                          # Exhausted input string
+    };
+
+    $$p{u32}   ->copy($address);                                                # Address of allocation
+    $$p{size32}->copy($size);                                                   # Size of allocation
+    $$p{count} ->getReg(r12);                                                   # Number of unicode points converted from utf8 to utf32
+    PopR @save;
+   } in => {u8 => 3, size8 => 3}, out => {u32 => 3, size32 => 3, count => 3};
+
+  $s->call(@parameters);
+ } # ConvertUtf8ToUtf32
 
 #D1 Short Strings                                                               # Operations on Short Strings
 
@@ -15583,9 +15628,6 @@ if (1) {                                                                        
 
   $address->printOutMemoryInHexNL($l);
 
-  $address->clearMemory($l);
-  $address->printOutMemoryInHexNL($l);
-
   Cq('newLine', 0x0A)->putBIntoZmm(0, 0);
   Cq('newLine', 0x01)->putBIntoZmm(0, 3);
   Cq('space',   0x20)->putBIntoZmm(0, 4);
@@ -15597,14 +15639,38 @@ if (1) {                                                                        
     my $s = Cq('size', 6);
 
     ClassifyCharacters4 address=>$t, size=>$s;
+    PrintOutStringNL "Convert some utf8 to utf32";
     $s->for(sub
      {my ($index, $start, $next, $end) = @_;
       my $a = $t+$index * 4;
-      $a->setReg(r15); KeepFree r15;
+      $a->setReg(r15);
+      KeepFree r15;
       Mov r15d, "[r15]";
+      KeepFree r15;
       PrintOutRegisterInHex r15;
      });
    }
+
+  if (1)                                                                        # Convert utf8 test string to utf32
+   {my @p = my ($u32, $size32, $count) = (Vq(u32), Vq(size32), Vq(count));
+
+    ConvertUtf8ToUtf32 u8 => $s, size8 => $l,  @p;
+    ClassifyCharacters4 address=>$u32, size=>$count;
+
+    PrintOutStringNL "Convert test statement";
+    $count->for(sub
+     {my ($index, $start, $next, $end) = @_;
+      my $a = $u32 + $index * 4;
+      $a->setReg(r15);
+      KeepFree r15;
+      Mov r15d, "[r15]";
+      KeepFree r15;
+      PrintOutRegisterInHex r15;
+     });
+   }
+
+  $address->clearMemory($l);
+  $address->printOutMemoryInHexNL($l);
 
   ok Assemble(debug => 1, eq => <<END);
 out1 : 0000 0000 0000 0024 size : 0000 0000 0000 0001
@@ -15618,13 +15684,41 @@ outC : 0000 0000 0001 D44E size : 0000 0000 0000 0004
 outD : 0000 0000 0001 D5BB size : 0000 0000 0000 0004
 outE : 0000 0000 0001 D429 size : 0000 0000 0000 0004
 F09D 96BA 20F0 9D918EF0 9D91 A0F0 9D91A0F0 9D91 96F0 9D9194F0 9D91 9B20 F09D96BB 20F0 9D90 A9F09D90 A5F0 9D90 AEF09D90 AC20 F09D 96BC0A41 4141 4141 4141
-0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+Convert some utf8 to utf32
    r15: 0000 0000 0001 D5BA
    r15: 0000 0000 0200 0020
    r15: 0000 0000 0001 D44E
    r15: 0000 0000 0100 000A
    r15: 0000 0000 0001 D5BB
    r15: 0000 0000 0001 D429
+Convert test statement
+   r15: 0000 0000 0001 D5BA
+   r15: 0000 0000 0200 0020
+   r15: 0000 0000 0001 D44E
+   r15: 0000 0000 0001 D460
+   r15: 0000 0000 0001 D460
+   r15: 0000 0000 0001 D456
+   r15: 0000 0000 0001 D454
+   r15: 0000 0000 0001 D45B
+   r15: 0000 0000 0200 0020
+   r15: 0000 0000 0001 D5BB
+   r15: 0000 0000 0200 0020
+   r15: 0000 0000 0001 D429
+   r15: 0000 0000 0001 D425
+   r15: 0000 0000 0001 D42E
+   r15: 0000 0000 0001 D42C
+   r15: 0000 0000 0200 0020
+   r15: 0000 0000 0001 D5BC
+   r15: 0000 0000 0100 000A
+   r15: 0000 0000 0000 0041
+   r15: 0000 0000 0000 0041
+   r15: 0000 0000 0000 0041
+   r15: 0000 0000 0000 0041
+   r15: 0000 0000 0000 0041
+   r15: 0000 0000 0000 0041
+   r15: 0000 0000 0000 0041
+   r15: 0000 0000 0000 0041
+0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
 END
  }
 
