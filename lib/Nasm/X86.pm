@@ -3281,8 +3281,8 @@ sub ClassifyCharacters4(@)                                                      
       Vpcmpud  k7, zmm30, zmm31, 0;                                             # Look for one matching character
       Ktestw k7, k7;                                                            # Was there a match
       IfZ {Jmp $next};                                                          # No character was matched
-      Vpcompressd "zmm29\{k7}", zmm0;                                           # Place classification byte at start of xmm28
-      Vpextrb "[r15-1]", xmm29, 3;                                              # Extract classification character
+      Vpcompressd "zmm30\{k7}", zmm0;                                           # Place classification byte at start of xmm
+      Vpextrb "[r15-1]", xmm30, 3;                                              # Extract classification character
      });
 
     SetLabel $finish;
@@ -3291,6 +3291,49 @@ sub ClassifyCharacters4(@)                                                      
 
   $s->call(@parameters);
  } # ClassifyCharacters4
+
+sub ClassifyRange(@)                                                            # Classify the utf32 characters in a block of memory of specified length using zmm0, zmm1 formatted in double words with each word in zmm1 having the classification in the highest 8 bits and with zmm0 and zmm1 having the utf32 character at the start (zmm0) and end (zmm1) of each range in the lower 21 bits.  The classification bits from the first match range are copied into each utf32 character in the block of memory.
+ {my (@parameters) = @_;                                                        # Parameters
+  @_ >= 1 or confess;
+
+  my $s = Subroutine
+   {my ($p) = @_;                                                               # Parameters
+    Comment "Classify characters in utf32 format";
+    my $finish = Label;
+
+    PushR my @save =  (r14, r15, k6, k7, zmm 29..31);
+
+    Mov r15, 0x88888888;                                                        # Create a mask for the classification bytes
+    Kmovq k7, r15;
+    KeepFree r15;
+    Kshiftlq k6, k7, 32;                                                        # Move mask into upper half of register
+    Korq  k7, k6, k7;                                                           # Classification bytes masked by k7
+
+    Knotq k7, k7;                                                               # Utf32 characters mask
+    Vmovdqu8 "zmm31\{k7}{z}", zmm1;                                             # utf32 characters at upper end of each range
+    Vmovdqu8 "zmm30\{k7}{z}", zmm0;                                             # utf32 characters at lower end of each range
+
+    $$p{address}->setReg(r15);                                                  # Address of first utf32 character
+    $$p{size}->for(sub                                                          # Process each utf32 character in the block of memory
+     {my ($index, $start, $next, $end) = @_;
+
+      Mov r14d, "[r15]";                                                        # Load utf32 character
+      Add r15, RegisterSize r14d;                                               # Move up to next utf32 character
+      Vpbroadcastd       zmm29, r14d;                                           # 16 copies of the utf32  character to be processed
+      Vpcmpud  k7,       zmm29, zmm30, 5;                                       # Look for start of range
+      Vpcmpud "k6\{k7}", zmm29, zmm31, 2;                                       # Look for end of range
+      Ktestw k6, k6;                                                            # Was there a match
+      IfZ {Jmp $next};                                                          # No character was matched
+      Vpcompressd "zmm29\{k6}", zmm0;                                           # Place classification byte at start of xmm29
+      Vpextrb "[r15-1]", xmm29, 3;                                              # Extract classification character
+     });
+
+    SetLabel $finish;
+    PopR @save;
+   } in => {address => 3, size => 3};
+
+  $s->call(@parameters);
+ } # ClassifyRange
 
 sub ConvertUtf8ToUtf32(@)                                                       # Convert a string of utf8 to an allocated block of utf32 and return its address and length.
  {my (@parameters) = @_;                                                        # Parameters
@@ -15657,7 +15700,37 @@ if (1) {                                                                        
     ConvertUtf8ToUtf32 u8 => $s, size8 => $l,  @p;
     ClassifyCharacters4 address=>$u32, size=>$count;
 
-    PrintOutStringNL "Convert test statement";
+    PrintOutStringNL "Convert test statement - special characters";
+    $count->for(sub
+     {my ($index, $start, $next, $end) = @_;
+      my $a = $u32 + $index * 4;
+      $a->setReg(r15);
+      KeepFree r15;
+      Mov r15d, "[r15]";
+      KeepFree r15;
+      PrintOutRegisterInHex r15;
+     });
+
+    Cq('variable', 0x0)     ->putDIntoZmm(0,  0);
+    Cq('variable', 0x03)    ->putBIntoZmm(0,  3);
+    Cq('variable', 0x01D5A0)->putDIntoZmm(0,  4);
+    Cq('variable', 0x04)    ->putBIntoZmm(0,  7);
+    Cq('variable', 0x01D434)->putDIntoZmm(0,  8);
+    Cq('variable', 0x05)    ->putBIntoZmm(0, 11);
+    Cq('variable', 0x01D400)->putDIntoZmm(0, 12);
+    Cq('variable', 0x06)    ->putBIntoZmm(0, 15);
+
+    Cq('variable', 0x7f)    ->putDIntoZmm(1,  0);
+    Cq('variable', 0x03)    ->putBIntoZmm(1,  3);
+    Cq('variable', 0x01D5D3)->putDIntoZmm(1,  4);
+    Cq('variable', 0x04)    ->putBIntoZmm(1,  7);
+    Cq('variable', 0x01D467)->putDIntoZmm(1,  8);
+    Cq('variable', 0x05)    ->putBIntoZmm(1, 11);
+    Cq('variable', 0x01D433)->putDIntoZmm(1, 12);
+    Cq('variable', 0x06)    ->putBIntoZmm(1, 15);
+    ClassifyRange address=>$u32, size=>$count;
+
+    PrintOutStringNL "Convert test statement - ranges";
     $count->for(sub
      {my ($index, $start, $next, $end) = @_;
       my $a = $u32 + $index * 4;
@@ -15672,7 +15745,7 @@ if (1) {                                                                        
   $address->clearMemory($l);
   $address->printOutMemoryInHexNL($l);
 
-  ok Assemble(debug => 1, eq => <<END);
+  ok Assemble(debug => 0, eq => <<END);
 out1 : 0000 0000 0000 0024 size : 0000 0000 0000 0001
 out2 : 0000 0000 0000 00A2 size : 0000 0000 0000 0002
 out3 : 0000 0000 0000 0251 size : 0000 0000 0000 0002
@@ -15691,7 +15764,7 @@ Convert some utf8 to utf32
    r15: 0000 0000 0100 000A
    r15: 0000 0000 0001 D5BB
    r15: 0000 0000 0001 D429
-Convert test statement
+Convert test statement - special characters
    r15: 0000 0000 0001 D5BA
    r15: 0000 0000 0200 0020
    r15: 0000 0000 0001 D44E
@@ -15718,6 +15791,33 @@ Convert test statement
    r15: 0000 0000 0000 0041
    r15: 0000 0000 0000 0041
    r15: 0000 0000 0000 0041
+Convert test statement - ranges
+   r15: 0000 0000 0401 D5BA
+   r15: 0000 0000 0200 0020
+   r15: 0000 0000 0501 D44E
+   r15: 0000 0000 0501 D460
+   r15: 0000 0000 0501 D460
+   r15: 0000 0000 0501 D456
+   r15: 0000 0000 0501 D454
+   r15: 0000 0000 0501 D45B
+   r15: 0000 0000 0200 0020
+   r15: 0000 0000 0401 D5BB
+   r15: 0000 0000 0200 0020
+   r15: 0000 0000 0601 D429
+   r15: 0000 0000 0601 D425
+   r15: 0000 0000 0601 D42E
+   r15: 0000 0000 0601 D42C
+   r15: 0000 0000 0200 0020
+   r15: 0000 0000 0401 D5BC
+   r15: 0000 0000 0100 000A
+   r15: 0000 0000 0300 0041
+   r15: 0000 0000 0300 0041
+   r15: 0000 0000 0300 0041
+   r15: 0000 0000 0300 0041
+   r15: 0000 0000 0300 0041
+   r15: 0000 0000 0300 0041
+   r15: 0000 0000 0300 0041
+   r15: 0000 0000 0300 0041
 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
 END
  }
