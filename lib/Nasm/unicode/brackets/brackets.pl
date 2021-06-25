@@ -66,14 +66,27 @@ if (1)                                                                          
   my @l; my @h;
   my $index = $bracketBase;
   for my $t(@t)                                                                 # Load zmm0, zmm1
-   {push @l, sprintf("0x%08x", $$t[0] [0] + ($index<<24));
-    $index += scalar(@$t);
-    push @h, sprintf("0x%08x", $$t[-1][0] + ($index<<24));
+   {if (@$t > 1)
+     {push @l, sprintf("0x%08x", $$t[0] [0] + ($index<<24));
+      $index += scalar(@$t) - 1;
+      push @h, sprintf("0x%08x", $$t[-1][0] + ($index<<24));
+     }
+    elsif ($$t[-1][-1] =~ m(LEFT))                                              # Single range left
+     {++$index if $index % 2;
+      push @l, sprintf("0x%08x", $$t[0] [0] + ($index<<24));
+      push @h, sprintf("0x%08x", $$t[0] [0] + ($index<<24));
+     }
+    else                                                                        # Single range right
+     {++$index unless $index % 2;
+      push @l, sprintf("0x%08x", $$t[0] [0] + ($index<<24));
+      push @h, sprintf("0x%08x", $$t[0] [0] + ($index<<24));
+     }
+    $index += 1;
    }
   push @l, 0 while @l < 16;
   push @h, 0 while @h < 16;
-  say STDERR "Rd(", join(', ',  @l), ")";
-  say STDERR "Rd(", join(', ',  @h), ")";
+  say STDERR "my \$bl = Rd(", join(', ',  @l), ");";
+  say STDERR "my \$bh = Rd(", join(', ',  @h), ");";
 # lll "BBBB", dump([@t]);
 #  my $t = join "", @t;
 #  owf($brackets, $t);
