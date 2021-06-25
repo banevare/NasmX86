@@ -3251,6 +3251,52 @@ sub GetNextUtf8CharAsUtf32(@)                                                   
   $s->call(@parameters);
  } # GetNextUtf8CharAsUtf32
 
+sub ConvertUtf8ToUtf32(@)                                                       # Convert a string of utf8 to an allocated block of utf32 and return its address and length.
+ {my (@parameters) = @_;                                                        # Parameters
+  @_ >= 1 or confess;
+
+  my $s = Subroutine
+   {my ($p) = @_;                                                               # Parameters
+    Comment "Convert utf8 to utf32";
+
+    PushR my @save =  (r10, r11, r12, r13, r14, r15);
+
+    my $size = $$p{size8} * 4;                                                  # Estimated length for utf32
+    AllocateMemory size => $size, my $address = Vq(address);
+
+     $$p{u8}            ->setReg(r14);                                          # Current position in input string
+    ($$p{u8}+$$p{size8})->setReg(r15);                                          # Upper limit of input string
+    $address->setReg(r13);                                                      # Current position in output string
+    ClearRegisters r12;                                                         # Number of characters in output string
+
+    ForEver sub                                                                 # Loop through input string  converting each utf8 sequence to utf32
+     {my ($start, $end) = @_;
+      my @p = my ($out, $size, $fail) = (Vq(out), Vq(size), Vq('fail'));
+      GetNextUtf8CharAsUtf32 Vq(in, r14), @p;                                   # Get next utf 8 character and convert it to utf32
+      If ($fail, sub
+       {PrintErrStringNL "Invalid utf8 character";
+        Exit(1);
+       });
+
+      Inc r12;                                                                  # Count characters converted
+      $out->setReg(r11);                                                        # Output character
+      Mov  "[r13]",  r11d;
+      Add    r13,    RegisterSize eax;                                          # Move up 32 bits output string
+      $size->setReg(r10);                                                       # Decoded this many bytes
+      Add   r14, r10;                                                           # Move up in input string
+      Cmp   r14, r15;
+      IfGe {Jmp $end};                                                          # Exhausted input string
+    };
+
+    $$p{u32}   ->copy($address);                                                # Address of allocation
+    $$p{size32}->copy($size);                                                   # Size of allocation
+    $$p{count} ->getReg(r12);                                                   # Number of unicode points converted from utf8 to utf32
+    PopR @save;
+   } in => {u8 => 3, size8 => 3}, out => {u32 => 3, size32 => 3, count => 3};
+
+  $s->call(@parameters);
+ } # ConvertUtf8ToUtf32
+
 sub ClassifyCharacters4(@)                                                      # Classify the utf32 characters in a block of memory of specified length using zmm0 formatted in double words with each word having the classification in the highest 8 bits and the utf32 character in the lower 21 bits.  The classification bits are copied into each utf32 character in the block of memory.
  {my (@parameters) = @_;                                                        # Parameters
   @_ >= 1 or confess;
@@ -3292,8 +3338,8 @@ sub ClassifyCharacters4(@)                                                      
   $s->call(@parameters);
  } # ClassifyCharacters4
 
-sub ClassifyRange($@)                                                           #P Implemenmtation of ClassifyInRange and ClassifyWithinRange
- {my ($recordOffsetInRange, @parameters) = @_;                                  # Record offset in range if true, Parameters
+sub ClassifyRange($@)                                                           #P Implementation of ClassifyInRange and ClassifyWithinRange
+ {my ($recordOffsetInRange, @parameters) = @_;                                  # Record offset in range if true, parameters
   @_ >= 1 or confess;
 
   my $s = Subroutine
@@ -3360,51 +3406,75 @@ sub ClassifyWithInRange(@)                                                      
   ClassifyRange(1, @_);
  }
 
-sub ConvertUtf8ToUtf32(@)                                                       # Convert a string of utf8 to an allocated block of utf32 and return its address and length.
+sub MatchBrackets(@)                                                            # Replace a utf32 character with 24 bits of offset to the matching opening or closing bracket. Opening brackets have even codes from 0x10 to 0x4e whilke the corresponding closing bracket has a code one higher.
  {my (@parameters) = @_;                                                        # Parameters
   @_ >= 1 or confess;
 
   my $s = Subroutine
    {my ($p) = @_;                                                               # Parameters
-    Comment "Convert utf8 to utf32";
+    Comment "Match brackets in utf 32 text";
+    my $finish = Label;
+    PushR my @save = (xmm0, k7, r10, r11, r12, r13, r14, r15, rbp);             # r15 current character address. r14 is the current classification. r13 the last classification code. r12 the stack depth. r11 the number of opening brackets found. r10  address of first utf32 character.
+    Mov rbp, rsp;                                                               # Save stack location so we can use the stack to record the brackets we have found
+    ClearRegisters r11, r12, r15;                                               # Count the number of brackets and track the stack depth, index of each character
+    Cq(three, 3)->setMaskFirst(k7);                                             # These are the number of bytes that we are going to use for the offsets of brackets which limits the size of a program to 24 million utf32 characters
+    $$p{fail}   ->getConst(0);                                                  # Clear failure indicator
+    $$p{opens}  ->getConst(0);                                                  # Clear count of opens
+    $$p{address}->setReg(r10);                                                  # Address of first utf32 character
+    my $w = RegisterSize eax;                                                   # Size of a utf32 character
 
-    PushR my @save =  (r10, r11, r12, r13, r14, r15);
+    $$p{size}->for(sub                                                          # Process each utf32 character in the block of memory
+     {my ($index, $start, $next, $end) = @_;
+      my $continue = Label;
 
-    my $size = $$p{size8} * 4;                                                  # Estimated length for utf32
-    AllocateMemory size => $size, my $address = Vq(address);
+      Mov r14b, "[r10+$w*r15+3]";                                               # Classification character
 
-     $$p{u8}            ->setReg(r14);                                          # Current position in input string
-    ($$p{u8}+$$p{size8})->setReg(r15);                                          # Upper limit of input string
-    $address->setReg(r13);                                                      # Current position in output string
-    ClearRegisters r12;                                                         # Number of characters in output string
+      Cmp r14, 0x10;                                                            # First bracket
+      IfLt sub {Jmp $continue};                                                 # Less than first bracket
+      Cmp r14, 0x4f;                                                            # Last bracket
+      IfGt sub {Jmp $continue};                                                 # Greater than last bracket
 
-    ForEver sub                                                                 # Loop through input string  converting each utf8 sequence to utf32
-     {my ($start, $end) = @_;
-      my @p = my ($out, $size, $fail) = (Vq(out), Vq(size), Vq('fail'));
-      GetNextUtf8CharAsUtf32 Vq(in, r14), @p;                                   # Get next utf 8 character and convert it to utf32
-      If ($fail, sub
-       {PrintErrStringNL "Invalid utf8 character";
-        Exit(1);
-       });
+      Test r14, 1;                                                              # Zero means that the bracket is an opener
+      IfZ sub                                                                   # Save an opener then continue
+       {Push r15;                                                               # Save position in input
+        Push r14;                                                               # Save opening code
+        Inc r11;                                                                # Count number of opening brackets
+        Inc r12;                                                                # Number of brackets currently open
+        Jmp $continue;
+       };
+      Cmp r12, 1;                                                               # Check that there is a bracket to match on the stack
+      IfLt sub                                                                  # Nothing on stack
+       {Not r15;                                                                # Minus the offset at which the error occurred so that we can fail at zero
+        $$p{fail}->getReg(r15);                                                 # Position in input that caused the failure
+        Jmp $finish;                                                            # Return
+       };
+      Mov r13, "[rsp]";                                                         # Peek at the opening bracket code which is on top of the stack
+      Inc r13;                                                                  # Expected closing bracket
+      Cmp r13, r14;                                                             # Check for match
+      IfNe sub                                                                  # Mismatch
+       {Not r15;                                                                # Minus the offset at which the error occurred so that we can fail at zero
+        $$p{fail}->getReg(r15);                                                 # Position in input that caused the failure
+        Jmp $finish;                                                            # Return
+       };
+      Pop r13;                                                                  # The closing bracket matches the opening bracket
+      Pop r13;                                                                  # Offset of opener
+      Dec r12;                                                                  # Close off bracket sequence
+      Vpbroadcastq xmm0, r15;                                                   # Load offset of opener
+      Vmovdqu8 "[r10+$w*r13]\{k7}", xmm0;                                       # Save offset of opener in the code for the closer - the classification is left intact so we still know what kind of bracket we have
+      Vpbroadcastq xmm0, r13;                                                   # Load offset of opener
+      Vmovdqu8 "[r10+$w*r15]\{k7}", xmm0;                                       # Save offset of closer in the code for the openercloser - the classification is left intact so we still know what kind of bracket we have
+      SetLabel $continue;                                                       # Continue with next character
+      Inc r15;                                                                  # Next character
+     });
 
-      Inc r12;                                                                  # Count characters converted
-      $out->setReg(r11);                                                        # Output character
-      Mov  "[r13]",  r11d;
-      Add    r13,    RegisterSize eax;                                          # Move up 32 bits output string
-      $size->setReg(r10);                                                       # Decoded this many bytes
-      Add   r14, r10;                                                           # Move up in input string
-      Cmp   r14, r15;
-      IfGe {Jmp $end};                                                          # Exhausted input string
-    };
-
-    $$p{u32}   ->copy($address);                                                # Address of allocation
-    $$p{size32}->copy($size);                                                   # Size of allocation
-    $$p{count} ->getReg(r12);                                                   # Number of unicode points converted from utf8 to utf32
+    SetLabel $finish;
+    Mov rsp, rbp;                                                               # Restore stack
+    $$p{opens}->getReg(r11);                                                    # Number of brackets opened
     PopR @save;
-   } in => {u8 => 3, size8 => 3}, out => {u32 => 3, size32 => 3, count => 3};
+   } in  => {address => 3, size => 3}, out => {fail => 3, opens => 3};
 
   $s->call(@parameters);
- } # ConvertUtf8ToUtf32
+ } # MatchBrackets
 
 #D1 Short Strings                                                               # Operations on Short Strings
 
@@ -15652,6 +15722,7 @@ END
 latest:
 if (1) {                                                                        #TConvertUtf8ToUtf32
   my @p = my ($out, $size, $fail) = (Vq(out), Vq(size), Vq('fail'));
+  my $opens = Vq(opens);
   my $class = Vq(class);
 
   my $Chars = Rb(0x24, 0xc2, 0xa2, 0xc9, 0x91, 0xE2, 0x82, 0xAC, 0xF0, 0x90, 0x8D, 0x88);
@@ -15784,6 +15855,19 @@ if (1) {                                                                        
       KeepFree r15;
       PrintOutRegisterInHex r15;
      });
+
+    MatchBrackets address=>$u32, size=>$count, $opens, $fail;
+
+    PrintOutStringNL "Convert test statement - bracket matching";
+    $count->for(sub
+     {my ($index, $start, $next, $end) = @_;
+      my $a = $u32 + $index * 4;
+      $a->setReg(r15);
+      KeepFree r15;
+      Mov r15d, "[r15]";
+      KeepFree r15;
+      PrintOutRegisterInHex r15;
+     });
    }
 
   $address->clearMemory($l);
@@ -15895,6 +15979,38 @@ Convert test statement - brackets
    r15: 0000 0000 0401 D5BC
    r15: 0000 0000 3F00 3011
    r15: 0000 0000 3F00 3011
+   r15: 0000 0000 0100 000A
+   r15: 0000 0000 0300 0041
+   r15: 0000 0000 0300 0041
+   r15: 0000 0000 0300 0041
+   r15: 0000 0000 0300 0041
+   r15: 0000 0000 0300 0041
+   r15: 0000 0000 0300 0041
+   r15: 0000 0000 0300 0041
+   r15: 0000 0000 0300 0041
+Convert test statement - bracket matching
+   r15: 0000 0000 0401 D5BA
+   r15: 0000 0000 0100 000A
+   r15: 0000 0000 0200 0020
+   r15: 0000 0000 0501 D44E
+   r15: 0000 0000 0501 D460
+   r15: 0000 0000 0501 D460
+   r15: 0000 0000 0501 D456
+   r15: 0000 0000 0501 D454
+   r15: 0000 0000 0501 D45B
+   r15: 0000 0000 0200 0020
+   r15: 0000 0000 3E00 0015
+   r15: 0000 0000 3E00 0014
+   r15: 0000 0000 0401 D5BB
+   r15: 0000 0000 0200 0020
+   r15: 0000 0000 0601 D429
+   r15: 0000 0000 0601 D425
+   r15: 0000 0000 0601 D42E
+   r15: 0000 0000 0601 D42C
+   r15: 0000 0000 0200 0020
+   r15: 0000 0000 0401 D5BC
+   r15: 0000 0000 3F00 000B
+   r15: 0000 0000 3F00 000A
    r15: 0000 0000 0100 000A
    r15: 0000 0000 0300 0041
    r15: 0000 0000 0300 0041
