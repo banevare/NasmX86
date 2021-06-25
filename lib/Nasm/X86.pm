@@ -3292,8 +3292,8 @@ sub ClassifyCharacters4(@)                                                      
   $s->call(@parameters);
  } # ClassifyCharacters4
 
-sub ClassifyRange(@)                                                            # Classify the utf32 characters in a block of memory of specified length using zmm0, zmm1 formatted in double words with each word in zmm1 having the classification in the highest 8 bits and with zmm0 and zmm1 having the utf32 character at the start (zmm0) and end (zmm1) of each range in the lower 21 bits.  The classification bits from the first match range are copied into each utf32 character in the block of memory.
- {my (@parameters) = @_;                                                        # Parameters
+sub ClassifyRange($@)                                                           #P Implemenmtation of ClassifyInRange and ClassifyWithinRange
+ {my ($recordOffsetInRange, @parameters) = @_;                                  # Record offset in range if true, Parameters
   @_ >= 1 or confess;
 
   my $s = Subroutine
@@ -3301,7 +3301,8 @@ sub ClassifyRange(@)                                                            
     Comment "Classify characters in utf32 format";
     my $finish = Label;
 
-    PushR my @save =  (r14, r15, k6, k7, zmm 29..31);
+    PushR my @save =  (($recordOffsetInRange ? (r12, r13) : ()),
+                       r14, r15, k6, k7, zmm 29..31);
 
     Mov r15, 0x88888888;                                                        # Create a mask for the classification bytes
     Kmovq k7, r15;
@@ -3324,16 +3325,40 @@ sub ClassifyRange(@)                                                            
       Vpcmpud "k6\{k7}", zmm29, zmm31, 2;                                       # Look for end of range
       Ktestw k6, k6;                                                            # Was there a match
       IfZ {Jmp $next};                                                          # No character was matched
-      Vpcompressd "zmm29\{k6}", zmm0;                                           # Place classification byte at start of xmm29
-      Vpextrb "[r15-1]", xmm29, 3;                                              # Extract classification character
+
+      if ($recordOffsetInRange)                                                 # Record offset in range
+       {Vpcompressd "zmm29\{k6}", zmm0;                                         # Place classification byte at start of xmm29
+        Vpextrd r13d, xmm29, 4;                                                 # Extract start of range
+        Mov r12, r13;                                                           # Copy start of range
+        Shr r12, 24;                                                            # Classification start
+        And r13, 0x00ffffff;                                                    # Range start
+        Sub r14, r13;                                                           # Negative offset in range
+        Add r12, r14;                                                           # Offset in range
+        Mov "[r15-1]", r12b;                                                    # Save classification
+       }
+      else                                                                      # Record range
+       {Vpcompressd "zmm29\{k6}", zmm0;                                         # Place classification byte at start of xmm29
+        Vpextrb "[r15-1]", xmm29, 3;                                            # Extract and save classification
+       }
      });
 
     SetLabel $finish;
     PopR @save;
-   } in => {address => 3, size => 3};
+   } name => "ClassifyRange_$recordOffsetInRange",
+     in   => {address => 3, size => 3};
 
   $s->call(@parameters);
  } # ClassifyRange
+
+sub ClassifyInRange(@)                                                          # Classify the utf32 characters in a block of memory of specified length using zmm0, zmm1 formatted in double words with each word in zmm1 having the classification in the highest 8 bits and with zmm0 and zmm1 having the utf32 character at the start (zmm0) and end (zmm1) of each range in the lower 21 bits.  The classification bits from the first matching range are copied into each utf32 character in the block of memory.
+ {my (@parameters) = @_;                                                        # Parameters
+  ClassifyRange(0, @_);
+ }
+
+sub ClassifyWithInRange(@)                                                      # Classify the utf32 characters in a block of memory of specified length using zmm0, zmm1 formatted in double words with the classification range in the highest 8 bits of zmm0 and zmm1 and the utf32 character at the start (zmm0) and end (zmm1) of each range in the lower 21 bits.  The classification bits from the position within the first matching range are copied into each utf32 character in the block of memory.
+ {my (@parameters) = @_;                                                        # Parameters
+  ClassifyRange(1, @_);
+ }
 
 sub ConvertUtf8ToUtf32(@)                                                       # Convert a string of utf8 to an allocated block of utf32 and return its address and length.
  {my (@parameters) = @_;                                                        # Parameters
@@ -15729,7 +15754,7 @@ if (1) {                                                                        
     Cq('variable', 0x05)    ->putBIntoZmm(1, 11);
     Cq('variable', 0x01D433)->putDIntoZmm(1, 12);
     Cq('variable', 0x06)    ->putBIntoZmm(1, 15);
-    ClassifyRange address=>$u32, size=>$count;
+    ClassifyInRange address=>$u32, size=>$count;
 
     PrintOutStringNL "Convert test statement - ranges";
     $count->for(sub
@@ -15746,7 +15771,7 @@ if (1) {                                                                        
     my $bh = Rd(0x12002046, 0x1400232a, 0x1600276d, 0x1c002775, 0x240027ed, 0x26002984, 0x38002998, 0x3a0029fd, 0x3e00300b, 0x40003011, 0x4800301b, 0x4900ff3b, 0x4a00ff3d, 0x4b00ff5b, 0x4c00ff5d, 0);
     Vmovdqu8 zmm0, "[$bl]";
     Vmovdqu8 zmm1, "[$bh]";
-    ClassifyRange address=>$u32, size=>$count;
+    ClassifyWithInRange address=>$u32, size=>$count;
 
     PrintOutStringNL "Convert test statement - brackets";
     $count->for(sub
@@ -15867,8 +15892,8 @@ Convert test statement - brackets
    r15: 0000 0000 0601 D42C
    r15: 0000 0000 0200 0020
    r15: 0000 0000 0401 D5BC
-   r15: 0000 0000 3E00 3011
-   r15: 0000 0000 3E00 3011
+   r15: 0000 0000 3F00 3011
+   r15: 0000 0000 3F00 3011
    r15: 0000 0000 0100 000A
    r15: 0000 0000 0300 0041
    r15: 0000 0000 0300 0041
