@@ -23,7 +23,7 @@ my $lexicalsFile = fpe $home, qw(lexicals data);                                
 Space processing - remove leading and trailing spaces
 New line as semi colon when new line occurs after a variable
 Alphabet compression so we can make better use of Tree:Multi
-Text generation routines so we can write some pretend code to parse
+Text generation routine let us write some pretend code to parse
 
 =cut
 
@@ -197,10 +197,13 @@ sub alphabets                                                                   
   say STDERR dump(\@zmm);
 
   if (1)                                                                        # Write zmm load sequence
-   {my @l; my @h;
+   {my @l; my @h; my %r;                                                        # Low, high, current start within range
     for my $r(@zmm)
-     {push @l, (($$r[1]<<24) + $$r[2]);
+     {my $l = $r{$$r[0]}//0;                                                    # Current start of range
+
+      push @l, (($l    <<24) + $$r[2]);                                         # Start of range in low and lexical item in high at byte 3 allows us to replace the utf32 code with XX....YY where XX is the lexical item type and YY is the position in the range of that lexical item freeing the two central bytes for other purposes
       push @h, (($$r[1]<<24) + $$r[3]);
+      $r{$$r[0]} += ($$r[3] - $$r[2]) + 1;                                      # Extend the base of the current range
      }
     my $l = join ', ', map {sprintf("0x%08x", $_)} @l;                          # Format zmm load sequence
     my $h = join ', ', map {sprintf("0x%08x", $_)} @h;
@@ -399,7 +402,11 @@ sub translateSomeText($)                                                        
    }
 
   say STDERR $T;
-  $Tables->sampleText = $T;
+  my @t = split //, $T;
+  $Tables->sampleText = join ''                                                 # Sample text as doubles
+    , 'my $sc = Rd('
+    , (join ', ', map{sprintf("0x%08x", ord($_))} split //, $T)
+    , ');';
  }
 
 
