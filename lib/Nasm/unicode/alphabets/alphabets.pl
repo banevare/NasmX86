@@ -9,6 +9,7 @@ use Carp;
 use Data::Dump qw(dump);
 use Data::Table::Text qw(:all);
 use Test::More qw(no_plan);
+use Tree::Term;
 use feature qw(say state current_sub);
 use utf8;
 
@@ -17,25 +18,63 @@ my $unicode = q(https://www.unicode.org/Public/UCD/latest/ucd/UnicodeData.txt); 
 my $data    = fpe $home, qw(unicode txt);                                       # Local copy of unicode
 my $lexicalsFile = fpe $home, qw(lexicals data);                                # Dump of lexicals
 
+=pod
+
+Space processing - remove leading and trailing spaces
+New line as semi colon when new line occurs after a variable
+Alphabet compression so we can make better use of Tree:Multi
+Text generation routines so we can write some pretend code to parse
+
+=cut
+
 my $bracketBase = 0x10;                                                         # Start numbering brackets from here
 
+sub LexicalConstant($$;$)                                                       # Lexical constants as opposed to derived values
+ {my ($name, $number, $letter, $like) = @_;                                     # Name of the lexical item, numeric code as used in Nida, character code as used Tree::Term, a specialized instance of this Tree::Term which is never the less lexically identical to the Tree::Term
+  genHash("Nida::Lexical::Constant",                                            # Description of a lexical item connecting the definition in Tree::Term with that in Nida::Lexicals
+    name   => $name,                                                            #I Name of the lexical item
+    number => $number,                                                          #I Numeric code for lexical item
+    letter => $letter,                                                          #I Alphabetic name for lexical item
+   );
+ }
+
 my $Lexicals = genHash("Nida::Lexicals",                                        # Lexical items
-  OpenBracket      =>  0,                                                       # The lowest bit of an open bracket code is zero
-  CloseBracket     =>  1,                                                       # The lowest bit of a close bracket code is one
-  Ascii            =>  2,                                                       # Ascii characters
-  NewLine          =>  3,                                                       # New line character
-  re               =>  4,                                                       # Regular expression control character
-  dyad             =>  5,                                                       # Infix operator with left to right binding at priority 3
-  prefix           =>  6,                                                       # Prefix operator - it applies only to the following variable
-  assign           =>  7,                                                       # Assign infix operator with right to left binding at priority 2.
-  variable         =>  8,                                                       # Variable although it could also be an ascii string or regular expression
-  suffix           =>  9,                                                       # Suffix operator - it applies only to the preceding variable
-  semiColon        => 10,                                                       # Infix operator with left to right binding at priority 1
-  NewLineSemiColon => 11,                                                       # A new line character that is also acting as a semi colon
+  OpenBracket      => LexicalConstant("OpenBracket",       0, 'b'),             # The lowest bit of an open bracket code is zero
+  CloseBracket     => LexicalConstant("CloseBracket",      1, 'B'),             # The lowest bit of a close bracket code is one
+  Ascii            => LexicalConstant("Ascii",             2, 'v'),             # Ascii characters
+  NewLine          => LexicalConstant("NewLine",           3, 'v'),             # New line character
+  dyad             => LexicalConstant("dyad",              4, 'd'),             # Infix operator with left to right binding at priority 3
+  prefix           => LexicalConstant("prefix",            5, 'p'),             # Prefix operator - it applies only to the following variable
+  assign           => LexicalConstant("assign",            6, 'a'),             # Assign infix operator with right to left binding at priority 2.
+  variable         => LexicalConstant("variable",          7, 'v'),             # Variable although it could also be an ascii string or regular expression
+  suffix           => LexicalConstant("suffix",            8, 'q'),             # Suffix operator - it applies only to the preceding variable
+  semiColon        => LexicalConstant("semiColon",         9, 's'),             # Infix operator with left to right binding at priority 1
+  NewLineSemiColon => LexicalConstant("NewLineSemiColon", 10),                  # A new line character that is also acting as a semi colon
+  WhiteSpace       => LexicalConstant("WhiteSpace",       11),                  # White space between non ascii items
+ );
+
+my $TreeTermLexicals = genHash("Nida::TreeTermLexicals",                        # Tree Term Lexical items embodied as Nida lexical items
+  a => "assign",
+  d => "dyad",
+  b => "OpenBracket",
+  B => "CloseBracket",
+  p => "prefix",
+  s => "semiColon",
+  q => "suffix",
+  v => "variable",
+ );
+
+my $Tables = genHash("Nida::Lexical::Tables",                                   # Tables used to parse lexical items
   low              => undef,                                                    # Low  zmm for lexical items
   high             => undef,                                                    # High zmm for lexical items
   bracketsLow      => undef,                                                    # Low  zmm for opening brackets
   bracketsHigh     => undef,                                                    # High zmm for closing brackets
+  transitions      => undef,                                                    # Zmm of transition possibilities
+  alphabets        => undef,                                                    # Alphabets selected from unciode database
+  lexicalAlpha     => undef,                                                    # The alphabets assigned to each lexical item
+  lexicals         => $Lexicals,                                                # The lexical items
+  treeTermLexicals => $TreeTermLexicals,                                        # Tree term lexicals
+  sampleText       => undef,                                                    # A sample Nida program
  );
 
 if (!-e $data)                                                                  # Download specification
@@ -80,6 +119,8 @@ sub alphabets                                                                   
    }
 
   my %selected;                                                                 # Selected alphabets
+     $selected{semiColon} = q(⟢);                                               # We cannot use semi colon as it is an ascii character, so we use this character instead
+
   for my $a(sort keys %alpha)
    {next unless $a =~ m((CIRCLED LATIN LETTER|MATHEMATICAL BOLD|MATHEMATICAL BOLD FRAKTUR|MATHEMATICAL BOLD ITALIC|MATHEMATICAL BOLD SCRIPT|MATHEMATICAL DOUBLE-STRUCK|MATHEMATICAL FRAKTUR|MATHEMATICAL ITALIC|MATHEMATICAL MONOSPACE|MATHEMATICAL SANS-SERIF|MATHEMATICAL SANS-SERIF BOLD|MATHEMATICAL SANS-SERIF|BOLD ITALIC|MATHEMATICAL SANS-SERIF ITALIC|MATHEMATICAL SCRIPT|NEGATIVE|CIRCLED LATIN LETTER|NEGATIVE SQUARED LATIN LETTER|SQUARED LATIN LETTER))i;
                                                                                 # Selected alphabets
@@ -96,7 +137,6 @@ sub alphabets                                                                   
 
   #lll "AAAA", dump(\%alpha);                                                   # Alphabets discovered
 
-  $selected{semiColon} = q(⟢);                                                  # Additional specials
 
   my @range;  my @zmm;                                                          # Ranges of characters
 
@@ -107,7 +147,9 @@ sub alphabets                                                                   
        $z = q(prefix)   if $a =~ m/mathematicalBoldItalic\Z/;
        $z = q(assign)   if $a =~ m/mathematicalItalic\Z/;
        $z = q(suffix)   if $a =~ m/mathematicalSans-serifBoldItalic\Z/;
-       $z = q(re)       if $a =~ m/circledLatinLetter\Z/;
+       $z = q(Ascii)    if $a =~ m/negativeCircledLatinLetter\Z/;               # Control characters as used in regular expressions and quoted strings
+
+    push $Tables->lexicalAlpha->{$z}->@*, $a;                                   # Alphabets assigned to each lexical item
 
     my $Z = $z ? pad(" = $z", 16) : '';
     if ($z)                                                                     # Alphabet we are going to use for a lexical item
@@ -132,7 +174,7 @@ sub alphabets                                                                   
        }
      }
 
-    if ($z)                                                                     # Write ranges ready to laod into zmm registers
+    if ($z)                                                                     # Write ranges ready to load into zmm registers
      {for my $i(keys @r)
        {my $r = $r[$i];
         my $j = $i + 1;
@@ -141,20 +183,20 @@ sub alphabets                                                                   
         say STDERR "Range $j: ",
           sprintf("0x%x to 0x%x length: %2d", $s, $l, $l - $s + 1);
         push @range, [$z,  $s, $l];
-        push @zmm,   [$z, $$Lexicals{$z}, $s, $l];
+        push @zmm,   [$z, $$Lexicals{$z}->number, $s, $l];
        }
      }
    }
-#             0               1                         2       3
-  push @zmm, ["NewLine",      $$Lexicals{NewLine},          10,     10];        # Add other stuff to look for while we are making the pass through the source as we have 16 slots in the zmm
-  push @zmm, ["Ascii",        $$Lexicals{Ascii},             0,    127];
-  push @zmm, ["semiColon",    $$Lexicals{semiColon},    0x27E2, 0x27E2];
+#             0               1                                     2       3
+  push @zmm, ["NewLine",      $Lexicals->NewLine  ->number,        10,     10]; # Add other stuff to look for while we are making the pass through the source as we have 16 slots in the zmm
+  push @zmm, ["Ascii",        $Lexicals->Ascii    ->number,         0,    127];
+  push @zmm, ["semiColon",    $Lexicals->semiColon->number,    0x27E2, 0x27E2];
   @zmm = sort {$$a[1] <=> $$b[1]} @zmm;
 
   lll "Alphabet Ranges: ", scalar(@zmm);
   say STDERR dump(\@zmm);
 
-  if (1)                                                                        # Write zmm load sequqnce
+  if (1)                                                                        # Write zmm load sequence
    {my @l; my @h;
     for my $r(@zmm)
      {push @l, (($$r[1]<<24) + $$r[2]);
@@ -165,9 +207,11 @@ sub alphabets                                                                   
     my $L = 'my $ll = Rd('. $l.');';
     my $H = 'my $lh = Rd('. $h.');';
     say STDERR "$L\n$H";
-    $Lexicals->low  = $L;
-    $Lexicals->high = $H;
+    $Tables->low  = $L;
+    $Tables->high = $H;
    }
+
+  $Tables->alphabets = \%selected;
  }
 
 sub brackets                                                                    # Write brackets
@@ -176,21 +220,31 @@ sub brackets                                                                    
   my @s = readFile $data;
 
   for my $s(@s)                                                                 # Select the brackets we want
-   {next unless $s =~ m(;P[s|e];)i;
+   {next unless $s =~ m(;P[s|e];)i;                                             # Select brackets
     my @w = split m/;/, $s;
 
     my ($point, $name) = @w;
     my $u = eval "0x$point";
     $@ and confess "$s\n$@\n";
 
-    next if $u <=   0x208e;
+    next if $u <= 0x208e;
     next if $u >=  9121 and  $u <=  9137;
     next if $u >= 11778 and  $u <= 11815;
     next if $u >= 12300 and  $u <= 12303;
     next if $u >= 65047 and  $u <= 65118 ;
     next if $u >= 65378;
+
+    next if $u >= 0x27C5 and $u <= 0x27C6;                                      # Bag
+    next if $u >= 0x29D8 and $u <= 0x29D9;                                      # Wiggly fence
+    next if $u >= 0x29DA and $u <= 0x29Db;                                      # Double Wiggly fence
+    next if $u == 0x2E42;                                                       # Double Low-Reversed-9 Quotation Mark[1]
+    next if $u >= 0x301D and $u <= 0x3020;                                      # Quotation marks
+
     push @S, [$u, $name, $s];
    }
+
+  @S % 2 and confess "Mismatched bracket pairs";
+  lll "Bracket Pairs: ", scalar(@S) / 2;
 
   my ($T, @T) = @S;                                                             # Divide into ranges
   push my @t, [$T];
@@ -203,13 +257,23 @@ sub brackets                                                                    
     push @t, [$T = $t];
    }
 
-  @t = grep {@$_ > 1} @t;                                                       # Remove blocks
+  @t = grep {@$_ > 1} @t;                                                       # Remove small blocks so we can fit into one zmm
 
-  if (0)                                                                        # Check sizes of the ranges
-   {for my $t(@t)
-     {lll "AAAA ", scalar(@$t);
+  if (1)                                                                        # Bracket strings
+   {my @o; my @c;
+    my $i = 0;
+    for   my $r(@t)
+     {for my $t(@$r)
+       {push @o, chr $$t[0] unless $i % 2;
+        push @c, chr $$t[0] if     $i % 2;
+        ++$i;
+       }
      }
-    lll "BBBB ", scalar(@t);
+    if (1)
+     {for my $i(keys @o)
+       {lll "Bracket pair $i", $o[$i], $c[$i], ord($o[$i]), ord($c[$i]);
+       }
+     }
    }
 
   my @l; my @h;
@@ -234,26 +298,126 @@ sub brackets                                                                    
    }
   push @l, 0 while @l < 16;
   push @h, 0 while @h < 16;
-  lll "Bracket ranges : ", scalar(@l);
+  lll "Bracket ranges: ", scalar(@l);
 
   my $L = join '', "my \$bl = Rd(", join(', ',  @l), ");";
   my $H = join '', "my \$bh = Rd(", join(', ',  @h), ");";
   say STDERR "$L\n$H";
 
-  $Lexicals->bracketsLow  = $L;
-  $Lexicals->bracketsHigh = $H;
+  $Tables->bracketsLow  = $L;
+  $Tables->bracketsHigh = $H;
+ }
+
+sub transitions                                                                 # Write transitions table
+ {my @l;
+  for my $l(sort keys $Lexicals->%*)                                            # Each lexical item that could appear in a transition becuase it is like a Tree::Term
+   {my $L = $$Lexicals{$l};
+    next unless $L->letter;
+    push @l, $L;
+   }
+
+  my $next = Tree::Term::LexicalStructure()->next;                              # The permitted transitions as letters
+
+  my %t;
+  for my $l1(@l)                                                                # Transitions on numbers
+   {my $a = $l1->letter;
+    my $A = $$next{$a};
+    for my $l2(@l)
+     {my $b = $l2->letter;
+      next unless index($A, $b) > -1;
+      $t{$l1->number}{$l2->number} = "$a$b";
+     }
+   }
+
+  if (1)                                                                        # Load transitions
+   {my $n = 0;                                                                  # Number of transitions
+    my @t;                                                                      # Transitions
+    for   my $t1(keys %t)
+     {for my $t2(keys $t{$t1}->%*)
+       {++$n;
+        push @t, $t1 + ($t2 << 4);                                              # Encode transitions
+       }
+     }
+    lll "Number of transitions = $n";
+    my $t = $Tables->transitions = join '',
+     'my $tt = Rb(', (join ', ', map{sprintf("0x%02x", $_)} @t), ');';
+    lll $t;
+   }
+ }
+
+sub translateSomeText($)                                                        # Translate some text
+ {my ($s) = @_;                                                                 # String to translate
+  my @w = (substr($s, 0, 1));
+  for my $i(1..length($s))                                                      # Parse into strings of letters and spaces
+   {my $b = join '', sort split //, substr($s, $i - 1, 2) =~ s(\S) (a)gsr  =~ s(\s) ( )gsr;
+    my $c = substr($s, $i, 1);
+    if ($b ne ' a')
+     {$w[-1] .= $c;
+     }
+    else
+     {push @w, $c;
+     }
+   }
+
+  my %alphabets;                                                                # Alphabets for each lexical
+
+  for my $l(keys $TreeTermLexicals->%*)
+   {my $m = $TreeTermLexicals->{$l};
+    my $n = $Tables->lexicalAlpha->{$m}[0];
+    next unless $n;
+    my $a = $Tables->alphabets->{$n};
+    next unless $a;
+    $alphabets{$l} = [$n, $a];
+   }
+
+  my $T = '';
+  my $normal = join '', 'A'..'Z', 'a'..'z';                                     # The alphabet we can write lexical items
+
+  my sub translate($)                                                           # Translate a string written in normal into the indicated alphabet
+   {my ($lexical) = @_;                                                         # Lexical item to translate
+
+    my $a =  $alphabets{substr($lexical, 0, 1)};                                # Alphabet to translate to
+    my @a =   split //, $$a[1];                                                  # Alphabet to translate to
+    for my $c(split //, substr($lexical, 1))
+     {my $i = index $normal, $c;
+      if ($$a[0] =~ m(\AmathematicalItalic\Z))
+       {$c eq 'h' and confess "Cannot translate 'h' to $$a[0]";
+        --$i if $c ge 'h';
+       }
+      $T .= $a[$i];
+     }
+   }
+
+  for my $w(@w)
+   {my $t = substr($w, 0, 1);
+    if ($t =~ m(\A(a|d|v)\Z)) {translate $w}
+    elsif ($t eq 's')         {$T .= $Tables->alphabets->{semiColon}}
+    elsif ($t =~ m(\s))       {$T .= $w}
+    elsif ($t eq 'A')         {$T .= substr($w, 1) =~ s(-) (\n)gsr}
+#    elsif ($t eq 's') {semicolon}
+#    else              {space    $w}
+   }
+
+  say STDERR $T;
+  $Tables->sampleText = $T;
  }
 
 
 alphabets;                                                                      # Locate alphabets
 brackets;                                                                       # Locate brackets
+transitions;                                                                    # Transitions table
+translateSomeText <<END;                                                        # Translate some text into Nida
+va aassign vbp dplus vsc s
+vaa
+  aassign
+  Asome--ascii--text
+  dplus
+  vcc s
+END
 
-dumpFile($lexicalsFile, $Lexicals);                                             # Write lexicals
+dumpFile($lexicalsFile, $Tables);                                               # Write lexical tables
 
 __DATA__
-
-CIRCLED LATIN LETTER|MATHEMATICAL BOLD|MATHEMATICAL BOLD FRAKTUR|MATHEMATICAL BOLD ITALIC|MATHEMATICAL BOLD SCRIPT|MATHEMATICAL DOUBLE-STRUCK|MATHEMATICAL FRAKTUR|MATHEMATICAL ITALIC|MATHEMATICAL MONOSPACE|MATHEMATICAL SANS-SERIF|MATHEMATICAL SANS-SERIF BOLD|MATHEMATICAL SANS-SERIF|BOLD ITALIC|MATHEMATICAL SANS-SERIF ITALIC|MATHEMATICAL SCRIPT|NEGATIVE|CIRCLED LATIN LETTER|NEGATIVE SQUARED LATIN LETTER|SQUARED LATIN LETTER
-
 CIRCLED LATIN LETTER  : ⒶⒷⒸⒹⒺⒻⒼⒽⒾⒿⓀⓁⓂⓃⓄⓅⓆⓇⓈⓉⓊⓋⓌⓍⓎⓏⓐⓑⓒⓓⓔⓕⓖⓗⓘⓙⓚⓛⓜⓝⓞⓟⓠⓡⓢⓣⓤⓥⓦⓧⓨⓩ
 MATHEMATICAL BOLD  : 𝐀𝐁𝐂𝐃𝐄𝐅𝐆𝐇𝐈𝐉𝐊𝐋𝐌𝐍𝐎𝐏𝐐𝐑𝐒𝐓𝐔𝐕𝐖𝐗𝐘𝐙𝐚𝐛𝐜𝐝𝐞𝐟𝐠𝐡𝐢𝐣𝐤𝐥𝐦𝐧𝐨𝐩𝐪𝐫𝐬𝐭𝐮𝐯𝐰𝐱𝐲𝐳𝚨𝚩𝚪𝚫𝚬𝚭𝚮𝚯𝚰𝚱𝚲𝚳𝚴𝚵𝚶𝚷𝚸𝚺𝚻𝚼𝚽𝚾𝚿𝛀𝛂𝛃𝛄𝛅𝛆𝛇𝛈𝛉𝛊𝛋𝛌𝛍𝛎𝛏𝛐𝛑𝛒𝛔𝛕𝛖𝛗𝛘𝛙𝛚𝟊𝟋
 MATHEMATICAL BOLD FRAKTUR  : 𝕬𝕭𝕮𝕯𝕰𝕱𝕲𝕳𝕴𝕵𝕶𝕷𝕸𝕹𝕺𝕻𝕼𝕽𝕾𝕿𝖀𝖁𝖂𝖃𝖄𝖅𝖆𝖇𝖈𝖉𝖊𝖋𝖌𝖍𝖎𝖏𝖐𝖑𝖒𝖓𝖔𝖕𝖖𝖗𝖘𝖙𝖚𝖛𝖜𝖝𝖞𝖟
