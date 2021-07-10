@@ -310,6 +310,7 @@ END
 
 sub Rutf8(@)                                                                    # Layout a utf8 encoded string as bytes in read only memory and return their label
  {my (@d) = @_;                                                                 # Data to be laid out
+  confess unless @_;
   my $d = join '', @_;
   my @e;
   for my $e(split //, $d)
