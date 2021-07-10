@@ -65,16 +65,16 @@ my $TreeTermLexicals = genHash("Nida::TreeTermLexicals",                        
  );
 
 my $Tables = genHash("Nida::Lexical::Tables",                                   # Tables used to parse lexical items
-  low              => undef,                                                    # Low  zmm for lexical items
-  high             => undef,                                                    # High zmm for lexical items
-  bracketsLow      => undef,                                                    # Low  zmm for opening brackets
-  bracketsHigh     => undef,                                                    # High zmm for closing brackets
-  transitions      => undef,                                                    # Zmm of transition possibilities
   alphabets        => undef,                                                    # Alphabets selected from unciode database
+  bracketsHigh     => undef,                                                    # High zmm for closing brackets
+  bracketsLow      => undef,                                                    # Low  zmm for opening brackets
   lexicalAlpha     => undef,                                                    # The alphabets assigned to each lexical item
+  lexicalHigh      => undef,                                                    # High zmm for lexical items
+  lexicalLow       => undef,                                                    # Low  zmm for lexical items
   lexicals         => $Lexicals,                                                # The lexical items
-  treeTermLexicals => $TreeTermLexicals,                                        # Tree term lexicals
   sampleText       => undef,                                                    # A sample Nida program
+  transitions      => undef,                                                    # Zmm of transition possibilities
+  treeTermLexicals => $TreeTermLexicals,                                        # Tree term lexicals
  );
 
 if (!-e $data)                                                                  # Download specification
@@ -119,7 +119,7 @@ sub alphabets                                                                   
    }
 
   my %selected;                                                                 # Selected alphabets
-     $selected{semiColon} = q(⟢);                                               # We cannot use semi colon as it is an ascii character, so we use this character instead
+     $selected{semiColon} = q(⟢);                                               # We cannot use semi colon as it is an ascii character, so we use this character instead  U+27E2
 
   for my $a(sort keys %alpha)
    {next unless $a =~ m((CIRCLED LATIN LETTER|MATHEMATICAL BOLD|MATHEMATICAL BOLD FRAKTUR|MATHEMATICAL BOLD ITALIC|MATHEMATICAL BOLD SCRIPT|MATHEMATICAL DOUBLE-STRUCK|MATHEMATICAL FRAKTUR|MATHEMATICAL ITALIC|MATHEMATICAL MONOSPACE|MATHEMATICAL SANS-SERIF|MATHEMATICAL SANS-SERIF BOLD|MATHEMATICAL SANS-SERIF|BOLD ITALIC|MATHEMATICAL SANS-SERIF ITALIC|MATHEMATICAL SCRIPT|NEGATIVE|CIRCLED LATIN LETTER|NEGATIVE SQUARED LATIN LETTER|SQUARED LATIN LETTER))i;
@@ -136,7 +136,6 @@ sub alphabets                                                                   
    }
 
   #lll "AAAA", dump(\%alpha);                                                   # Alphabets discovered
-
 
   my @range;  my @zmm;                                                          # Ranges of characters
 
@@ -207,11 +206,9 @@ sub alphabets                                                                   
      }
     my $l = join ', ', map {sprintf("0x%08x", $_)} @l;                          # Format zmm load sequence
     my $h = join ', ', map {sprintf("0x%08x", $_)} @h;
-    my $L = 'my $ll = Rd('. $l.');';
-    my $H = 'my $lh = Rd('. $h.');';
-    say STDERR "$L\n$H";
-    $Tables->low  = $L;
-    $Tables->high = $H;
+    say STDERR "$l\n$h";
+    $Tables->lexicalLow  = [@l];
+    $Tables->lexicalHigh = [@h];
    }
 
   $Tables->alphabets = \%selected;
@@ -272,7 +269,8 @@ sub brackets                                                                    
         ++$i;
        }
      }
-    if (1)
+
+    if (0)                                                                      # Print every bracket pair
      {for my $i(keys @o)
        {lll "Bracket pair $i", $o[$i], $c[$i], ord($o[$i]), ord($c[$i]);
        }
@@ -303,12 +301,12 @@ sub brackets                                                                    
   push @h, 0 while @h < 16;
   lll "Bracket ranges: ", scalar(@l);
 
-  my $L = join '', "my \$bl = Rd(", join(', ',  @l), ");";
-  my $H = join '', "my \$bh = Rd(", join(', ',  @h), ");";
+  my $L = join '', join(', ',  @l);
+  my $H = join '', join(', ',  @h);
   say STDERR "$L\n$H";
 
-  $Tables->bracketsLow  = $L;
-  $Tables->bracketsHigh = $H;
+  $Tables->bracketsLow  = [@l];
+  $Tables->bracketsHigh = [@h];
  }
 
 sub transitions                                                                 # Write transitions table
@@ -342,9 +340,8 @@ sub transitions                                                                 
        }
      }
     lll "Number of transitions = $n";
-    my $t = $Tables->transitions = join '',
-     'my $tt = Rb(', (join ', ', map{sprintf("0x%02x", $_)} @t), ');';
-    lll $t;
+    $Tables->transitions = [@t];
+    lll join ', ', map{sprintf("0x%02x", $_)} @t;
    }
  }
 
@@ -397,18 +394,20 @@ sub translateSomeText($)                                                        
     elsif ($t eq 's')         {$T .= $Tables->alphabets->{semiColon}}
     elsif ($t =~ m(\s))       {$T .= $w}
     elsif ($t eq 'A')         {$T .= substr($w, 1) =~ s(-) (\n)gsr}
-#    elsif ($t eq 's') {semicolon}
-#    else              {space    $w}
+    else {confess "Invalid lexical item $s"}
    }
 
-  say STDERR $T;
-  my @t = split //, $T;
-  $Tables->sampleText = join ''                                                 # Sample text as doubles
-    , 'my $sc = Rd('
-    , (join ', ', map{sprintf("0x%08x", ord($_))} split //, $T)
-    , ');';
- }
+  lll "Sample text length in chars:", sprintf("0x%x", length($T));
 
+  my @T = split //, $T;
+  for my $i(keys @T)
+   {my $c = $T[$i];
+    say STDERR "$i   $c ", sprintf("%08x   %08x", ord($c), convertUtf32ToUtf8(ord($c)));
+   }
+
+  lll "Sample text:\n$T";
+  $Tables->sampleText = $T;
+ }
 
 alphabets;                                                                      # Locate alphabets
 brackets;                                                                       # Locate brackets
