@@ -15910,9 +15910,7 @@ END
  }
 
 #latest:
-lll "AAAA 87";
 if (1) {
-lll "AAAA 87 start";
   my $b = CreateByteString;
   my $t = $b->CreateBlockMultiWayTree;
   my $d = Vq(data);
@@ -15996,9 +15994,7 @@ END
  }
 
 #latest:
-lll "AAAA 88";
-if (0) {                                                                        #TConvertUtf8ToUtf32
-lll "AAAA 88 start";
+if (1) {                                                                        #TConvertUtf8ToUtf32
   my @p = my ($out, $size, $fail) = (Vq(out), Vq(size), Vq('fail'));
   my $opens = Vq(opens);
   my $class = Vq(class);
@@ -16302,10 +16298,8 @@ END
  }
 
 #latest:
-lll "AAAA 89";
 if (1) {                                                                        # Parse some Nida code
-lll "AAAA 89 start";
-  my $lex = do q(unicode/alphabets/lexicals.data);                              # As produced by unicode/alphabets/alphabets.pl
+  my $lex = do q(unicode/alphabets/lex.data);                                   # As produced by unicode/lex/lex.pl
 
   my @p = my ($out, $size, $fail) = (Vq(out), Vq(size), Vq('fail'));
   my $opens = Vq(opens);
