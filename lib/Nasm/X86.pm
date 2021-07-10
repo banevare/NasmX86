@@ -15993,7 +15993,7 @@ END
  }
 
 #latest:
-if (1) {                                                                        #TConvertUtf8ToUtf32
+if (0) {                                                                        #TConvertUtf8ToUtf32
   my @p = my ($out, $size, $fail) = (Vq(out), Vq(size), Vq('fail'));
   my $opens = Vq(opens);
   my $class = Vq(class);
