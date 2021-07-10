@@ -13577,7 +13577,7 @@ Test::More->builder->output("/dev/null") if $localTest;                         
 
 if ($^O =~ m(bsd|linux|cygwin)i)                                                # Supported systems
  {if (confirmHasCommandLineCommand(q(nasm)) and LocateIntelEmulator)            # Network assembler and Intel Software Development emulator
-   {plan tests => 109;
+   {plan tests => 108;
    }
   else
    {plan skip_all => qq(Nasm or Intel 64 emulator not available);
@@ -16296,7 +16296,7 @@ Convert test statement - bracket matching
 END
  }
 
-latest:
+#latest:
 if (1) {                                                                        # Parse some Nida code
   my $lex = do q(unicode/alphabets/lexicals.data);                              # As produced by unicode/alphabets/alphabets.pl
 
