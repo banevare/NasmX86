@@ -10,7 +10,7 @@ use warnings FATAL => qw(all);
 use strict;
 use Carp qw(confess cluck);
 use Data::Dump qw(dump);
-use Data::Table::Text qw(confirmHasCommandLineCommand currentDirectory fff fileMd5Sum fileSize findFiles firstNChars formatTable fpe fpf genHash lll owf pad readFile stringsAreNotEqual stringMd5Sum temporaryFile);
+use Data::Table::Text qw(confirmHasCommandLineCommand convertUtf32ToUtf8 currentDirectory fff fileMd5Sum fileSize findFiles firstNChars formatTable fpe fpf genHash lll owf pad readFile stringsAreNotEqual stringMd5Sum temporaryFile);
 use Asm::C qw(:all);
 use feature qw(say current_sub);
 
@@ -298,6 +298,34 @@ sub Rs(@)                                                                       
    {if ($e !~ m([A-Z0-9])i) {push @e, sprintf("0x%x", ord($e))} else {push @e, qq('$e')}
    }
   my $e = join ', ', @e;
+  my $L = $rodatas{$e};
+  return $L if defined $L;                                                      # Data already exists so return it
+  my $l = Label;                                                                # New label for new data
+  $rodatas{$e} = $l;                                                            # Record label
+  push @rodata, <<END;                                                          # Define bytes
+  $l: db  $e, 0;
+END
+  $l                                                                            # Return label
+ }
+
+sub Rutf8(@)                                                                    # Layout a utf8 encoded string as bytes in read only memory and return their label
+ {my (@d) = @_;                                                                 # Data to be laid out
+  my $d = join '', @_;
+  my @e;
+  for my $e(split //, $d)
+   {my $o  = ord $e;
+    my $u  = convertUtf32ToUtf8($o);
+    my $x = sprintf("%08x", $u);
+    my $o1 = substr($x, 0, 2);
+    my $o2 = substr($x, 2, 2);
+    my $o3 = substr($x, 4, 2);
+    my $o4 = substr($x, 6, 2);
+    if    ($o <= (1 << 7))  {push @e,                $o4}
+    elsif ($o <= (1 << 11)) {push @e,           $o3, $o4}
+    elsif ($o <= (1 << 16)) {push @e,      $o2, $o3, $o4}
+    else                    {push @e, $o1, $o2, $o3, $o4}
+   }
+  my $e = join ', ',map {"0x$_"}  @e;
   my $L = $rodatas{$e};
   return $L if defined $L;                                                      # Data already exists so return it
   my $l = Label;                                                                # New label for new data
@@ -3259,7 +3287,7 @@ sub ConvertUtf8ToUtf32(@)                                                       
    {my ($p) = @_;                                                               # Parameters
     Comment "Convert utf8 to utf32";
 
-    PushR my @save =  (r10, r11, r12, r13, r14, r15);
+    PushR my @save = (r10, r11, r12, r13, r14, r15);
 
     my $size = $$p{size8} * 4;                                                  # Estimated length for utf32
     AllocateMemory size => $size, my $address = Vq(address);
@@ -3274,7 +3302,8 @@ sub ConvertUtf8ToUtf32(@)                                                       
       my @p = my ($out, $size, $fail) = (Vq(out), Vq(size), Vq('fail'));
       GetNextUtf8CharAsUtf32 Vq(in, r14), @p;                                   # Get next utf 8 character and convert it to utf32
       If ($fail, sub
-       {PrintErrStringNL "Invalid utf8 character";
+       {PrintErrStringNL "Invalid utf8 character at index:";
+        PrintErrRegisterInHex r12;
         Exit(1);
        });
 
@@ -3557,7 +3586,7 @@ sub ConcatenateShortStrings($$)                                                 
 
 #D1 Byte Strings                                                                # Operations on Byte Strings
 
-sub Cstrlen()                                                                   # Length of the C style string addressed by rax returning the length in r15
+sub Cstrlen()                                                                   #P Length of the C style string addressed by rax returning the length in r15
  {@_ == 0 or confess;
 
   my $sub  = Macro                                                              # Create byte string
@@ -3577,6 +3606,23 @@ END
    } name=> "Cstrlen";
 
   Call $sub;
+ }
+
+sub StringLength(@)                                                             # Length of a zero terminated string
+ {my (@parameters) = @_;                                                        # Parameters
+  Comment "Length of zero terminated string";
+
+  my $s = Subroutine
+   {my ($p) = @_;                                                               # Parameters
+    SaveFirstFour;
+    $$p{string}->setReg(rax);                                                   # Address string
+    Cstrlen;                                                                    # Length now in r15
+    $$p{size}->getReg(r15);                                                     # Save length
+    RestoreFirstFour;
+   } in => {string => 3}, out => {size => 3};
+
+  $s->call(@parameters, my $z = Vq(size));                                      # Variable that holds the length of the string
+  $z
  }
 
 sub CreateByteString(%)                                                         # Create an relocatable string of bytes in an arena and returns its address in rax. Optionally add a chain header so that 64 byte blocks of memory can be freed and reused within the byte string.
@@ -14325,12 +14371,11 @@ END
 #   0 eq    1 lt    2 le    4 ne    5 ge    6 gt   comparisons
  }
 
-if (1) {                                                                        #TCstrlen
-  my $s = Rs("abcd");
-  Mov rax, $s;
-  Cstrlen;
-  PrintOutRegisterInHex r15;
-  ok Assemble =~ m(r15: 0000 0000 0000 0004);
+if (1) {                                                                        #TStringLength
+  StringLength(Vq(string, Rs("abcd")))->outNL;
+  Assemble(debug => 0, eq => <<END);
+size: 0000 0000 0000 0004
+END
  }
 
 if (1) {                                                                        # Hash a string #THash
@@ -15947,7 +15992,7 @@ Found: 0000 0000 0000 0001
 END
  }
 
-latest:
+#latest:
 if (1) {                                                                        #TConvertUtf8ToUtf32
   my @p = my ($out, $size, $fail) = (Vq(out), Vq(size), Vq('fail'));
   my $opens = Vq(opens);
@@ -16046,7 +16091,6 @@ if (1) {                                                                        
   if (1)                                                                        # Convert utf8 test string to utf32
    {my @p = my ($u32, $size32, $count) = (Vq(u32), Vq(size32), Vq(count));
 
-    ConvertUtf8ToUtf32 u8 => $s, size8 => $l,  @p;
     ClassifyCharacters4 address=>$u32, size=>$count;
 
     PrintOutStringNL "Convert test statement - special characters";
@@ -16249,6 +16293,33 @@ Convert test statement - bracket matching
    r15: 0000 0000 0600 0041
    r15: 0000 0000 0600 0041
 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+END
+ }
+
+latest:
+if (1) {                                                                        # Parse some Nida code
+  my $lex = do q(unicode/alphabets/lexicals.data);                              # As produced by unicode/alphabets/alphabets.pl
+
+  my @p = my ($out, $size, $fail) = (Vq(out), Vq(size), Vq('fail'));
+  my $opens = Vq(opens);
+  my $class = Vq(class);
+
+  my $source = Rutf8 $$lex{sampleText};                                         # String to be parsed in utf8
+  my $sourceLength = StringLength Vq(string, $source);
+     $sourceLength->outNL;
+
+  ConvertUtf8ToUtf32 Vq(u8,$source), size8 => $sourceLength,
+    (my $source32       = Vq(u32)),
+    (my $sourceSize32   = Vq(size32)),
+    (my $sourceLength32 = Vq(count));
+
+  $sourceSize32  ->outNL;
+  $sourceLength32->outNL;
+
+  ok Assemble(debug => 1, eq => <<END);
+size: 0000 0000 0000 009F
+size32: 0000 0000 0000 027C
+count: 0000 0000 0000 0044
 END
  }
 
