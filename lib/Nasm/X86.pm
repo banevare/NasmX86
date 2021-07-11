@@ -13625,7 +13625,6 @@ else
 my $start = time;                                                               # Tests
 
 eval {goto latest} if !caller(0) and -e "/home/phil";                           # Go to latest test if specified
-goto latest;
 
 if (1) {                                                                        #TPrintOutStringNL #TPrintErrStringNL #TAssemble
   PrintOutStringNL "Hello World";
