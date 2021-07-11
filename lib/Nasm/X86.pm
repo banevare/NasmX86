@@ -16200,7 +16200,10 @@ END
 
 #latest:
 if (1) {                                                                        # Parse some Nida code
-  my $lex = eval readFile q(unicode/lex/lex.data);                              # As produced by unicode/lex/lex.pl
+  my $lexDataFile = qq(unicode/lex/lex.data);                                   # As produced by unicode/lex/lex.pl
+     $lexDataFile = qq(lib/Nasm/$lexDataFile) unless $develop;
+
+  my $lex = eval readFile $lexDataFile;
 
   my @p = my ($out, $size, $fail) = (Vq(out), Vq(size), Vq('fail'));
   my $opens = Vq(opens);
