@@ -3370,7 +3370,7 @@ sub ClassifyCharacters4(@)                                                      
  } # ClassifyCharacters4
 
 sub ClassifyRange($@)                                                           #P Implementation of ClassifyInRange and ClassifyWithinRange
- {my ($recordOffsetInRange, @parameters) = @_;                                  # Record offset in range if true, parameters
+ {my ($recordOffsetInRange, @parameters) = @_;   # Record offset in classification in high byte if true, record offset in range in low byte if true, parameters
   @_ >= 1 or confess;
 
   my $s = Subroutine
@@ -3378,7 +3378,7 @@ sub ClassifyRange($@)                                                           
     Comment "Classify characters in utf32 format";
     my $finish = Label;
 
-    PushR my @save =  (($recordOffsetInRange ? (r12, r13) : ()),
+    PushR my @save =  (($recordOffsetInRange ? (r12, r13) : ()),                # More registers required if we are recording position in range
                        r14, r15, k6, k7, zmm 29..31);
 
     Mov r15, 0x88888888;                                                        # Create a mask for the classification bytes
@@ -3403,17 +3403,35 @@ sub ClassifyRange($@)                                                           
       Ktestw k6, k6;                                                            # Was there a match
       IfZ {Jmp $next};                                                          # No character was matched
 
-      if ($recordOffsetInRange)                                                 # Record offset in range
+      if ($recordOffsetInRange == 1)                                            # Record offset in classification range in high byte as used for bracket matching
        {Vpcompressd "zmm29\{k6}", zmm0;                                         # Place classification byte at start of xmm29
         Vpextrd r13d, xmm29, 4;                                                 # Extract start of range
         Mov r12, r13;                                                           # Copy start of range
         Shr r12, 24;                                                            # Classification start
         And r13, 0x00ffffff;                                                    # Range start
-        Sub r14, r13;                                                           # Negative offset in range
-        Add r12, r14;                                                           # Offset in range
+        Sub r14, r13;                                                           # Offset in range
+        Add r12, r14;                                                           # Offset in classification
         Mov "[r15-1]", r12b;                                                    # Save classification
        }
-      else                                                                      # Record range
+      elsif ($recordOffsetInRange == 2)                                         # Record classification in high byte and offset in classification range in low byte as used for alphabets
+       {Vpcompressd "zmm29\{k6}", zmm0;                                         # Place classification byte and start of range at start of xmm29
+        Vpextrd r13d, xmm29, 4;                                                 # Extract start of range specification
+        Mov r12, r13;                                                           # Range classification code and start of range
+        Shr r12, 24;                                                            # Range classification code
+        Mov "[r15-1]", r12b;                                                    # Save classification
+        And r13, 0x00ffffff;                                                    # Range start
+
+        Vpcompressd "zmm29\{k6}", zmm1;                                         # Place start of alphabet at start of xmm29
+        Vpextrd r12d, xmm29, 4;                                                 # Extract offset of alphabet in range
+        Shr r12, 24;                                                            # Alphabet offset
+        Add r12, r14;                                                           # Range start plus utf32
+        Sub r12, r13;                                                           # Offset of utf32 in alphabet range
+        Mov "[r15-4]", r12b;                                                    # Save offset of utf32 in alphabet range
+        KeepFree r12;
+        ClearRegisters r12;                                                     # Zero r12
+        Mov "[r15-3]", r12w;                                                    # Clear middle of utf32
+       }
+      else                                                                      # Record classification in high byte
        {Vpcompressd "zmm29\{k6}", zmm0;                                         # Place classification byte at start of xmm29
         Vpextrb "[r15-1]", xmm29, 3;                                            # Extract and save classification
        }
@@ -3435,6 +3453,11 @@ sub ClassifyInRange(@)                                                          
 sub ClassifyWithInRange(@)                                                      # Classify the utf32 characters in a block of memory of specified length using a range specification held in zmm0, zmm1 formatted in double words with the classification range in the highest 8 bits of zmm0 and zmm1 and the utf32 character at the start (zmm0) and end (zmm1) of each range in the lower 21 bits.  The classification bits from the position within the first matching range are copied into the high (unused) byte of each utf32 character in the block of memory.
  {my (@parameters) = @_;                                                        # Parameters
   ClassifyRange(1, @_);
+ }
+
+sub ClassifyWithInRangeAndSaveOffset(@)                                         # Classify the utf32 characters in a block of memory of specified length using a range specification held in zmm0, zmm1 formatted in double words with the classification code in the high byte of zmm1 and the offset of the first element in the range in the high byte of zmm0.  The lowest 21 bits of each double word in zmm0 and zmm1  contain the utf32 characters marking the start and end of each range. The classification bits from zmm1 for the first matching range are copied into the high byte of each utf32 character in the block of memory.  The offset in the range is copied into the lowest byte of each utf32 character in the bloxk of memory.  The middle two bytes are cleared.  The nett effect is to reduce 21 bits of utf32 to 16 bits of Nida.
+ {my (@parameters) = @_;                                                        # Parameters
+  ClassifyRange(2, @_);
  }
 
 sub MatchBrackets(@)                                                            # Replace the low three bytes of a utf32 bracket character with 24 bits of offset to the matching opening or closing bracket. Opening brackets have even codes from 0x10 to 0x4e while the corresponding closing bracket has a code one higher.
@@ -16212,23 +16235,39 @@ if (1) {                                                                        
   my $sourceLength = StringLength Vq(string, $source);
      $sourceLength->outNL("Input  Length: ");
 
-  ConvertUtf8ToUtf32 Vq(u8,$source), size8 => $sourceLength,
+  ConvertUtf8ToUtf32 Vq(u8,$source), size8 => $sourceLength,                    # Convert to utf32
     (my $source32       = Vq(u32)),
     (my $sourceSize32   = Vq(size32)),
     (my $sourceLength32 = Vq(count));
 
   $sourceSize32   ->outNL("Output Length: ");
 
-  PrintUtf32($sourceLength32, $source32);
+  PrintOutStringNL "After conversion from utf8 to utf32";
+  PrintUtf32($sourceLength32, $source32);                                       # Print utf32
+
+  Vmovdqu8 zmm0, "[".Rd(join ', ', $lex->{lexicalLow} ->@*)."]";                # Each double is [31::24] Classification, [21::0] Utf32 start character
+  Vmovdqu8 zmm1, "[".Rd(join ', ', $lex->{lexicalHigh}->@*)."]";                # Each double is [31::24] Range offset,   [21::0] Utf32 end character
+
+  ClassifyWithInRangeAndSaveOffset address=>$source32, size=>$sourceLength32;
+
+  PrintOutStringNL "After classification into alphabet ranges";
+  PrintUtf32($sourceLength32, $source32);                                       # Print classified utf32
 
   ok Assemble(debug => 1, eq => <<END);
 Input  Length: 0000 0000 0000 009F
 Output Length: 0000 0000 0000 027C
+After conversion from utf8 to utf32
 0001 D5EE 0000 0020  0001 D44E 0001 D460  0001 D460 0001 D456  0001 D454 0001 D45B  0000 0020 0001 D5EF  0001 D5FD 0000 0020  0001 D429 0001 D425  0001 D42E 0001 D42C
 0000 0020 0001 D600  0001 D5F0 0000 0020  0000 27E2 0000 000A  0001 D5EE 0001 D5EE  0000 000A 0000 0020  0000 0020 0001 D44E  0001 D460 0001 D460  0001 D456 0001 D454
 0001 D45B 0000 000A  0000 0020 0000 0020  0000 0073 0000 006F  0000 006D 0000 0065  0000 000A 0000 000A  0000 0061 0000 0073  0000 0063 0000 0069  0000 0069 0000 000A
 0000 000A 0000 0074  0000 0065 0000 0078  0000 0074 0000 000A  0000 0020 0000 0020  0001 D429 0001 D425  0001 D42E 0001 D42C  0000 000A 0000 0020  0000 0020 0001 D5F0
 0001 D5F0 0000 0020  0000 27E2 0000 000A
+After classification into alphabet ranges
+0700 001A 0200 0020  0600 001A 0600 002C  0600 002C 0600 0022  0600 0020 0600 0027  0200 0020 0700 001B  0700 0029 0200 0020  0400 0029 0400 0025  0400 002E 0400 002C
+0200 0020 0700 002C  0700 001C 0200 0020  0900 0000 0300 0000  0700 001A 0700 001A  0300 0000 0200 0020  0200 0020 0600 001A  0600 002C 0600 002C  0600 0022 0600 0020
+0600 0027 0300 0000  0200 0020 0200 0020  0200 0073 0200 006F  0200 006D 0200 0065  0300 0000 0300 0000  0200 0061 0200 0073  0200 0063 0200 0069  0200 0069 0300 0000
+0300 0000 0200 0074  0200 0065 0200 0078  0200 0074 0300 0000  0200 0020 0200 0020  0400 0029 0400 0025  0400 002E 0400 002C  0300 0000 0200 0020  0200 0020 0700 001C
+0700 001C 0200 0020  0900 0000 0300 0000
 END
  }
 
