@@ -3512,7 +3512,8 @@ sub PrintUtf32($$)                                                              
   PushR my @save = (rax, r14, r15);
 PrintErrStringNL "MMMM";
 $m->errNL;
-  ($n / 2)->for(sub
+  my $count = $n / 2; my $count1 = $count - 1;
+  $count->for(sub
    {my ($index, $start, $next, $end) = @_;
     my $a = $m + $index * 8;
     $a->setReg(rax);
@@ -3530,9 +3531,12 @@ $m->errNL;
      {PrintOutNL;                                                               #
      },
     sub
-    {PrintOutString "  ";
+    {If($index != $count1, sub
+      {PrintOutString "  ";
+      });
     });
    });
+  PrintOutNL;
   PopR @save;
  }
 
@@ -16222,7 +16226,8 @@ Output Length: 0000 0000 0000 027C
 0000 0020 0001 D600  0001 D5F0 0000 0020  0000 27E2 0000 000A  0001 D5EE 0001 D5EE  0000 000A 0000 0020  0000 0020 0001 D44E  0001 D460 0001 D460  0001 D456 0001 D454
 0001 D45B 0000 000A  0000 0020 0000 0020  0000 0073 0000 006F  0000 006D 0000 0065  0000 000A 0000 000A  0000 0061 0000 0073  0000 0063 0000 0069  0000 0069 0000 000A
 0000 000A 0000 0074  0000 0065 0000 0078  0000 0074 0000 000A  0000 0020 0000 0020  0001 D429 0001 D425  0001 D42E 0001 D42C  0000 000A 0000 0020  0000 0020 0001 D5F0
-0001 D5F0 0000 0020  0000 27E2 0000 000A  END
+0001 D5F0 0000 0020  0000 27E2 0000 000A
+END
  }
 
 #latest:
