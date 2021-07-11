@@ -3400,9 +3400,9 @@ sub ClassifyRange($@)                                                           
       Vpbroadcastd       zmm29, r14d;                                           # 16 copies of the utf32  character to be processed
       Vpcmpud  k7,       zmm29, zmm30, 5;                                       # Look for start of range
       Vpcmpud "k6\{k7}", zmm29, zmm31, 2;                                       # Look for end of range
-      Ktestw k6, k6;                                                            # Was there a match
+      Ktestw k6, k6;                                                            # Was there a match ?
       IfZ {Jmp $next};                                                          # No character was matched
-
+                                                                                # Process matched character
       if ($recordOffsetInRange == 1)                                            # Record offset in classification range in high byte as used for bracket matching
        {Vpcompressd "zmm29\{k6}", zmm0;                                         # Place classification byte at start of xmm29
         Vpextrd r13d, xmm29, 4;                                                 # Extract start of range
