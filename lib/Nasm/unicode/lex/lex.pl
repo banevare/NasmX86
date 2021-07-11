@@ -190,7 +190,7 @@ sub alphabets                                                                   
   push @zmm, ["NewLine",      $Lexicals->NewLine  ->number,        10,     10]; # Add other stuff to look for while we are making the pass through the source as we have 16 slots in the zmm
   push @zmm, ["Ascii",        $Lexicals->Ascii    ->number,         0,    127];
   push @zmm, ["semiColon",    $Lexicals->semiColon->number,    0x27E2, 0x27E2];
-  @zmm = sort {$$a[1] <=> $$b[1]} @zmm;
+  @zmm = sort {$$a[3] <=> $$b[3]} @zmm;
 
   lll "Alphabet Ranges: ", scalar(@zmm);
   say STDERR dump(\@zmm);
@@ -200,13 +200,13 @@ sub alphabets                                                                   
     for my $r(@zmm)
      {my $l = $r{$$r[0]}//0;                                                    # Current start of range
 
-      push @l, (($l    <<24) + $$r[2]);                                         # Start of range in low and lexical item in high at byte 3 allows us to replace the utf32 code with XX....YY where XX is the lexical item type and YY is the position in the range of that lexical item freeing the two central bytes for other purposes
-      push @h, (($$r[1]<<24) + $$r[3]);
+      push @l, (($$r[1]<<24) + $$r[2]);                                         # Start of range in high and lexical item in low at byte 3 allows us to replace the utf32 code with XX....YY where XX is the lexical item type and YY is the position in the range of that lexical item freeing the two central bytes for other purposes
+      push @h, (($l    <<24) + $$r[3]);
       $r{$$r[0]} += ($$r[3] - $$r[2]) + 1;                                      # Extend the base of the current range
      }
     my $l = join ', ', map {sprintf("0x%08x", $_)} @l;                          # Format zmm load sequence
     my $h = join ', ', map {sprintf("0x%08x", $_)} @h;
-    say STDERR "$l\n$h";
+    say STDERR "Lexical Low / Lexical High:\n$l\n$h";
     $Tables->lexicalLow  = [@l];
     $Tables->lexicalHigh = [@h];
    }
@@ -377,7 +377,7 @@ sub translateSomeText($)                                                        
    {my ($lexical) = @_;                                                         # Lexical item to translate
 
     my $a =  $alphabets{substr($lexical, 0, 1)};                                # Alphabet to translate to
-    my @a =   split //, $$a[1];                                                  # Alphabet to translate to
+    my @a =   split //, $$a[1];                                                 # Alphabet to translate to
     for my $c(split //, substr($lexical, 1))
      {my $i = index $normal, $c;
       if ($$a[0] =~ m(\AmathematicalItalic\Z))
