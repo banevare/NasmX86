@@ -10,7 +10,7 @@ use warnings FATAL => qw(all);
 use strict;
 use Carp qw(confess cluck);
 use Data::Dump qw(dump);
-use Data::Table::Text qw(confirmHasCommandLineCommand convertUtf32ToUtf8 currentDirectory fff fileMd5Sum fileSize findFiles firstNChars formatTable fpe fpf genHash lll owf pad readFile stringsAreNotEqual stringMd5Sum temporaryFile);
+use Data::Table::Text qw(confirmHasCommandLineCommand convertUtf32ToUtf8 currentDirectory evalFile fff fileMd5Sum fileSize findFiles firstNChars formatTable fpe fpf genHash lll owf pad readFile stringsAreNotEqual stringMd5Sum temporaryFile);
 use Asm::C qw(:all);
 use feature qw(say current_sub);
 
@@ -1041,7 +1041,7 @@ sub PrintRaxInHex($;$)                                                          
       Shr rax, 56;                                                              # Push select byte low
       Shl rax, 1;                                                               # Multiply by two because each entry in the translation table is two bytes long
       Lea rax, "[$hexTranslateTable+rax]";
-      PrintMemory($channel);
+      PrintMemory($channel);                                                    # Print memory addressed by rax for length specified by rdi
       PrintString($channel, ' ') if $i % 2 and $i < 7;
      }
     RestoreFirstFour;
@@ -3310,6 +3310,7 @@ sub ConvertUtf8ToUtf32(@)                                                       
 
       Inc r12;                                                                  # Count characters converted
       $out->setReg(r11);                                                        # Output character
+
       Mov  "[r13]",  r11d;
       Add    r13,    RegisterSize eax;                                          # Move up 32 bits output string
       $size->setReg(r10);                                                       # Decoded this many bytes
@@ -3505,6 +3506,35 @@ sub MatchBrackets(@)                                                            
 
   $s->call(@parameters);
  } # MatchBrackets
+
+sub PrintUtf32($$)                                                              # Print the specified number of utf32 characters at the specified address
+ {my ($n, $m) = @_;                                                             # Variable: number of characters to print, variable: address of memory
+  PushR my @save = (rax, r14, r15);
+PrintErrStringNL "MMMM";
+$m->errNL;
+  ($n / 2)->for(sub
+   {my ($index, $start, $next, $end) = @_;
+    my $a = $m + $index * 8;
+    $a->setReg(rax);
+    KeepFree rax;
+    Mov rax, "[rax]";
+    KeepFree rax;
+    Mov r14, rax;
+    Mov r15, rax;
+    Shl r15, 32;
+    Shr r14, 32;
+    Or r14,r15;
+    Mov rax, r14;
+    PrintOutRaxInHex;
+    If ($index % 8 == 7, sub                                                    #
+     {PrintOutNL;                                                               #
+     },
+    sub
+    {PrintOutString "  ";
+    });
+   });
+  PopR @save;
+ }
 
 #D1 Short Strings                                                               # Operations on Short Strings
 
@@ -13591,6 +13621,7 @@ else
 my $start = time;                                                               # Tests
 
 eval {goto latest} if !caller(0) and -e "/home/phil";                           # Go to latest test if specified
+goto latest;
 
 if (1) {                                                                        #TPrintOutStringNL #TPrintErrStringNL #TAssemble
   PrintOutStringNL "Hello World";
@@ -16089,6 +16120,7 @@ if (1) {                                                                        
 # squaredLatinLetter               :                    🄰🄱🄲🄳🄴🄵🄶🄷🄸🄹🄺🄻🄼🄽🄾🄿🅀🅁🅂🅃🅄🅅🅆🅇🅈🅉🆥
 # semiColon                        : semicolon          ⟢
 
+# Delete following code when the following test is completed
   if (0)                                                                        # Convert utf8 test string to utf32
    {my @p = my ($u32, $size32, $count) = (Vq(u32), Vq(size32), Vq(count));
 
@@ -16164,7 +16196,7 @@ END
 
 #latest:
 if (1) {                                                                        # Parse some Nida code
-  my $lex = do q(unicode/lex/lex.data);                                         # As produced by unicode/lex/lex.pl
+  my $lex = eval readFile q(unicode/lex/lex.data);                              # As produced by unicode/lex/lex.pl
 
   my @p = my ($out, $size, $fail) = (Vq(out), Vq(size), Vq('fail'));
   my $opens = Vq(opens);
@@ -16172,21 +16204,25 @@ if (1) {                                                                        
 
   my $source = Rutf8 $$lex{sampleText};                                         # String to be parsed in utf8
   my $sourceLength = StringLength Vq(string, $source);
-     $sourceLength->outNL;
+     $sourceLength->outNL("Input  Length: ");
 
   ConvertUtf8ToUtf32 Vq(u8,$source), size8 => $sourceLength,
     (my $source32       = Vq(u32)),
     (my $sourceSize32   = Vq(size32)),
     (my $sourceLength32 = Vq(count));
 
-  $sourceSize32  ->outNL;
-  $sourceLength32->outNL;
+  $sourceSize32   ->outNL("Output Length: ");
+
+  PrintUtf32($sourceLength32, $source32);
 
   ok Assemble(debug => 1, eq => <<END);
-size: 0000 0000 0000 009F
-size32: 0000 0000 0000 027C
-count: 0000 0000 0000 0044
-END
+Input  Length: 0000 0000 0000 009F
+Output Length: 0000 0000 0000 027C
+0001 D5EE 0000 0020  0001 D44E 0001 D460  0001 D460 0001 D456  0001 D454 0001 D45B  0000 0020 0001 D5EF  0001 D5FD 0000 0020  0001 D429 0001 D425  0001 D42E 0001 D42C
+0000 0020 0001 D600  0001 D5F0 0000 0020  0000 27E2 0000 000A  0001 D5EE 0001 D5EE  0000 000A 0000 0020  0000 0020 0001 D44E  0001 D460 0001 D460  0001 D456 0001 D454
+0001 D45B 0000 000A  0000 0020 0000 0020  0000 0073 0000 006F  0000 006D 0000 0065  0000 000A 0000 000A  0000 0061 0000 0073  0000 0063 0000 0069  0000 0069 0000 000A
+0000 000A 0000 0074  0000 0065 0000 0078  0000 0074 0000 000A  0000 0020 0000 0020  0001 D429 0001 D425  0001 D42E 0001 D42C  0000 000A 0000 0020  0000 0020 0001 D5F0
+0001 D5F0 0000 0020  0000 27E2 0000 000A  END
  }
 
 #latest:
