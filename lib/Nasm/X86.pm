@@ -3445,17 +3445,17 @@ sub ClassifyRange($@)                                                           
   $s->call(@parameters);
  } # ClassifyRange
 
-sub ClassifyInRange(@)                                                          # Classify the utf32 characters in a block of memory of specified length using a range specification held in zmm0, zmm1 formatted in double words with each word in zmm1 having the classification in the highest 8 bits and with zmm0 and zmm1 having the utf32 character at the start (zmm0) and end (zmm1) of each range in the lower 21 bits.  The classification bits from the first matching range are copied into the high (unused) byte of each utf32 character in the block of memory.
+sub ClassifyInRange(@)                                                          # Character classification: classify the utf32 characters in a block of memory of specified length using a range specification held in zmm0, zmm1 formatted in double words with each word in zmm1 having the classification in the highest 8 bits and with zmm0 and zmm1 having the utf32 character at the start (zmm0) and end (zmm1) of each range in the lower 21 bits.  The classification bits from the first matching range are copied into the high (unused) byte of each utf32 character in the block of memory.
  {my (@parameters) = @_;                                                        # Parameters
   ClassifyRange(0, @_);
  }
 
-sub ClassifyWithInRange(@)                                                      # Classify the utf32 characters in a block of memory of specified length using a range specification held in zmm0, zmm1 formatted in double words with the classification range in the highest 8 bits of zmm0 and zmm1 and the utf32 character at the start (zmm0) and end (zmm1) of each range in the lower 21 bits.  The classification bits from the position within the first matching range are copied into the high (unused) byte of each utf32 character in the block of memory.
+sub ClassifyWithInRange(@)                                                      # Bracket classification: Classify the utf32 characters in a block of memory of specified length using a range specification held in zmm0, zmm1 formatted in double words with the classification range in the highest 8 bits of zmm0 and zmm1 and the utf32 character at the start (zmm0) and end (zmm1) of each range in the lower 21 bits.  The classification bits from the position within the first matching range are copied into the high (unused) byte of each utf32 character in the block of memory.
  {my (@parameters) = @_;                                                        # Parameters
   ClassifyRange(1, @_);
  }
 
-sub ClassifyWithInRangeAndSaveOffset(@)                                         # Classify the utf32 characters in a block of memory of specified length using a range specification held in zmm0, zmm1 formatted in double words with the classification code in the high byte of zmm1 and the offset of the first element in the range in the high byte of zmm0.  The lowest 21 bits of each double word in zmm0 and zmm1  contain the utf32 characters marking the start and end of each range. The classification bits from zmm1 for the first matching range are copied into the high byte of each utf32 character in the block of memory.  The offset in the range is copied into the lowest byte of each utf32 character in the bloxk of memory.  The middle two bytes are cleared.  The nett effect is to reduce 21 bits of utf32 to 16 bits of Nida.
+sub ClassifyWithInRangeAndSaveOffset(@)                                         # Alphabetic classification: classify the utf32 characters in a block of memory of specified length using a range specification held in zmm0, zmm1 formatted in double words with the classification code in the high byte of zmm1 and the offset of the first element in the range in the high byte of zmm0.  The lowest 21 bits of each double word in zmm0 and zmm1  contain the utf32 characters marking the start and end of each range. The classification bits from zmm1 for the first matching range are copied into the high byte of each utf32 character in the block of memory.  The offset in the range is copied into the lowest byte of each utf32 character in the bloxk of memory.  The middle two bytes are cleared.  The nett effect is to reduce 21 bits of utf32 to 16 bits of Nida.
  {my (@parameters) = @_;                                                        # Parameters
   ClassifyRange(2, @_);
  }
@@ -16050,7 +16050,7 @@ Found: 0000 0000 0000 0001
 END
  }
 
-latest:
+#latest:
 if (1) {                                                                        #TConvertUtf8ToUtf32
   my @p = my ($out, $size, $fail) = (Vq(out), Vq(size), Vq('fail'));
   my $opens = Vq(opens);
@@ -16220,7 +16220,7 @@ Convert some utf8 to utf32
 END
  }
 
-#latest:
+latest:
 if (1) {                                                                        # Parse some Nida code
   my $lexDataFile = qq(unicode/lex/lex.data);                                   # As produced by unicode/lex/lex.pl
      $lexDataFile = qq(lib/Nasm/$lexDataFile) unless $develop;
@@ -16248,9 +16248,17 @@ if (1) {                                                                        
   Vmovdqu8 zmm0, "[".Rd(join ', ', $lex->{lexicalLow} ->@*)."]";                # Each double is [31::24] Classification, [21::0] Utf32 start character
   Vmovdqu8 zmm1, "[".Rd(join ', ', $lex->{lexicalHigh}->@*)."]";                # Each double is [31::24] Range offset,   [21::0] Utf32 end character
 
-  ClassifyWithInRangeAndSaveOffset address=>$source32, size=>$sourceLength32;
+  ClassifyWithInRangeAndSaveOffset address=>$source32, size=>$sourceLength32;   # Alphabetic classification
 
   PrintOutStringNL "After classification into alphabet ranges";
+  PrintUtf32($sourceLength32, $source32);                                       # Print classified utf32
+
+  Vmovdqu8 zmm0, "[".Rd(join ', ', $lex->{bracketsLow} ->@*)."]";               # Each double is [31::24] Classification, [21::0] Utf32 start character
+  Vmovdqu8 zmm1, "[".Rd(join ', ', $lex->{bracketsHigh}->@*)."]";               # Each double is [31::24] Range offset,   [21::0] Utf32 end character
+
+  ClassifyWithInRange address=>$source32, size=>$sourceLength32;                # Bracket matching
+
+  PrintOutStringNL "After classification into brackets";
   PrintUtf32($sourceLength32, $source32);                                       # Print classified utf32
 
   ok Assemble(debug => 1, eq => <<END);
@@ -16267,6 +16275,13 @@ After classification into alphabet ranges
 0700 001A 0200 0020  0600 001A 0600 002C  0600 002C 0600 0022  0600 0020 0600 0027  0200 0020 0000 230A  0200 0020 0000 2329  0200 0020 0000 2768  0200 0020 0700 001B
 0700 0029 0200 0020  0000 2769 0200 0020  0000 232A 0200 0020  0200 0020 0400 0029  0400 0025 0400 002E  0400 002C 0200 0020  0000 276A 0200 0020  0700 002C 0700 001C
 0200 0020 0000 276B  0200 0020 0000 230B  0200 0020 0900 0000  0300 0000 0700 001A  0700 001A 0300 0000  0200 0020 0200 0020  0600 001A 0600 002C  0600 002C 0600 0022
+0600 0020 0600 0027  0300 0000 0200 0020  0200 0020 0200 0073  0200 006F 0200 006D  0200 0065 0300 0000  0300 0000 0200 0061  0200 0073 0200 0063  0200 0069 0200 0069
+0300 0000 0300 0000  0200 0074 0200 0065  0200 0078 0200 0074  0300 0000 0200 0020  0200 0020 0400 0029  0400 0025 0400 002E  0400 002C 0300 0000  0200 0020 0200 0020
+0700 001C 0700 001C  0200 0020 0900 0000
+After classification into brackets
+0700 001A 0200 0020  0600 001A 0600 002C  0600 002C 0600 0022  0600 0020 0600 0027  0200 0020 1200 230A  0200 0020 1400 2329  0200 0020 1600 2768  0200 0020 0700 001B
+0700 0029 0200 0020  1700 2769 0200 0020  1500 232A 0200 0020  0200 0020 0400 0029  0400 0025 0400 002E  0400 002C 0200 0020  1800 276A 0200 0020  0700 002C 0700 001C
+0200 0020 1900 276B  0200 0020 1300 230B  0200 0020 0900 0000  0300 0000 0700 001A  0700 001A 0300 0000  0200 0020 0200 0020  0600 001A 0600 002C  0600 002C 0600 0022
 0600 0020 0600 0027  0300 0000 0200 0020  0200 0020 0200 0073  0200 006F 0200 006D  0200 0065 0300 0000  0300 0000 0200 0061  0200 0073 0200 0063  0200 0069 0200 0069
 0300 0000 0300 0000  0200 0074 0200 0065  0200 0078 0200 0074  0300 0000 0200 0020  0200 0020 0400 0029  0400 0025 0400 002E  0400 002C 0300 0000  0200 0020 0200 0020
 0700 001C 0700 001C  0200 0020 0900 0000
