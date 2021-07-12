@@ -51,6 +51,7 @@ my $Lexicals = genHash("Nida::Lexicals",                                        
   semiColon        => LexicalConstant("semiColon",         9, 's'),             # Infix operator with left to right binding at priority 1
   NewLineSemiColon => LexicalConstant("NewLineSemiColon", 10),                  # A new line character that is also acting as a semi colon
   WhiteSpace       => LexicalConstant("WhiteSpace",       11),                  # White space between non ascii items
+  Term             => LexicalConstant("Term",             12),                  # Term in the parse tree
  );
 
 my $TreeTermLexicals = genHash("Nida::TreeTermLexicals",                        # Tree Term Lexical items embodied as Nida lexical items
