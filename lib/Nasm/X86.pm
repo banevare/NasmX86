@@ -3533,8 +3533,6 @@ sub MatchBrackets(@)                                                            
 sub PrintUtf32($$)                                                              # Print the specified number of utf32 characters at the specified address
  {my ($n, $m) = @_;                                                             # Variable: number of characters to print, variable: address of memory
   PushR my @save = (rax, r14, r15);
-PrintErrStringNL "MMMM";
-$m->errNL;
   my $count = $n / 2; my $count1 = $count - 1;
   $count->for(sub
    {my ($index, $start, $next, $end) = @_;
@@ -16227,9 +16225,8 @@ if (1) {                                                                        
 
   my $lex = eval readFile $lexDataFile;
 
-  my @p = my ($out, $size, $fail) = (Vq(out), Vq(size), Vq('fail'));
-  my $opens = Vq(opens);
-  my $class = Vq(class);
+  my @p = my (  $out,    $size,   $opens,       $fail) =
+             (Vq(out), Vq(size), Vq(opens),  Vq('fail'));
 
   my $source = Rutf8 $$lex{sampleText};                                         # String to be parsed in utf8
   my $sourceLength = StringLength Vq(string, $source);
@@ -16259,7 +16256,12 @@ if (1) {                                                                        
   ClassifyWithInRange address=>$source32, size=>$sourceLength32;                # Bracket matching
 
   PrintOutStringNL "After classification into brackets";
-  PrintUtf32($sourceLength32, $source32);                                       # Print classified utf32
+  PrintUtf32($sourceLength32, $source32);                                       # Print classified brackets
+
+  MatchBrackets address=>$source32, size=>$sourceLength32, $opens, $fail;       # Match brackets
+
+  PrintOutStringNL "After bracket matching";
+  PrintUtf32($sourceLength32, $source32);                                       # Print matched brackets
 
   ok Assemble(debug => 1, eq => <<END);
 Input  Length: 0000 0000 0000 00C0
@@ -16282,6 +16284,13 @@ After classification into brackets
 0700 001A 0200 0020  0600 001A 0600 002C  0600 002C 0600 0022  0600 0020 0600 0027  0200 0020 1200 230A  0200 0020 1400 2329  0200 0020 1600 2768  0200 0020 0700 001B
 0700 0029 0200 0020  1700 2769 0200 0020  1500 232A 0200 0020  0200 0020 0400 0029  0400 0025 0400 002E  0400 002C 0200 0020  1800 276A 0200 0020  0700 002C 0700 001C
 0200 0020 1900 276B  0200 0020 1300 230B  0200 0020 0900 0000  0300 0000 0700 001A  0700 001A 0300 0000  0200 0020 0200 0020  0600 001A 0600 002C  0600 002C 0600 0022
+0600 0020 0600 0027  0300 0000 0200 0020  0200 0020 0200 0073  0200 006F 0200 006D  0200 0065 0300 0000  0300 0000 0200 0061  0200 0073 0200 0063  0200 0069 0200 0069
+0300 0000 0300 0000  0200 0074 0200 0065  0200 0078 0200 0074  0300 0000 0200 0020  0200 0020 0400 0029  0400 0025 0400 002E  0400 002C 0300 0000  0200 0020 0200 0020
+0700 001C 0700 001C  0200 0020 0900 0000
+After bracket matching
+0700 001A 0200 0020  0600 001A 0600 002C  0600 002C 0600 0022  0600 0020 0600 0027  0200 0020 1200 0023  0200 0020 1400 0014  0200 0020 1600 0012  0200 0020 0700 001B
+0700 0029 0200 0020  1700 000D 0200 0020  1500 000B 0200 0020  0200 0020 0400 0029  0400 0025 0400 002E  0400 002C 0200 0020  1800 0021 0200 0020  0700 002C 0700 001C
+0200 0020 1900 001C  0200 0020 1300 0009  0200 0020 0900 0000  0300 0000 0700 001A  0700 001A 0300 0000  0200 0020 0200 0020  0600 001A 0600 002C  0600 002C 0600 0022
 0600 0020 0600 0027  0300 0000 0200 0020  0200 0020 0200 0073  0200 006F 0200 006D  0200 0065 0300 0000  0300 0000 0200 0061  0200 0073 0200 0063  0200 0069 0200 0069
 0300 0000 0300 0000  0200 0074 0200 0065  0200 0078 0200 0074  0300 0000 0200 0020  0200 0020 0400 0029  0400 0025 0400 002E  0400 002C 0300 0000  0200 0020 0200 0020
 0700 001C 0700 001C  0200 0020 0900 0000
