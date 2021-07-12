@@ -65,9 +65,13 @@ my $TreeTermLexicals = genHash("Nida::TreeTermLexicals",                        
  );
 
 my $Tables = genHash("Nida::Lexical::Tables",                                   # Tables used to parse lexical items
-  alphabets        => undef,                                                    # Alphabets selected from unciode database
+  alphabets        => undef,                                                    # Alphabets selected from uncode database
+  alphabetRanges   => undef,                                                    # Number of alphabet ranges
+  brackets         => undef,                                                    # Number of brackets
   bracketsHigh     => undef,                                                    # High zmm for closing brackets
   bracketsLow      => undef,                                                    # Low  zmm for opening brackets
+  bracketsOpen     => undef,                                                    # Open brackets
+  bracketsClose    => undef,                                                    # Close brackets
   lexicalAlpha     => undef,                                                    # The alphabets assigned to each lexical item
   lexicalHigh      => undef,                                                    # High zmm for lexical items
   lexicalLow       => undef,                                                    # Low  zmm for lexical items
@@ -192,7 +196,8 @@ sub alphabets                                                                   
   push @zmm, ["semiColon",    $Lexicals->semiColon->number,    0x27E2, 0x27E2];
   @zmm = sort {$$a[3] <=> $$b[3]} @zmm;
 
-  lll "Alphabet Ranges: ", scalar(@zmm);
+  $Tables->alphabetRanges = scalar(@zmm);                                       # Alphabet ranges
+  lll "Alphabet Ranges: ",  scalar(@zmm);
   say STDERR dump(\@zmm);
 
   if (1)                                                                        # Write zmm load sequence
@@ -204,6 +209,9 @@ sub alphabets                                                                   
       push @h, (($l    <<24) + $$r[3]);
       $r{$$r[0]} += ($$r[3] - $$r[2]) + 1;                                      # Extend the base of the current range
      }
+
+    push @l, 0 while @l < 16;                                                   # Clear remaining ranges
+    push @h, 0 while @h < 16;
     my $l = join ', ', map {sprintf("0x%08x", $_)} @l;                          # Format zmm load sequence
     my $h = join ', ', map {sprintf("0x%08x", $_)} @h;
     say STDERR "Lexical Low / Lexical High:\n$l\n$h";
@@ -275,6 +283,9 @@ sub brackets                                                                    
        {lll "Bracket pair $i", $o[$i], $c[$i], ord($o[$i]), ord($c[$i]);
        }
      }
+
+    $Tables->bracketsOpen  = [@o];                                              # Brackets list
+    $Tables->bracketsClose = [@c];
    }
 
   my @l; my @h;
@@ -299,6 +310,7 @@ sub brackets                                                                    
    }
   push @l, 0 while @l < 16;
   push @h, 0 while @h < 16;
+  $Tables->brackets = @l;                                                       # Number of brackets
   lll "Bracket ranges: ", scalar(@l);
 
   my $L = join '', join(', ',  @l);
@@ -389,9 +401,11 @@ sub translateSomeText($)                                                        
    }
 
   for my $w(@w)
-   {my $t = substr($w, 0, 1);
+   {my $t = substr($w, 0, 1); my $r = substr($w, 1);
     if ($t =~ m(\A(a|d|v)\Z)) {translate $w}
     elsif ($t eq 's')         {$T .= $Tables->alphabets->{semiColon}}
+    elsif ($t eq 'b')         {$T .= $Tables->bracketsOpen ->[$r]}
+    elsif ($t eq 'B')         {$T .= $Tables->bracketsClose->[$r]}
     elsif ($t =~ m(\s))       {$T .= $w}
     elsif ($t eq 'A')         {$T .= substr($w, 1) =~ s(-) (\n)gsr}
     else {confess "Invalid lexical item $s"}
@@ -415,7 +429,7 @@ alphabets;                                                                      
 brackets;                                                                       # Locate brackets
 transitions;                                                                    # Transitions table
 translateSomeText <<END;                                                        # Translate some text into Nida
-va aassign vbp dplus vsc s
+va aassign b1 b2 b3 vbp B3 B2  dplus b4 vsc B4 B1 s
 vaa
   aassign
   Asome--ascii--text
