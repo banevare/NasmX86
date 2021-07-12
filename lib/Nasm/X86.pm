@@ -3571,6 +3571,17 @@ sub NidaLexType($)                                                              
   IfGe {And $r, 1};                                                             # Brackets
  }
 
+sub Nida_test_b($)                                                              #P Check that we have an opening bracket
+ {my ($item) = @_;                                                              # Register to check
+  Cmp $item, 0x0;
+ }
+
+sub Nida_test_B($)                                                              #P Check that we have a closing bracket
+ {my ($item) = @_;                                                              # Register to check
+  Cmp $item, 0x1;
+ }
+
+
 =pod
 sub parse(@)                                                                    # Parse an expression.
  {my (@expression) = @_;                                                        # Expression to parse
@@ -16404,14 +16415,14 @@ END
  }
 
 latest:
-if (1) {                                                                        # Parse some Nida code
+if (1) {                                                                        # Parse some code
   my $lexDataFile = qq(unicode/lex/lex.data);                                   # As produced by unicode/lex/lex.pl
      $lexDataFile = qq(lib/Nasm/$lexDataFile) unless $develop;
 
-  my $lex = eval readFile $lexDataFile;
+  my $lex = eval readFile $lexDataFile;                                         # Load lexical definitions
 
-  my @p = my (  $out,    $size,   $opens,       $fail) =
-             (Vq(out), Vq(size), Vq(opens),  Vq('fail'));
+  my @p = my (  $out,    $size,   $opens,      $fail) =                         # Variables
+             (Vq(out), Vq(size), Vq(opens), Vq('fail'));
 
   my $source = Rutf8 $$lex{sampleText};                                         # String to be parsed in utf8
   my $sourceLength = StringLength Vq(string, $source);
@@ -16422,7 +16433,7 @@ if (1) {                                                                        
     (my $sourceSize32   = Vq(size32)),
     (my $sourceLength32 = Vq(count));
 
-  $sourceSize32   ->outNL("Output Length: ");
+  $sourceSize32   ->outNL("Output Length: ");                                   # Write output length
 
   PrintOutStringNL "After conversion from utf8 to utf32";
   PrintUtf32($sourceLength32, $source32);                                       # Print utf32
