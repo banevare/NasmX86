@@ -3571,10 +3571,12 @@ sub NidaLexType($)                                                              
   IfGe {And $r, 1};                                                             # Brackets
  }
 
-sub Nida_test_b($)                                                              #P Check that we have an opening bracket
- {my ($item) = @_;                                                              # Register to check
+sub Nida_test_b(&$)                                                             #P Check that we have an opening bracket
+ {my ($sub, $item) = @_;                                                        # Sub defining action to be taken on a match, register to check,
   Cmp $item, 0x0;
+  IfEq {};
  }
+
 
 sub Nida_test_B($)                                                              #P Check that we have a closing bracket
  {my ($item) = @_;                                                              # Register to check
@@ -16489,7 +16491,7 @@ After bracket matching
 0200 0020 1900 001C  0200 0020 1300 0009  0200 0020 0900 0000  0300 0000 0700 001A  0700 001A 0300 0000  0200 0020 0200 0020  0600 001A 0600 002C  0600 002C 0600 0022
 0600 0020 0600 0027  0300 0000 0200 0020  0200 0020 0200 0073  0200 006F 0200 006D  0200 0065 0300 0000  0300 0000 0200 0061  0200 0073 0200 0063  0200 0069 0200 0069
 0300 0000 0300 0000  0200 0074 0200 0065  0200 0078 0200 0074  0300 0000 0200 0020  0200 0020 0400 0029  0400 0025 0400 002E  0400 002C 0300 0000  0200 0020 0200 0020
-0700 001C 0700 001C  0200 0020 0900 0010
+0700 001C 0700 001C  0200 0020 0900 0000
 END
  }
 
