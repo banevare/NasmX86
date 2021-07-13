@@ -446,12 +446,38 @@ sub recognizers()                                                               
     my $n = sprintf("0x%x", $Tables->lexicals->{$v}->number);
     push @t, <<END;
 sub Nida_test_$c(&\$)                                                             #P Check that we have $v
- {my (\$sub, \$item) = \@_;                                                        # Sub defining action to be taken on a match, register to check,
-  Cmp \$item, $n;
+ {my (\$sub, \$register) = \@_;                                                    # Sub defining action to be taken on a match, register to check,
+  Cmp \$register, $n;
   IfEq {\$sub->()};
  }
 END
    }
+
+  my sub check($)                                                               # Check for one of several possible lexical items
+   {my ($c) = @_;                                                               # Items to check for
+    push @t, <<END;
+sub Nida_test_$c(&\$)                                                             #P Check that we have $c
+ {my (\$sub, \$register) = \@_;                                                    # Sub defining action to be taken on a match, register to check,
+  my \$end = Label;
+END
+    for my $C(split //, $c)
+     {my $v = $l{$C};                                                             # Full name of lexical item
+      my $n = sprintf("0x%x", $Tables->lexicals->{$v}->number);
+      push @t, <<END;
+  Cmp \$register, $n;
+  IfEq {\$sub->(); Jmp \$end};
+END
+     }
+    push @t, <<END;
+  SetLabel \$end;
+ }
+END
+   }
+
+  check('ads');
+  check('bpsv');
+  check('sb');
+
   join "\n", @t                                                                 # Lexical checking
  }
 
