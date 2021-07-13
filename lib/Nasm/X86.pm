@@ -24,6 +24,7 @@ my @text;                                                                       
 my @extern;                                                                     # External symbols imports for linking with C libraries
 my @link;                                                                       # Specify libraries which to link against in the final assembly stage
 my $interpreter = q(-I /usr/lib64/ld-linux-x86-64.so.2);                        # The ld command needs an interpreter if we are linking with C.
+my $develop   = -e q(/home/phil/);                                              # Developing
 
 our $stdin  = 0;                                                                # File descriptor for standard input
 our $stdout = 1;                                                                # File descriptor for standard output
@@ -3571,180 +3572,15 @@ sub NidaLexType($)                                                              
   IfGe {And $r, 1};                                                             # Brackets
  }
 
-sub Nida_test_b(&$)                                                             #P Check that we have an opening bracket
- {my ($sub, $item) = @_;                                                        # Sub defining action to be taken on a match, register to check,
-  Cmp $item, 0x0;
-  IfEq {};
+my $Nida_Lexical_Tables;                                                        # Lexical table definitions
+if (1)                                                                          # Load lexical tables
+ {my $f = qq(unicode/lex/lex.data);                                             # As produced by unicode/lex/lex.pl
+     $f = qq(lib/Nasm/$f) unless $develop;
+
+  my $l = eval readFile $f;                                                     # Load lexical definitions
+  confess "$@\n" if $@;
+  $Nida_Lexical_Tables = $l;
  }
-
-
-sub Nida_test_B($)                                                              #P Check that we have a closing bracket
- {my ($item) = @_;                                                              # Register to check
-  Cmp $item, 0x1;
- }
-
-
-=pod
-sub parse(@)                                                                    # Parse an expression.
- {my (@expression) = @_;                                                        # Expression to parse
-
-  my @s;                                                                        # Stack
-
-  my sub test($$)                                                               # Check the type of an item in the stack
-   {my ($item, $type) = @_;                                                     # Item to test, expected type of item
-    index($type, ref($item) ? 't' : substr $item, 0, 1) > -1                    # Term
-   }
-
-  my sub reduce()                                                               # Convert the longest possible expression on top of the stack into a term
-   {#lll "TTTT ", scalar(@s), "\n", dump([@s]);
-
-    if (@s >= 3)                                                                # Go for term infix-operator term
-     {my ($r, $d, $l) = reverse @s;
-      if (test($l, 't') and test($r, 't') and test($d, 'ads'))                  # Parse out infix operator expression
-       {pop  @s for 1..3;
-        push @s, new $d, $l, $r;
-        return 1;
-       }
-      if (test($l, 'b') and test($r, 'B') and test($d, 't'))                    # Parse parenthesized term
-       {pop  @s for 1..3;
-        push @s, $d;
-        return 1;
-       }
-     }
-
-    if (@s >= 2)                                                                # Convert an empty pair of parentheses to an empty term
-     {my ($r, $l) = reverse @s;
-      if (test($l, 'b')  and test($r, 'B'))                                     # Empty pair of parentheses
-       {pop  @s for 1..2;
-        push @s, new 'empty1';
-        return 1;
-       }
-      if (test($l,'s') and test($r, 'B'))                                       # Semi-colon, close implies remove unneeded semi
-       {pop  @s for 1..2;
-        push @s, $r;
-        return 1;
-       }
-      if (test($l,'p') and test($r, 't'))                                       # Prefix, term
-       {pop  @s for 1..2;
-        push @s, new $l, $r;
-        return 1;
-       }
-     }
-
-    undef                                                                       # No move made
-   };
-
-  for my $i(keys @expression)                                                   # Each input element
-   {my $e = $expression[$i];
-
-    if (!@s)                                                                    # Empty stack
-     {my $E = expandElement $e;
-      die <<END =~ s(\n) ( )gsr =~ s(\s+\Z) (\n)gsr if !test($e, 'bpsv');
-Expression must start with 'opening parenthesis', 'prefix
-operator', 'semi-colon' or 'variable', not $E.
-END
-      if    (test($e, 'v'))                                                     # Single variable
-       {@s = (new $e);
-       }
-      elsif (test($e, 's'))                                                     # Semi
-       {@s = (new('empty4'), $e);
-       }
-      else                                                                      # Not semi or variable
-       {@s = ($e);
-       }
-      next;
-     }
-
-    my sub check($)                                                             # Check that the top of the stack has one of the specified elements
-     {my ($types) = @_;                                                         # Possible types to match
-      return 1 if index($types, type($s[-1])) > -1;                             # Check type allowed
-      unexpected $s[-1], $e, $i;                                                # Complain about an unexpected type
-     }
-
-    my sub prev($)                                                              # Check that the second item on the stack contains one of the expected items
-     {my ($types) = @_;                                                         # Possible types to match
-      return undef unless @s >= 2;                                              # Stack not deep enough so cannot contain any of the specified types
-      return 1 if index($types, type($s[-2])) > -1;
-      undef
-     }
-
-    my %action =                                                                # Action on each lexical item
-     (a => sub                                                                  # Assign
-       {check("t");
-        push @s, $e;
-       },
-
-      b => sub                                                                  # Open
-       {check("bdps");
-        push @s, $e;
-       },
-
-      B => sub                                                                  # Closing parenthesis
-       {check("bst");
-        1 while reduce;
-        push @s, $e;
-        1 while reduce;
-        check("bst");
-       },
-
-      d => sub                                                                  # Infix but not assign or semi-colon
-       {check("t");
-        push @s, $e;
-       },
-
-      p => sub                                                                  # Prefix
-       {check("bdp");
-        push @s, $e;
-       },
-
-      q => sub                                                                  # Post fix
-       {check("t");
-        if (test($s[-1], 't'))                                                  # Post fix operator applied to a term
-         {my $p = pop @s;
-          push @s, new $e, $p;
-         }
-       },
-
-      s => sub                                                                  # Semi colon
-       {check("bst");
-        push @s, new 'empty5' if test($s[-1], "sb");                            # Insert an empty element between two consecutive semicolons
-        1 while reduce;
-        push @s, $e;
-       },
-
-      v => sub                                                                  # Variable
-       {check("abdps");
-        push @s, new $e;
-        while(prev("p"))
-         {my ($l, $r) = splice @s, -2;
-          push @s, new $l, $r;
-         }
-       },
-     );
-
-    $action{substr($e, 0, 1)}->();                                              # Dispatch the action associated with the lexical item
-   }
-
-  pop @s while @s > 1 and $s[-1] =~ m(s);                                       # Remove any trailing semi colons
-  1 while reduce;                                                               # Final reductions
-
-  if (@s != 1)                                                                  # Incomplete expression
-   {my $E = expected $expression[-1];
-    die "Incomplete expression. $E.\n";
-   }
-
-  if (index($last,   type $expression[-1]) == -1)                               # Incomplete expression
-   {my $C = expandElement $expression[-1];
-    my $E = expected      $expression[-1];
-    die <<END;
-$E after final $C.
-END
-   }
-
-  $s[0]                                                                         # The resulting parse tree
- } # parse
-
-=cut
 
 #D1 Short Strings                                                               # Operations on Short Strings
 
@@ -13811,7 +13647,6 @@ use Test::Most;
 
 bail_on_fail;
 
-my $develop   = -e q(/home/phil/);                                              # Developing
 my $localTest = ((caller(1))[0]//'Nasm::X86') eq "Nasm::X86";                   # Local testing mode
 
 Test::More->builder->output("/dev/null") if $localTest;                         # Reduce number of confirmation messages during testing
@@ -16421,7 +16256,7 @@ if (1) {                                                                        
   my $lexDataFile = qq(unicode/lex/lex.data);                                   # As produced by unicode/lex/lex.pl
      $lexDataFile = qq(lib/Nasm/$lexDataFile) unless $develop;
 
-  my $lex = eval readFile $lexDataFile;                                         # Load lexical definitions
+  my $lex = $Nida_Lexical_Tables;                                               # Load lexical definitions
 
   my @p = my (  $out,    $size,   $opens,      $fail) =                         # Variables
              (Vq(out), Vq(size), Vq(opens), Vq('fail'));
