@@ -1,49 +1,97 @@
 sub Nida_test_B(&$)                                                             #P Check that we have CloseBracket
- {my ($sub, $item) = @_;                                                        # Sub defining action to be taken on a match, register to check,
-  Cmp $item, 0x1;
+ {my ($sub, $register) = @_;                                                    # Sub defining action to be taken on a match, register to check,
+  Cmp $register, 0x1;
   IfEq {$sub->()};
  }
 
 sub Nida_test_a(&$)                                                             #P Check that we have assign
- {my ($sub, $item) = @_;                                                        # Sub defining action to be taken on a match, register to check,
-  Cmp $item, 0x6;
+ {my ($sub, $register) = @_;                                                    # Sub defining action to be taken on a match, register to check,
+  Cmp $register, 0x6;
   IfEq {$sub->()};
  }
 
 sub Nida_test_b(&$)                                                             #P Check that we have OpenBracket
- {my ($sub, $item) = @_;                                                        # Sub defining action to be taken on a match, register to check,
-  Cmp $item, 0x0;
+ {my ($sub, $register) = @_;                                                    # Sub defining action to be taken on a match, register to check,
+  Cmp $register, 0x0;
   IfEq {$sub->()};
  }
 
 sub Nida_test_d(&$)                                                             #P Check that we have dyad
- {my ($sub, $item) = @_;                                                        # Sub defining action to be taken on a match, register to check,
-  Cmp $item, 0x4;
+ {my ($sub, $register) = @_;                                                    # Sub defining action to be taken on a match, register to check,
+  Cmp $register, 0x4;
   IfEq {$sub->()};
  }
 
 sub Nida_test_p(&$)                                                             #P Check that we have prefix
- {my ($sub, $item) = @_;                                                        # Sub defining action to be taken on a match, register to check,
-  Cmp $item, 0x5;
+ {my ($sub, $register) = @_;                                                    # Sub defining action to be taken on a match, register to check,
+  Cmp $register, 0x5;
   IfEq {$sub->()};
  }
 
 sub Nida_test_q(&$)                                                             #P Check that we have suffix
- {my ($sub, $item) = @_;                                                        # Sub defining action to be taken on a match, register to check,
-  Cmp $item, 0x8;
+ {my ($sub, $register) = @_;                                                    # Sub defining action to be taken on a match, register to check,
+  Cmp $register, 0x8;
   IfEq {$sub->()};
  }
 
 sub Nida_test_s(&$)                                                             #P Check that we have semiColon
- {my ($sub, $item) = @_;                                                        # Sub defining action to be taken on a match, register to check,
-  Cmp $item, 0x9;
+ {my ($sub, $register) = @_;                                                    # Sub defining action to be taken on a match, register to check,
+  Cmp $register, 0x9;
   IfEq {$sub->()};
  }
 
 sub Nida_test_v(&$)                                                             #P Check that we have variable
- {my ($sub, $item) = @_;                                                        # Sub defining action to be taken on a match, register to check,
-  Cmp $item, 0x7;
+ {my ($sub, $register) = @_;                                                    # Sub defining action to be taken on a match, register to check,
+  Cmp $register, 0x7;
   IfEq {$sub->()};
+ }
+
+sub Nida_test_ads(&$)                                                             #P Check that we have ads
+ {my ($sub, $register) = @_;                                                    # Sub defining action to be taken on a match, register to check,
+  my $end = Label;
+
+  Cmp $register, 0x6;
+  IfEq {$sub->(); Jmp $end};
+
+  Cmp $register, 0x4;
+  IfEq {$sub->(); Jmp $end};
+
+  Cmp $register, 0x9;
+  IfEq {$sub->(); Jmp $end};
+
+  SetLabel $end;
+ }
+
+sub Nida_test_bpsv(&$)                                                             #P Check that we have bpsv
+ {my ($sub, $register) = @_;                                                    # Sub defining action to be taken on a match, register to check,
+  my $end = Label;
+
+  Cmp $register, 0x0;
+  IfEq {$sub->(); Jmp $end};
+
+  Cmp $register, 0x5;
+  IfEq {$sub->(); Jmp $end};
+
+  Cmp $register, 0x9;
+  IfEq {$sub->(); Jmp $end};
+
+  Cmp $register, 0x7;
+  IfEq {$sub->(); Jmp $end};
+
+  SetLabel $end;
+ }
+
+sub Nida_test_sb(&$)                                                             #P Check that we have sb
+ {my ($sub, $register) = @_;                                                    # Sub defining action to be taken on a match, register to check,
+  my $end = Label;
+
+  Cmp $register, 0x9;
+  IfEq {$sub->(); Jmp $end};
+
+  Cmp $register, 0x0;
+  IfEq {$sub->(); Jmp $end};
+
+  SetLabel $end;
  }
 
 bless({
@@ -263,13 +311,6 @@ bless({
                       }, "Nida::Lexicals"),
   sampleText       => "\x{1D5EE} \x{1D44E}\x{1D460}\x{1D460}\x{1D456}\x{1D454}\x{1D45B} \x{230A} \x{2329} \x{2768} \x{1D5EF}\x{1D5FD} \x{2769} \x{232A}  \x{1D429}\x{1D425}\x{1D42E}\x{1D42C} \x{276A} \x{1D600}\x{1D5F0} \x{276B} \x{230B} \x{27E2}\n\x{1D5EE}\x{1D5EE}\n  \x{1D44E}\x{1D460}\x{1D460}\x{1D456}\x{1D454}\x{1D45B}\n  some\n\nascii\n\ntext\n  \x{1D429}\x{1D425}\x{1D42E}\x{1D42C}\n  \x{1D5F0}\x{1D5F0} \x{27E2}\n",
   transitions      => [
-                        89,
-                        9,
-                        57,
-                        25,
-                        121,
-                        153,
-                        41,
                         97,
                         129,
                         65,
@@ -280,49 +321,56 @@ bless({
                         103,
                         151,
                         23,
-                        146,
-                        18,
-                        130,
-                        66,
-                        98,
-                        80,
-                        0,
-                        48,
-                        144,
-                        112,
-                        16,
-                        32,
-                        37,
-                        53,
-                        85,
-                        5,
-                        117,
-                        84,
-                        4,
-                        116,
-                        36,
-                        52,
-                        100,
-                        19,
-                        147,
-                        99,
-                        131,
-                        67,
                         152,
                         24,
                         72,
                         136,
                         104,
-                        38,
+                        117,
+                        53,
+                        37,
+                        85,
+                        5,
+                        98,
+                        66,
+                        130,
+                        18,
+                        146,
+                        32,
+                        80,
+                        144,
+                        0,
+                        48,
+                        16,
+                        112,
+                        57,
+                        89,
+                        41,
+                        9,
+                        153,
+                        121,
+                        25,
+                        19,
+                        147,
+                        99,
+                        67,
+                        131,
+                        118,
                         54,
                         86,
+                        38,
                         6,
-                        118,
+                        116,
+                        4,
+                        36,
+                        84,
+                        52,
+                        100,
                       ],
   treeTermLexicals => bless({
                         a => "assign",
-                        b => "OpenBracket",
                         B => "CloseBracket",
+                        b => "OpenBracket",
                         d => "dyad",
                         p => "prefix",
                         q => "suffix",
