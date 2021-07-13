@@ -438,7 +438,28 @@ vaa
   vcc s
 END
 
-dumpFile($lexicalsFile, $Tables);                                               # Write lexical tables
+sub recognizers()                                                               # Write lexical check routines
+ {my @t;
+  my %l = $Tables->treeTermLexicals->%*;
+  for my $c(sort keys %l)                                                       # Each lexical item
+   {my $v = $l{$c};                                                             # Full name of lexical item
+    my $n = sprintf("0x%x", $Tables->lexicals->{$v}->number);
+    push @t, <<END;
+sub Nida_test_$c(&\$)                                                             #P Check that we have $v
+ {my (\$sub, \$item) = \@_;                                                        # Sub defining action to be taken on a match, register to check,
+  Cmp \$item, $n;
+  IfEq {\$sub->()};
+ }
+END
+   }
+  join "\n", @t                                                                 # Lexical checking
+ }
+
+if (1)                                                                          # Write results
+ {push my @t, recognizers;
+  push @t,  dump($Tables);
+  owf($lexicalsFile, join "\n", @t);
+ }
 
 __DATA__
 CIRCLED LATIN LETTER  : ⒶⒷⒸⒹⒺⒻⒼⒽⒾⒿⓀⓁⓂⓃⓄⓅⓆⓇⓈⓉⓊⓋⓌⓍⓎⓏⓐⓑⓒⓓⓔⓕⓖⓗⓘⓙⓚⓛⓜⓝⓞⓟⓠⓡⓢⓣⓤⓥⓦⓧⓨⓩ
