@@ -3584,27 +3584,31 @@ sub NidaLexType($)                                                              
    }
   sub
    {my %l = $Nida_Lexical_Tables->{lexicals}->%*;
-    Cmp       $r, $l{Ascii}   ->{number};                                       # Ascii is a type of variable
+    Cmp       $r, $l{Ascii}   {number};                                         # Ascii is a type of variable
     KeepFree $r;
-    IfEq {Mov $r, $l{variable}->{number}};
+    IfEq {Mov $r, $l{variable}{number}};
    };
  }
 
-sub ClassIfyWhiteSpace($$)        ###DEV                                              # A blank is white space unless it appears between two blocks of ascii. A new line acts a semi colon if it appears immediately after a variable.
+sub ClassIfyWhiteSpace($$)        ###DEV                                        # A blank is white space unless it appears between two blocks of ascii. A new line acts a semi colon if it appears immediately after a variable.
  {my ($n, $m) = @_;                                                             # Variable: number of characters to print, variable: address of memory
-  PushR my @save = (rax, r14, r15);
-  $n->for(sub
+  PushR my @save = (rax, r10, r11, r12, r13, r14, r15);
+  Mov r10, -1;                                                                  # The last item seen -1 - at the start
+  $n->for(sub                                                                   # Each character  in expression
    {my ($index, $start, $next, $end) = @_;
     my $a = $m + $index * 4;
     $a->setReg(r15);
-    KeepFree r15;
-    Mov r15d, "[r15]";
-    NidaLexType r15;                                                            # Classify the lexical item
-    Mov r14, rax;
-    Mov r15, rax;
-    Shl r15, 32;
-    Shr r14, 32;
-    Or r14,r15;
+    Mov r14d, "[r15]";                                                          # Current character
+    NidaLexType r14;                                                            # Classify lexical type of current item
+    Cmp r10, $Nida_Lexical_Tables->{lexicals}{variable};                        # Test last lexical item
+    IfEq                                                                        # Last item was a variable
+     {Cmp r14,   $Nida_Lexical_Tables->{lexicals}{NewLine};
+      IfEq                                                                      # Current item is new line
+       {Mov r13, $Nida_Lexical_Tables->{lexicals}{semiColon};
+        Mov "[r15+3]", r14b;                                                    # Make a current item a semicolon as the new line immediately follows a variable
+       };
+     };
+    Mov r10, r14;                                                               # New last item
    });
   PopR @save;
  }
