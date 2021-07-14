@@ -3584,34 +3584,53 @@ sub NidaLexType($)                                                              
    }
   sub
    {my %l = $Nida_Lexical_Tables->{lexicals}->%*;
-    Cmp       $r, $l{Ascii}   {number};                                         # Ascii is a type of variable
-    KeepFree $r;
-    IfEq {Mov $r, $l{variable}{number}};
+
+    Cmp        $r, $l{Ascii}{number};                                           # Ascii is a type of variable
+    IfEq
+     {KeepFree $r;
+      Mov      $r, $l{variable}{number};
+     }
+    sub
+     {Cmp      $r, $l{NewLineSemiColon}{number};                                # New line semicolon is a type of semi colon
+      IfEq
+       {KeepFree $r;
+        Mov $r, $l{semiColon}{number};
+       };
+     };
    };
  }
 
-sub ClassIfyWhiteSpace($$)        ###DEV                                        # A blank is white space unless it appears between two blocks of ascii. A new line acts a semi colon if it appears immediately after a variable.
- {my ($n, $m) = @_;                                                             # Variable: number of characters to print, variable: address of memory
-  PushR my @save = (rax, r10, r11, r12, r13, r14, r15);
-  Mov r10, -1;                                                                  # The last item seen -1 - at the start
-  $n->for(sub                                                                   # Each character  in expression
-   {my ($index, $start, $next, $end) = @_;
-    my $a = $m + $index * 4;
-    $a->setReg(r15);
-    Mov r14d, "[r15]";                                                          # Current character
-    NidaLexType r14;                                                            # Classify lexical type of current item
-    Cmp r10, $Nida_Lexical_Tables->{lexicals}{variable};                        # Test last lexical item
-    IfEq                                                                        # Last item was a variable
-     {Cmp r14,   $Nida_Lexical_Tables->{lexicals}{NewLine};
-      IfEq                                                                      # Current item is new line
-       {Mov r13, $Nida_Lexical_Tables->{lexicals}{semiColon};
-        Mov "[r15+3]", r14b;                                                    # Make a current item a semicolon as the new line immediately follows a variable
+sub ClassIfyWhiteSpace(@)                                                       # A blank is white space unless it appears between two blocks of ascii. A new line acts a semi colon if it appears immediately after a variable.
+ {my (@parameters) = @_;                                                        # Parameters
+  @_ >= 1 or confess;
+
+  my $s = Subroutine
+   {my ($p) = @_;                                                               # Parameters
+    PushR my @save = (rax, r10, r11, r12, r13, r14, r15);
+    Mov r10, -1;                                                                # The last item seen -1 at the start which is knonw not to be nay lexical item
+
+    $$p{size}->for(sub                                                          # Each character  in expression
+     {my ($index, $start, $next, $end) = @_;
+      my $a = $$p{address} + $index * 4;
+      $a->setReg(r15);
+      Mov r14d, "[r15]";                                                        # Current character
+      NidaLexType r14;                                                          # Classify lexical type of current item
+      Cmp r10, $Nida_Lexical_Tables->{lexicals}{variable}{number};              # Test last lexical item
+      IfEq                                                                      # Last item was a variable
+       {Cmp r14,   $Nida_Lexical_Tables->{lexicals}{NewLine}{number};
+        IfEq                                                                    # Current item is new line
+         {Mov r13, $Nida_Lexical_Tables->{lexicals}{NewLineSemiColon}{number};
+          Mov "[r15+3]", r13b;                                                  # Make the current item a new line semicolon as the new line immediately follows a variable
+         };
        };
-     };
-    Mov r10, r14;                                                               # New last item
-   });
-  PopR @save;
- }
+      KeepFree r10;
+      Mov r10, r14;                                                             # New last item
+     });
+    PopR @save;
+   } in  => {address => 3, size => 3}; #, out => {fail => 3};
+
+  $s->call(@parameters);
+ } # ClassIfyWhiteSpace
 
 #D1 Short Strings                                                               # Operations on Short Strings
 
@@ -16269,16 +16288,18 @@ Convert some utf8 to utf32
 END
  }
 
-latest:
+#latest:
 if (1) {                                                                        # Check conversion of classification to lexical item
-  Mov r10, 0x12FFFFFF; NidaLexType r10
-  Mov r11, 0x13FFFFFF; NidaLexType r11
+  Mov r10, 0x12FFFFFF; NidaLexType r10                                          # Open bracket
+  Mov r11, 0x13FFFFFF; NidaLexType r11                                          # Close bracket
   Mov r12, 0x02FFFFFF; NidaLexType r12;                                         # Ascii is a sub class of variable because we could assign it to a variable and then put the variable in place of the ascii to get the same effect.
-  PrintOutRegisterInHex r10, r11, r12;
+  Mov r13, 0x0AFFFFFF; NidaLexType r13;                                         # New line semi colon is a type of semi colon
+  PrintOutRegisterInHex r10, r11, r12, r13;
   ok Assemble(debug => 1, eq => <<END);
    r10: 0000 0000 0000 0000
    r11: 0000 0000 0000 0001
    r12: 0000 0000 0000 0007
+   r13: 0000 0000 0000 0009
 END
  }
 
@@ -16327,6 +16348,11 @@ if (1) {                                                                        
   PrintOutStringNL "After bracket matching";
   PrintUtf32($sourceLength32, $source32);                                       # Print matched brackets
 
+  ClassIfyWhiteSpace address=>$source32, size=>$sourceLength32;                 # Classify white space
+
+  PrintOutStringNL "After white-space classification";
+  PrintUtf32($sourceLength32, $source32);                                       # Print matched brackets
+
   ok Assemble(debug => 1, eq => <<END);
 Input  Length: 0000 0000 0000 00C0
 Output Length: 0000 0000 0000 0300
@@ -16357,6 +16383,13 @@ After bracket matching
 0200 0020 1900 001C  0200 0020 1300 0009  0200 0020 0900 0000  0300 0000 0700 001A  0700 001A 0300 0000  0200 0020 0200 0020  0600 001A 0600 002C  0600 002C 0600 0022
 0600 0020 0600 0027  0300 0000 0200 0020  0200 0020 0200 0073  0200 006F 0200 006D  0200 0065 0300 0000  0300 0000 0200 0061  0200 0073 0200 0063  0200 0069 0200 0069
 0300 0000 0300 0000  0200 0074 0200 0065  0200 0078 0200 0074  0300 0000 0200 0020  0200 0020 0400 0029  0400 0025 0400 002E  0400 002C 0300 0000  0200 0020 0200 0020
+0700 001C 0700 001C  0200 0020 0900 0000
+After white-space classification
+0700 001A 0200 0020  0600 001A 0600 002C  0600 002C 0600 0022  0600 0020 0600 0027  0200 0020 1200 0023  0200 0020 1400 0014  0200 0020 1600 0012  0200 0020 0700 001B
+0700 0029 0200 0020  1700 000D 0200 0020  1500 000B 0200 0020  0200 0020 0400 0029  0400 0025 0400 002E  0400 002C 0200 0020  1800 0021 0200 0020  0700 002C 0700 001C
+0200 0020 1900 001C  0200 0020 1300 0009  0200 0020 0900 0000  0300 0000 0700 001A  0700 001A 0A00 0000  0200 0020 0200 0020  0600 001A 0600 002C  0600 002C 0600 0022
+0600 0020 0600 0027  0300 0000 0200 0020  0200 0020 0200 0073  0200 006F 0200 006D  0200 0065 0A00 0000  0300 0000 0200 0061  0200 0073 0200 0063  0200 0069 0200 0069
+0A00 0000 0300 0000  0200 0074 0200 0065  0200 0078 0200 0074  0A00 0000 0200 0020  0200 0020 0400 0029  0400 0025 0400 002E  0400 002C 0300 0000  0200 0020 0200 0020
 0700 001C 0700 001C  0200 0020 0900 0000
 END
  }
