@@ -3614,17 +3614,18 @@ sub ClassIfyWhiteSpace(@)                                                       
       my $a = $$p{address} + $index * 4;
       $a->setReg(r15);
       Mov r14d, "[r15]";                                                        # Current character
-      NidaLexType r14;                                                          # Classify lexical type of current item
-      Cmp r10, $Nida_Lexical_Tables->{lexicals}{variable}{number};              # Test last lexical item
+      Mov r13, r14;                                                             # Current character
+      NidaLexType r13;                                                          # Classify lexical type of current item
+      Cmp r10, $Nida_Lexical_Tables->{lexicals}{variable}{number};              # Is last lexical item a variable ?
       IfEq                                                                      # Last item was a variable
-       {Cmp r14,   $Nida_Lexical_Tables->{lexicals}{NewLine}{number};
+       {Cmp r13,   $Nida_Lexical_Tables->{lexicals}{NewLine}{number};
         IfEq                                                                    # Current item is new line
-         {Mov r13, $Nida_Lexical_Tables->{lexicals}{NewLineSemiColon}{number};
-          Mov "[r15+3]", r13b;                                                  # Make the current item a new line semicolon as the new line immediately follows a variable
+         {Mov r12, $Nida_Lexical_Tables->{lexicals}{NewLineSemiColon}{number};
+          Mov "[r15+3]", r12b;                                                  # Make the current item a new line semicolon as the new line immediately follows a variable
          };
        };
       KeepFree r10;
-      Mov r10, r14;                                                             # New last item
+      Mov r10, r13;                                                             # New last item
      });
     PopR @save;
    } in  => {address => 3, size => 3}; #, out => {fail => 3};
