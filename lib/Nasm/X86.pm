@@ -3564,14 +3564,6 @@ sub PrintUtf32($$)                                                              
 
 #D1 Nida Parsing                                                                # Parse Nida language statements
 
-sub NidaLexType($)                                                              # Convert a classified utf32 character in the specified register into a lexical item in 3:0 bits representing the lexical item.
- {my ($r) = @_;                                                                 # Register to convert
-  Shr $r, 24;                                                                   # Move classification byte into position
-  And $r, 0xff;                                                                 # Classification byte
-  Cmp $r, 0x10;
-  IfGe {And $r, 1};                                                             # Brackets
- }
-
 my $Nida_Lexical_Tables;                                                        # Lexical table definitions
 if (1)                                                                          # Load lexical tables
  {my $f = qq(unicode/lex/lex.data);                                             # As produced by unicode/lex/lex.pl
@@ -3580,6 +3572,41 @@ if (1)                                                                          
   my $l = eval readFile $f;                                                     # Load lexical definitions
   confess "$@\n" if $@;
   $Nida_Lexical_Tables = $l;
+ }
+
+sub NidaLexType($)                                                              # Convert a classified utf32 character in the specified register into a lexical item in 3:0 bits representing the lexical item as Tree::Term.  This allows us to parse the expression using the techniques tested in Tree::Term.
+ {my ($r) = @_;                                                                 # Register to convert
+  Shr $r, 24;                                                                   # Move classification byte into position
+  And $r, 0xff;                                                                 # Classification byte
+  Cmp $r, 0x10;
+  IfGe                                                                          # Brackets
+   {And $r, 1
+   }
+  sub
+   {my %l = $Nida_Lexical_Tables->{lexicals}->%*;
+    Cmp       $r, $l{Ascii}   ->{number};                                       # Ascii is a type of variable
+    KeepFree $r;
+    IfEq {Mov $r, $l{variable}->{number}};
+   };
+ }
+
+sub ClassIfyWhiteSpace($$)        ###DEV                                              # A blank is white space unless it appears between two blocks of ascii. A new line acts a semi colon if it appears immediately after a variable.
+ {my ($n, $m) = @_;                                                             # Variable: number of characters to print, variable: address of memory
+  PushR my @save = (rax, r14, r15);
+  $n->for(sub
+   {my ($index, $start, $next, $end) = @_;
+    my $a = $m + $index * 4;
+    $a->setReg(r15);
+    KeepFree r15;
+    Mov r15d, "[r15]";
+    NidaLexType r15;                                                            # Classify the lexical item
+    Mov r14, rax;
+    Mov r15, rax;
+    Shl r15, 32;
+    Shr r14, 32;
+    Or r14,r15;
+   });
+  PopR @save;
  }
 
 #D1 Short Strings                                                               # Operations on Short Strings
@@ -16242,12 +16269,12 @@ latest:
 if (1) {                                                                        # Check conversion of classification to lexical item
   Mov r10, 0x12FFFFFF; NidaLexType r10
   Mov r11, 0x13FFFFFF; NidaLexType r11
-  Mov r12, 0x02FFFFFF; NidaLexType r12;
+  Mov r12, 0x02FFFFFF; NidaLexType r12;                                         # Ascii is a sub class of variable because we could assign it to a variable and then put the variable in place of the ascii to get the same effect.
   PrintOutRegisterInHex r10, r11, r12;
   ok Assemble(debug => 1, eq => <<END);
    r10: 0000 0000 0000 0000
    r11: 0000 0000 0000 0001
-   r12: 0000 0000 0000 0002
+   r12: 0000 0000 0000 0007
 END
  }
 
