@@ -50,8 +50,8 @@ my $Lexicals = genHash("Nida::Lexicals",                                        
   suffix           => LexicalConstant("suffix",            8, 'q'),             # Suffix operator - it applies only to the preceding variable
   semiColon        => LexicalConstant("semiColon",         9, 's'),             # Infix operator with left to right binding at priority 1
   NewLineSemiColon => LexicalConstant("NewLineSemiColon", 10),                  # A new line character that is also acting as a semi colon
-  WhiteSpace       => LexicalConstant("WhiteSpace",       11),                  # White space between non ascii items
-  Term             => LexicalConstant("Term",             12),                  # Term in the parse tree
+  WhiteSpace       => LexicalConstant("WhiteSpace",       11),                  # White space not between non ascii items
+  term             => LexicalConstant("term",             12),                  # Term in the parse tree
  );
 
 my $TreeTermLexicals = genHash("Nida::TreeTermLexicals",                        # Tree Term Lexical items embodied as Nida lexical items
@@ -62,8 +62,24 @@ my $TreeTermLexicals = genHash("Nida::TreeTermLexicals",                        
   p => "prefix",
   s => "semiColon",
   q => "suffix",
+  t => "term",
   v => "variable",
  );
+
+sub lexicalNameFromLetter($)                                                    # Lexical name for a lexical item described by its letter
+ {my ($l) = @_;                                                                 # Letter of the lexical item
+  my $n = $TreeTermLexicals->{$l};
+  confess "No such lexical: $l"       unless $n;
+  $n
+ }
+
+sub lexicalNumberFromLetter($)                                                  # Lexical number for a lexical item described by its letter
+ {my ($l) = @_;                                                                 # Letter of the lexical item
+  my $n = lexicalNameFromLetter $l;
+  my $N = $Lexicals->{$n}->number;
+  confess "No such lexical named: $n" unless defined $N;
+  $N
+ }
 
 my $Tables = genHash("Nida::Lexical::Tables",                                   # Tables used to parse lexical items
   alphabets        => undef,                                                    # Alphabets selected from uncode database
@@ -80,6 +96,8 @@ my $Tables = genHash("Nida::Lexical::Tables",                                   
   sampleText       => undef,                                                    # A sample Nida program
   transitions      => undef,                                                    # Zmm of transition possibilities
   treeTermLexicals => $TreeTermLexicals,                                        # Tree term lexicals
+  semiColon        => q(⟢),                                                     # Semi colon symbol, left star: U+27E2
+  separator        => q( ),                                                     # Space for separating non ascii items: U+205F
  );
 
 if (!-e $data)                                                                  # Download specification
@@ -123,8 +141,7 @@ sub alphabets                                                                   
     $alpha{$D}{$c} = $C;                                                        # Place into alphabets
    }
 
-  my %selected;                                                                 # Selected alphabets
-     $selected{semiColon} = q(⟢);                                               # We cannot use semi colon as it is an ascii character, so we use this character instead  U+27E2
+  my %selected = (semiColon => $Tables->semiColon);                             # We cannot use semi colon as it is an ascii character, so we use this character instead  U+27E2
 
   for my $a(sort keys %alpha)
    {next unless $a =~ m((CIRCLED LATIN LETTER|MATHEMATICAL BOLD|MATHEMATICAL BOLD FRAKTUR|MATHEMATICAL BOLD ITALIC|MATHEMATICAL BOLD SCRIPT|MATHEMATICAL DOUBLE-STRUCK|MATHEMATICAL FRAKTUR|MATHEMATICAL ITALIC|MATHEMATICAL MONOSPACE|MATHEMATICAL SANS-SERIF|MATHEMATICAL SANS-SERIF BOLD|MATHEMATICAL SANS-SERIF|BOLD ITALIC|MATHEMATICAL SANS-SERIF ITALIC|MATHEMATICAL SCRIPT|NEGATIVE|CIRCLED LATIN LETTER|NEGATIVE SQUARED LATIN LETTER|SQUARED LATIN LETTER))i;
@@ -191,15 +208,24 @@ sub alphabets                                                                   
        }
      }
    }
-#             0               1                                     2       3
-  push @zmm, ["NewLine",      $Lexicals->NewLine  ->number,        10,     10]; # Add other stuff to look for while we are making the pass through the source as we have 16 slots in the zmm
-  push @zmm, ["Ascii",        $Lexicals->Ascii    ->number,         0,    127];
-  push @zmm, ["semiColon",    $Lexicals->semiColon->number,    0x27E2, 0x27E2];
-  @zmm = sort {$$a[3] <=> $$b[3]} @zmm;
+
+  if (1)                                                                        # Load special ranges
+   {my $s = ord $Tables->semiColon;
+    my $t = ord $Tables->separator;
+    my %l = map {$_ => $Lexicals->{$_}->number}  keys $Lexicals->%*;            # Ennumerate lexical items
+    my $nl = ord("\n");
+
+#               0               1                              2    3
+    push @zmm, ["NewLine",      $l{NewLine},                   $nl, $nl];
+    push @zmm, ["Ascii",        $l{Ascii},                     0,   127];
+    push @zmm, ["semiColon",    $Lexicals->semiColon->number,  $s,  $s];
+    push @zmm, ["WhiteSpace",   $Lexicals->WhiteSpace->number, $t,  $t];
+    @zmm = sort {$$a[3] <=> $$b[3]} @zmm;
+   }
 
   $Tables->alphabetRanges = scalar(@zmm);                                       # Alphabet ranges
   lll "Alphabet Ranges: ",  scalar(@zmm);
-  say STDERR dump(\@zmm);
+  say STDERR formatTable(\@zmm);
 
   if (1)                                                                        # Write zmm load sequence
    {my @l; my @h; my %r;                                                        # Low, high, current start within range
@@ -330,12 +356,12 @@ sub transitions                                                                 
     push @l, $L;
    }
 
-  my $next = Tree::Term::LexicalStructure()->next;                              # The permitted transitions as letters
 
   my %t;
   for my $l1(@l)                                                                # Transitions on numbers
    {my $a = $l1->letter;
-    my $A = $$next{$a};
+    my $A = Tree::Term::LexicalStructure()->codes->{$a}->next;                         # The permitted transitions as letters
+
     for my $l2(@l)
      {my $b = $l2->letter;
       next unless index($A, $b) > -1;
@@ -407,7 +433,8 @@ sub translateSomeText($)                                                        
     elsif ($t eq 's')         {$T .= $Tables->alphabets->{semiColon}}
     elsif ($t eq 'b')         {$T .= $Tables->bracketsOpen ->[$r]}
     elsif ($t eq 'B')         {$T .= $Tables->bracketsClose->[$r]}
-    elsif ($t =~ m(\s))       {$T .= $w}
+    elsif ($t =~ m(\n))       {$T .= $w}
+    elsif ($t =~ m(\s))       {$T .= $Tables->separator x length($w)}
     elsif ($t eq 'A')         {$T .= substr($w, 1) =~ s(-) (\n)gsr}
     else {confess "Invalid lexical item $s"}
    }
@@ -430,53 +457,60 @@ alphabets;                                                                      
 brackets;                                                                       # Locate brackets
 transitions;                                                                    # Transitions table
 translateSomeText <<END;                                                        # Translate some text into Nida
-va aassign b1 b2 b3 vbp B3 B2  dplus b4 vsc B4 B1 s
-vaa
-  aassign
-  Asome--ascii--text
-  dplus
+va aassign b1 b2 b3 vbp B3 B2 dplus b4 vsc B4 B1 s
+vaa aassign
+  Asome--ascii--text dplus
   vcc s
 END
 
 sub recognizers()                                                               # Write lexical check routines
  {my @t;
   my %l = $Tables->treeTermLexicals->%*;
-  for my $c(sort keys %l)                                                       # Each lexical item
-   {my $v = $l{$c};                                                             # Full name of lexical item
-    my $n = sprintf("0x%x", $Tables->lexicals->{$v}->number);
-    push @t, <<END;
-sub Nida_test_$c(&\$)                                                             #P Check that we have $v
- {my (\$sub, \$register) = \@_;                                                    # Sub defining action to be taken on a match, register to check,
-  Cmp \$register, $n;
-  IfEq {\$sub->()};
- }
-END
-   }
 
-  my sub check($)                                                               # Check for one of several possible lexical items
-   {my ($c) = @_;                                                               # Items to check for
+  for my $c(qw(abdps ads b B bdp bdps bpsv bst p pbsv s sb sbt t v))            # Test various sets of items
+   {my @n = map {sprintf("0x%x", lexicalNumberFromLetter $_)} split //, $c;
+
     push @t, <<END;
-sub Nida_test_$c(&\$)                                                             #P Check that we have $c
- {my (\$sub, \$register) = \@_;                                                    # Sub defining action to be taken on a match, register to check,
+sub Nida_test_$c(\$)                                                            #P Set ZF if have one of $c in the specified register
+ {my (\$register) = \@_;                                                        # Sub defining action to be taken on a match, register to check,
   my \$end = Label;
 END
-    for my $C(split //, $c)
-     {my $v = $l{$C};                                                             # Full name of lexical item
-      my $n = sprintf("0x%x", $Tables->lexicals->{$v}->number);
-      push @t, <<END;
+
+    for my $n(@n)
+     {push @t, <<END;
   Cmp \$register, $n;
-  IfEq {\$sub->(); Jmp \$end};
+  IfEq {SetZF; Jmp \$end};
 END
      }
+
     push @t, <<END;
+  ClearZF;
   SetLabel \$end;
  }
 END
    }
 
-  check('ads');
-  check('bpsv');
-  check('sb');
+  for my $c(qw(t bdp bdps bst abdps))                                           # Check the top of the stack and complain if there is something unexpected there
+   {my @n = map {sprintf("0x%x", lexicalNumberFromLetter $_)} split //, $c;
+    my $n = join ', ', map {lexicalNameFromLetter $_}         split //, $c;
+
+    push @t, <<END;
+sub Nida_check_$c()                                                             #P Set ZF if we have one of $c on top of the stack
+ {my \$end = Label;
+END
+    for my $n(@n)
+     {push @t, <<END;
+  Cmp [rsp], $n;
+  IfEq {SetZF; Jmp \$end};
+END
+     }
+    push @t, <<END;
+  PrintErrStringNL "Expected $c on the stack not found";
+  ClearZF;
+  SetLabel \$end;
+ }
+END
+   }
 
   join "\n", @t                                                                 # Lexical checking
  }
