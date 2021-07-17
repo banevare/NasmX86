@@ -24,7 +24,8 @@ my @text;                                                                       
 my @extern;                                                                     # External symbols imports for linking with C libraries
 my @link;                                                                       # Specify libraries which to link against in the final assembly stage
 my $interpreter = q(-I /usr/lib64/ld-linux-x86-64.so.2);                        # The ld command needs an interpreter if we are linking with C.
-my $develop   = -e q(/home/phil/);                                              # Developing
+my $develop;                                                                    # Developing
+BEGIN{$develop = -e q(/home/phil/)}
 
 our $stdin  = 0;                                                                # File descriptor for standard input
 our $stdout = 1;                                                                # File descriptor for standard output
@@ -3565,7 +3566,7 @@ sub PrintUtf32($$)                                                              
 #D1 Nida Parsing                                                                # Parse Nida language statements
 
 my $Nida_Lexical_Tables;                                                        # Lexical table definitions
-if (1)                                                                          # Load lexical tables
+BEGIN                                                                           # Load lexical tables
  {my $f = qq(unicode/lex/lex.data);                                             # As produced by unicode/lex/lex.pl
      $f = qq(lib/Nasm/$f) unless $develop;
 
@@ -3638,7 +3639,272 @@ sub ClassifyNewLines(@)                                                         
    } in  => {address => 3, size => 3}; #, out => {fail => 3};
 
   $s->call(@parameters);
- } # ClassIfyWhiteSpace
+ } # ClassIfyNewLines
+
+=pod
+
+In the following we assume that:
+
+  The stack is used solely for tracking the lexical items still to be placed in
+  the parse tree.  Each such stacked item description is 8 bytes wide. The
+  first 4 bytes hold the classification of the lexical item as described by
+  $Lexicals. The second 4 bytes hold the index of the character in the input
+  stream at which this lexical items starts.  This index can be used to locate
+  the start of the lexical item in the input stream and a a unique key to any
+  multi way trees that are used to store information describing the parse tree.
+
+  r8 contains the item being parsed
+  r9 index into the input string that is being parsed
+ r10 stack height
+ r11 r12 rax rbx rcx rdx rdi rsi work registers
+ r14 is the start of the parse string
+ r15 is the length of the input string
+
+ rbp points to the base of the stack
+
+=cut
+
+sub CreateNidaParser($)                                                         # Create an expression parser for a Nida expression
+ {my ($new) = @_;                                                               # Routine to allocate a new term
+
+  sub nidaRecognizers()                                                         # Write lexical check routines
+   {my @t;
+
+    sub lexicalNameFromLetter($)                                                # Lexical name for a lexical item described by its letter
+     {my ($l) = @_;                                                             # Letter of the lexical item
+      my %l = $Nida_Lexical_Tables->{treeTermLexicals}->%*;
+      my $n = $l{$l};
+      confess "No such lexical: $l" unless $n;
+      $n
+     }
+
+    sub lexicalNumberFromLetter($)                                              # Lexical number for a lexical item described by its letter
+     {my ($l) = @_;                                                             # Letter of the lexical item
+      my $n = lexicalNameFromLetter $l;
+      my $N = $Nida_Lexical_Tables->{lexicals}{$n}{number};
+      confess "No such lexical named: $n" unless defined $N;
+      $N
+     }
+
+    for my $c(qw(abdps ads b B bdp bdps bpsv bst p pbsv s sb sbt t v))          # Test various sets of items
+     {my @n = map {sprintf("0x%x", lexicalNumberFromLetter $_)} split //, $c;
+
+      push @t, <<END;
+sub test_$c(\$)                                                                 #P Set ZF if have one of $c in the specified register
+ {my (\$register) = \@_;                                                        # Sub defining action to be taken on a match, register to check,
+  my \$end = Label;
+END
+
+      for my $n(@n)
+       {push @t, <<END;
+  Cmp \$register."d", $n;
+  IfEq {SetZF; Jmp \$end};
+END
+       }
+
+      push @t, <<END;
+  ClearZF;
+  SetLabel \$end;
+ }
+END
+     }
+
+    for my $c(qw(t bdp bdps bst abdps))                                         # Check the top of the stack and complain if there is something unexpected there
+     {my @n = map {sprintf("0x%x", lexicalNumberFromLetter $_)} split //, $c;
+      my $n = join ', ', map {lexicalNameFromLetter $_}         split //, $c;
+
+      push @t, <<END;
+sub check_$c()                                                                  #P Set ZF if we have one of $c on top of the stack
+ {my \$end = Label;
+END
+      for my $n(@n)
+       {push @t, <<END;
+  Cmp "dword[rsp]", $n;
+  IfEq {SetZF; Jmp \$end};
+END
+       }
+      push @t, <<END;
+  PrintErrStringNL "Expected $c on the stack not found";
+  ClearZF;
+  SetLabel \$end;
+ }
+END
+     }
+
+    join "\n", @t                                                               # Lexical recognizers code
+   } # recognizers
+
+  BEGIN                                                                         # Create recognizers
+   {my $s = nidaRecognizers;
+    eval $s;
+    confess "$s\n$@\n" if $@;
+   }
+
+  my $ses = RegisterSize rax;                                                   # Size of an element on the stack
+
+  my sub checkStackHas($)                                                       #P Check that we have mat least the specified number of elements on the stack
+   {my ($depth) = @_;                                                           # Number of elements required on the stack
+    Mov r10, rbp;
+    Sub r10, rsp;
+    Cmp r10, $ses * $depth;
+   }
+
+  my sub reduce()                                                               #P Convert the longest possible expression on top of the stack into a term
+   {#lll "TTTT ", scalar(@s), "\n", dump([@s]);
+    my ($success, $fail, $end) = mnap {Label} 1..3;                             # Exit points
+
+    checkStackHas 3;                                                            # At least three elements on the stack
+    IfGe
+     {my ($l, $d, $r) = (rax, rbx, rdx);
+      Mov $l, "[rsp+".(2*$ses)."]";                                             # Top 3 elements on the stack
+      Mov $d, "[rsp+".(1*$ses)."]";
+      Mov $r, "[rsp+".(0*$ses)."]";
+
+      test_t($l);                                                               # Parse out infix operator expression
+      IfEq
+       {test_t($r);
+        IfEq
+         {test_ads($d);
+          IfEq
+           {Add rsp, 3 * $ses;                                                  # Reorder into polish notation
+            Push $_ for $d, $l, $r;
+            &$new(3);
+            Jmp $success;
+           };
+         };
+       };
+
+      test_b($l);                                                               # Parse parenthesized term
+      IfEq
+       {test_B($r);
+        IfEq
+         {test_t($d);
+          IfEq
+           {Add rsp, 3 * $ses;                                                  # Pop expression
+            Push $d;
+            Jmp $success;
+           };
+         };
+       };
+     };
+
+    checkStackHas 2;                                                            # At least two elements on the stack
+    IfGe                                                                        # Convert an empty pair of parentheses to an empty term
+     {my ($l, $r) = (rax, rdx);
+      Mov $l, "[rsp+".(1*$ses)."]";                                             # Top 3 elements on the stack
+      Mov $r, "[rsp+".(0*$ses)."]";
+      test_b($l);                                                               # Empty pair of parentheses
+      IfEq
+       {test_B($r);
+        IfEq
+         {Add rsp, 2 * $ses;                                                    # Pop expression
+          Push "quad ".$Nida_Lexical_Tables->{lexicals}{empty}{number};
+          &$new(1);
+          Jmp $success;
+         };
+       };
+      test_s($l);                                                               # Semi-colon, close implies remove unneeded semi
+      IfEq
+       {test_B($r);
+        IfEq
+         {Add rsp, 2 * $ses;                                                    # Pop expression
+          Push $r;
+          Jmp $success;
+         };
+       };
+      test_p($l);                                                               # Prefix, term
+      IfEq
+       {test_t($r);
+        IfEq
+         {&new(2);
+          Jmp $success;
+         };
+       };
+     };
+
+    Mov r15, 0;                                                                 # Failed to match anything
+    Jmp $end;
+
+    SetLabel $success;                                                          # Successfully matched
+    Mov r15, 1;
+
+    SetLabel $end;                                                              # End
+   }
+
+  my sub accept_a()                                                             #P Assign
+   {check_t;
+    Push "[rsp]", r8;
+   }
+
+  my sub accept_b                                                               #P Open
+   {check_bdps;
+    Push "[rsp]", r8;
+   }
+
+  my sub accept_reduce                                                          #P Accept by reducing
+   {Vq('count',99)->for(sub
+     {my ($index, $start, $next, $end) = @_;                                    # Execute body
+      reduce;
+      IfZ(sub{Jmp $end});
+     });
+   }
+
+  my sub accept_B                                                               #P Closing parenthesis
+   {check_bst;
+    accept_reduce;
+    Push "[rsp]", r8;
+    accept_reduce;
+    check_bst;
+   }
+
+  my sub accept_d                                                               #P Infix but not assign or semi-colon
+   {check_t;
+    Push "[rsp]", r8;
+   }
+
+  my sub accept_p                                                               #P Prefix
+   {check_bdp;
+    Push "[rsp]", r8;
+   }
+
+  my sub accept_q                                                               #P Post fix
+   {check_t;
+    IfEq                                                                        # Post fix operator applied to a term
+     {Pop rax;
+      Push "[rsp]", r8;
+      Push "[rsp]", rax;
+      &$new(2);
+     }
+   }
+
+  my sub accept_s                                                               #P Semi colon
+   {check_bst;
+    Mov rax, "[rsp]";
+    test_sb(rax);
+    IfEq                                                                        # Insert an empty element between two consecutive semicolons
+     {Push "quad ".$Nida_Lexical_Tables->{lexicals}{empty}{number};
+     };
+    accept_reduce;
+    Push "[rsp]", r8;
+   }
+
+   my sub accept_v                                                              #P Variable
+    {check_abdps;
+     Push "[rsp]", r8;
+     &$new(1);
+     Vq(count,99)->For(sub                                                      # Reduce prefix operators
+      {my ($index, $start, $next, $end) = @_;
+       checkStackHas 2;
+       IfLt {Jmp $end};
+       my ($l, $r) = (rax, rdx);
+       Mov $l, "[rsp+".(1*$ses)."]";
+       Mov $r, "[rsp+".(0*$ses)."]";
+       test_p($l);
+       IfNe {Jmp $end};
+       &$new(2);
+      });
+    }
+ } # CreateNidaParser
 
 #D1 Short Strings                                                               # Operations on Short Strings
 
