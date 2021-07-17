@@ -1,322 +1,3 @@
-sub Nida_test_abdps($)                                                            #P Set ZF if have one of abdps in the specified register
- {my ($register) = @_;                                                        # Sub defining action to be taken on a match, register to check,
-  my $end = Label;
-
-  Cmp $register, 0x6;
-  IfEq {SetZF; Jmp $end};
-
-  Cmp $register, 0x0;
-  IfEq {SetZF; Jmp $end};
-
-  Cmp $register, 0x4;
-  IfEq {SetZF; Jmp $end};
-
-  Cmp $register, 0x5;
-  IfEq {SetZF; Jmp $end};
-
-  Cmp $register, 0x9;
-  IfEq {SetZF; Jmp $end};
-
-  ClearZF;
-  SetLabel $end;
- }
-
-sub Nida_test_ads($)                                                            #P Set ZF if have one of ads in the specified register
- {my ($register) = @_;                                                        # Sub defining action to be taken on a match, register to check,
-  my $end = Label;
-
-  Cmp $register, 0x6;
-  IfEq {SetZF; Jmp $end};
-
-  Cmp $register, 0x4;
-  IfEq {SetZF; Jmp $end};
-
-  Cmp $register, 0x9;
-  IfEq {SetZF; Jmp $end};
-
-  ClearZF;
-  SetLabel $end;
- }
-
-sub Nida_test_b($)                                                            #P Set ZF if have one of b in the specified register
- {my ($register) = @_;                                                        # Sub defining action to be taken on a match, register to check,
-  my $end = Label;
-
-  Cmp $register, 0x0;
-  IfEq {SetZF; Jmp $end};
-
-  ClearZF;
-  SetLabel $end;
- }
-
-sub Nida_test_B($)                                                            #P Set ZF if have one of B in the specified register
- {my ($register) = @_;                                                        # Sub defining action to be taken on a match, register to check,
-  my $end = Label;
-
-  Cmp $register, 0x1;
-  IfEq {SetZF; Jmp $end};
-
-  ClearZF;
-  SetLabel $end;
- }
-
-sub Nida_test_bdp($)                                                            #P Set ZF if have one of bdp in the specified register
- {my ($register) = @_;                                                        # Sub defining action to be taken on a match, register to check,
-  my $end = Label;
-
-  Cmp $register, 0x0;
-  IfEq {SetZF; Jmp $end};
-
-  Cmp $register, 0x4;
-  IfEq {SetZF; Jmp $end};
-
-  Cmp $register, 0x5;
-  IfEq {SetZF; Jmp $end};
-
-  ClearZF;
-  SetLabel $end;
- }
-
-sub Nida_test_bdps($)                                                            #P Set ZF if have one of bdps in the specified register
- {my ($register) = @_;                                                        # Sub defining action to be taken on a match, register to check,
-  my $end = Label;
-
-  Cmp $register, 0x0;
-  IfEq {SetZF; Jmp $end};
-
-  Cmp $register, 0x4;
-  IfEq {SetZF; Jmp $end};
-
-  Cmp $register, 0x5;
-  IfEq {SetZF; Jmp $end};
-
-  Cmp $register, 0x9;
-  IfEq {SetZF; Jmp $end};
-
-  ClearZF;
-  SetLabel $end;
- }
-
-sub Nida_test_bpsv($)                                                            #P Set ZF if have one of bpsv in the specified register
- {my ($register) = @_;                                                        # Sub defining action to be taken on a match, register to check,
-  my $end = Label;
-
-  Cmp $register, 0x0;
-  IfEq {SetZF; Jmp $end};
-
-  Cmp $register, 0x5;
-  IfEq {SetZF; Jmp $end};
-
-  Cmp $register, 0x9;
-  IfEq {SetZF; Jmp $end};
-
-  Cmp $register, 0x7;
-  IfEq {SetZF; Jmp $end};
-
-  ClearZF;
-  SetLabel $end;
- }
-
-sub Nida_test_bst($)                                                            #P Set ZF if have one of bst in the specified register
- {my ($register) = @_;                                                        # Sub defining action to be taken on a match, register to check,
-  my $end = Label;
-
-  Cmp $register, 0x0;
-  IfEq {SetZF; Jmp $end};
-
-  Cmp $register, 0x9;
-  IfEq {SetZF; Jmp $end};
-
-  Cmp $register, 0xc;
-  IfEq {SetZF; Jmp $end};
-
-  ClearZF;
-  SetLabel $end;
- }
-
-sub Nida_test_p($)                                                            #P Set ZF if have one of p in the specified register
- {my ($register) = @_;                                                        # Sub defining action to be taken on a match, register to check,
-  my $end = Label;
-
-  Cmp $register, 0x5;
-  IfEq {SetZF; Jmp $end};
-
-  ClearZF;
-  SetLabel $end;
- }
-
-sub Nida_test_pbsv($)                                                            #P Set ZF if have one of pbsv in the specified register
- {my ($register) = @_;                                                        # Sub defining action to be taken on a match, register to check,
-  my $end = Label;
-
-  Cmp $register, 0x5;
-  IfEq {SetZF; Jmp $end};
-
-  Cmp $register, 0x0;
-  IfEq {SetZF; Jmp $end};
-
-  Cmp $register, 0x9;
-  IfEq {SetZF; Jmp $end};
-
-  Cmp $register, 0x7;
-  IfEq {SetZF; Jmp $end};
-
-  ClearZF;
-  SetLabel $end;
- }
-
-sub Nida_test_s($)                                                            #P Set ZF if have one of s in the specified register
- {my ($register) = @_;                                                        # Sub defining action to be taken on a match, register to check,
-  my $end = Label;
-
-  Cmp $register, 0x9;
-  IfEq {SetZF; Jmp $end};
-
-  ClearZF;
-  SetLabel $end;
- }
-
-sub Nida_test_sb($)                                                            #P Set ZF if have one of sb in the specified register
- {my ($register) = @_;                                                        # Sub defining action to be taken on a match, register to check,
-  my $end = Label;
-
-  Cmp $register, 0x9;
-  IfEq {SetZF; Jmp $end};
-
-  Cmp $register, 0x0;
-  IfEq {SetZF; Jmp $end};
-
-  ClearZF;
-  SetLabel $end;
- }
-
-sub Nida_test_sbt($)                                                            #P Set ZF if have one of sbt in the specified register
- {my ($register) = @_;                                                        # Sub defining action to be taken on a match, register to check,
-  my $end = Label;
-
-  Cmp $register, 0x9;
-  IfEq {SetZF; Jmp $end};
-
-  Cmp $register, 0x0;
-  IfEq {SetZF; Jmp $end};
-
-  Cmp $register, 0xc;
-  IfEq {SetZF; Jmp $end};
-
-  ClearZF;
-  SetLabel $end;
- }
-
-sub Nida_test_t($)                                                            #P Set ZF if have one of t in the specified register
- {my ($register) = @_;                                                        # Sub defining action to be taken on a match, register to check,
-  my $end = Label;
-
-  Cmp $register, 0xc;
-  IfEq {SetZF; Jmp $end};
-
-  ClearZF;
-  SetLabel $end;
- }
-
-sub Nida_test_v($)                                                            #P Set ZF if have one of v in the specified register
- {my ($register) = @_;                                                        # Sub defining action to be taken on a match, register to check,
-  my $end = Label;
-
-  Cmp $register, 0x7;
-  IfEq {SetZF; Jmp $end};
-
-  ClearZF;
-  SetLabel $end;
- }
-
-sub Nida_check_t()                                                             #P Set ZF if we have one of t on top of the stack
- {my $end = Label;
-
-  Cmp [rsp], 0xc;
-  IfEq {SetZF; Jmp $end};
-
-  PrintErrStringNL "Expected t on the stack not found";
-  ClearZF;
-  SetLabel $end;
- }
-
-sub Nida_check_bdp()                                                             #P Set ZF if we have one of bdp on top of the stack
- {my $end = Label;
-
-  Cmp [rsp], 0x0;
-  IfEq {SetZF; Jmp $end};
-
-  Cmp [rsp], 0x4;
-  IfEq {SetZF; Jmp $end};
-
-  Cmp [rsp], 0x5;
-  IfEq {SetZF; Jmp $end};
-
-  PrintErrStringNL "Expected bdp on the stack not found";
-  ClearZF;
-  SetLabel $end;
- }
-
-sub Nida_check_bdps()                                                             #P Set ZF if we have one of bdps on top of the stack
- {my $end = Label;
-
-  Cmp [rsp], 0x0;
-  IfEq {SetZF; Jmp $end};
-
-  Cmp [rsp], 0x4;
-  IfEq {SetZF; Jmp $end};
-
-  Cmp [rsp], 0x5;
-  IfEq {SetZF; Jmp $end};
-
-  Cmp [rsp], 0x9;
-  IfEq {SetZF; Jmp $end};
-
-  PrintErrStringNL "Expected bdps on the stack not found";
-  ClearZF;
-  SetLabel $end;
- }
-
-sub Nida_check_bst()                                                             #P Set ZF if we have one of bst on top of the stack
- {my $end = Label;
-
-  Cmp [rsp], 0x0;
-  IfEq {SetZF; Jmp $end};
-
-  Cmp [rsp], 0x9;
-  IfEq {SetZF; Jmp $end};
-
-  Cmp [rsp], 0xc;
-  IfEq {SetZF; Jmp $end};
-
-  PrintErrStringNL "Expected bst on the stack not found";
-  ClearZF;
-  SetLabel $end;
- }
-
-sub Nida_check_abdps()                                                             #P Set ZF if we have one of abdps on top of the stack
- {my $end = Label;
-
-  Cmp [rsp], 0x6;
-  IfEq {SetZF; Jmp $end};
-
-  Cmp [rsp], 0x0;
-  IfEq {SetZF; Jmp $end};
-
-  Cmp [rsp], 0x4;
-  IfEq {SetZF; Jmp $end};
-
-  Cmp [rsp], 0x5;
-  IfEq {SetZF; Jmp $end};
-
-  Cmp [rsp], 0x9;
-  IfEq {SetZF; Jmp $end};
-
-  PrintErrStringNL "Expected abdps on the stack not found";
-  ClearZF;
-  SetLabel $end;
- }
-
 bless({
   alphabetRanges   => 15,
   alphabets        => {
@@ -523,6 +204,7 @@ bless({
                         assign           => bless({ letter => "a", name => "assign", number => 6 }, "Nida::Lexical::Constant"),
                         CloseBracket     => bless({ letter => "B", name => "CloseBracket", number => 1 }, "Nida::Lexical::Constant"),
                         dyad             => bless({ letter => "d", name => "dyad", number => 4 }, "Nida::Lexical::Constant"),
+                        empty            => bless({ letter => undef, name => "empty", number => 13 }, "Nida::Lexical::Constant"),
                         NewLine          => bless({ letter => "v", name => "NewLine", number => 3 }, "Nida::Lexical::Constant"),
                         NewLineSemiColon => bless({ letter => undef, name => "NewLineSemiColon", number => 10 }, "Nida::Lexical::Constant"),
                         OpenBracket      => bless({ letter => "b", name => "OpenBracket", number => 0 }, "Nida::Lexical::Constant"),
@@ -537,61 +219,61 @@ bless({
   semiColon        => "\x{27E2}",
   separator        => "\x{205F}",
   transitions      => [
-                        131,
-                        147,
-                        19,
-                        67,
-                        99,
-                        103,
-                        71,
-                        151,
                         135,
+                        151,
+                        71,
                         23,
-                        85,
-                        53,
-                        37,
-                        117,
-                        5,
-                        41,
-                        9,
-                        25,
-                        57,
-                        121,
-                        89,
-                        153,
-                        86,
-                        118,
-                        6,
-                        38,
-                        54,
-                        66,
-                        18,
-                        146,
-                        130,
-                        98,
-                        144,
-                        112,
+                        103,
                         48,
+                        0,
+                        112,
+                        144,
                         80,
                         16,
-                        0,
                         32,
-                        104,
-                        72,
-                        24,
-                        152,
-                        136,
-                        97,
-                        17,
+                        99,
+                        19,
+                        67,
+                        147,
+                        131,
+                        66,
+                        98,
+                        18,
+                        130,
+                        146,
+                        118,
+                        54,
+                        86,
+                        6,
+                        38,
                         145,
                         129,
                         65,
-                        4,
-                        100,
-                        36,
-                        84,
-                        116,
+                        97,
+                        17,
                         52,
+                        116,
+                        4,
+                        36,
+                        100,
+                        84,
+                        57,
+                        9,
+                        121,
+                        25,
+                        41,
+                        89,
+                        153,
+                        104,
+                        24,
+                        72,
+                        152,
+                        136,
+                        53,
+                        117,
+                        85,
+                        5,
+                        37,
                       ],
   treeTermLexicals => bless({
                         a => "assign",
