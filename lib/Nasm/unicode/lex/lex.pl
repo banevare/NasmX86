@@ -52,6 +52,7 @@ my $Lexicals = genHash("Nida::Lexicals",                                        
   NewLineSemiColon => LexicalConstant("NewLineSemiColon", 10),                  # A new line character that is also acting as a semi colon
   WhiteSpace       => LexicalConstant("WhiteSpace",       11),                  # White space not between non ascii items
   term             => LexicalConstant("term",             12),                  # Term in the parse tree
+  empty            => LexicalConstant("empty",            13),                  # Empty term present between two adjacent semicolons
  );
 
 my $TreeTermLexicals = genHash("Nida::TreeTermLexicals",                        # Tree Term Lexical items embodied as Nida lexical items
@@ -65,21 +66,6 @@ my $TreeTermLexicals = genHash("Nida::TreeTermLexicals",                        
   t => "term",
   v => "variable",
  );
-
-sub lexicalNameFromLetter($)                                                    # Lexical name for a lexical item described by its letter
- {my ($l) = @_;                                                                 # Letter of the lexical item
-  my $n = $TreeTermLexicals->{$l};
-  confess "No such lexical: $l"       unless $n;
-  $n
- }
-
-sub lexicalNumberFromLetter($)                                                  # Lexical number for a lexical item described by its letter
- {my ($l) = @_;                                                                 # Letter of the lexical item
-  my $n = lexicalNameFromLetter $l;
-  my $N = $Lexicals->{$n}->number;
-  confess "No such lexical named: $n" unless defined $N;
-  $N
- }
 
 my $Tables = genHash("Nida::Lexical::Tables",                                   # Tables used to parse lexical items
   alphabets        => undef,                                                    # Alphabets selected from uncode database
@@ -463,63 +449,7 @@ vaa aassign
   vcc s
 END
 
-sub recognizers()                                                               # Write lexical check routines
- {my @t;
-  my %l = $Tables->treeTermLexicals->%*;
-
-  for my $c(qw(abdps ads b B bdp bdps bpsv bst p pbsv s sb sbt t v))            # Test various sets of items
-   {my @n = map {sprintf("0x%x", lexicalNumberFromLetter $_)} split //, $c;
-
-    push @t, <<END;
-sub Nida_test_$c(\$)                                                            #P Set ZF if have one of $c in the specified register
- {my (\$register) = \@_;                                                        # Sub defining action to be taken on a match, register to check,
-  my \$end = Label;
-END
-
-    for my $n(@n)
-     {push @t, <<END;
-  Cmp \$register, $n;
-  IfEq {SetZF; Jmp \$end};
-END
-     }
-
-    push @t, <<END;
-  ClearZF;
-  SetLabel \$end;
- }
-END
-   }
-
-  for my $c(qw(t bdp bdps bst abdps))                                           # Check the top of the stack and complain if there is something unexpected there
-   {my @n = map {sprintf("0x%x", lexicalNumberFromLetter $_)} split //, $c;
-    my $n = join ', ', map {lexicalNameFromLetter $_}         split //, $c;
-
-    push @t, <<END;
-sub Nida_check_$c()                                                             #P Set ZF if we have one of $c on top of the stack
- {my \$end = Label;
-END
-    for my $n(@n)
-     {push @t, <<END;
-  Cmp [rsp], $n;
-  IfEq {SetZF; Jmp \$end};
-END
-     }
-    push @t, <<END;
-  PrintErrStringNL "Expected $c on the stack not found";
-  ClearZF;
-  SetLabel \$end;
- }
-END
-   }
-
-  join "\n", @t                                                                 # Lexical checking
- }
-
-if (1)                                                                          # Write results
- {push my @t, recognizers;
-  push @t,  dump($Tables);
-  owf($lexicalsFile, join "\n", @t);
- }
+owf $lexicalsFile, dump($Tables);                                               # Write results
 
 __DATA__
 CIRCLED LATIN LETTER  : ⒶⒷⒸⒹⒺⒻⒼⒽⒾⒿⓀⓁⓂⓃⓄⓅⓆⓇⓈⓉⓊⓋⓌⓍⓎⓏⓐⓑⓒⓓⓔⓕⓖⓗⓘⓙⓚⓛⓜⓝⓞⓟⓠⓡⓢⓣⓤⓥⓦⓧⓨⓩ
