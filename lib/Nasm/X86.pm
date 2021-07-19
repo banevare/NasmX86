@@ -3771,7 +3771,9 @@ END
 
   my sub loadCurrentChar()                                                      #P Push the empty element on to the stack
    {Mov $element."d", "[$start+4*$index]";
+PrintErrRegisterInHex r12;
     NidaLexType $element;
+PrintErrRegisterInHex r12;
    }
 
   my sub reduce()                                                               #P Convert the longest possible expression on top of the stack into a term
@@ -3948,7 +3950,6 @@ END
 
     loadCurrentChar;                                                            # Load current character
     &test_first($element);
-PrintErrZF;
     IfNe
      {&$die(<<END =~ s(\n) ( )gsr);
 Expression must start with 'opening parenthesis', 'prefix
@@ -3956,7 +3957,7 @@ operator', 'semi-colon' or 'variable'.
 END
      };
 
-    &test_v($element);                                                           # Single variable
+    &test_v($element);                                                          # Single variable
     IfEq
      {Push $element;
       &$new(1);
@@ -3971,7 +3972,7 @@ END
      };
     KeepFree $element;
 
-
+    Inc $index;                                                                 # We have processed the first character above
     my %l = $Nida_Lexical_Tables->{treeTermLexicals}->%*;
     my %n = $Nida_Lexical_Tables->{lexicals}->%*;
     my sub numberFromletter($)                                                  # Look up a lexical number for a letter - repeats prior code
@@ -3988,10 +3989,11 @@ END
 
       Cmp $prevChar, $element;                                                  # Compare with previous element known not to be whitespace
       IfEq                                                                      # Ignore white space
-       {Mov $prevChar, $element;
-        Jmp $next
+       {Jmp $next
        };
-PrintErrRegisterInHex $element;
+      Mov $prevChar, $element;                                                  # Save element to precious element now we know we are on a different element
+Mov rax, "[rsp]";
+PrintErrRegisterInHex rax, $element;
 
       for my $l(sort keys %l)                                                   # Each possible lexical item after classification
        {my $n = numberFromletter($l);
@@ -16721,7 +16723,7 @@ if (1) {                                                                        
 END
  }
 
-latest:
+#latest:
 if (1) {                                                                        # Parse some code
   my $lexDataFile = qq(unicode/lex/lex.data);                                   # As produced by unicode/lex/lex.pl
      $lexDataFile = qq(lib/Nasm/$lexDataFile) unless $develop;
@@ -16771,27 +16773,26 @@ if (1) {                                                                        
   PrintOutStringNL "After converting some new lines to semi colons";
   PrintUtf32($sourceLength32, $source32);                                       # Print matched brackets
 
-  CreateNidaParser
-    sub                                                                         # Create a new term
-     {my ($depth) = @_;                                                         # Stack depth to be converted
-      PrintErrString "new $depth: ";
-      PrintErrRegisterInHex r12;
-      PushR my @save = (rax, rdi, rdx);
-      for my $i(1..$depth)
-       {Pop rax;
-        PrintErrRaxInHex;
-        PrintErrString "  ";
-       }
-      PrintErrNL;
-      Shl rax, 32;
-      Mov eax, $Nida_Lexical_Tables->{lexicals}{term}{number};                  # Term
-      PopR     @save;
-     },
-    sub                                                                         # Die
-     {PrintErrStringNL "die:";
-      PrintErrRegisterInHex r12;
-     },
-    source=>$source32, size=>$sourceLength32, my $parse = Vq(parse);
+  if (0)                                                                          #
+   {CreateNidaParser
+      sub                                                                         # Create a new term
+       {my ($depth) = @_;                                                         # Stack depth to be converted
+        PrintErrString "new $depth: ";
+        for my $i(1..$depth)
+         {Pop rax;
+          PrintErrRaxInHex;
+          PrintErrString "  ";
+         }
+        PrintErrNL;
+        Mov rax, $Nida_Lexical_Tables->{lexicals}{term}{number};                  # Term
+        Push rax;                                                                 # Place simulated term on stack
+       },
+      sub                                                                         # Die
+       {PrintErrStringNL "die:";
+        PrintErrRegisterInHex r12;
+       },
+      source=>$source32, size=>$sourceLength32, my $parse = Vq(parse);
+   }
 
   ok Assemble(debug => 1, eq => <<END);
 Input  Length: 0000 0000 0000 00DB
