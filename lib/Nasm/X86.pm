@@ -16756,6 +16756,28 @@ if (1) {                                                                        
   PrintOutStringNL "After converting some new lines to semi colons";
   PrintUtf32($sourceLength32, $source32);                                       # Print matched brackets
 
+  CreateNidaParser
+    sub                                                                         # Create a new term
+     {my ($depth) = @_;                                                         # Stack depth to be converted
+      PrintErrString "new $depth: ";
+      PrintErrRegisterInHex r12;
+      PushR my @save = (rax, rdi, rdx);
+      for my $i(1..$depth)
+       {Pop rax;
+        PrintErrRaxInHex;
+        PrintErrString "  ";
+       }
+      PrintErrNL;
+      Shl rax, 32;
+      Mov eax, $Nida_Lexical_Tables->{lexicals}{term}{number};                  # Term
+      PopR     @save;
+     },
+    sub                                                                         # Die
+     {PrintErrStringNL "die:";
+      PrintErrRegisterInHex r12;
+     },
+    address=>$source32, size=>$source32;
+
   ok Assemble(debug => 1, eq => <<END);
 Input  Length: 0000 0000 0000 00DB
 Output Length: 0000 0000 0000 036C
