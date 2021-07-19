@@ -16773,10 +16773,10 @@ if (1) {                                                                        
   PrintOutStringNL "After converting some new lines to semi colons";
   PrintUtf32($sourceLength32, $source32);                                       # Print matched brackets
 
-  if (0)                                                                          #
+  if ($develop)                                                                 #
    {CreateNidaParser
-      sub                                                                         # Create a new term
-       {my ($depth) = @_;                                                         # Stack depth to be converted
+      sub                                                                       # Create a new term
+       {my ($depth) = @_;                                                       # Stack depth to be converted
         PrintErrString "new $depth: ";
         for my $i(1..$depth)
          {Pop rax;
@@ -16784,10 +16784,10 @@ if (1) {                                                                        
           PrintErrString "  ";
          }
         PrintErrNL;
-        Mov rax, $Nida_Lexical_Tables->{lexicals}{term}{number};                  # Term
-        Push rax;                                                                 # Place simulated term on stack
+        Mov rax, $Nida_Lexical_Tables->{lexicals}{term}{number};                # Term
+        Push rax;                                                               # Place simulated term on stack
        },
-      sub                                                                         # Die
+      sub                                                                       # Die
        {PrintErrStringNL "die:";
         PrintErrRegisterInHex r12;
        },
