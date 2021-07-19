@@ -3658,7 +3658,7 @@ In the following we assume that:
 
 =cut
 
-sub CreateNidaParser($$$)                                                       # Create a parser for a Nida expression described by variables
+sub CreateNidaParserCode($$$)                                                   # Create a parser for a Nida expression described by variables
  {my ($parameters, $new, $die) = @_;                                            # Parameters describing expression, new method, die method
 
   my $ses     = RegisterSize rax;                                               # Size of an element on the stack
@@ -4022,7 +4022,18 @@ END
     Pop $w1;                                                                    # The resulting parse tree
     $$parameters{parse}->getReg($w1);
    } # parseExpression
- } # CreateNidaParser
+ } # CreateNidaParserCode
+
+sub CreateNidaParser($$@)                                                       # Create a parser for a Nida expression described by variables
+ {my ($new, $die, @variables) = @_;                                             # New method, die method, variables describing expression
+
+  my $s = Subroutine
+   {my ($p) = @_;                                                               # Parameters
+    CreateNidaParserCode($p, $new, $die);
+   } in  => {address => 3, size => 3};
+
+  $s->call(@variables);                                                         # Call the parser
+ }
 
 #D1 Short Strings                                                               # Operations on Short Strings
 
