@@ -84,6 +84,7 @@ my $Tables = genHash("Nida::Lexical::Tables",                                   
   treeTermLexicals => $TreeTermLexicals,                                        # Tree term lexicals
   semiColon        => q(⟢),                                                     # Semi colon symbol, left star: U+27E2
   separator        => q( ),                                                     # Space for separating non ascii items: U+205F
+  structure        => Tree::Term::LexicalStructure,                             # Lexical structure from Tree::term
  );
 
 if (!-e $data)                                                                  # Download specification
