@@ -3567,12 +3567,13 @@ BEGIN                                                                           
  }
 
 sub NidaLexType($)                                                              # Convert a classified utf32 character in the specified register into a lexical item in 3:0 bits representing the lexical item as Tree::Term.  This allows us to parse the expression using the techniques tested in Tree::Term.
- {my ($r) = @_;                                                                 # Register to convert
-  Shr $r, 24;                                                                   # Move classification byte into position
+ {my ($R) = @_;                                                                 # Register to convert
+  my $r = $R."b";                                                               # Classification byte
+  Shr $R."d", 24;                                                               # Move classification byte into position
   And $r, 0xff;                                                                 # Classification byte
   Cmp $r, 0x10;
   IfGe                                                                          # Brackets
-   {And $r, 1
+   {And $r, 1                                                                   # 0 - open, 1 - close
    }
   sub
    {my %l = $Nida_Lexical_Tables->{lexicals}->%*;
@@ -3654,8 +3655,8 @@ sub CreateNidaParserCode($$$)                                                   
   my $prevChar = r10;                                                           # The previous character parsed
   my $index    = r11;                                                           # Index of current element
   my $element  = r12;                                                           # Contains the item being parsed
-  my $start    = r13;                                                           # Start of the parse string
-  my $current  = r14;                                                           # Current position in the parse string
+  my $lex      = r13;                                                           # The lexical number associated with the current lexical element is placed in the lowest byte, the index at which this item was found inthe utf32 source is placed in the upper dword
+  my $start    = r14;                                                           # Start of the parse string
   my $size     = r15;                                                           # Length of the input string
   my $empty    = $Nida_Lexical_Tables->{lexicals}{empty}{number};               # Empty element
 
@@ -3683,13 +3684,10 @@ sub CreateNidaParserCode($$$)                                                   
       my @n = map {sprintf("0x%x", lexicalNumberFromLetter $_)} split //, $set; # Each lexical item by number from letter
 
       push @t, <<END;
-sub test_$name(\$)                                                              #P Set ZF if have one of $set in the specified register
+sub test_$name(\$)                                                              #P Set ZF if have one of $set in the specified register.
  {my (\$register) = \@_;                                                        # Sub defining action to be taken on a match, register to check,
   my \$end = Label;
   Comment("Test: $name");
-  Mov $w1, \$register;
-  Shr $w1, 24;
-  And $w1, 0xf;
 END
       for my $n(@n)
        {push @t, <<END;
@@ -3722,7 +3720,7 @@ sub check_$c()                                                                  
 END
       for my $n(@n)
        {push @t, <<END;
-  Cmp "dword[rsp]", $n;
+  Cmp "byte[rsp]", $n;
   IfEq {SetZF; Jmp \$end};
 END
        }
@@ -3746,34 +3744,27 @@ END
    {my ($depth) = @_;                                                           # Number of elements required on the stack
     Mov $w1, rbp;
     Sub $w1, rsp;
+PrintErrStringNL "CheckStack has $depth";
+PrintErrRegisterInHex $w1;
     Cmp $w1, $ses * $depth;
     KeepFree $w1;
    }
 
   my sub pushElement()                                                          #P Push the current element on to the stack
-   {Mov $w1, $index;
-    KeepFree $w1;
-    Shl $w1, 32;
-    Mov $w1."d", $element."d";
-    Push $w1;
-    KeepFree $w1;
+   {Push $lex;
    }
 
   my sub pushEmpty()                                                            #P Push the empty element on to the stack
-   {Mov $w1, $current;
-    KeepFree $w1;
-    Sub $w1, $start;
+   {Mov $w1, $index;
     Shl $w1, 32;
-    Mov $w1."d", $empty;
+    Or  $w1, $empty;
     Push $w1;
     KeepFree $w1;
    }
 
   my sub loadCurrentChar()                                                      #P Push the empty element on to the stack
    {Mov $element."d", "[$start+4*$index]";
-PrintErrRegisterInHex r12;
     NidaLexType $element;
-PrintErrRegisterInHex r12;
    }
 
   my sub reduce()                                                               #P Convert the longest possible expression on top of the stack into a term
@@ -3912,6 +3903,8 @@ PrintErrRegisterInHex r12;
    {&check_bst;
     Mov $w1, "[rsp]";
     test_sb($w1);
+PrintErrZF;
+PrintErrStringNL "SSSSS";
     KeepFree $w1;
     IfEq                                                                        # Insert an empty element between two consecutive semicolons
      {pushEmpty;
@@ -3951,7 +3944,7 @@ PrintErrRegisterInHex r12;
     loadCurrentChar;                                                            # Load current character
     &test_first($element);
     IfNe
-     {&$die(<<END =~ s(\n) ( )gsr);
+     {&$die(1, <<END =~ s(\n) ( )gsr);
 Expression must start with 'opening parenthesis', 'prefix
 operator', 'semi-colon' or 'variable'.
 END
@@ -3987,11 +3980,14 @@ END
       Cmp $element, $WhiteSpace;
       IfEq {Jmp $next};                                                         # Ignore white space
 
-      Cmp $prevChar, $element;                                                  # Compare with previous element known not to be whitespace
-      IfEq                                                                      # Ignore white space
-       {Jmp $next
+      Cmp $element, 1;
+      IfGt                                                                      # Brackets are singular but everything else can potential be a plurality
+       {Cmp $prevChar, $element;                                                # Compare with previous element known not to be whitespace
+        IfEq                                                                    # Ignore white space
+         {Jmp $next
+         };
        };
-      Mov $prevChar, $element;                                                  # Save element to precious element now we know we are on a different element
+      Mov $prevChar, $element;                                                  # Save element to previous element now we know we are on a different element
 Mov rax, "[rsp]";
 PrintErrRegisterInHex rax, $element;
 
@@ -4004,7 +4000,7 @@ PrintErrRegisterInHex rax, $element;
 
     test_last($element);                                                        # Last element
     IfNe                                                                        # Incomplete expression
-     {&$die("Incomplete expression");
+     {&$die(2, "Incomplete expression");
      };
 
     Vq('count', 99)->for(sub                                                    # Remove trailing semicolons if present
@@ -4028,7 +4024,7 @@ PrintErrRegisterInHex rax, $element;
 
     checkStackHas(1);
     IfNe                                                                        # Incomplete expression
-     {&$die("Incomplete expression");
+     {&$die(3, "Incomplete expression");
      };
 
     Pop $w1;                                                                    # The resulting parse tree
@@ -4045,7 +4041,11 @@ sub CreateNidaParser($$@)                                                       
   my $s = Subroutine
    {my ($p) = @_;                                                               # Parameters
     PushR my @save = map {"r$_"} 8..15;
+    Push rbp;
+    Mov rbp, rsp;
     CreateNidaParserCode($p, $new, $die);
+    Mov rsp, rbp;
+    Pop rbp;
     PopR @save;
    } in  => {source => 3, size => 3}, out => {parse => 3};
 
@@ -16715,7 +16715,7 @@ if (1) {                                                                        
   Mov r12, 0x02FFFFFF; NidaLexType r12;                                         # Ascii is a sub class of variable because we could assign it to a variable and then put the variable in place of the ascii to get the same effect.
   Mov r13, 0x0AFFFFFF; NidaLexType r13;                                         # New line semi colon is a type of semi colon
   PrintOutRegisterInHex r10, r11, r12, r13;
-  ok Assemble(debug => 1, eq => <<END);
+  ok Assemble(debug => 0, eq => <<END);
    r10: 0000 0000 0000 0000
    r11: 0000 0000 0000 0001
    r12: 0000 0000 0000 0007
@@ -16724,7 +16724,7 @@ END
  }
 
 #latest:
-if (1) {                                                                        # Parse some code
+if (0) {                                                                        # Parse some code
   my $lexDataFile = qq(unicode/lex/lex.data);                                   # As produced by unicode/lex/lex.pl
      $lexDataFile = qq(lib/Nasm/$lexDataFile) unless $develop;
 
@@ -16773,11 +16773,11 @@ if (1) {                                                                        
   PrintOutStringNL "After converting some new lines to semi colons";
   PrintUtf32($sourceLength32, $source32);                                       # Print matched brackets
 
-  if ($develop)                                                                 #
+  if (0 and $develop)                                                                 #
    {CreateNidaParser
       sub                                                                       # Create a new term
        {my ($depth) = @_;                                                       # Stack depth to be converted
-        PrintErrString "new $depth: ";
+        PrintErrString "new start $depth: ";
         for my $i(1..$depth)
          {Pop rax;
           PrintErrRaxInHex;
@@ -16786,9 +16786,14 @@ if (1) {                                                                        
         PrintErrNL;
         Mov rax, $Nida_Lexical_Tables->{lexicals}{term}{number};                # Term
         Push rax;                                                               # Place simulated term on stack
+PrintErrStringNL "New end $depth";
+        Mov rax, rbp;
+        Sub rax, rsp;
+PrintErrRegisterInHex rax;
        },
       sub                                                                       # Die
-       {PrintErrStringNL "die:";
+       {my ($number) = @_;                                                      # Error number
+        PrintErrStringNL "die $number:";
         PrintErrRegisterInHex r12;
        },
       source=>$source32, size=>$sourceLength32, my $parse = Vq(parse);
@@ -16841,7 +16846,7 @@ if (0) {
 END
  }
 
-ok 1;
+ok 1 for 1..2;
 
 unlink $_ for qw(hash print2 sde-log.txt sde-ptr-check.out.txt z.txt);          # Remove incidental files
 
