@@ -199,8 +199,8 @@ END
        sub $I(\$\$)
         {my (\$target, \$source) = \@_;
          \@_ == 2 or confess "Two arguments required";
-         Keep(\$target)    if "$i" =~ m(\\Amov\\Z) and \$Registers{\$target};
-         KeepSet(\$source) if "$i" =~ m(\\Amov\\Z) and \$Registers{\$source};
+#TEST         Keep(\$target)    if "$i" =~ m(\\Amov\\Z) and \$Registers{\$target};
+#TEST         KeepSet(\$source) if "$i" =~ m(\\Amov\\Z) and \$Registers{\$source};
          my \$s = '  ' x scalar(my \@d = caller);
          push \@text, qq(\${s}$i \$target, \$source\\n);
         }
@@ -563,7 +563,7 @@ sub Trace                                                                       
 my %Keep;                                                                       # Registers to keep
 my %KeepStack;                                                                  # Registers keep stack across PushR and PopR
 
-sub Keep(@)                                                                     # Mark free registers so that they are not updated until we Free them or complain if the register is already in use.
+sub Keep(@)                                                                     # Mark registers as in use so that they cannot be updated  until we explicitly free them.  Complain if the register is already in use.
  {my (@target) = @_;                                                            # Registers to keep
   for my $target(@target)
    {my $r = $RegisterContaining{$target};                                       # Containing register
@@ -3756,21 +3756,26 @@ END
     Mov $w1, rbp;
     Sub $w1, rsp;
     Cmp $w1, $ses * $depth;
+    KeepFree $w1;
    }
 
   my sub pushElement()                                                          #P Push the current element on to the stack
    {Mov $w1, $index;
+    KeepFree $w1;
     Shl $w1, 32;
     Mov "{$w1}d", $element;
     Push $w1;
+    KeepFree $w1;
    }
 
-  my sub pushEmpty()                                                             #P Push the empty element on to the stack
+  my sub pushEmpty()                                                            #P Push the empty element on to the stack
    {Mov $w1, $current;
-    Sub $w1, $$start;
+    KeepFree $w1;
+    Sub $w1, $start;
     Shl $w1, 32;
     Mov "{$w1}d", $empty;
     Push $w1;
+    KeepFree $w1;
    }
 
   my sub loadCurrentChar()                                                      #P Push the empty element on to the stack
@@ -3779,7 +3784,7 @@ END
 
   my sub reduce()                                                               #P Convert the longest possible expression on top of the stack into a term
    {#lll "TTTT ", scalar(@s), "\n", dump([@s]);
-    my ($success, $fail, $end) = mnap {Label} 1..3;                             # Exit points
+    my ($success, $fail, $end) = map {Label} 1..3;                              # Exit points
 
     checkStackHas 3;                                                            # At least three elements on the stack
     IfGe
@@ -3814,11 +3819,14 @@ END
            };
          };
        };
+      KeepFree $l, $d, $r;
      };
 
     checkStackHas 2;                                                            # At least two elements on the stack
     IfGe                                                                        # Convert an empty pair of parentheses to an empty term
      {my ($l, $r) = ($w1, $w2);
+
+      KeepFree $l, $r;                                                          # Why ?
       Mov $l, "[rsp+".(1*$ses)."]";                                             # Top 3 elements on the stack
       Mov $r, "[rsp+".(0*$ses)."]";
       test_b($l);                                                               # Empty pair of parentheses
@@ -3848,6 +3856,7 @@ END
           Jmp $success;
          };
        };
+      KeepFree $l, $r;
      };
 
     ClearZF;                                                                    # Failed to match anything
@@ -3909,6 +3918,7 @@ END
    {check_bst;
     Mov $w1, "[rsp]";
     test_sb($w1);
+    KeepFree $w1;
     IfEq                                                                        # Insert an empty element between two consecutive semicolons
      {pushEmpty;
      };
@@ -3933,29 +3943,15 @@ END
       });
     }
 
-# Action on each lexical item
-  my $Accept =                                                                  # Dispatch the action associated with the lexical item
-   {a => \&accept_a,                                                            # Assign
-    b => \&accept_b,                                                            # Open
-    B => \&accept_B,                                                            # Closing parenthesis
-    d => \&accept_d,                                                            # Infix but not assign or semi-colon
-    p => \&accept_p,                                                            # Prefix
-    q => \&accept_q,                                                            # Post fix
-    s => \&accept_s,                                                            # Semi colon
-    v => \&accept_v,                                                            # Variable
-   };
-
   my sub parseExpression()                                                      #P Parse an expression.
    {my $end     = Label;
 
-    $$parameters{expession}   ->setReg($start);                                 # Start of expression string after it has been classified
-    $$parameters{size}        ->setReg($size);                                  # Number of characters in the expression
+    $$parameters{source}->setReg($start);                                       # Start of expression string after it has been classified
+    $$parameters{size}  ->setReg($size);                                        # Number of characters in the expression
 
     Cmp $size, 0;                                                               # Check for empty expression
     IfEq
-     {$$parameters{success}->copy(Vq(success, 1));
-      $$parameters{parse}  ->copy(Vq(parse,   0));
-      Jmp $end;
+     {Jmp $end;
      };
 
     loadCurrentChar;                                                            # Load current character
@@ -3980,6 +3976,7 @@ END
        };
       pushElement;
      };
+    KeepFree $element;
 
     For                                                                         # Parse each utf32 character after it has been classified
      {my ($start, $end, $next) = @_;                                            # Start and end of the classification loop
@@ -3991,7 +3988,7 @@ END
       for my $l(sort keys %l)                                                   # Each possible lexical item after classification
        {my $n = $n{$l{$l}};
         Cmp $element."b", $n;
-        IfEq {eval "accept_$l"; Jmp \$next};
+        IfEq {eval "accept_$l"; Jmp $next};
        }
      } $index, $size;
 
@@ -4022,6 +4019,8 @@ END
     Pop $w1;                                                                    # The resulting parse tree
     $$parameters{parse}->getReg($w1);
    } # parseExpression
+
+  parseExpression;
  } # CreateNidaParserCode
 
 sub CreateNidaParser($$@)                                                       # Create a parser for a Nida expression described by variables
@@ -4029,8 +4028,10 @@ sub CreateNidaParser($$@)                                                       
 
   my $s = Subroutine
    {my ($p) = @_;                                                               # Parameters
+    PushR my @save = map {"r$_"} 8..15;
     CreateNidaParserCode($p, $new, $die);
-   } in  => {address => 3, size => 3};
+    PopR @save;
+   } in  => {source => 3, size => 3};
 
   $s->call(@variables);                                                         # Call the parser
  }
@@ -16756,27 +16757,27 @@ if (1) {                                                                        
   PrintOutStringNL "After converting some new lines to semi colons";
   PrintUtf32($sourceLength32, $source32);                                       # Print matched brackets
 
-  CreateNidaParser
-    sub                                                                         # Create a new term
-     {my ($depth) = @_;                                                         # Stack depth to be converted
-      PrintErrString "new $depth: ";
-      PrintErrRegisterInHex r12;
-      PushR my @save = (rax, rdi, rdx);
-      for my $i(1..$depth)
-       {Pop rax;
-        PrintErrRaxInHex;
-        PrintErrString "  ";
-       }
-      PrintErrNL;
-      Shl rax, 32;
-      Mov eax, $Nida_Lexical_Tables->{lexicals}{term}{number};                  # Term
-      PopR     @save;
-     },
-    sub                                                                         # Die
-     {PrintErrStringNL "die:";
-      PrintErrRegisterInHex r12;
-     },
-    address=>$source32, size=>$source32;
+#  CreateNidaParser
+#    sub                                                                         # Create a new term
+#     {my ($depth) = @_;                                                         # Stack depth to be converted
+#      PrintErrString "new $depth: ";
+#      PrintErrRegisterInHex r12;
+#      PushR my @save = (rax, rdi, rdx);
+#      for my $i(1..$depth)
+#       {Pop rax;
+#        PrintErrRaxInHex;
+#        PrintErrString "  ";
+#       }
+#      PrintErrNL;
+#      Shl rax, 32;
+#      Mov eax, $Nida_Lexical_Tables->{lexicals}{term}{number};                  # Term
+#      PopR     @save;
+#     },
+#    sub                                                                         # Die
+#     {PrintErrStringNL "die:";
+#      PrintErrRegisterInHex r12;
+#     },
+#    address=>$source32, size=>$source32;
 
   ok Assemble(debug => 1, eq => <<END);
 Input  Length: 0000 0000 0000 00DB
