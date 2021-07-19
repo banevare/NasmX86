@@ -733,9 +733,11 @@ sub IfGe(&;&)                                                                   
   If(q(Jl), $then, $else);                                                      # Opposite code
  }
 
-sub For(&$$$)                                                                   # For - iterate the body as long as register is less than limit incrementing by increment each time
+sub For(&$$;$)                                                                  # For - iterate the body as long as register is less than limit incrementing by increment each time
  {my ($body, $register, $limit, $increment) = @_;                               # Body, register, limit on loop, increment on each iteration
-  @_ == 4 or confess;
+  @_ == 3 or @_ == 4 or confess;
+  $increment //= 1;                                                             # Default increment
+  my $next = Label;                                                             # Next iteration
   Comment "For $register $limit";
   my $start = Label;
   my $end   = Label;
@@ -743,16 +745,17 @@ sub For(&$$$)                                                                   
   Cmp $register, $limit;
   Jge $end;
 
-  &$body;
+  &$body($start, $end, $next);                                                  # Start, end and next labels
 
+  SetLabel $next;                                                               # Next iteration startinbg within crement
   if ($increment == 1)
    {Inc $register;
    }
   else
    {Add $register, $increment;
    }
-  Jmp $start;
-  SetLabel $end;
+  Jmp $start;                                                                   # Restart loop
+  SetLabel $end;                                                                # Exit loop
  }
 
 sub ForIn(&$$$$)                                                                # For - iterate the full body as long as register plus increment is less than than limit incrementing by increment each time then increment the last body for the last non full block.
@@ -3653,24 +3656,24 @@ In the following we assume that:
   the start of the lexical item in the input stream and a a unique key to any
   multi way trees that are used to store information describing the parse tree.
 
-  r8 contains the item being parsed
-  r9 index into the input string that is being parsed
- r10 stack height
- r11 r12 rax rbx rcx rdx rdi rsi work registers
- r14 is the start of the parse string
- r15 is the length of the input string
-
- rbp points to the base of the stack
-
 =cut
 
-sub CreateNidaParser($)                                                         # Create an expression parser for a Nida expression
- {my ($new) = @_;                                                               # Routine to allocate a new term
+sub CreateNidaParser($$$)                                                       # Create a parser for a Nida expression described by variables
+ {my ($parameters, $new, $die) = @_;                                            # Parameters describing expression, new method, die method
+
+  my $ses     = RegisterSize rax;                                               # Size of an element on the stack
+  my ($w1, $w2, $w3) = (r8, r9, r10);                                           # Work registers
+  my $index   = r11;                                                            # Index of current element
+  my $element = r12;                                                            # Contains the item being parsed
+  my $start   = r13;                                                            # Start of the parse string
+  my $current = r14;                                                            # Current position in the parse string
+  my $size    = r15;                                                            # Length of the input string
+  my $empty   = $Nida_Lexical_Tables->{lexicals}{empty}{number};                # Empty element
 
   sub nidaRecognizers()                                                         # Write lexical check routines
    {my @t;
 
-    sub lexicalNameFromLetter($)                                                # Lexical name for a lexical item described by its letter
+    my sub lexicalNameFromLetter($)                                             # Lexical name for a lexical item described by its letter
      {my ($l) = @_;                                                             # Letter of the lexical item
       my %l = $Nida_Lexical_Tables->{treeTermLexicals}->%*;
       my $n = $l{$l};
@@ -3678,7 +3681,7 @@ sub CreateNidaParser($)                                                         
       $n
      }
 
-    sub lexicalNumberFromLetter($)                                              # Lexical number for a lexical item described by its letter
+    my sub lexicalNumberFromLetter($)                                           # Lexical number for a lexical item described by its letter
      {my ($l) = @_;                                                             # Letter of the lexical item
       my $n = lexicalNameFromLetter $l;
       my $N = $Nida_Lexical_Tables->{lexicals}{$n}{number};
@@ -3686,18 +3689,19 @@ sub CreateNidaParser($)                                                         
       $N
      }
 
-    for my $c(qw(abdps ads b B bdp bdps bpsv bst p pbsv s sb sbt t v))          # Test various sets of items
-     {my @n = map {sprintf("0x%x", lexicalNumberFromLetter $_)} split //, $c;
+    my sub testSet($$)                                                          # Test a set of items
+     {my ($set, $name) = @_;                                                    # String of letters showing lexical items to test, name of test if any
+      my @n = map {sprintf("0x%x", lexicalNumberFromLetter $_)} split //, $set; # Each lexical item by number from letter
 
       push @t, <<END;
-sub test_$c(\$)                                                                 #P Set ZF if have one of $c in the specified register
+sub test_$name(\$)                                                              #P Set ZF if have one of $set in the specified register
  {my (\$register) = \@_;                                                        # Sub defining action to be taken on a match, register to check,
   my \$end = Label;
 END
 
       for my $n(@n)
        {push @t, <<END;
-  Cmp \$register."d", $n;
+  Cmp \$register."b", $n;
   IfEq {SetZF; Jmp \$end};
 END
        }
@@ -3707,6 +3711,13 @@ END
   SetLabel \$end;
  }
 END
+     }
+
+    testSet($$Nida_Lexical_Tables{structure}{first}, q(first));                 # First symbols allowed
+    testSet($$Nida_Lexical_Tables{structure}{last},   q(last));                 # Last symbols allowed
+
+    for my $c(qw(abdps ads b B bdp bdps bpsv bst p pbsv s sb sbt t v))          # Test various sets of items
+     {testSet($c, $c);
      }
 
     for my $c(qw(t bdp bdps bst abdps))                                         # Check the top of the stack and complain if there is something unexpected there
@@ -3740,13 +3751,30 @@ END
     confess "$s\n$@\n" if $@;
    }
 
-  my $ses = RegisterSize rax;                                                   # Size of an element on the stack
-
-  my sub checkStackHas($)                                                       #P Check that we have mat least the specified number of elements on the stack
+  my sub checkStackHas($)                                                       #P Check that we have at least the specified number of elements on the stack
    {my ($depth) = @_;                                                           # Number of elements required on the stack
-    Mov r10, rbp;
-    Sub r10, rsp;
-    Cmp r10, $ses * $depth;
+    Mov $w1, rbp;
+    Sub $w1, rsp;
+    Cmp $w1, $ses * $depth;
+   }
+
+  my sub pushElement()                                                          #P Push the current element on to the stack
+   {Mov $w1, $index;
+    Shl $w1, 32;
+    Mov "{$w1}d", $element;
+    Push $w1;
+   }
+
+  my sub pushEmpty()                                                             #P Push the empty element on to the stack
+   {Mov $w1, $current;
+    Sub $w1, $$start;
+    Shl $w1, 32;
+    Mov "{$w1}d", $empty;
+    Push $w1;
+   }
+
+  my sub loadCurrentChar()                                                      #P Push the empty element on to the stack
+   {Mov $element."d", "[$start+4*$index]";
    }
 
   my sub reduce()                                                               #P Convert the longest possible expression on top of the stack into a term
@@ -3755,7 +3783,7 @@ END
 
     checkStackHas 3;                                                            # At least three elements on the stack
     IfGe
-     {my ($l, $d, $r) = (rax, rbx, rdx);
+     {my ($l, $d, $r) = ($w1, $w2, $w3);
       Mov $l, "[rsp+".(2*$ses)."]";                                             # Top 3 elements on the stack
       Mov $d, "[rsp+".(1*$ses)."]";
       Mov $r, "[rsp+".(0*$ses)."]";
@@ -3790,7 +3818,7 @@ END
 
     checkStackHas 2;                                                            # At least two elements on the stack
     IfGe                                                                        # Convert an empty pair of parentheses to an empty term
-     {my ($l, $r) = (rax, rdx);
+     {my ($l, $r) = ($w1, $w2);
       Mov $l, "[rsp+".(1*$ses)."]";                                             # Top 3 elements on the stack
       Mov $r, "[rsp+".(0*$ses)."]";
       test_b($l);                                                               # Empty pair of parentheses
@@ -3798,7 +3826,7 @@ END
        {test_B($r);
         IfEq
          {Add rsp, 2 * $ses;                                                    # Pop expression
-          Push "quad ".$Nida_Lexical_Tables->{lexicals}{empty}{number};
+          pushEmpty;
           &$new(1);
           Jmp $success;
          };
@@ -3822,75 +3850,75 @@ END
        };
      };
 
-    Mov r15, 0;                                                                 # Failed to match anything
+    ClearZF;                                                                    # Failed to match anything
     Jmp $end;
 
     SetLabel $success;                                                          # Successfully matched
-    Mov r15, 1;
+    SetZF;
 
     SetLabel $end;                                                              # End
-   }
+   } # reduce
 
   my sub accept_a()                                                             #P Assign
    {check_t;
-    Push "[rsp]", r8;
+    pushElement;
    }
 
   my sub accept_b                                                               #P Open
    {check_bdps;
-    Push "[rsp]", r8;
+    pushElement;
    }
 
   my sub accept_reduce                                                          #P Accept by reducing
    {Vq('count',99)->for(sub
      {my ($index, $start, $next, $end) = @_;                                    # Execute body
       reduce;
-      IfZ(sub{Jmp $end});
+      IfNe(sub{Jmp $end});                                                      # Keep going as long as reductions are possible
      });
    }
 
   my sub accept_B                                                               #P Closing parenthesis
    {check_bst;
     accept_reduce;
-    Push "[rsp]", r8;
+    pushElement;
     accept_reduce;
     check_bst;
    }
 
   my sub accept_d                                                               #P Infix but not assign or semi-colon
    {check_t;
-    Push "[rsp]", r8;
+    pushElement;
    }
 
   my sub accept_p                                                               #P Prefix
    {check_bdp;
-    Push "[rsp]", r8;
+    pushElement;
    }
 
   my sub accept_q                                                               #P Post fix
    {check_t;
     IfEq                                                                        # Post fix operator applied to a term
-     {Pop rax;
-      Push "[rsp]", r8;
-      Push "[rsp]", rax;
+     {Pop $w1;
+      pushElement;
+      Push $w1;
       &$new(2);
      }
    }
 
   my sub accept_s                                                               #P Semi colon
    {check_bst;
-    Mov rax, "[rsp]";
-    test_sb(rax);
+    Mov $w1, "[rsp]";
+    test_sb($w1);
     IfEq                                                                        # Insert an empty element between two consecutive semicolons
-     {Push "quad ".$Nida_Lexical_Tables->{lexicals}{empty}{number};
+     {pushEmpty;
      };
     accept_reduce;
-    Push "[rsp]", r8;
+    pushElement;
    }
 
    my sub accept_v                                                              #P Variable
     {check_abdps;
-     Push "[rsp]", r8;
+     pushElement;
      &$new(1);
      Vq(count,99)->For(sub                                                      # Reduce prefix operators
       {my ($index, $start, $next, $end) = @_;
@@ -3904,6 +3932,96 @@ END
        &$new(2);
       });
     }
+
+# Action on each lexical item
+  my $Accept =                                                                  # Dispatch the action associated with the lexical item
+   {a => \&accept_a,                                                            # Assign
+    b => \&accept_b,                                                            # Open
+    B => \&accept_B,                                                            # Closing parenthesis
+    d => \&accept_d,                                                            # Infix but not assign or semi-colon
+    p => \&accept_p,                                                            # Prefix
+    q => \&accept_q,                                                            # Post fix
+    s => \&accept_s,                                                            # Semi colon
+    v => \&accept_v,                                                            # Variable
+   };
+
+  my sub parseExpression()                                                      #P Parse an expression.
+   {my $end     = Label;
+
+    $$parameters{expession}   ->setReg($start);                                 # Start of expression string after it has been classified
+    $$parameters{size}        ->setReg($size);                                  # Number of characters in the expression
+
+    Cmp $size, 0;                                                               # Check for empty expression
+    IfEq
+     {$$parameters{success}->copy(Vq(success, 1));
+      $$parameters{parse}  ->copy(Vq(parse,   0));
+      Jmp $end;
+     };
+
+    loadCurrentChar;                                                            # Load current character
+    test_first($element);
+    IfNe
+     {&$die(<<END =~ s(\n) ( )gsr);
+Expression must start with 'opening parenthesis', 'prefix
+operator', 'semi-colon' or 'variable'.
+END
+     };
+
+    test_v($element);                                                           # Single variable
+    IfEq
+     {Push $element;
+      &$new(1);
+     }
+    sub
+     {test_s($element);                                                         # Semi
+      IfEq
+       {pushEmpty;
+        &$new(1);
+       };
+      pushElement;
+     };
+
+    For                                                                         # Parse each utf32 character after it has been classified
+     {my ($start, $end, $next) = @_;                                            # Start and end of the classification loop
+      loadCurrentChar;                                                          # Load current character
+
+      my %l = $Nida_Lexical_Tables->{treeTermLexicals}->%*;
+      my %n = $Nida_Lexical_Tables->{lexicals}->%*;
+
+      for my $l(sort keys %l)                                                   # Each possible lexical item after classification
+       {my $n = $n{$l{$l}};
+        Cmp $element."b", $n;
+        IfEq {eval "accept_$l"; Jmp \$next};
+       }
+     } $index, $size;
+
+    test_last($element);                                                        # Last element
+    IfNe                                                                        # Incomplete expression
+     {&$die("Incomplete expression");
+     };
+
+    Vq('count', 99)->for(sub                                                    # Remove trailing semicolons if present
+     {my ($index, $start, $next, $end) = @_;                                    # Execute body
+      checkStackHas(2);
+      IfLt {Jmp $end};                                                          # Does not have two or more elements
+      Pop $w1;
+      test_s($w1);                                                              # Check that the top most element is a semi colon
+      IfNe                                                                      # Not a semi colon so put it back and finish the loop
+       {Push $w1;
+        Jmp $end;
+       };
+     });
+
+    accept_reduce;                                                              # Final reductions
+
+    checkStackHas(1);
+    IfNe                                                                        # Incomplete expression
+     {&$die("Incomplete expression");
+     };
+
+    Pop $w1;                                                                    # The resulting parse tree
+    $$parameters{parse}->getReg($w1);
+   } # parseExpression
  } # CreateNidaParser
 
 #D1 Short Strings                                                               # Operations on Short Strings
