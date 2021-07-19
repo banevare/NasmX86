@@ -443,11 +443,16 @@ sub translateSomeText($)                                                        
 alphabets;                                                                      # Locate alphabets
 brackets;                                                                       # Locate brackets
 transitions;                                                                    # Transitions table
+
 translateSomeText <<END;                                                        # Translate some text into Nida
 va aassign b1 b2 b3 vbp B3 B2 dplus b4 vsc B4 B1 s
 vaa aassign
   Asome--ascii--text dplus
   vcc s
+END
+
+translateSomeText <<END;                                                        # Translate some text into Nida
+va
 END
 
 owf $lexicalsFile, dump($Tables);                                               # Write results
