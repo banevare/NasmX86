@@ -2873,15 +2873,12 @@ sub MaskMemoryInRange4(@)                                                       
     Shr r11, 8; Vpbroadcastb zmm9, r11;                                         # Character 4 high
     KeepFree r10, r11;
     Lea r8, "[rax+rsi]";                                                        # Address of upper limit of source
-PrintErrRegisterInHex zmm 2..9;
 
     my sub check($$)                                                            # Check a character
      {my ($z, $f) = @_;                                                         # First zmm, finished label
       my $Z = $z + 4;
-PrintErrRegisterInHex zmm($z, $Z), k7;
       Vpcmpub  "k6{k7}", zmm0, "zmm$z", 5;                                      # Greater than or equal
       Vpcmpub  "k7{k6}", zmm0, "zmm$Z", 2;                                      # Less than or equal
-PrintErrRegisterInHex k6, k7;
       Ktestq k7, k7;
       Jz $f;                                                                    # No match
       Kshiftlq k7, k7, 1;                                                       # Match - move up to next character
@@ -2892,18 +2889,12 @@ PrintErrRegisterInHex k6, k7;
       Kshiftlq k6, k7, 2;  Kandq k7, k6, k7;                                    # Last four
      };
 
-PrintErrStringNL "AAAA";
-PrintErrRegisterInHex rsi;
     For                                                                         # Mask remaining memory in full zmm blocks
      {my $finished = Label;                                                     # Point where we have finished the initial comparisons
       Vmovdqu8 zmm0, "[rax]";                                                   # Load complete block of source
       Kxnorq k7, k7, k7;                                                        # Complete block - sets register to all ones
-PrintErrStringNL "BBBB";
-PrintErrRegisterInHex k7, zmm0;
       check($_, $finished) for 2..5;  last4;                                    # Check a range
 
-PrintErrStringNL "CCCC";
-PrintErrRegisterInHex k7, zmm1;
       Vmovdqu8 "[rdx]{k7}", zmm1;                                               # Write set byte into mask at match points
       Add rdx, $size;                                                           # Update point to mask to
       SetLabel $finished;
@@ -2912,13 +2903,10 @@ PrintErrRegisterInHex k7, zmm1;
 
     Mov r10, rsi; And r10, 0x3f;                                                # Modulus the size of zmm
     Test r10, r10;
-PrintErrStringNL "DDDD";
     IfNz sub                                                                    # Need to align so that the rest of the mask can be done in full zmm blocks
      {my $finished = Label;                                                     # Point where we have finished the initial comparisons
       Vq(align, r10)->setMaskFirst(k7);                                         # Set mask bits
       Vmovdqu8 "zmm0\{k7}", "[rax]";                                            # Load first incomplete block of source
-PrintErrStringNL "EEEE";
-PrintErrRegisterInHex k7, r10, zmm0;
       check($_, $finished) for 2..5;  last4;                                    # Check a range
       Vmovdqu8 "[rdx]{k7}", zmm1;                                               # Write set byte into mask at match points
       Add rax, r10;                                                             # Update point to mask from
@@ -3663,14 +3651,15 @@ sub CreateNidaParserCode($$$)                                                   
 
   my $ses     = RegisterSize rax;                                               # Size of an element on the stack
   my ($w1, $w2, $w3) = (r8, r9, r10);                                           # Work registers
-  my $index   = r11;                                                            # Index of current element
-  my $element = r12;                                                            # Contains the item being parsed
-  my $start   = r13;                                                            # Start of the parse string
-  my $current = r14;                                                            # Current position in the parse string
-  my $size    = r15;                                                            # Length of the input string
-  my $empty   = $Nida_Lexical_Tables->{lexicals}{empty}{number};                # Empty element
+  my $prevChar = r10;                                                           # The previous character parsed
+  my $index    = r11;                                                           # Index of current element
+  my $element  = r12;                                                           # Contains the item being parsed
+  my $start    = r13;                                                           # Start of the parse string
+  my $current  = r14;                                                           # Current position in the parse string
+  my $size     = r15;                                                           # Length of the input string
+  my $empty    = $Nida_Lexical_Tables->{lexicals}{empty}{number};               # Empty element
 
-  sub nidaRecognizers()                                                         # Write lexical check routines
+  my sub nidaRecognizers()                                                         # Write lexical check routines
    {my @t;
 
     my sub lexicalNameFromLetter($)                                             # Lexical name for a lexical item described by its letter
@@ -3697,8 +3686,11 @@ sub CreateNidaParserCode($$$)                                                   
 sub test_$name(\$)                                                              #P Set ZF if have one of $set in the specified register
  {my (\$register) = \@_;                                                        # Sub defining action to be taken on a match, register to check,
   my \$end = Label;
+  Comment("Test: $name");
+  Mov $w1, \$register;
+  Shr $w1, 24;
+  And $w1, 0xf;
 END
-
       for my $n(@n)
        {push @t, <<END;
   Cmp \$register."b", $n;
@@ -3741,11 +3733,10 @@ END
  }
 END
      }
-
     join "\n", @t                                                               # Lexical recognizers code
    } # recognizers
 
-  BEGIN                                                                         # Create recognizers
+# BEGIN                                                                         # Create recognizers
    {my $s = nidaRecognizers;
     eval $s;
     confess "$s\n$@\n" if $@;
@@ -3763,7 +3754,7 @@ END
    {Mov $w1, $index;
     KeepFree $w1;
     Shl $w1, 32;
-    Mov "{$w1}d", $element;
+    Mov $w1."d", $element."d";
     Push $w1;
     KeepFree $w1;
    }
@@ -3773,18 +3764,19 @@ END
     KeepFree $w1;
     Sub $w1, $start;
     Shl $w1, 32;
-    Mov "{$w1}d", $empty;
+    Mov $w1."d", $empty;
     Push $w1;
     KeepFree $w1;
    }
 
   my sub loadCurrentChar()                                                      #P Push the empty element on to the stack
    {Mov $element."d", "[$start+4*$index]";
+    NidaLexType $element;
    }
 
   my sub reduce()                                                               #P Convert the longest possible expression on top of the stack into a term
    {#lll "TTTT ", scalar(@s), "\n", dump([@s]);
-    my ($success, $fail, $end) = map {Label} 1..3;                              # Exit points
+    my ($success, $end) = map {Label} 1..2;                                     # Exit points
 
     checkStackHas 3;                                                            # At least three elements on the stack
     IfGe
@@ -3852,7 +3844,7 @@ END
       IfEq
        {test_t($r);
         IfEq
-         {&new(2);
+         {&$new(2);
           Jmp $success;
          };
        };
@@ -3869,12 +3861,12 @@ END
    } # reduce
 
   my sub accept_a()                                                             #P Assign
-   {check_t;
+   {&check_t;
     pushElement;
    }
 
   my sub accept_b                                                               #P Open
-   {check_bdps;
+   {&check_bdps;
     pushElement;
    }
 
@@ -3882,30 +3874,30 @@ END
    {Vq('count',99)->for(sub
      {my ($index, $start, $next, $end) = @_;                                    # Execute body
       reduce;
-      IfNe(sub{Jmp $end});                                                      # Keep going as long as reductions are possible
+      IfNe {Jmp $end};                                                          # Keep going as long as reductions are possible
      });
    }
 
   my sub accept_B                                                               #P Closing parenthesis
-   {check_bst;
+   {&check_bst;
     accept_reduce;
     pushElement;
     accept_reduce;
-    check_bst;
+    &check_bst;
    }
 
   my sub accept_d                                                               #P Infix but not assign or semi-colon
-   {check_t;
+   {&check_t;
     pushElement;
    }
 
   my sub accept_p                                                               #P Prefix
-   {check_bdp;
+   {&check_bdp;
     pushElement;
    }
 
   my sub accept_q                                                               #P Post fix
-   {check_t;
+   {&check_t;
     IfEq                                                                        # Post fix operator applied to a term
      {Pop $w1;
       pushElement;
@@ -3915,7 +3907,7 @@ END
    }
 
   my sub accept_s                                                               #P Semi colon
-   {check_bst;
+   {&check_bst;
     Mov $w1, "[rsp]";
     test_sb($w1);
     KeepFree $w1;
@@ -3927,7 +3919,7 @@ END
    }
 
    my sub accept_v                                                              #P Variable
-    {check_abdps;
+    {&check_abdps;
      pushElement;
      &$new(1);
      Vq(count,99)->For(sub                                                      # Reduce prefix operators
@@ -3955,7 +3947,8 @@ END
      };
 
     loadCurrentChar;                                                            # Load current character
-    test_first($element);
+    &test_first($element);
+PrintErrZF;
     IfNe
      {&$die(<<END =~ s(\n) ( )gsr);
 Expression must start with 'opening parenthesis', 'prefix
@@ -3963,7 +3956,7 @@ operator', 'semi-colon' or 'variable'.
 END
      };
 
-    test_v($element);                                                           # Single variable
+    &test_v($element);                                                           # Single variable
     IfEq
      {Push $element;
       &$new(1);
@@ -3978,15 +3971,30 @@ END
      };
     KeepFree $element;
 
+
+    my %l = $Nida_Lexical_Tables->{treeTermLexicals}->%*;
+    my %n = $Nida_Lexical_Tables->{lexicals}->%*;
+    my sub numberFromletter($)                                                  # Look up a lexical number for a letter - repeats prior code
+     {my ($l) = @_;                                                             # Parameters
+      $n{$l{$l}}{number}
+     };
+    my $WhiteSpace = $Nida_Lexical_Tables->{lexicals}{WhiteSpace}{number};      # White space that should be ignored
+
     For                                                                         # Parse each utf32 character after it has been classified
      {my ($start, $end, $next) = @_;                                            # Start and end of the classification loop
       loadCurrentChar;                                                          # Load current character
+      Cmp $element, $WhiteSpace;
+      IfEq {Jmp $next};                                                         # Ignore white space
 
-      my %l = $Nida_Lexical_Tables->{treeTermLexicals}->%*;
-      my %n = $Nida_Lexical_Tables->{lexicals}->%*;
+      Cmp $prevChar, $element;                                                  # Compare with previous element known not to be whitespace
+      IfEq                                                                      # Ignore white space
+       {Mov $prevChar, $element;
+        Jmp $next
+       };
+PrintErrRegisterInHex $element;
 
       for my $l(sort keys %l)                                                   # Each possible lexical item after classification
-       {my $n = $n{$l{$l}};
+       {my $n = numberFromletter($l);
         Cmp $element."b", $n;
         IfEq {eval "accept_$l"; Jmp $next};
        }
@@ -4000,7 +4008,12 @@ END
     Vq('count', 99)->for(sub                                                    # Remove trailing semicolons if present
      {my ($index, $start, $next, $end) = @_;                                    # Execute body
       checkStackHas(2);
-      IfLt {Jmp $end};                                                          # Does not have two or more elements
+      IfLt                                                                      # Does not have two or more elements
+       {Mov $w1, 0;
+        $$parameters{parse}->getReg($w1);
+        KeepFree $w1;
+        Jmp $end
+       };
       Pop $w1;
       test_s($w1);                                                              # Check that the top most element is a semi colon
       IfNe                                                                      # Not a semi colon so put it back and finish the loop
@@ -4018,6 +4031,7 @@ END
 
     Pop $w1;                                                                    # The resulting parse tree
     $$parameters{parse}->getReg($w1);
+    SetLabel $end;
    } # parseExpression
 
   parseExpression;
@@ -4031,7 +4045,7 @@ sub CreateNidaParser($$@)                                                       
     PushR my @save = map {"r$_"} 8..15;
     CreateNidaParserCode($p, $new, $die);
     PopR @save;
-   } in  => {source => 3, size => 3};
+   } in  => {source => 3, size => 3}, out => {parse => 3};
 
   $s->call(@variables);                                                         # Call the parser
  }
@@ -16757,27 +16771,27 @@ if (1) {                                                                        
   PrintOutStringNL "After converting some new lines to semi colons";
   PrintUtf32($sourceLength32, $source32);                                       # Print matched brackets
 
-#  CreateNidaParser
-#    sub                                                                         # Create a new term
-#     {my ($depth) = @_;                                                         # Stack depth to be converted
-#      PrintErrString "new $depth: ";
-#      PrintErrRegisterInHex r12;
-#      PushR my @save = (rax, rdi, rdx);
-#      for my $i(1..$depth)
-#       {Pop rax;
-#        PrintErrRaxInHex;
-#        PrintErrString "  ";
-#       }
-#      PrintErrNL;
-#      Shl rax, 32;
-#      Mov eax, $Nida_Lexical_Tables->{lexicals}{term}{number};                  # Term
-#      PopR     @save;
-#     },
-#    sub                                                                         # Die
-#     {PrintErrStringNL "die:";
-#      PrintErrRegisterInHex r12;
-#     },
-#    address=>$source32, size=>$source32;
+  CreateNidaParser
+    sub                                                                         # Create a new term
+     {my ($depth) = @_;                                                         # Stack depth to be converted
+      PrintErrString "new $depth: ";
+      PrintErrRegisterInHex r12;
+      PushR my @save = (rax, rdi, rdx);
+      for my $i(1..$depth)
+       {Pop rax;
+        PrintErrRaxInHex;
+        PrintErrString "  ";
+       }
+      PrintErrNL;
+      Shl rax, 32;
+      Mov eax, $Nida_Lexical_Tables->{lexicals}{term}{number};                  # Term
+      PopR     @save;
+     },
+    sub                                                                         # Die
+     {PrintErrStringNL "die:";
+      PrintErrRegisterInHex r12;
+     },
+    source=>$source32, size=>$sourceLength32, my $parse = Vq(parse);
 
   ok Assemble(debug => 1, eq => <<END);
 Input  Length: 0000 0000 0000 00DB
