@@ -24,8 +24,7 @@ my @text;                                                                       
 my @extern;                                                                     # External symbols imports for linking with C libraries
 my @link;                                                                       # Specify libraries which to link against in the final assembly stage
 my $interpreter = q(-I /usr/lib64/ld-linux-x86-64.so.2);                        # The ld command needs an interpreter if we are linking with C.
-my $develop;                                                                    # Developing
-BEGIN{$develop = -e q(/home/phil/)}
+my $develop     = -e q(/home/phil/);                                            # Developing
 
 our $stdin  = 0;                                                                # File descriptor for standard input
 our $stdout = 1;                                                                # File descriptor for standard output
