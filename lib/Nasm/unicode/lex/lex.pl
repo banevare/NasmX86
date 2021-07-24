@@ -1,4 +1,4 @@
-#!/usr/bin/perl -I/home/phil/perl/cpan/DataTableText/lib/
+#!/usr/bin/perl -I/home/phil/perl/cpan/DataTableText/lib/  -I/home/phil/perl/cpan/TreeTerm/lib/
 #-------------------------------------------------------------------------------
 # Find all 13 Unicode Mathematical Alphabets as used by Perl Zero.
 # Philip R Brenan at appaapps dot com, Appa Apps Ltd Inc., 2021
@@ -27,7 +27,7 @@ Text generation routine let us write some pretend code to parse
 
 =cut
 
-my $bracketBase = 0x10;                                                         # Start numbering brackets from here
+&tripleTerms; exit;
 
 sub LexicalConstant($$;$)                                                       # Lexical constants as opposed to derived values
  {my ($name, $number, $letter, $like) = @_;                                     # Name of the lexical item, numeric code as used in Nida, character code as used Tree::Term, a specialized instance of this Tree::Term which is never the less lexically identical to the Tree::Term
@@ -71,6 +71,7 @@ my $Tables = genHash("Nida::Lexical::Tables",                                   
   alphabets        => undef,                                                    # Alphabets selected from uncode database
   alphabetRanges   => undef,                                                    # Number of alphabet ranges
   brackets         => undef,                                                    # Number of brackets
+  bracketsBase     => 0x10,                                                     # Start numbering brackets from here
   bracketsHigh     => undef,                                                    # High zmm for closing brackets
   bracketsLow      => undef,                                                    # Low  zmm for opening brackets
   bracketsOpen     => undef,                                                    # Open brackets
@@ -79,7 +80,8 @@ my $Tables = genHash("Nida::Lexical::Tables",                                   
   lexicalHigh      => undef,                                                    # High zmm for lexical items
   lexicalLow       => undef,                                                    # Low  zmm for lexical items
   lexicals         => $Lexicals,                                                # The lexical items
-  sampleText       => undef,                                                    # A sample Nida program
+  sampleLexicals   => undef,                                                    # A sample Nida program as classified lexical items
+  sampleText       => undef,                                                    # A sample Nida program as text
   transitions      => undef,                                                    # Zmm of transition possibilities
   treeTermLexicals => $TreeTermLexicals,                                        # Tree term lexicals
   semiColon        => q(⟢),                                                     # Semi colon symbol, left star: U+27E2
@@ -303,7 +305,7 @@ sub brackets                                                                    
    }
 
   my @l; my @h;
-  my $index = $bracketBase;
+  my $index = $Tables->bracketsBase;                                            # Brackets are numbered from here
   for my $t(@t)                                                                 # Load zmm0, zmm1
    {if (@$t > 1)
      {push @l, sprintf("0x%08x", $$t[0] [0] + ($index<<24));
@@ -347,7 +349,7 @@ sub transitions                                                                 
   my %t;
   for my $l1(@l)                                                                # Transitions on numbers
    {my $a = $l1->letter;
-    my $A = Tree::Term::LexicalStructure()->codes->{$a}->next;                         # The permitted transitions as letters
+    my $A = Tree::Term::LexicalStructure()->codes->{$a}->next;                  # The permitted transitions as letters
 
     for my $l2(@l)
      {my $b = $l2->letter;
@@ -368,6 +370,33 @@ sub transitions                                                                 
     lll "Number of transitions = $n";
     $Tables->transitions = [@t];
     lll join ', ', map{sprintf("0x%02x", $_)} @t;
+   }
+ }
+
+sub tripleTerms                                                                 # All invalid transitions that could usefully interpret one or more intervening new lines as a variable or term and thereby become syntactically correct
+ {my %C = Tree::Term::LexicalStructure->codes->%*;
+  my @d = qw(d p q v B b);                                                      # Ignoring assing to avoid the possibility of assigning to a new line. Ignoring semi colon as intervening space is specially treated as empty.
+  my %semi; my %var;                                                            # The various ways we could treat a string of one or more new line characters followed by trailing spaces.
+  for   my $a(@d)
+   {for my $b(@d)
+     {if (!Tree::Term::validPair($a, $b))
+       {my $as = Tree::Term::validPair($a, 's');
+        my $sb = Tree::Term::validPair('s', $b);
+        my $av = Tree::Term::validPair($a, 'v');
+        my $vb = Tree::Term::validPair('v', $b);
+        if    ($as && $sb and !($av && $vb))
+         {$semi{$a}{$b}++;
+         lll "Semi $a $b";
+         }
+        elsif ($av && $vb and !($as && $sb))
+         {$var{$a}{$b}++;
+         lll "Var $a $b";
+         }
+        elsif ($av && $vb and $as && $sb)
+         {confess "$a to $b allows for both semi colon and variable";
+         }
+       }
+     }
    }
  }
 
@@ -396,7 +425,7 @@ sub translateSomeText($)                                                        
     $alphabets{$l} = [$n, $a];
    }
 
-  my $T = '';
+  my $T = '';                                                                   # Translated text as characters
   my $normal = join '', 'A'..'Z', 'a'..'z';                                     # The alphabet we can write lexical items
 
   my sub translate($)                                                           # Translate a string written in normal into the indicated alphabet
@@ -414,7 +443,7 @@ sub translateSomeText($)                                                        
      }
    }
 
-  for my $w(@w)
+  for my $w(@w)                                                                 # Translate to text
    {my $t = substr($w, 0, 1); my $r = substr($w, 1);
     if ($t =~ m(\A(a|d|v)\Z)) {translate $w}
     elsif ($t eq 's')         {$T .= $Tables->alphabets->{semiColon}}
@@ -426,7 +455,24 @@ sub translateSomeText($)                                                        
     else {confess "Invalid lexical item $s"}
    }
 
-  lll "Sample text length in chars:", sprintf("0x%x", length($T));
+  my @L;                                                                        # Translated text as lexical elements
+  my %l = $Tables->lexicals->%*;
+  my %n = map {$_=>$l{$_}->number} sort keys %l;
+  for my $w(@w)                                                                 # Translate to lexical elements
+   {my $t = substr($w, 0, 1);
+       if ($t eq 'a')         {push @L, $n{assign}}
+    elsif ($t eq 'd')         {push @L, $n{dyad}}
+    elsif ($t eq 'v')         {push @L, $n{variable}}
+    elsif ($t eq 's')         {push @L, $n{semiColon}}
+    elsif ($t eq 'b')         {push @L, $n{OpenBracket}}
+    elsif ($t eq 'B')         {push @L, $n{CloseBracket}}
+    elsif ($t =~ m(\s))       {}
+    elsif ($t eq 'A')         {push @L, $n{Ascii}}
+    else {confess "Invalid lexical item $s"}
+   }
+
+  lll "Sample text length in chars   :", sprintf("0x%x", length($T));
+  lll "Sample text length in lexicals:", scalar(@L);
 
   if (0)                                                                        # Print source code as utf8
    {my @T = split //, $T;
@@ -436,13 +482,16 @@ sub translateSomeText($)                                                        
      }
    }
 
-  lll "Sample text:\n$T";
-  $Tables->sampleText = $T;
+  lll "Sample text    :\n$T";
+  lll "Sample lexicals:\n", dump(\@L);
+  $Tables->sampleText     = $T;
+  $Tables->sampleLexicals = [map {$_<<24} @L];
  }
 
 alphabets;                                                                      # Locate alphabets
 brackets;                                                                       # Locate brackets
 transitions;                                                                    # Transitions table
+tripleTerms;
 
 translateSomeText <<END;                                                        # Translate some text into Nida
 va aassign b1 b2 b3 vbp B3 B2 dplus b4 vsc B4 B1 s
@@ -452,7 +501,11 @@ vaa aassign
 END
 
 translateSomeText <<END;                                                        # Translate some text into Nida
-va
+va aassign b1 b2 b3 vbp B3 B2 dplus b4 vsc B4 B1 s
+END
+
+translateSomeText <<END;                                                        # Translate some text into Nida
+va aassign b1 b2 b3 vbp B3 B2 dplus b4 vsc B4 B1
 END
 
 owf $lexicalsFile, dump($Tables);                                               # Write results
