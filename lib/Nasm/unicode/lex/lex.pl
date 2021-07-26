@@ -37,20 +37,21 @@ sub LexicalConstant($$;$)                                                       
  }
 
 my $Lexicals = genHash("Nida::Lexicals",                                        # Lexical items
-  OpenBracket      => LexicalConstant("OpenBracket",       0, 'b'),             # The lowest bit of an open bracket code is zero
-  CloseBracket     => LexicalConstant("CloseBracket",      1, 'B'),             # The lowest bit of a close bracket code is one
-  Ascii            => LexicalConstant("Ascii",             2, 'v'),             # Ascii characters
-  NewLine          => LexicalConstant("NewLine",           3, 'v'),             # New line character
-  dyad             => LexicalConstant("dyad",              4, 'd'),             # Infix operator with left to right binding at priority 3
-  prefix           => LexicalConstant("prefix",            5, 'p'),             # Prefix operator - it applies only to the following variable
-  assign           => LexicalConstant("assign",            6, 'a'),             # Assign infix operator with right to left binding at priority 2.
-  variable         => LexicalConstant("variable",          7, 'v'),             # Variable although it could also be an ascii string or regular expression
-  suffix           => LexicalConstant("suffix",            8, 'q'),             # Suffix operator - it applies only to the preceding variable
-  semiColon        => LexicalConstant("semiColon",         9, 's'),             # Infix operator with left to right binding at priority 1
-  NewLineSemiColon => LexicalConstant("NewLineSemiColon", 10, 'N'),             # A new line character that is also acting as a semi colon
-  WhiteSpace       => LexicalConstant("WhiteSpace",       11, 'W'),             # White space not between non ascii items
-  term             => LexicalConstant("term",             12, 't'),             # Term in the parse tree
-  empty            => LexicalConstant("empty",            13, 'e'),             # Empty term present between two adjacent semicolons
+  OpenBracket       => LexicalConstant("OpenBracket",        0, 'b'),           # The lowest bit of an open bracket code is zero
+  CloseBracket      => LexicalConstant("CloseBracket",       1, 'B'),           # The lowest bit of a close bracket code is one
+  Ascii             => LexicalConstant("Ascii",              2, 'a'),           # Ascii characters
+  NewLine           => LexicalConstant("NewLine",            3, 'n'),           # New line character in ascii
+  dyad              => LexicalConstant("dyad",               4, 'd'),           # Infix operator with left to right binding at priority 3
+  prefix            => LexicalConstant("prefix",             5, 'p'),           # Prefix operator - it applies only to the following variable
+  assign            => LexicalConstant("assign",             6, 'a'),           # Assign infix operator with right to left binding at priority 2.
+  variable          => LexicalConstant("variable",           7, 'v'),           # Variable although it could also be an ascii string or regular expression
+  suffix            => LexicalConstant("suffix",             8, 'q'),           # Suffix operator - it applies only to the preceding variable
+  semiColon         => LexicalConstant("semiColon",          9, 's'),           # Infix operator with left to right binding at priority 1
+  NewLineSemiColon  => LexicalConstant("NewLineSemiColon",  10, 'N'),           # A new line character that is also acting as a semi colon
+  WhiteSpace        => LexicalConstant("WhiteSpace",        11, 'W'),           # White space that can be ignored during lexical analysis
+  term              => LexicalConstant("term",              12, 't'),           # Term in the parse tree
+  empty             => LexicalConstant("empty",             13, 'e'),           # Empty term present between two adjacent semicolons
+  WhiteSpaceNewLine => LexicalConstant("WhiteSpaceNewLine", 14, 'h'),           # White space new line that can be ignored during lexical analysis but must be distinguished from other white space so that we can divide the source into lines
  );
 
 my $TreeTermLexicals = genHash("Nida::TreeTermLexicals",                        # Tree Term Lexical items embodied as Nida lexical items
