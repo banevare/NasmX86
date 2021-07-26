@@ -27,8 +27,6 @@ Text generation routine let us write some pretend code to parse
 
 =cut
 
-&tripleTerms; exit;
-
 sub LexicalConstant($$;$)                                                       # Lexical constants as opposed to derived values
  {my ($name, $number, $letter, $like) = @_;                                     # Name of the lexical item, numeric code as used in Nida, character code as used Tree::Term, a specialized instance of this Tree::Term which is never the less lexically identical to the Tree::Term
   genHash("Nida::Lexical::Constant",                                            # Description of a lexical item connecting the definition in Tree::Term with that in Nida::Lexicals
@@ -49,10 +47,10 @@ my $Lexicals = genHash("Nida::Lexicals",                                        
   variable         => LexicalConstant("variable",          7, 'v'),             # Variable although it could also be an ascii string or regular expression
   suffix           => LexicalConstant("suffix",            8, 'q'),             # Suffix operator - it applies only to the preceding variable
   semiColon        => LexicalConstant("semiColon",         9, 's'),             # Infix operator with left to right binding at priority 1
-  NewLineSemiColon => LexicalConstant("NewLineSemiColon", 10),                  # A new line character that is also acting as a semi colon
-  WhiteSpace       => LexicalConstant("WhiteSpace",       11),                  # White space not between non ascii items
-  term             => LexicalConstant("term",             12),                  # Term in the parse tree
-  empty            => LexicalConstant("empty",            13),                  # Empty term present between two adjacent semicolons
+  NewLineSemiColon => LexicalConstant("NewLineSemiColon", 10, 'N'),             # A new line character that is also acting as a semi colon
+  WhiteSpace       => LexicalConstant("WhiteSpace",       11, 'W'),             # White space not between non ascii items
+  term             => LexicalConstant("term",             12, 't'),             # Term in the parse tree
+  empty            => LexicalConstant("empty",            13, 'e'),             # Empty term present between two adjacent semicolons
  );
 
 my $TreeTermLexicals = genHash("Nida::TreeTermLexicals",                        # Tree Term Lexical items embodied as Nida lexical items
@@ -82,7 +80,6 @@ my $Tables = genHash("Nida::Lexical::Tables",                                   
   lexicals         => $Lexicals,                                                # The lexical items
   sampleLexicals   => undef,                                                    # A sample Nida program as classified lexical items
   sampleText       => undef,                                                    # A sample Nida program as text
-  transitions      => undef,                                                    # Zmm of transition possibilities
   treeTermLexicals => $TreeTermLexicals,                                        # Tree term lexicals
   semiColon        => q(⟢),                                                     # Semi colon symbol, left star: U+27E2
   separator        => q( ),                                                     # Space for separating non ascii items: U+205F
@@ -205,10 +202,10 @@ sub alphabets                                                                   
     my $nl = ord("\n");
 
 #               0               1                              2    3
-    push @zmm, ["NewLine",      $l{NewLine},                   $nl, $nl];
+#   push @zmm, ["NewLine",      $l{NewLine},                   $nl, $nl];       # New lines are being handled after lexical pas
     push @zmm, ["Ascii",        $l{Ascii},                     0,   127];
     push @zmm, ["semiColon",    $Lexicals->semiColon->number,  $s,  $s];
-    push @zmm, ["WhiteSpace",   $Lexicals->WhiteSpace->number, $t,  $t];
+#   push @zmm, ["WhiteSpace",   $Lexicals->WhiteSpace->number, $t,  $t];        # White space is being handled after the lexical pass
     @zmm = sort {$$a[3] <=> $$b[3]} @zmm;
    }
 
@@ -337,42 +334,6 @@ sub brackets                                                                    
   $Tables->bracketsHigh = [@h];
  }
 
-sub transitions                                                                 # Write transitions table
- {my @l;
-  for my $l(sort keys $Lexicals->%*)                                            # Each lexical item that could appear in a transition becuase it is like a Tree::Term
-   {my $L = $$Lexicals{$l};
-    next unless $L->letter;
-    push @l, $L;
-   }
-
-
-  my %t;
-  for my $l1(@l)                                                                # Transitions on numbers
-   {my $a = $l1->letter;
-    my $A = Tree::Term::LexicalStructure()->codes->{$a}->next;                  # The permitted transitions as letters
-
-    for my $l2(@l)
-     {my $b = $l2->letter;
-      next unless index($A, $b) > -1;
-      $t{$l1->number}{$l2->number} = "$a$b";
-     }
-   }
-
-  if (1)                                                                        # Load transitions
-   {my $n = 0;                                                                  # Number of transitions
-    my @t;                                                                      # Transitions
-    for   my $t1(keys %t)
-     {for my $t2(keys $t{$t1}->%*)
-       {++$n;
-        push @t, $t1 + ($t2 << 4);                                              # Encode transitions
-       }
-     }
-    lll "Number of transitions = $n";
-    $Tables->transitions = [@t];
-    lll join ', ', map{sprintf("0x%02x", $_)} @t;
-   }
- }
-
 sub tripleTerms                                                                 # All invalid transitions that could usefully interpret one or more intervening new lines as a variable or term and thereby become syntactically correct
  {my %C = Tree::Term::LexicalStructure->codes->%*;
   my @d = qw(d p q v B b);                                                      # Ignoring assing to avoid the possibility of assigning to a new line. Ignoring semi colon as intervening space is specially treated as empty.
@@ -449,8 +410,9 @@ sub translateSomeText($)                                                        
     elsif ($t eq 's')         {$T .= $Tables->alphabets->{semiColon}}
     elsif ($t eq 'b')         {$T .= $Tables->bracketsOpen ->[$r]}
     elsif ($t eq 'B')         {$T .= $Tables->bracketsClose->[$r]}
-    elsif ($t =~ m(\n))       {$T .= $w}
-    elsif ($t =~ m(\s))       {$T .= $Tables->separator x length($w)}
+#   elsif ($t =~ m(\n))       {$T .= $w}
+#   elsif ($t =~ m(\s))       {$T .= $Tables->separator x length($w)}
+    elsif ($t =~ m(\s))       {}                                                # Simplify by not spacing the lexicals during testing
     elsif ($t eq 'A')         {$T .= substr($w, 1) =~ s(-) (\n)gsr}
     else {confess "Invalid lexical item $s"}
    }
@@ -490,7 +452,6 @@ sub translateSomeText($)                                                        
 
 alphabets;                                                                      # Locate alphabets
 brackets;                                                                       # Locate brackets
-transitions;                                                                    # Transitions table
 tripleTerms;
 
 translateSomeText <<END;                                                        # Translate some text into Nida
@@ -508,7 +469,7 @@ translateSomeText <<END;                                                        
 va aassign b1 b2 b3 vbp B3 B2 dplus b4 vsc B4 B1
 END
 
-owf $lexicalsFile, dump($Tables);                                               # Write results
+say STDERR owf $lexicalsFile, dump($Tables);                                               # Write results
 
 __DATA__
 CIRCLED LATIN LETTER  : ⒶⒷⒸⒹⒺⒻⒼⒽⒾⒿⓀⓁⓂⓃⓄⓅⓆⓇⓈⓉⓊⓋⓌⓍⓎⓏⓐⓑⓒⓓⓔⓕⓖⓗⓘⓙⓚⓛⓜⓝⓞⓟⓠⓡⓢⓣⓤⓥⓦⓧⓨⓩ
