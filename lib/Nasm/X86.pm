@@ -732,6 +732,15 @@ sub IfGe(&;&)                                                                   
   If(q(Jl), $then, $else);                                                      # Opposite code
  }
 
+sub Block(&)                                                                    # Execute a block of code one with the option of jumping out of the block or restarting the block via the supplied labels.
+ {my ($body) = @_;                                                              # Body
+  @_ == 1 or confess;
+  SetLabel(my $start = Label);
+  my $end = Label;
+  &$body($start, $end);                                                         # Start and end labels
+  SetLabel $end;                                                                # Exit loop
+ }
+
 sub For(&$$;$)                                                                  # For - iterate the body as long as register is less than limit incrementing by increment each time
  {my ($body, $register, $limit, $increment) = @_;                               # Body, register, limit on loop, increment on each iteration
   @_ == 3 or @_ == 4 or confess;
@@ -13799,12 +13808,37 @@ END
 
 if (1) {                                                                        #TFor
   For
-   {PrintOutRegisterInHex rax
+   {my ($start, $end, $next) = @_;
+    Cmp rax, 3;
+    IfGe {Jmp $end};
+    PrintOutRegisterInHex rax;
    } rax, 16, 1;
 
-  my $r = Assemble;
-  ok $r =~ m(( 0000){3} 0000)i;
-  ok $r =~ m(( 0000){3} 000F)i;
+  ok Assemble(debug => 0, eq => <<END);
+   rax: 0000 0000 0000 0000
+   rax: 0000 0000 0000 0001
+   rax: 0000 0000 0000 0002
+END
+ }
+
+if (1) {                                                                        #TBlock
+  Mov rax, 0;
+  Block
+   {my ($start, $end) = @_;
+    PrintOutRegisterInHex rax;
+    Cmp rax, 3;
+    IfGe {Jmp $end};
+    Inc rax;
+    PrintOutRegisterInHex rax
+    Jmp $start;
+   };
+
+  ok Assemble(debug => 0, eq => <<END);
+   rax: 0000 0000 0000 0000
+   rax: 0000 0000 0000 0001
+   rax: 0000 0000 0000 0002
+   rax: 0000 0000 0000 0003
+END
  }
 
 if (1) {                                                                        #TPrintOutRaxInReverseInHex #TPrintOutMemoryInHex
