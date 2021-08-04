@@ -3340,46 +3340,46 @@ sub ConvertUtf8ToUtf32(@)                                                       
   $s->call(@parameters);
  } # ConvertUtf8ToUtf32
 
-sub ClassifyCharacters4(@)                                                      # Classify the utf32 characters in a block of memory of specified length using the classification held in zmm0: zmm0 should be  formatted in double words with each word having the classification in the highest 8 bits and the utf32 character so classified in the lower 21 bits.  The classification bits are copied into the high unused) byte of each utf32 character in the block of memory.
- {my (@parameters) = @_;                                                        # Parameters
-  @_ >= 1 or confess;
-
-  my $s = Subroutine
-   {my ($p) = @_;                                                               # Parameters
-    Comment "Classify characters in utf32 format";
-    my $finish = Label;
-
-    PushR my @save =  (r14, r15, k6, k7, zmm 29..31);
-
-    Mov r15, 0x88888888;                                                        # Create a mask for the classification bytes
-    Kmovq k7, r15;
-    KeepFree r15;
-    Kshiftlq k6, k7, 32;                                                        # Move mask into upper half of register
-    Korq  k7, k6, k7;                                                           # Classification bytes masked by k7
-
-    Knotq k7, k7;                                                               # Utf32 characters mask
-    Vmovdqu8   "zmm31\{k7}{z}", zmm0;                                           # utf32 characters to match
-
-    $$p{address}->setReg(r15);                                                  # Address of first utf32 character
-    $$p{size}->for(sub                                                          # Process each utf32 character in the block of memory
-     {my ($index, $start, $next, $end) = @_;
-
-      Mov r14d, "[r15]";                                                        # Load utf32 character
-      Add r15, RegisterSize r14d;                                               # Move up to next utf32 character
-      Vpbroadcastd zmm30, r14d;                                                 # 16 copies of the utf32  character to be processed
-      Vpcmpud  k7, zmm30, zmm31, 0;                                             # Look for one matching character
-      Ktestw k7, k7;                                                            # Was there a match
-      IfZ {Jmp $next};                                                          # No character was matched
-      Vpcompressd "zmm30\{k7}", zmm0;                                           # Place classification byte at start of xmm
-      Vpextrb "[r15-1]", xmm30, 3;                                              # Extract classification character
-     });
-
-    SetLabel $finish;
-    PopR @save;
-   } in => {address => 3, size => 3};
-
-  $s->call(@parameters);
- } # ClassifyCharacters4
+#sub ClassifyCharacters4(@)                                                      # Classify the utf32 characters in a block of memory of specified length using the classification held in zmm0: zmm0 should be  formatted in double words with each word having the classification in the highest 8 bits and the utf32 character so classified in the lower 21 bits.  The classification bits are copied into the high unused) byte of each utf32 character in the block of memory.
+# {my (@parameters) = @_;                                                        # Parameters
+#  @_ >= 1 or confess;
+#
+#  my $s = Subroutine
+#   {my ($p) = @_;                                                               # Parameters
+#    Comment "Classify characters in utf32 format";
+#    my $finish = Label;
+#
+#    PushR my @save =  (r14, r15, k6, k7, zmm 29..31);
+#
+#    Mov r15, 0x88888888;                                                        # Create a mask for the classification bytes
+#    Kmovq k7, r15;
+#    KeepFree r15;
+#    Kshiftlq k6, k7, 32;                                                        # Move mask into upper half of register
+#    Korq  k7, k6, k7;                                                           # Classification bytes masked by k7
+#
+#    Knotq k7, k7;                                                               # Utf32 characters mask
+#    Vmovdqu8   "zmm31\{k7}{z}", zmm0;                                           # utf32 characters to match
+#
+#    $$p{address}->setReg(r15);                                                  # Address of first utf32 character
+#    $$p{size}->for(sub                                                          # Process each utf32 character in the block of memory
+#     {my ($index, $start, $next, $end) = @_;
+#
+#      Mov r14d, "[r15]";                                                        # Load utf32 character
+#      Add r15, RegisterSize r14d;                                               # Move up to next utf32 character
+#      Vpbroadcastd zmm30, r14d;                                                 # 16 copies of the utf32  character to be processed
+#      Vpcmpud  k7, zmm30, zmm31, 0;                                             # Look for one matching character
+#      Ktestw k7, k7;                                                            # Was there a match
+#      IfZ {Jmp $next};                                                          # No character was matched
+#      Vpcompressd "zmm30\{k7}", zmm0;                                           # Place classification byte at start of xmm
+#      Vpextrb "[r15-1]", xmm30, 3;                                              # Extract classification character
+#     });
+#
+#    SetLabel $finish;
+#    PopR @save;
+#   } in => {address => 3, size => 3};
+#
+#  $s->call(@parameters);
+# } # ClassifyCharacters4
 
 sub ClassifyRange($@)                                                           #P Implementation of ClassifyInRange and ClassifyWithinRange
  {my ($recordOffsetInRange, @parameters) = @_;                                  # Record offset in classification in high byte if 1 else in classification if 2, parameters
@@ -5008,6 +5008,7 @@ sub Nasm::X86::BlockMultiWayTree::DescribeBlockMultiWayTree($;$)                
     maxNodes  => $b / $o - 1,                                                   # Maximum number of children per parent.
     loop      => $b - $o,                                                       # Offset of keys, data, node loop.
     length    => $b - $o * 2,                                                   # Offset of length in keys block.  The length field is a word - see: "MultiWayTree.svg"
+    treeBits  => $b - $o * 2 + 2,                                               # Offset of tree bits in keys block.  The tree bits field is a word, each bit of which tells us whether the corresponding data element is the offset (or not) to a sub tree of this tree .
     up        => $b - $o * 2,                                                   # Offset of up in data block.
    );
  }
@@ -5942,6 +5943,62 @@ sub Nasm::X86::BlockMultiWayTree::depth($@)                                     
 
   $s->call($bmt->address, @variables);
  } # depth
+
+sub Nasm::X86::BlockMultiWayTree::isTree($$$)                                   #P Set the Zero Flag to match the tree bit in the numbered zmm register holding the keys of a node to indicate whether the data element indexed by the specified register is an offset to a sub tree in the containing byte string or not.
+{my ($bmt, $register, $zmm) = @_;                                               # Block multi way tree descriptor, register holding data element index 0..13, numbered zmm register holding the keys for a node in the tree
+  @_ == 3 or confess;
+
+  my $b = RegisterSize zmm0;                                                    # Size of a block == size of a zmm register
+  my $o = $b - $$bmt{treeBits};                                                 # Bytes from tree bits to end of zmm
+  my $treeBits = $register eq r15 ? r14 : r15;                                  # Choose a register to hold a copy of the tree bits
+  PushR my @save = ($treeBits, rcx);
+  Mov rcx, $register;                                                           # Index
+  Mov $treeBits,  1;                                                            # Single bit
+  Shl $treeBits, cl;                                                            # Single bit in position
+  PushRR "zmm$zmm";                                                             # Put the keys on the stack
+  Add rsp, RegisterSize zmm0;                                                   # Restore stack
+  And $treeBits."w", "[rsp-$o]";                                                # Test the tree bits - done here to avoid the effect on ZF of add
+  PopR @save;
+ } # isTree
+
+sub Nasm::X86::BlockMultiWayTree::setOrClearTree($$$$)                          #P Set or clear the tree bit in the numbered zmm register holding the keys of a node to indicate that the data element indexed by the specified register is an offset to a sub tree in the containing byte string.
+{my ($bmt, $set, $register, $zmm) = @_;                                         # Block multi way tree descriptor, set if true else clear, register holding data element index 0..13, numbered zmm register holding the keys for a node in the tree
+  @_ == 4 or confess;
+  my $z = "zmm$zmm";                                                            # Full name of zmm register
+  my $o = $$bmt{treeBits};                                                      # Tree bits to end of zmm
+  my $treeBits = $register eq r15 ? r14 : r15;                                  # Choose a register to hold a copy of the tree bits
+  PushR my @save = ($treeBits, rcx);
+  Mov rcx, $register;                                                           # Index
+  Mov $treeBits, 1;                                                              # Index bit
+  Shl $treeBits, cl;                                                            # Shift the index bit into position
+  PushR $z;                                                                     # Put the keys on the stack
+  if ($set)                                                                     # Set the indexed bit
+   {Or "[rsp+$o]", $treeBits."w";
+PrintErrStringNL "AAAA";
+PrintErrRegisterInHex $treeBits;
+   }
+  else                                                                          # Clear the indexed bit
+   {Neg $treeBits;
+    And "[rsp+$$bmt{treeBits}]", $treeBits."w";
+   }
+  PopR $z;                                                                      # Reload zmm
+PrintErrStringNL "CCCC";
+PrintErrRegisterInHex $z;
+
+  PopR @save;
+ } # setOrClearTree
+
+sub Nasm::X86::BlockMultiWayTree::setTree($$$)                                  #P Set the tree bit in the numbered zmm register holding the keys of a node to indicate that the data element indexed by the specified register is an offset to a sub tree in the containing byte string.
+{my ($bmt, $register, $zmm) = @_;                                               # Block multi way tree descriptor, register holding data element index 0..13, numbered zmm register holding the keys for a node in the tree
+  @_ == 3 or confess;
+  $bmt->setOrClearTree(1, $register, $zmm);
+ } # setTree
+
+sub Nasm::X86::BlockMultiWayTree::clearTree($$$)                                #P Clear the tree bit in the numbered zmm register holding the keys of a node to indicate that the data element indexed by the specified register is an offset to a sub tree in the containing byte string.
+{my ($bmt, $register, $zmm) = @_;                                               # Block multi way tree descriptor, register holding data element index 0..13, numbered zmm register holding the keys for a node in the tree
+  @_ == 3 or confess;
+  $bmt->setOrClearTree(0, $register, $zmm);
+ } # clearTree
 
 sub Nasm::X86::BlockMultiWayTree::iterator($)                                   # Iterate through a multi way tree
  {my ($b) = @_;                                                                 # Block multi way tree
@@ -15434,7 +15491,7 @@ F3: 0000 0000 0000 0003
 END
  }
 
-latest:
+#latest:
 if (1) {                                                                        #TNasm::X86::ByteString::CreateBlockMultiWayTree #TLoadConstantIntoMaskRegister #TPopEax
   Mov r14, 0;
   Kmovq k0, r14;
@@ -15865,8 +15922,6 @@ END
 #latest:
 if (1) {                                                                        #TConvertUtf8ToUtf32
   my @p = my ($out, $size, $fail) = (Vq(out), Vq(size), Vq('fail'));
-  my $opens = Vq(opens);
-  my $class = Vq(class);
 
   my $Chars = Rb(0x24, 0xc2, 0xa2, 0xc9, 0x91, 0xE2, 0x82, 0xAC, 0xF0, 0x90, 0x8D, 0x88);
   my $chars = Vq(chars, $Chars);
@@ -15911,33 +15966,75 @@ if (1) {                                                                        
 
   $address->printOutMemoryInHexNL($l);
                                                                                 # Single character classifications
-  Cq('newLine', 0x0A)->putBIntoZmm(0, 0);                                       #r 0x0 - open bracket  #r 0x1 - close bracket
-  Cq('newLine', 0x02)->putBIntoZmm(0, 3);                                       #r 0x2 - new line,     #r 0x3 - new line acting as a semi-colon
-  Cq('space',   0x20)->putBIntoZmm(0, 4);
-  Cq('space',   0x05)->putBIntoZmm(0, 7);                                       #r 0x5 - space
+#  Cq('newLine', 0x0A)->putBIntoZmm(0, 0);                                       #r 0x0 - open bracket  #r 0x1 - close bracket
+#  Cq('newLine', 0x02)->putBIntoZmm(0, 3);                                       #r 0x2 - new line,     #r 0x3 - new line acting as a semi-colon
+#  Cq('space',   0x20)->putBIntoZmm(0, 4);
+#  Cq('space',   0x05)->putBIntoZmm(0, 7);                                       #r 0x5 - space
+#
+#  my sub pu32($$)                                                               # Print some utf32 characters
+#   {my ($n, $m) = @_;                                                           # Variable: number of characters to print, variable: address of memory
+#    $n->for(sub
+#     {my ($index, $start, $next, $end) = @_;
+#      my $a = $m + $index * 4;
+#      $a->setReg(r15);
+#      KeepFree r15;
+#      Mov r15d, "[r15]";
+#      KeepFree r15;
+#      PrintOutRegisterInHex r15;
+#     });
+#   }
+#
+#  if (1)                                                                        # Classify a utf32 string
+#   {my $a = Dd(0x0001d5ba, 0x00000020, 0x0001d44e, 0x0000000a, 0x0001d5bb, 0x0001d429);
+#    my $t = Cq('test', $a);
+#    my $s = Cq('size', 6);
+#
+#    ClassifyCharacters4 address=>$t, size=>$s;
+#    PrintOutStringNL "Convert some utf8 to utf32";
+#    pu32($s, $t);
+#   }
+  ok Assemble(debug => 0, eq => <<END);
+out1 : 0000 0000 0000 0024 size : 0000 0000 0000 0001
+out2 : 0000 0000 0000 00A2 size : 0000 0000 0000 0002
+out3 : 0000 0000 0000 0251 size : 0000 0000 0000 0002
+out4 : 0000 0000 0000 20AC size : 0000 0000 0000 0003
+out5 : 0000 0000 0001 0348 size : 0000 0000 0000 0004
+outA : 0000 0000 0001 D5BA size : 0000 0000 0000 0004
+outB : 0000 0000 0000 000A size : 0000 0000 0000 0001
+outC : 0000 0000 0000 0020 size : 0000 0000 0000 0001
+outD : 0000 0000 0000 0020 size : 0000 0000 0000 0001
+outE : 0000 0000 0000 0010 size : 0000 0000 0000 0002
+F09D 96BA 0A20 F09D918E F09D 91A0 F09D91A0 F09D 9196 F09D9194 F09D 919B 20E38090 E380 90F0 9D96BB20 F09D 90A9 F09D90A5 F09D 90AE F09D90AC 20F0 9D96 BCE38091 E380 910A 4141
+END
+ }
 
-  my sub pu32($$)                                                               # Print some utf32 characters
-   {my ($n, $m) = @_;                                                           # Variable: number of characters to print, variable: address of memory
-    $n->for(sub
-     {my ($index, $start, $next, $end) = @_;
-      my $a = $m + $index * 4;
-      $a->setReg(r15);
-      KeepFree r15;
-      Mov r15d, "[r15]";
-      KeepFree r15;
-      PrintOutRegisterInHex r15;
-     });
-   }
-
-  if (1)                                                                        # Classify a utf32 string
-   {my $a = Dd(0x0001d5ba, 0x00000020, 0x0001d44e, 0x0000000a, 0x0001d5bb, 0x0001d429);
-    my $t = Cq('test', $a);
-    my $s = Cq('size', 6);
-
-    ClassifyCharacters4 address=>$t, size=>$s;
-    PrintOutStringNL "Convert some utf8 to utf32";
-    pu32($s, $t);
-   }
+latest:
+if (1) {                                                                        #T setOrClearTreeBits
+  ClearRegisters zmm0;
+  my $b = CreateByteString;
+  my $t = $b->CreateBlockMultiWayTree;
+  Mov r15, 3;
+  $t->setTree(r15, 0);
+  PrintOutRegisterInHex zmm0;
+  $t->isTree(r15, 0);
+  PrintOutZF;
+  Mov r15, 4;
+  $t->isTree(r15, 0);
+  PrintOutZF;
+  Mov r15, 4;
+  $t->setTree(r15, 0);
+  PrintOutRegisterInHex zmm0;
+  $t->clearTree(r15, 0);
+  PrintOutRegisterInHex zmm0;
+  $t->isTree(r15, 0);
+  PrintOutZF;
+  ok Assemble(debug => 1, eq => <<END);
+  zmm0: 0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+ZF=1
+ZF=1
+  zmm0: 0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+  zmm0: 0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+END
  }
 
 #latest:
