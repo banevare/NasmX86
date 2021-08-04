@@ -5944,7 +5944,7 @@ sub Nasm::X86::BlockMultiWayTree::depth($@)                                     
   $s->call($bmt->address, @variables);
  } # depth
 
-sub Nasm::X86::BlockMultiWayTree::isTree($$$)                                   #P Set the Zero Flag to match the tree bit in the numbered zmm register holding the keys of a node to indicate whether the data element indexed by the specified register is an offset to a sub tree in the containing byte string or not.
+sub Nasm::X86::BlockMultiWayTree::isTree($$$)                                   #P Set the Zero Flag to oppose the tree bit in the numbered zmm register holding the keys of a node to indicate whether the data element indexed by the specified register is an offset to a sub tree in the containing byte string or not.
 {my ($bmt, $register, $zmm) = @_;                                               # Block multi way tree descriptor, register holding data element index 0..13, numbered zmm register holding the keys for a node in the tree
   @_ == 3 or confess;
 
@@ -5974,18 +5974,12 @@ sub Nasm::X86::BlockMultiWayTree::setOrClearTree($$$$)                          
   PushR $z;                                                                     # Put the keys on the stack
   if ($set)                                                                     # Set the indexed bit
    {Or "[rsp+$o]", $treeBits."w";
-PrintErrStringNL "AAAA";
-PrintErrRegisterInHex $treeBits;
    }
   else                                                                          # Clear the indexed bit
-   {Neg $treeBits;
-    And "[rsp+$$bmt{treeBits}]", $treeBits."w";
+   {Not $treeBits;
+    And "[rsp+$o]", $treeBits."w";
    }
-  PopR $z;                                                                      # Reload zmm
-PrintErrStringNL "CCCC";
-PrintErrRegisterInHex $z;
-
-  PopR @save;
+  PopR @save, $z;
  } # setOrClearTree
 
 sub Nasm::X86::BlockMultiWayTree::setTree($$$)                                  #P Set the tree bit in the numbered zmm register holding the keys of a node to indicate that the data element indexed by the specified register is an offset to a sub tree in the containing byte string.
@@ -13479,7 +13473,7 @@ Test::More->builder->output("/dev/null") if $localTest;                         
 
 if ($^O =~ m(bsd|linux|cygwin)i)                                                # Supported systems
  {if (confirmHasCommandLineCommand(q(nasm)) and LocateIntelEmulator)            # Network assembler and Intel Software Development emulator
-   {plan tests => 110;
+   {plan tests => 111;
    }
   else
    {plan skip_all => qq(Nasm or Intel 64 emulator not available);
@@ -16013,27 +16007,24 @@ if (1) {                                                                        
   ClearRegisters zmm0;
   my $b = CreateByteString;
   my $t = $b->CreateBlockMultiWayTree;
+
   Mov r15, 3;
-  $t->setTree(r15, 0);
-  PrintOutRegisterInHex zmm0;
-  $t->isTree(r15, 0);
-  PrintOutZF;
+  $t->setTree  (r15, 0); PrintOutRegisterInHex zmm0;
+  $t->isTree   (r15, 0); PrintOutZF;
+
   Mov r15, 4;
-  $t->isTree(r15, 0);
-  PrintOutZF;
-  Mov r15, 4;
-  $t->setTree(r15, 0);
-  PrintOutRegisterInHex zmm0;
-  $t->clearTree(r15, 0);
-  PrintOutRegisterInHex zmm0;
-  $t->isTree(r15, 0);
-  PrintOutZF;
-  ok Assemble(debug => 1, eq => <<END);
-  zmm0: 0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+  $t->isTree   (r15, 0); PrintOutZF;
+  $t->setTree  (r15, 0); PrintOutRegisterInHex zmm0;
+  $t->clearTree(r15, 0); PrintOutRegisterInHex zmm0;
+  $t->isTree   (r15, 0); PrintOutZF;
+
+  ok Assemble(debug => 0, eq => <<END);
+  zmm0: 0000 0000 0008 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+ZF=0
 ZF=1
+  zmm0: 0000 0000 0018 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+  zmm0: 0000 0000 0008 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
 ZF=1
-  zmm0: 0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
-  zmm0: 0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
 END
  }
 
