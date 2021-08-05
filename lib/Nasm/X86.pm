@@ -5614,8 +5614,8 @@ sub Nasm::X86::BlockMultiWayTree::find($@)                                      
   $s->call($bmt->address, first => $bmt->first, @variables);
  } # find
 
-sub Nasm::X86::BlockMultiWayTree::insert($@)                                    # Insert a (key, data) pair into the tree
- {my ($bmt, @variables) = @_;                                                   # Block multi way tree descriptor, variables
+sub Nasm::X86::BlockMultiWayTree::insert($$$)                                   # Insert a (key, data) pair into the tree
+ {my ($bmt, $key, $data) = @_;                                                  # Block multi way tree descriptor, key as a dword, data as a dword
   @_ >= 2 or confess;
   my $b = $bmt->bs;                                                             # Underlying byte string
   my $W = RegisterSize zmm0;                                                    # The size of a block
@@ -5636,7 +5636,7 @@ sub Nasm::X86::BlockMultiWayTree::insert($@)                                    
     If  $l == 0,
     Then                                                                        # Empty tree
      {$K->putDIntoZmm      (31, 0);                                             # Write key
-      $bmt->putLengthInKeys (31, Cq(one, 1));                                   # Set the length of the block
+      $bmt->putLengthInKeys(31, Cq(one, 1));                                    # Set the length of the block
       $D->putDIntoZmm      (30, 0);                                             # Write data
       $bmt->putKeysData($F, 31, 30);                                            # Write the data block back into the underlying byte string
       Jmp $success;                                                             # Insert completed successfully
@@ -5741,7 +5741,7 @@ sub Nasm::X86::BlockMultiWayTree::insert($@)                                    
     PopR @save;
    }  in => {bs => 3, first => 3, key => 3, data => 3};
 
-  $s->call($bmt->address, first => $bmt->first, @variables);
+  $s->call($bmt->address, first => $bmt->first, key => $key, data => $data);
  } # insert
 
 sub Nasm::X86::BlockMultiWayTree::getKeysData($$$$)                             # Load the keys and data blocks for a node
@@ -5944,6 +5944,8 @@ sub Nasm::X86::BlockMultiWayTree::depth($@)                                     
   $s->call($bmt->address, @variables);
  } # depth
 
+#D2 Sub trees                                                                   # Construct trees of trees.
+
 sub Nasm::X86::BlockMultiWayTree::isTree($$$)                                   #P Set the Zero Flag to oppose the tree bit in the numbered zmm register holding the keys of a node to indicate whether the data element indexed by the specified register is an offset to a sub tree in the containing byte string or not.
 {my ($bmt, $register, $zmm) = @_;                                               # Block multi way tree descriptor, register holding data element index 0..13, numbered zmm register holding the keys for a node in the tree
   @_ == 3 or confess;
@@ -5993,6 +5995,14 @@ sub Nasm::X86::BlockMultiWayTree::clearTree($$$)                                
   @_ == 3 or confess;
   $bmt->setOrClearTree(0, $register, $zmm);
  } # clearTree
+
+sub Nasm::X86::BlockMultiWayTree::createSubTree($@)                             # Create a sub tree at the specified key in the specified tree (if it is not already a tree) and return a descriptor to it.
+ {my ($bmt, @variables) = @_;                                                   # Block multi way tree descriptor, variables
+  @_ >= 2 or confess;
+  my $b = $bmt->bs;                                                             # Underlying byte string
+ } # createSubTree
+
+#D2 Iteration                                                                   # Iterate through a tree non recursively
 
 sub Nasm::X86::BlockMultiWayTree::iterator($)                                   # Iterate through a multi way tree
  {my ($b) = @_;                                                                 # Block multi way tree
@@ -15486,7 +15496,7 @@ END
  }
 
 #latest:
-if (1) {                                                                        #TNasm::X86::ByteString::CreateBlockMultiWayTree #TLoadConstantIntoMaskRegister #TPopEax
+if (1) {                                                                        #TLoadConstantIntoMaskRegister #TPopEax
   Mov r14, 0;
   Kmovq k0, r14;
   KeepFree r14;
@@ -15717,7 +15727,7 @@ if (1) {                                                                        
 END
  }
 
-#latest:
+latest:
 if (1) {
   my $b = CreateByteString;
   my $t = $b->CreateBlockMultiWayTree;
@@ -15727,7 +15737,7 @@ if (1) {
   Vq(count, 24)->for(sub       # 24
    {my ($index, $start, $next, $end) = @_;
     my $k = $index + 1; my $d = $k + 0x100;
-    $t->insert(key => $k, data => $d);
+    $t->insert($k, $d);
    });
 
   $t->getKeysDataNode($t->first, 31, 30, 29);
@@ -15841,11 +15851,11 @@ if (1) {
    {my ($index, $start, $next, $end) = @_;
     if (1)
      {my $k = $index *  2 + 1;      my $d = $k + 0x100;
-      $t->insert(key => $k, data => $d);
+      $t->insert($k, $d);
      }
     if (1)
      {my $k = $index * -2 + 2 * $N; my $d = $k + 0x100;
-      $t->insert(key => $k, data => $d);
+      $t->insert($k, $d);
      }
    });
 
@@ -16002,7 +16012,7 @@ F09D 96BA 0A20 F09D918E F09D 91A0 F09D91A0 F09D 9196 F09D9194 F09D 919B 20E38090
 END
  }
 
-latest:
+#latest:
 if (1) {                                                                        #T setOrClearTreeBits
   ClearRegisters zmm0;
   my $b = CreateByteString;
