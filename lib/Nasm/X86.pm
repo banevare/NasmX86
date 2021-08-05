@@ -5615,8 +5615,8 @@ sub Nasm::X86::BlockMultiWayTree::find($$$$)                                    
            key => $key, data => $data, found => $found);
  } # find
 
-sub Nasm::X86::BlockMultiWayTree::insert($$$)                                   # Insert a (key, data) pair into the tree
- {my ($bmt, $key, $data) = @_;                                                  # Block multi way tree descriptor, key as a dword, data as a dword
+sub Nasm::X86::BlockMultiWayTree::insertDataOrTree($$$$)                        # Insert a (key, data) pair into the tree
+ {my ($bmt, $first, $key, $data) = @_;                                          # Block multi way tree descriptor, variable addressing created sub tree, key as a dword, data as a dword
   @_ >= 2 or confess;
   my $b = $bmt->bs;                                                             # Underlying byte string
   my $W = RegisterSize zmm0;                                                    # The size of a block
@@ -5744,6 +5744,19 @@ sub Nasm::X86::BlockMultiWayTree::insert($$$)                                   
 
   $s->call($bmt->address, first => $bmt->first, key => $key, data => $data);
  } # insert
+
+sub Nasm::X86::BlockMultiWayTree::insert($$$)                                   # Insert a dword into into the specified tree at the specified key.
+ {my ($bmt, $key, $data) = @_;                                                  # Block multi way tree descriptor, key as a dword, data as a dword
+  @_ == 3 or confess;
+  $bmt->insertDataOrTree(undef, $key, $data)                                    # Insert data
+ }
+
+sub Nasm::X86::BlockMultiWayTree::insertTree($$$)                               # Insert a sub tree into the specified tree tree under the specified key and return a descriptor for it.  If the tree already exists, return a descriptor for it.
+ {my ($bmt, $key, $data) = @_;                                                  # Block multi way tree descriptor, key as a dword, offset to data as a dword
+  @_ == 3 or confess;
+  my $first = Vq(first);                                                        # Variable containing offset to first block of the sub tree in the byte string
+  $bmt->insertDataOrTree($first, $key, $data)
+ }
 
 sub Nasm::X86::BlockMultiWayTree::getKeysData($$$$)                             # Load the keys and data blocks for a node
  {my ($bmt, $offset, $zmmKeys, $zmmData) = @_;                                  # Block multi way tree descriptor, offset as a variable, numbered zmm for keys, numbered data for keys
