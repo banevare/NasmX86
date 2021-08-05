@@ -5545,9 +5545,9 @@ sub Nasm::X86::BlockMultiWayTree::findAndSplit($@)                              
   $s->call($bmt->address, first => $bmt->first, @variables);
  } # findAndSplit
 
-sub Nasm::X86::BlockMultiWayTree::find($@)                                      # Find a key in a tree and  return its associated data
- {my ($bmt, @variables) = @_;                                                   # Block multi way tree descriptor, variables
-  @_ >= 3 or confess;
+sub Nasm::X86::BlockMultiWayTree::find($$$$)                                    # Find a key in a tree and  return its associated data.  The found variable will be set to true if the specified key has been found and the data variable will contain the data associated with the key.
+ {my ($bmt, $key, $data, $found) = @_;                                          # Block multi way tree descriptor, key field to search for, data variable to receive result, found variable to show whether a result was found or not.
+  @_ == 4 or confess;
   my $W = $bmt->width;                                                          # Width of keys and data
 
   my $s = Subroutine
@@ -5611,7 +5611,8 @@ sub Nasm::X86::BlockMultiWayTree::find($@)                                      
     PopR @save;
    }  in => {bs => 3, first => 3, key => 3}, out => {data => 3, found => 3};
 
-  $s->call($bmt->address, first => $bmt->first, @variables);
+  $s->call($bmt->address, first => $bmt->first,
+           key => $key, data => $data, found => $found);
  } # find
 
 sub Nasm::X86::BlockMultiWayTree::insert($$$)                                   # Insert a (key, data) pair into the tree
@@ -15765,12 +15766,12 @@ if (1) {
     $iter->data->out(' data: ');
     $iter->tree->depth($iter->node, my $D = Vq(depth));
 
-    $t->find(key => $iter->key, $d, $f);
+    $t->find($iter->key, $d, $f);
     $f->out(' found: '); $d->out(' data: '); $D->outNL(' depth: ');
    });
 
-  $t->find(key => Vq(key, 0xffff), $d, $f);  $f->outNL('Found: ');
-  $t->find(key => Vq(key, 0xd),    $d, $f);  $f->outNL('Found: ');
+  $t->find(Vq(key, 0xffff), $d, $f);  $f->outNL('Found: ');
+  $t->find(Vq(key, 0xd),    $d, $f);  $f->outNL('Found: ');
 
   ok Assemble(debug => 0, eq => <<END);
 Root
@@ -15889,8 +15890,8 @@ if (1) {
   PrintOutRegisterInHex zmm28, zmm27, zmm26;
 
 
-  $t->find(key => Vq(key, 0xffff), $d, $f);  $f->outNL('Found: ');
-  $t->find(key => Vq(key, 0x1b),   $d, $f);  $f->outNL('Found: ');
+  $t->find(Vq(key, 0xffff), $d, $f);  $f->outNL('Found: ');
+  $t->find(Vq(key, 0x1b),   $d, $f);  $f->outNL('Found: ');
 
   ok Assemble(debug => 0, eq => <<END);
 Root
