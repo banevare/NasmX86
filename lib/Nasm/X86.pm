@@ -3315,7 +3315,8 @@ sub ConvertUtf8ToUtf32(@)                                                       
      {my ($start, $end) = @_;
       my @p = my ($out, $size, $fail) = (Vq(out), Vq(size), Vq('fail'));
       GetNextUtf8CharAsUtf32 Vq(in, r14), @p;                                   # Get next utf 8 character and convert it to utf32
-      If ($fail, sub
+      If ($fail,
+      Then
        {PrintErrStringNL "Invalid utf8 character at index:";
         PrintErrRegisterInHex r12;
         Exit(1);
@@ -3491,14 +3492,15 @@ sub PrintUtf32($$)                                                              
     Or r14,r15;
     Mov rax, r14;
     PrintOutRaxInHex;
-    If ($index % 8 == 7, sub                                                    #
+    If ($index % 8 == 7,
+    Then
      {PrintOutNL;                                                               #
      },
-    sub
-    {If($index != $count1, sub
-      {PrintOutString "  ";
-      });
-    });
+    Else
+     {If($index != $count1, sub
+       {PrintOutString "  ";
+       });
+     });
    });
   PrintOutNL;
   PopR @save;
@@ -3734,7 +3736,8 @@ sub Nasm::X86::ByteString::updateSpace($@)                                      
     my $oldUsed = Vq(oldUsed, $used);                                           # Used
     my $minSize = $oldUsed + $$p{size};                                         # Minimum size of new string
     KeepFree rax;
-    If ($minSize > $oldSize, sub                                                # More space needed
+    If ($minSize > $oldSize,
+    Then                                                                        # More space needed
      {Mov rax, 4096;                                                            # Minimum byte string size
       $minSize->setReg(rdx);
       ForEver
@@ -3832,10 +3835,11 @@ sub Nasm::X86::ByteString::allocZmmBlock($@)                                    
  {my ($byteString, @variables) = @_;                                            # Byte string, variables
   @_ >= 2 or confess;
   my $ffb = $byteString->firstFreeBlock;                                        # Check for a free block
-  If ($ffb > 0, sub                                                             # Free block available
+  If ($ffb > 0,
+  Then                                                                          # Free block available
    {PushR zmm31;
     $byteString->getBlock($byteString->bs, $ffb, 31);                           # Load the first block on the free chain
-    my $second = getDFromZmm(31, 60);                                 # The location of the next pointer is forced upon us by block string which got there first.
+    my $second = getDFromZmm(31, 60);                                           # The location of the next pointer is forced upon us by block string which got there first.
     $byteString->setFirstFreeBlock($second);                                    # Set the first free block field to point to the second block
     for my $v(@variables)
      {if (ref($v) and $v->name eq "offset")
@@ -3845,7 +3849,7 @@ sub Nasm::X86::ByteString::allocZmmBlock($@)                                    
      }
     PopR zmm31;
    },
-  sub
+  Else
    {$byteString->allocate(Vq(size, RegisterSize(zmm0)), @variables);
    });
  }
@@ -3911,7 +3915,8 @@ sub Nasm::X86::ByteString::getBlock($$$$)                                       
   defined($bsa) or confess;
   $bsa->setReg(r15);                                                            # Byte string address
   defined($block) or confess;
-  If ($block < $byteString->data->loc, sub                                      #DEBUG
+  If ($block < $byteString->data->loc,
+  Then                                                                          #DEBUG
    {PrintErrStringNL "Attempt to get block below start of byte string";
     Exit(1);
    });
@@ -3927,7 +3932,8 @@ sub Nasm::X86::ByteString::putBlock($$$$)                                       
   defined($bsa) or confess "Byte string not set";
   $bsa->setReg(r15);                                                            # Byte string address
   defined($block) or confess;
-  If ($block < $byteString->data->loc, sub                                      #DEBUG
+  If ($block < $byteString->data->loc,
+  Then                                                                          #DEBUG
    {PrintErrStringNL "Attempt to put block below start of byte string";
     Exit(1);
    });
@@ -4360,7 +4366,8 @@ sub Nasm::X86::BlockString::concatenate($$)                                     
       Vmovdqu8 zmm30, zmm29;                                                    # Last target block
 
       my ($sn, $sp) = $source->getNextAndPrevBlockOffsetFromZmm(31);            # Get links from current source block
-      If ($sn == $sf, sub                                                       # Last source block
+      If ($sn == $sf,
+      Then                                                                      # Last source block
        {$source->getBlock($tb, $tf, 30);                                        # The first target block
         $source->putNextandPrevBlockOffsetIntoZmm(30, undef, $new);             # Update end of block chain
         $source->putBlock($tb, $tf, 30);                                        # Save modified first target block
@@ -4400,19 +4407,21 @@ sub Nasm::X86::BlockString::insertChar($@)                                      
     ForEver                                                                     # Each block in source string
      {my ($start, $end) = @_;                                                   # Start and end labels
 
-      If ((($P >= $C) & ($P <= $C + $L)), sub                                   # Position is in current block
+      If ((($P >= $C) & ($P <= $C + $L)),
+      Then                                                                      # Position is in current block
        {my $O = $P - $C;                                                        # Offset in current block
         PushRR zmm31;                                                           # Stack block
         $O->setReg(r14);                                                        # Offset of character in block
         $c->setReg(r15);                                                        # Character to insert
         Mov "[rsp+r14]", r15b;                                                  # Place character after skipping length field
 
-        If ($L < $M, sub                                                        # Current block has space
+        If ($L < $M,
+        Then                                                                    # Current block has space
          {($P+1)->setMask($C + $L - $P + 1, k7);                                # Set mask for reload
           Vmovdqu8 "zmm31{k7}", "[rsp-1]";                                      # Reload
           $blockString->setBlockLengthInZmm($L + 1, 31);                        # Length of block
          },
-        sub                                                                     # In the current block but no space so split the block
+        Else                                                                    # In the current block but no space so split the block
          {$One->setMask($C + $L - $P + 2, k7);                                  # Set mask for reload
           Vmovdqu8 "zmm30{k7}", "[rsp+r14-1]";                                  # Reload
           $blockString->setBlockLengthInZmm($O,          31);                   # New shorter length of original block
@@ -4421,11 +4430,12 @@ sub Nasm::X86::BlockString::insertChar($@)                                      
           my $new = $blockString->allocBlock;                                   # Allocate new block
           my ($next, $prev)=$blockString->getNextAndPrevBlockOffsetFromZmm(31); # Linkage from last block
 
-          If ($next == $prev, sub                                               # The existing string has one block, add new as the second block
+          If ($next == $prev,
+          Then                                                                  # The existing string has one block, add new as the second block
            {$blockString->putNextandPrevBlockOffsetIntoZmm(31, $new,  $new);
             $blockString->putNextandPrevBlockOffsetIntoZmm(30, $next, $prev);
            },
-          sub                                                                   # The existing string has two or more blocks
+          Else                                                                  # The existing string has two or more blocks
            {$blockString->putNextandPrevBlockOffsetIntoZmm(31, $new,  $prev);   # From last block
             $blockString->putNextandPrevBlockOffsetIntoZmm(30, $next, $current);# From new block
            });
@@ -4440,7 +4450,8 @@ sub Nasm::X86::BlockString::insertChar($@)                                      
        });
 
       my ($next, $prev) = $blockString->getNextAndPrevBlockOffsetFromZmm(31);   # Get links from current source block
-      If ($next == $F, sub                                                      # Last source block
+      If ($next == $F,
+      Then                                                                      # Last source block
        {$c->setReg(r15);                                                        # Character to insert
         Push r15;
         $blockString->append($B, $F, Vq(size, 1), Vq(source, rsp));             # Append character if we go beyond limit
@@ -4479,7 +4490,8 @@ sub Nasm::X86::BlockString::deleteChar($@)                                      
     ForEver                                                                     # Each block in source string
      {my ($start, $end) = @_;                                                   # Start and end labels
 
-      If ((($P >= $C) & ($P <= $C + $L)), sub                                   # Position is in current block
+      If ((($P >= $C) & ($P <= $C + $L)),
+      Then                                                                      # Position is in current block
        {my $O = $P - $C;                                                        # Offset in current block
         PushRR zmm31;                                                           # Stack block
         ($O+1)->setMask($L - $O, k7);                                           # Set mask for reload
@@ -4521,7 +4533,8 @@ sub Nasm::X86::BlockString::getCharacter($@)                                    
     ForEver                                                                     # Each block in source string
      {my ($start, $end) = @_;                                                   # Start and end labels
 
-      If ((($P >= $C) & ($P <= $C + $L)), sub                                   # Position is in current block
+      If ((($P >= $C) & ($P <= $C + $L)),
+      Then                                                                      # Position is in current block
        {my $O = $P - $C;                                                        # Offset in current block
         PushRR zmm31;                                                           # Stack block
         ($O+1)  ->setReg(r15);                                                  # Character to get
@@ -4581,11 +4594,12 @@ sub Nasm::X86::BlockString::append($@)                                          
       $blockString->getBlock  ($B, $new, 30);                                   # Load the new block
       my ($next, $prev) = $blockString->getNextAndPrevBlockOffsetFromZmm(31);   # Linkage from last block
 
-      If ($first == $last, sub                                                  # The existing string has one block, add new as the second block
+      If ($first == $last,
+      Then                                                                      # The existing string has one block, add new as the second block
         {$blockString->putNextandPrevBlockOffsetIntoZmm(31, $new,  $new);
          $blockString->putNextandPrevBlockOffsetIntoZmm(30, $last, $last);
         },
-      sub                                                                       # The existing string has two or more blocks
+      Else                                                                      # The existing string has two or more blocks
        {$blockString->putNextandPrevBlockOffsetIntoZmm(31, $new,    $prev);     # From last block
         $blockString->putNextandPrevBlockOffsetIntoZmm(30, $next,   $last);     # From new block
         $blockString->putNextandPrevBlockOffsetIntoZmm(29, undef,   $new);      # From first block
@@ -4617,20 +4631,20 @@ sub Nasm::X86::BlockString::clear($)                                            
     $blockString->putNextandPrevBlockOffsetIntoZmm(29, $first, $first);         # Initialize block chain
     $blockString->putBlock($$p{bs}, $first, 29);                                # Put the first block
 
-    If ($last == $first, sub                                                    # String only has one block
-     {},
-    sub                                                                         # Two or more blocks on the chain
+    If ($last != $first,
+    Then                                                                        # Two or more blocks on the chain
      {$$p{bs}->setReg(rax);                                                     # Address underlying byte string
       Lea r14, $blockString->bs->free->addr;                                    # Address of address of free chain
       Mov r15, "[r14]";                                                         # Address of free chain
       my $rfc = Vq('next', r15);                                                # Remainder of the free chain
 
-      If ($second == $last, sub                                                 # Two blocks on the chain
+      If ($second == $last,
+      Then                                                                      # Two blocks on the chain
        {ClearRegisters zmm30;                                                   # Second block
         $blockString->putNextandPrevBlockOffsetIntoZmm(30, $rfc, undef);        # Put second block on head of the list
         $blockString->putBlock($$p{bs}, $second, 30);                           # Put the second block
        },
-      sub                                                                       # Three or more blocks on the chain
+      Else                                                                      # Three or more blocks on the chain
        {my $z = Vq(zero, 0);                                                    # A variable with zero in it
         $blockString->getBlock($$p{bs}, $second, 30);                           # Get the second block
         $blockString->getBlock($$p{bs}, $last,   31);                           # Get the last block
@@ -4711,7 +4725,8 @@ sub Nasm::X86::BlockArray::dump($@)                                             
     $size->out("Size: ", "  ");
     PrintOutRegisterInHex zmm31;
 
-    If ($size > $n, sub                                                         # Array has secondary blocks
+    If ($size > $n,
+    Then                                                                        # Array has secondary blocks
      {my $T = $size / $N;                                                       # Number of full blocks
 
       $T->for(sub                                                               # Print out each block
@@ -4758,14 +4773,16 @@ sub Nasm::X86::BlockArray::push($@)                                             
     $b->getBlock($B, $F, 31);                                                   # Get the first block
     my $size = getDFromZmm(31, 0);                                              # Size of array
 
-    If ($size < $n, sub                                                         # Room in the first block
+    If ($size < $n,
+    Then                                                                        # Room in the first block
      {$E       ->putDIntoZmm(31, ($size + 1) * $w);                             # Place element
       ($size+1)->putDIntoZmm(31, 0);                                            # Update size
       $b       ->putBlock($B, $F, 31);                                          # Put the first block back into memory
       Jmp $success;                                                             # Element successfully inserted in first block
      });
 
-    If ($size == $n, sub                                                        # Migrate the first block to the second block and fill in the last slot
+    If ($size == $n,
+    Then                                                                        # Migrate the first block to the second block and fill in the last slot
      {PushR my @save = (rax, k7, zmm30);
       Mov rax, -2;                                                              # Load compression mask
       Kmovq k7, rax;                                                            # Set  compression mask
@@ -4781,8 +4798,10 @@ sub Nasm::X86::BlockArray::push($@)                                             
       Jmp $success;                                                             # Element successfully inserted in second block
      });
 
-    If ($size <= $N * ($N - 1), sub                                             # Still within two levels
-     {If ($size % $N == 0, sub                                                  # New secondary block needed
+    If ($size <= $N * ($N - 1),
+    Then                                                                        # Still within two levels
+     {If ($size % $N == 0,
+      Then                                                                      # New secondary block needed
        {PushR my @save = (rax, zmm30);
         my $new = $b->allocBlock;                                               # Allocate new block
         $E       ->putDIntoZmm(30, 0);                                          # Place new element last in new second block
@@ -4835,15 +4854,18 @@ sub Nasm::X86::BlockArray::pop($@)                                              
     $b->getBlock($B, $F, 31);                                                   # Get the first block
     my $size = getDFromZmm(31, 0);                                              # Size of array
 
-    If ($size > 0, sub                                                          # Array has elements
-     {If ($size <= $n, sub                                                      # In the first block
+    If ($size > 0,
+    Then                                                                        # Array has elements
+     {If ($size <= $n,
+      Then                                                                      # In the first block
        {$E       ->getDFromZmm(31, $size * $w);                                 # Get element
         ($size-1)->putDIntoZmm(31, 0);                                          # Update size
         $b       ->putBlock($B, $F, 31);                                        # Put the first block back into memory
         Jmp $success;                                                           # Element successfully retrieved from secondary block
        });
 
-      If ($size == $N, sub                                                      # Migrate the second block to the first block now that the last slot is empty
+      If ($size == $N,
+      Then                                                                      # Migrate the second block to the first block now that the last slot is empty
        {PushR my @save = (rax, k7, zmm30);
         my $S = getDFromZmm(31, $w);                                            # Offset of second block in first block
         $b->getBlock($B, $S, 30);                                               # Get the second block
@@ -4858,8 +4880,10 @@ sub Nasm::X86::BlockArray::pop($@)                                              
         Jmp $success;                                                           # Element successfully retrieved from secondary block
        });
 
-      If ($size <= $N * ($N - 1), sub                                           # Still within two levels
-       {If ($size % $N == 1, sub                                                # Secondary block can be freed
+      If ($size <= $N * ($N - 1),
+      Then                                                                      # Still within two levels
+       {If ($size % $N == 1,
+        Then                                                                    # Secondary block can be freed
          {PushR my @save = (rax, zmm30);
           my $S = getDFromZmm(31, ($size / $N + 1) * $w);                       # Address secondary block from first block
           $b       ->getBlock($B, $S, 30);                                      # Load secondary block
@@ -4915,13 +4939,16 @@ sub Nasm::X86::BlockArray::get($@)                                              
     $b->getBlock($B, $F, 31);                                                   # Get the first block
     my $size = getDFromZmm(31, 0);                                              # Size of array
 
-    If ($I < $size, sub                                                         # Index is in array
-     {If ($size <= $n, sub                                                      # Element is in the first block
+    If ($I < $size,
+    Then                                                                        # Index is in array
+     {If ($size <= $n,
+      Then                                                                      # Element is in the first block
        {$E->getDFromZmm(31, ($I + 1) * $w);                                     # Get element
         Jmp $success;                                                           # Element successfully inserted in first block
        });
 
-      If ($size <= $N * ($N - 1), sub                                           # Still within two levels
+      If ($size <= $N * ($N - 1),
+      Then                                                                      # Still within two levels
        {my $S = getDFromZmm(31, ($I / $N + 1) * $w);                            # Offset of second block in first block
         $b->getBlock($B, $S, 31);                                               # Get the second block
         $E->getDFromZmm(31, ($I % $N) * $w);                                    # Offset of element in second block
@@ -4961,14 +4988,17 @@ sub Nasm::X86::BlockArray::put($@)                                              
     PushR my @save = (zmm31);
     $b->getBlock($B, $F, 31);                                                   # Get the first block
     my $size = getDFromZmm(31, 0          );                                    # Size of array
-    If ($I < $size, sub                                                         # Index is in array
-     {If ($size <= $n, sub                                                      # Element is in the first block
+    If ($I < $size,
+    Then                                                                        # Index is in array
+     {If ($size <= $n,
+       Then                                                                     # Element is in the first block
        {$E->putDIntoZmm(31, ($I + 1) * $w);                                     # Put element
         $b->putBlock($B, $F, 31);                                               # Get the first block
         Jmp $success;                                                           # Element successfully inserted in first block
        });
 
-      If ($size <= $N * ($N - 1), sub                                           # Still within two levels
+      If ($size <= $N * ($N - 1),
+      Then                                                                      # Still within two levels
        {my $S = getDFromZmm(31, ($I / $N + 1) * $w);                            # Offset of second block in first block
         $b->getBlock($B, $S, 31);                                               # Get the second block
         $E->putDIntoZmm(31, ($I % $N) * $w);                                    # Put the element into the second block in first block
@@ -5070,14 +5100,17 @@ sub Nasm::X86::BlockMultiWayTree::splitNode($$$$@)                              
     PushR my @save = (zmm 22..31);
     $bmt->getKeysDataNode($n, $K, $D, $N);                                      # Load root node
 
-    If ($bmt->getLengthInKeys($K) != $bmt->maxKeys, sub                         # Only split full blocks
+    If ($bmt->getLengthInKeys($K) != $bmt->maxKeys,
+    Then                                                                        # Only split full blocks
      {Jmp $success;
      });
 
     my $p = $bmt->getUpFromData($D);                                            # Parent
-    If ($p, sub                                                                 # Not the root
+    If ($p,
+    Then                                                                        # Not the root
      {my $s = getDFromZmm($K, ($bmt->minKeys + 1) * $bmt->width);               # Splitting key
-      If ($k < $s, sub                                                          # Split left node pushing remainder right so that we keep the key we are looking for in the left node
+      If ($k < $s,
+      Then                                                                      # Split left node pushing remainder right so that we keep the key we are looking for in the left node
        {Vmovdqu64 zmm28, zmm31;                                                 # Load left node
         Vmovdqu64 zmm27, zmm30;
         Vmovdqu64 zmm26, zmm29;
@@ -5092,7 +5125,7 @@ sub Nasm::X86::BlockMultiWayTree::splitNode($$$$@)                              
         $bmt->putUpIntoData  ($p, 24);                                          # Reparent new block
         $bmt->putKeysDataNode($r, 25, 24, 23);                                  # Save right back into node we just split
        },
-      sub                                                                       # Split right node pushing remainder left  so that we keep the key we are looking for in the right node
+      Else                                                                      # Split right node pushing remainder left  so that we keep the key we are looking for in the right node
        {Vmovdqu64 zmm25, zmm31;                                                 # Load right node
         Vmovdqu64 zmm24, zmm30;
         Vmovdqu64 zmm23, zmm29;
@@ -5108,7 +5141,7 @@ sub Nasm::X86::BlockMultiWayTree::splitNode($$$$@)                              
         $bmt->putKeysDataNode($n, 25, 24, 23);                                  # Save right back into node we just split
        });
      },
-    sub
+    Then
      {$bmt->splitFullRoot($b);                                                  # Root
       my $l = getDFromZmm($N, 0);
       my $r = getDFromZmm($N, $bmt->width);
@@ -5177,9 +5210,7 @@ sub Nasm::X86::BlockMultiWayTree::splitFullRoot($$)                             
 
     PushR my @save = (k6, k7, zmm22);
 
-    If ($bmt->getLengthInKeys($TK) != $bmt->maxKeys, sub                        # Only split full blocks
-     {Jmp $success;
-     });
+    If ($bmt->getLengthInKeys($TK) != $bmt->maxKeys, sub {Jmp $success});       # Only split full blocks
 
     $bmt->allocKeysDataNode(  28, 27, 26);                                      # Allocate immediate children of the root
     my $l = $bmt->getLoop(            26);
@@ -5208,9 +5239,7 @@ sub Nasm::X86::BlockMultiWayTree::splitFullRoot($$)                             
     LoadConstantIntoMaskRegister(k7, eval "0b".'1'x$leftLength);                # Constant mask up to the split point
     &Vmovdqu32   (zmm $LK."{k7}",      $TK);                                    # Split keys left
     &Vmovdqu32   (zmm $LD."{k7}",      $TD);                                    # Split data left
-    If ($n, sub                                                                 # Split nodes left
-     {&Vmovdqu32 (zmm $LN."{k7}",      $TN);
-     });
+    If ($n, sub  {&Vmovdqu32 (zmm $LN."{k7}", $TN)});                           # Split nodes left
 
     my $mr = eval "0b".('1'x$rightLength).('0'x($leftLength+1));                # Right mask
     LoadConstantIntoMaskRegister(k6, $mr);                                      # Constant mask from one beyond split point to end of keys
@@ -5224,7 +5253,8 @@ sub Nasm::X86::BlockMultiWayTree::splitFullRoot($$)                             
     &Vpcompressd (zmm $Test."{k6}",    $Test);                                  # Compress right data
     &Vmovdqu32   (zmm $RD.  "{k7}",    $Test);                                  # Save right data
 
-    If ($n, sub                                                                 # Split nodes right
+    If ($n,
+    Then                                                                        # Split nodes right
      {&Vmovdqu32   (zmm $Test."{k6}{z}", $TN);                                  # Split right nodes
       &Vpcompressd (zmm $Test."{k6}",    $Test);                                # Compress right node
       &Vmovdqu32   (zmm $RN.  "{k7}",    $Test);                                # Save right node
@@ -5241,7 +5271,8 @@ sub Nasm::X86::BlockMultiWayTree::splitFullRoot($$)                             
     LoadConstantIntoMaskRegister(k7, eval "0b11".('0'x($length-1)).'1');        # Unused fields
     &Vmovdqu32 (zmm $TK."{k7}{z}",  $TK);                                       # Clear unused keys in root
     &Vmovdqu32 (zmm $TD."{k7}{z}",  $TD);                                       # Clear unused data in root
-    If ($n, sub
+    If ($n,
+    Then
      {LoadConstantIntoMaskRegister(k7, eval "0b1".('0'x($length)).'1');         # Unused fields
       &Vmovdqu32 (zmm $TN."{k7}{z}",  $TN);                                     # Clear unused node in root
      });
@@ -5283,9 +5314,7 @@ sub Nasm::X86::BlockMultiWayTree::splitFullLeftNode($$)                         
 
     PushR my @save = (k6, k7, zmm22);
 
-    If ($bmt->getLengthInKeys($LK) != $bmt->maxKeys, sub                        # Only split full blocks
-     {Jmp $success;
-     });
+    If ($bmt->getLengthInKeys($LK) != $bmt->maxKeys, sub {Jmp $success});       # Only split full blocks
 
     my $n  = $bmt->getLoop($LD);                                                # Offset of node block or zero if there is no node block for the left node
     my $lo = $bmt->getLoop($LN);                                                # Offset of left block
@@ -5307,7 +5336,8 @@ sub Nasm::X86::BlockMultiWayTree::splitFullLeftNode($$)                         
     &Vmovdqu32   (zmm $Test."{k6}{z}", $LD);                                    # Split out right data
     &Vpcompressd (zmm $Test."{k6}",    $Test);                                  # Compress right data
     &Vmovdqu32   (zmm $RD.  "{k7}",    $Test);                                  # Save right data
-    If ($n, sub                                                                 # Split nodes right
+    If ($n,
+    Then                                                                        # Split nodes right
      {&Vmovdqu32   (zmm $Test."{k6}{z}", $LN);                                  # Split right nodes
       &Vpcompressd (zmm $Test."{k6}",    $Test);                                # Compress right node
       &Vmovdqu32   (zmm $RN.  "{k7}",    $Test);                                # Save right node
@@ -5321,7 +5351,8 @@ sub Nasm::X86::BlockMultiWayTree::splitFullLeftNode($$)                         
 
     &Vmovdqu32   (zmm $LK."{k7}{z}",   $LK);                                    # Remove unused keys
     &Vmovdqu32   (zmm $LD."{k7}{z}",   $LD);                                    # Split data left
-    If ($n, sub                                                                 # Split nodes left
+    If ($n,
+    Then                                                                        # Split nodes left
      {my $B = "0b10".('0'x($rightLength+1)).('1'x($leftLength));                # Areas to retain
       my $b = eval $B;
       LoadConstantIntoMaskRegister(k7, $b);                                     # Areas to retain
@@ -5339,7 +5370,8 @@ sub Nasm::X86::BlockMultiWayTree::splitFullLeftNode($$)                         
     $d->zBroadCastD($Test);                                                     # Broadcast new data
     &Vmovdqu32 (zmm $PD."{k6}", $Test);                                         # Insert new data
 
-    If ($n, sub                                                                 # Insert new right node offset into parent nodes
+    If ($n,
+    Then                                                                        # Insert new right node offset into parent nodes
      {Kshiftlq k6, k6, 1;                                                       # Node insertion point
       Kandnq k5, k6, k7;                                                        # Expansion mask
       &Vpexpandd (zmm $PN."{k5}", $PN);                                         # Shift up nodes
@@ -5377,9 +5409,7 @@ sub Nasm::X86::BlockMultiWayTree::splitFullRightNode($$)                        
     my $B = $$parameters{bs};
     PushR my @save = (k6, k7, zmm22);
 
-    If ($bmt->getLengthInKeys($RK) != $bmt->maxKeys, sub                        # Only split full blocks
-     {Jmp $success;
-     });
+    If ($bmt->getLengthInKeys($RK) != $bmt->maxKeys, sub {Jmp $success});       # Only split full blocks
 
     my $n  = $bmt->getLoop($RD);                                                # Offset of node block or zero if there is no node block for the right node
     my $lo = $bmt->getLoop($LN);                                                # Offset of left block
@@ -5408,7 +5438,8 @@ sub Nasm::X86::BlockMultiWayTree::splitFullRightNode($$)                        
     &Vpcompressd (zmm $Test."{k6}",    $Test);                                  # Compress right data
     &Vmovdqu32   (zmm $RD.  "{k7}",    $Test);                                  # Save right data
 
-    If ($n, sub                                                                 # Split nodes right
+    If ($n,
+    Then                                                                        # Split nodes right
      {&Vmovdqu32   (zmm $Test."{k6}{z}", $LN);                                  # Split right nodes
       &Vpcompressd (zmm $Test."{k6}",    $Test);                                # Compress right node
       &Vmovdqu32   (zmm $RN.  "{k7}",    $Test);                                # Save right node
@@ -5424,7 +5455,8 @@ sub Nasm::X86::BlockMultiWayTree::splitFullRightNode($$)                        
 
     &Vmovdqu32   (zmm $RK."{k7}{z}",   $RK);                                    # Remove unused keys on right
     &Vmovdqu32   (zmm $RD."{k7}{z}",   $RD);                                    # Remove unused data on right
-    If ($n, sub                                                                 # Split nodes left
+    If ($n,
+    Then                                                                        # Split nodes left
      {my $Br = "0b10".('0'x($rightLength+2)).('1'x($leftLength-1));             # Areas to retain
       my $br = eval $Br;
       LoadConstantIntoMaskRegister(k7, $br);
@@ -5433,7 +5465,8 @@ sub Nasm::X86::BlockMultiWayTree::splitFullRightNode($$)                        
 
     &Vmovdqu32   (zmm $LK."{k6}{z}",   $LK);                                    # Remove unused keys on left
     &Vmovdqu32   (zmm $LD."{k6}{z}",   $LD);                                    # Remove unused data on left
-    If ($n, sub                                                                 # Split nodes left
+    If ($n,
+    Then                                                                        # Split nodes left
      {my $Lr = "0b10".('0'x($rightLength+1)).('1'x($leftLength));               # Areas to retain
       my $lr = eval $Lr;
       LoadConstantIntoMaskRegister(k6, $lr);
@@ -5452,7 +5485,8 @@ sub Nasm::X86::BlockMultiWayTree::splitFullRightNode($$)                        
     $d->zBroadCastD($Test);                                                     # Broadcast new data
     &Vmovdqu32 (zmm $PD."{k6}", $Test);                                         # Insert new data
 
-    If ($n, sub                                                                 # Insert new left node offset into parent nodes
+    If ($n,
+    Then                                                                        # Insert new left node offset into parent nodes
      {Kandnq k5, k6, k7;                                                        # Expansion mask
       &Vpexpandd (zmm $PN."{k5}", $PN);                                         # Shift up nodes
       $lo->zBroadCastD($Test);                                                  # Broadcast left node offset
@@ -5518,7 +5552,8 @@ sub Nasm::X86::BlockMultiWayTree::findAndSplit($@)                              
       IfNz                                                                      # Non zero implies that the key is less than some of the keys in the block
        {Kmovq r15, $testMask;
         Tzcnt r14, r15;                                                         # Trailing zeros
-        If ($node == 0, sub                                                     # We are on a leaf
+        If ($node == 0,
+        Then                                                                    # We are on a leaf
          {$$p{compare}->copy(Cq(minusOne, -1));                                 # Key less than
           $$p{index}  ->getReg(r14);                                            # Index from trailing zeros
           $$p{offset} ->copy($tree);                                            # Offset of matching block
@@ -5529,7 +5564,8 @@ sub Nasm::X86::BlockMultiWayTree::findAndSplit($@)                              
        };
 
       if (1)                                                                    # Key greater than all keys in block
-       {If ($node == 0, sub                                                     # We have reached a leaf
+       {If ($node == 0,
+        Then                                                                    # We have reached a leaf
          {$$p{compare}->copy(Cq(plusOne, +1));                                  # Key greater than last key
           $$p{index}  ->copy($l-1);                                             # Index of last key which we are greater than
           $$p{offset} ->copy($tree);                                            # Offset of matching block
@@ -5573,7 +5609,8 @@ sub Nasm::X86::BlockMultiWayTree::find($$$$)                                    
      {my ($index, $start, $next, $end) = @_;
       $bmt->getKeysDataNode($tree, $zmmKeys, $zmmData, $zmmNode);               # Get the keys block
       my $l = $bmt->getLengthInKeys($zmmKeys);                                  # Length of the block
-      If ($l == 0, sub                                                          # Empty tree so we have not found the key
+      If ($l == 0,
+      Then                                                                      # Empty tree so we have not found the key
        {$$p{found}->copy(Cq(zero, 0));                                          # Key not found
         Jmp $success;                                                           # Return
        });
@@ -5590,7 +5627,8 @@ sub Nasm::X86::BlockMultiWayTree::find($$$$)                                    
        };
 
       my $n = getDFromZmm($zmmNode, 0);                                         # First child empty implies we are on a leaf
-      If ($n == 0, sub                                                          # Zero implies that this is a leaf node
+      If ($n == 0,
+      Then                                                                      # Zero implies that this is a leaf node
        {$$p{found}->copy(Cq(zero, 0));                                          # Key not found
         Jmp $success;                                                           # Return
        });
@@ -5776,7 +5814,8 @@ sub Nasm::X86::BlockMultiWayTree::putKeysData($$$$)                             
   $b->putBlock($b->bs, $offset, $zmmKeys);                                      # Put the keys block
   my $data = $bmt->getLoop($zmmKeys);                                           # Get the offset of the corresponding data block
   my $up   = $bmt->getUpFromData($zmmData);                                     #DEBUG Check up pointer
-  If ($up >= $offset, sub
+  If ($up >= $offset,
+  Then
    {PrintErrStringNL "Up is not less than node";
     Exit(0);
    });
@@ -5797,7 +5836,8 @@ sub Nasm::X86::BlockMultiWayTree::getKeysDataNode($$$$$)                        
   my $data = $bmt->getLoop($zmmKeys);                                           # Get the offset of the corresponding data block
   $b->getBlock($b->bs, $data, $zmmData);                                        # Get the data block
   my $node = $bmt->getLoop($zmmData);                                           # Get the offset of the corresponding node block
-  If ($node, sub                                                                # Check for optional node block
+  If ($node,
+  Then                                                                          # Check for optional node block
    {$b->getBlock($b->bs, $node, $zmmNode);                                      # Get the node block
    },
   sub                                                                           # No children
@@ -5810,7 +5850,8 @@ sub Nasm::X86::BlockMultiWayTree::putKeysDataNode($$$$$)                        
   @_ == 5 or confess;
   $bmt->putKeysData($offset, $zmmKeys, $zmmData);                               # Put keys and data
   my $node = $bmt->getLoop($zmmData);                                           # Get the offset of the corresponding node block
-  If ($node, sub                                                                # Check for optional node block
+  If ($node,
+  Then                                                                          # Check for optional node block
    {$bmt->bs->putBlock($bmt->bs->bs, $node, $zmmNode);                          # Put the node block
    });
  }
@@ -5871,7 +5912,8 @@ sub Nasm::X86::BlockMultiWayTree::leftOrRightMost($$@)                          
      {my ($index, $start, $next, $end) = @_;
       $bmt->getKeysDataNode($F, 31, 30, 29);                                    # Get the first keys block
       my $n = getDFromZmm(29, 0);                                               # Get the node block offset from the data block loop
-      If ($n == 0, sub                                                          # Reached the end so return the containing block
+      If ($n == 0,
+      Then                                                                      # Reached the end so return the containing block
        {$$p{offset}->copy($F);
         Jmp $success;
        });
@@ -5944,7 +5986,8 @@ sub Nasm::X86::BlockMultiWayTree::depth($@)                                     
      {my ($index, $start, $next, $end) = @_;
       $bmt->getKeysData($tree, 31, 30);                                         # Get the keys block
       my $p = $bmt->getUpFromData(30);                                          # Parent
-      If ($p == 0, sub                                                          # Empty tree so we have not found the key
+      If ($p == 0,
+      Then                                                                      # Empty tree so we have not found the key
        {$$parameters{depth}->copy($index+1);                                    # Key not found
         Jmp $success;                                                           # Return
        });
@@ -6063,23 +6106,26 @@ sub Nasm::X86::BlockMultiWayTree::Iterator::next($)                             
       PopR rax;
       };
 
-    If ($$p{pos} == -1,  sub                                                    # Initial descent
+    If ($$p{pos} == -1,
+    Then                                                                        # Initial descent
      {my $t = $iter->tree;
 
       PushR my @save = (zmm31, zmm30,  zmm29);
       $t->getKeysDataNode($C, 31, 30, 29);                                      # Load keys and data
       my $nodes = $t->getLoop(30);                                              # Nodes
 
-      If ($nodes, sub                                                           # Go left if there are child nodes
+      If ($nodes,
+      Then                                                                      # Go left if there are child nodes
        {$t->leftMost($t->address, $C, my $l = Vq(offset));
         &$new($l, Cq(zero, 0));
        },
-      sub
+      Else
        {my $l = $t->getLengthInKeys(31);                                        # Number of keys
-        If ($l, sub                                                             # Start with the current node as it is a leaf
+        If ($l,
+        Then                                                                    # Start with the current node as it is a leaf
          {&$new($C, Cq(zero, 0));
          },
-        sub
+        Else
          {&$done;
          });
        });
@@ -6108,9 +6154,10 @@ sub Nasm::X86::BlockMultiWayTree::Iterator::next($)                             
         Kmovw r14d, k7;                                                         # Bit mask ready for count
         Tzcnt r14, r14;                                                         # Number of leading zeros gives us the position of the child in the parent
         my $i = Vq(indexInParent, r14);                                         # Index in parent
-        my $l = $t->getLengthInKeys($zmmPK);                                     # Length of parent
+        my $l = $t->getLengthInKeys($zmmPK);                                    # Length of parent
 
-        If ($i < $l, sub                                                        # Continue with this node if all the keys have yet to be finished
+        If ($i < $l,
+        Then                                                                    # Continue with this node if all the keys have yet to be finished
          {&$new($p, $i);
           Jmp $top;
          });
@@ -6125,16 +6172,18 @@ sub Nasm::X86::BlockMultiWayTree::Iterator::next($)                             
     PushR my @save = (zmm31, zmm30, zmm29);
     $iter->tree->getKeysDataNode($C,    31, 30, 29);                            # Load keys and data
     my $l = $iter->tree->getLengthInKeys(31);                                   # Length of keys
-    my $n = getDFromZmm(29, 0);                                       # First node will ne zero if on a leaf
-    If ($n == 0, sub                                                            # Leaf
-     {If ($i < $l, sub
+    my $n = getDFromZmm(29, 0);                                                 # First node will ne zero if on a leaf
+    If ($n == 0,
+    Then                                                                        # Leaf
+     {If ($i < $l,
+      Then
        {&$new($C, $i);
        },
-      sub
+      Else
        {&$up;
        });
      },
-    sub                                                                         # Node
+    Then                                                                        # Node
      {my $offsetAtI = getDFromZmm(29, $i * $iter->tree->width);
       $iter->tree->leftMost(node=>$offsetAtI, my $l = Vq(offset));
       &$new($l, Cq(zero, 0));
@@ -16017,7 +16066,7 @@ F09D 96BA 0A20 F09D918E F09D 91A0 F09D91A0 F09D 9196 F09D9194 F09D 919B 20E38090
 END
  }
 
-latest:
+#latest:
 if (1) {                                                                        #T setOrClearTreeBits
   ClearRegisters zmm0;
   my $b = CreateByteString;
