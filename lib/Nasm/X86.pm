@@ -93,6 +93,7 @@ vpbroadcast
 END
 
   my @i3 =  split /\s+/, <<END;                                                 # Triple operand instructions
+andn
 bzhi
 kadd kand kandn kor kshiftl kshiftr kunpck kxnor kxor
 
@@ -4997,19 +4998,20 @@ sub Nasm::X86::BlockMultiWayTree::DescribeBlockMultiWayTree($;$)                
   confess "Maximum keys must be 14" unless $b / $o - 2 == 14;                   # Maximum number of keys is expected to be 14
 
   genHash(__PACKAGE__."::BlockMultiWayTree",                                    # Block multi way tree.
-    bs        => $byteString,                                                   # Byte string definition.
-    first     => ($header // Vq(first)),                                        # Variable addressing offset to first block of keys.
-    width     => $o,                                                            # Width of a key or data slot.
-    keys      => $o * 1,                                                        # Offset of keys in header.
-    data      => $o * 2,                                                        # Offset of data in header.
-    node      => $o * 3,                                                        # Offset of nodes in header.
-    minKeys   => int($b / 2) - 1,                                               # Minimum number of keys.
-    maxKeys   => $b / $o - 2,                                                   # Maximum number of keys.
-    maxNodes  => $b / $o - 1,                                                   # Maximum number of children per parent.
-    loop      => $b - $o,                                                       # Offset of keys, data, node loop.
-    length    => $b - $o * 2,                                                   # Offset of length in keys block.  The length field is a word - see: "MultiWayTree.svg"
-    treeBits  => $b - $o * 2 + 2,                                               # Offset of tree bits in keys block.  The tree bits field is a word, each bit of which tells us whether the corresponding data element is the offset (or not) to a sub tree of this tree .
-    up        => $b - $o * 2,                                                   # Offset of up in data block.
+    bs           => $byteString,                                                # Byte string definition.
+    first        => ($header // Vq(first)),                                     # Variable addressing offset to first block of keys.
+    width        => $o,                                                         # Width of a key or data slot.
+    keys         => $o * 1,                                                     # Offset of keys in header.
+    data         => $o * 2,                                                     # Offset of data in header.
+    node         => $o * 3,                                                     # Offset of nodes in header.
+    minKeys      => int($b / 2) - 1,                                            # Minimum number of keys.
+    maxKeys      => $b / $o - 2,                                                # Maximum number of keys.
+    maxNodes     => $b / $o - 1,                                                # Maximum number of children per parent.
+    loop         => $b - $o,                                                    # Offset of keys, data, node loop.
+    length       => $b - $o * 2,                                                # Offset of length in keys block.  The length field is a word - see: "MultiWayTree.svg"
+    treeBits     => $b - $o * 2 + 2,                                            # Offset of tree bits in keys block.  The tree bits field is a word, each bit of which tells us whether the corresponding data element is the offset (or not) to a sub tree of this tree .
+    up           => $b - $o * 2,                                                # Offset of up in data block.
+    treeBitsMask => 0x3f,                                                       # 14 tree bits
    );
  }
 
@@ -5960,42 +5962,37 @@ sub Nasm::X86::BlockMultiWayTree::depth($@)                                     
 
 #D2 Sub trees                                                                   # Construct trees of trees.
 
-sub Nasm::X86::BlockMultiWayTree::isTree($$$)                                   #P Set the Zero Flag to oppose the tree bit in the numbered zmm register holding the keys of a node to indicate whether the data element indexed by the specified register is an offset to a sub tree in the containing byte string or not.
-{my ($bmt, $register, $zmm) = @_;                                               # Block multi way tree descriptor, register holding data element index 0..13, numbered zmm register holding the keys for a node in the tree
+sub Nasm::X86::BlockMultiWayTree::isTree($$$)                                   #P Set the Zero Flag to oppose the tree bit in the numbered zmm register holding the keys of a node to indicate whether the data element indicated by the specified register is an offset to a sub tree in the containing byte string or not.
+{my ($bmt, $register, $zmm) = @_;                                               # Block multi way tree descriptor, word register holding a bit shifted into the position to test, numbered zmm register holding the keys for a node in the tree
   @_ == 3 or confess;
 
   my $b = RegisterSize zmm0;                                                    # Size of a block == size of a zmm register
   my $o = $b - $$bmt{treeBits};                                                 # Bytes from tree bits to end of zmm
-  my $treeBits = $register eq r15 ? r14 : r15;                                  # Choose a register to hold a copy of the tree bits
-  PushR my @save = ($treeBits, rcx);
-  Mov rcx, $register;                                                           # Index
-  Mov $treeBits,  1;                                                            # Single bit
-  Shl $treeBits, cl;                                                            # Single bit in position
+  PushR $register;
+  And $register, $bmt->treeBitsMask;                                            # Mask tree bits to prevent tests outside the permitted area
   PushRR "zmm$zmm";                                                             # Put the keys on the stack
   Add rsp, RegisterSize zmm0;                                                   # Restore stack
-  And $treeBits."w", "[rsp-$o]";                                                # Test the tree bits - done here to avoid the effect on ZF of add
-  PopR @save;
+  And $register, "[rsp-$o]";                                                    # Test the tree bits - done here to avoid the effect on ZF of add
+  PopR $register;
  } # isTree
 
-sub Nasm::X86::BlockMultiWayTree::setOrClearTree($$$$)                          #P Set or clear the tree bit in the numbered zmm register holding the keys of a node to indicate that the data element indexed by the specified register is an offset to a sub tree in the containing byte string.
+sub Nasm::X86::BlockMultiWayTree::setOrClearTree($$$$)                          #P Set or clear the tree bit in the numbered zmm register holding the keys of a node to indicate that the data element indicated by the specified register is an offset to a sub tree in the containing byte string.
 {my ($bmt, $set, $register, $zmm) = @_;                                         # Block multi way tree descriptor, set if true else clear, register holding data element index 0..13, numbered zmm register holding the keys for a node in the tree
   @_ == 4 or confess;
+
   my $z = "zmm$zmm";                                                            # Full name of zmm register
   my $o = $$bmt{treeBits};                                                      # Tree bits to end of zmm
-  my $treeBits = $register eq r15 ? r14 : r15;                                  # Choose a register to hold a copy of the tree bits
-  PushR my @save = ($treeBits, rcx);
-  Mov rcx, $register;                                                           # Index
-  Mov $treeBits, 1;                                                              # Index bit
-  Shl $treeBits, cl;                                                            # Shift the index bit into position
-  PushR $z;                                                                     # Put the keys on the stack
+  PushR my @save = ($register, $z);
   if ($set)                                                                     # Set the indexed bit
-   {Or "[rsp+$o]", $treeBits."w";
+   {And $register, $bmt->treeBitsMask;                                          # Mask tree bits to prevent operations outside the permitted area
+    Or "[rsp+$o]", $register;
    }
   else                                                                          # Clear the indexed bit
-   {Not $treeBits;
-    And "[rsp+$o]", $treeBits."w";
+   {And $register, $bmt->treeBitsMask;                                          # Mask tree bits to prevent operations outside the permitted area
+    Not $register;
+    And "[rsp+$o]", $register;
    }
-  PopR @save, $z;
+  PopR @save;
  } # setOrClearTree
 
 sub Nasm::X86::BlockMultiWayTree::setTree($$$)                                  #P Set the tree bit in the numbered zmm register holding the keys of a node to indicate that the data element indexed by the specified register is an offset to a sub tree in the containing byte string.
@@ -6009,12 +6006,6 @@ sub Nasm::X86::BlockMultiWayTree::clearTree($$$)                                
   @_ == 3 or confess;
   $bmt->setOrClearTree(0, $register, $zmm);
  } # clearTree
-
-sub Nasm::X86::BlockMultiWayTree::createSubTree($@)                             # Create a sub tree at the specified key in the specified tree (if it is not already a tree) and return a descriptor to it.
- {my ($bmt, @variables) = @_;                                                   # Block multi way tree descriptor, variables
-  @_ >= 2 or confess;
-  my $b = $bmt->bs;                                                             # Underlying byte string
- } # createSubTree
 
 #D2 Iteration                                                                   # Iterate through a tree non recursively
 
@@ -6475,7 +6466,7 @@ use vars qw(@ISA @EXPORT @EXPORT_OK %EXPORT_TAGS);
 
 @ISA          = qw(Exporter);
 @EXPORT       = qw();
-@EXPORT_OK    = qw(Add All8Structure AllocateAll8OnStack AllocateMemory And Assemble Block Bswap Bt Btc Btr Bts Bzhi Call CallC ClassifyCharacters4 ClassifyInRange ClassifyRange ClassifyWithInRange ClassifyWithInRangeAndSaveOffset ClearMemory ClearRegisters ClearZF CloseFile Cmova Cmovae Cmovb Cmovbe Cmovc Cmove Cmovg Cmovge Cmovl Cmovle Cmovna Cmovnae Cmovnb Cmp Comment ConcatenateShortStrings ConvertUtf8ToUtf32 CopyMemory Cq CreateByteString Cstrlen DComment Db Dbwdq Dd Dec Dq Ds Dw Else Exit Extern Float32 Float64 For ForEver ForIn Fork FreeMemory GetLengthOfShortString GetNextUtf8CharAsUtf32 GetPPid GetPid GetPidInHex GetUid Hash ISA Idiv If IfEq IfGe IfGt IfLe IfLt IfNe IfNz IfZ Imul Inc Ja Jae Jb Jbe Jc Jcxz Je Jecxz Jg Jge Jl Jle Jmp Jna Jnae Jnb Jnbe Jnc Jne Jng Jnge Jnl Jnle Jno Jnp Jns Jnz Jo Jp Jpe Jpo Jrcxz Js Jz Loop  Kaddb Kaddd Kaddq Kaddw Kandb Kandd Kandnb Kandnd Kandnq Kandnw Kandq Kandw Keep KeepFree KeepPop KeepPush KeepReturn KeepSet Kmovb Kmovd Kmovq Kmovw Knotb Knotd Knotq Knotw Korb Kord Korq Kortestb Kortestd Kortestq Kortestw Korw Kshiftlb Kshiftld Kshiftlq Kshiftlw Kshiftrb Kshiftrd Kshiftrq Kshiftrw Ktestb Ktestd Ktestq Ktestw Kunpckb Kunpckd Kunpckq Kunpckw Kxnorb Kxnord Kxnorq Kxnorw Kxorb Kxord Kxorq Kxorw Label Lea Link LoadConstantIntoMaskRegister LoadShortStringFromMemoryToZmm LoadShortStringFromMemoryToZmm2 LocalData LocateIntelEmulator Lzcnt Macro MaskMemory MaskMemoryInRange4  Mov Movdqa Mulpd Neg Not OpenRead OpenWrite Or PeekR Pextrb Pextrd Pextrq Pextrw Pi32 Pi64 Pinsrb Pinsrd Pinsrq Pinsrw Pop PopEax PopR PopRR Popcnt Popfq PrintErrMemory PrintErrMemoryInHex PrintErrMemoryInHexNL PrintErrMemoryNL PrintErrNL PrintErrRaxInHex PrintErrRegisterInHex PrintErrString PrintErrStringNL PrintErrZF PrintMemory PrintMemoryInHex PrintNL PrintOutMemory PrintOutMemoryInHex PrintOutMemoryInHexNL PrintOutMemoryNL PrintOutNL PrintOutRaxInHex PrintOutRaxInReverseInHex PrintOutRegisterInHex PrintOutRegistersInHex PrintOutRflagsInHex PrintOutRipInHex PrintOutString PrintOutStringNL PrintOutZF PrintRaxInHex PrintRegisterInHex PrintString PrintUtf32 Pslldq Psrldq Push PushR PushRR Pushfq RComment Rb Rbwdq Rd Rdtsc ReadFile ReadTimeStampCounter RegisterSize ReorderSyscallRegisters RestoreFirstFour RestoreFirstFourExceptRax RestoreFirstFourExceptRaxAndRdi RestoreFirstSeven RestoreFirstSevenExceptRax RestoreFirstSevenExceptRaxAndRdi Ret Rq Rs Rutf8 Rw SaveFirstFour SaveFirstSeven Scope ScopeEnd SetLabel SetLengthOfShortString SetMaskRegister SetZF Seta Setae Setb Setbe Setc Sete Setg Setge Setl Setle Setna Setnae Setnb Setnbe Setnc Setne Setng Setnge Setnl Setno Setnp Setns Setnz Seto Setp Setpe Setpo Sets Setz Shl Shr Start StatSize StringLength Structure Sub Subroutine Syscall Test Then Trace Tzcnt UnReorderSyscallRegisters VERSION Vaddd Vaddpd Variable Vb Vcvtudq2pd Vcvtudq2ps Vcvtuqq2pd Vd Vdpps Vgetmantps Vmovd Vmovdqa32 Vmovdqa64 Vmovdqu Vmovdqu32 Vmovdqu64 Vmovdqu8 Vmovq Vmulpd Vpbroadcastb Vpbroadcastd Vpbroadcastq Vpbroadcastw Vpcmpeqb Vpcmpeqd Vpcmpeqq Vpcmpeqw Vpcmpub Vpcmpud Vpcmpuq Vpcmpuw Vpcompressd Vpcompressq Vpexpandd Vpexpandq Vpextrb Vpextrd Vpextrq Vpextrw Vpinsrb Vpinsrd Vpinsrq Vpinsrw Vpmullb Vpmulld Vpmullq Vpmullw Vprolq Vpsubb Vpsubd Vpsubq Vpsubw Vpxorq Vq Vr Vsqrtpd Vw Vx VxyzInit Vy Vz WaitPid Xchg Xor ah al ax bh bl bp bpl bx ch cl cs cx dh di dil dl ds dx eax ebp ebx ecx edi edx es esi esp fs gs k0 k1 k2 k3 k4 k5 k6 k7 mm0 mm1 mm2 mm3 mm4 mm5 mm6 mm7 r10 r10b r10d r10l r10w r11 r11b r11d r11l r11w r12 r12b r12d r12l r12w r13 r13b r13d r13l r13w r14 r14b r14d r14l r14w r15 r15b r15d r15l r15w r8 r8b r8d r8l r8w r9 r9b r9d r9l r9w rax rbp rbx rcx rdi rdx rflags rip rsi rsp si sil sp spl ss st0 st1 st2 st3 st4 st5 st6 st7 xmm0 xmm1 xmm10 xmm11 xmm12 xmm13 xmm14 xmm15 xmm16 xmm17 xmm18 xmm19 xmm2 xmm20 xmm21 xmm22 xmm23 xmm24 xmm25 xmm26 xmm27 xmm28 xmm29 xmm3 xmm30 xmm31 xmm4 xmm5 xmm6 xmm7 xmm8 xmm9 ymm0 ymm1 ymm10 ymm11 ymm12 ymm13 ymm14 ymm15 ymm16 ymm17 ymm18 ymm19 ymm2 ymm20 ymm21 ymm22 ymm23 ymm24 ymm25 ymm26 ymm27 ymm28 ymm29 ymm3 ymm30 ymm31 ymm4 ymm5 ymm6 ymm7 ymm8 ymm9 zmm0 zmm1 zmm10 zmm11 zmm12 zmm13 zmm14 zmm15 zmm16 zmm17 zmm18 zmm19 zmm2 zmm20 zmm21 zmm22 zmm23 zmm24 zmm25 zmm26 zmm27 zmm28 zmm29 zmm3 zmm30 zmm31 zmm4 zmm5 zmm6 zmm7 zmm8 zmm9);
+@EXPORT_OK    = qw(Add All8Structure AllocateAll8OnStack AllocateMemory And Andn Assemble Block Bswap Bt Btc Btr Bts Bzhi Call CallC ClassifyCharacters4 ClassifyInRange ClassifyRange ClassifyWithInRange ClassifyWithInRangeAndSaveOffset ClearMemory ClearRegisters ClearZF CloseFile Cmova Cmovae Cmovb Cmovbe Cmovc Cmove Cmovg Cmovge Cmovl Cmovle Cmovna Cmovnae Cmovnb Cmp Comment ConcatenateShortStrings ConvertUtf8ToUtf32 CopyMemory Cq CreateByteString Cstrlen DComment Db Dbwdq Dd Dec Dq Ds Dw Else Exit Extern Float32 Float64 For ForEver ForIn Fork FreeMemory GetLengthOfShortString GetNextUtf8CharAsUtf32 GetPPid GetPid GetPidInHex GetUid Hash ISA Idiv If IfEq IfGe IfGt IfLe IfLt IfNe IfNz IfZ Imul Inc Ja Jae Jb Jbe Jc Jcxz Je Jecxz Jg Jge Jl Jle Jmp Jna Jnae Jnb Jnbe Jnc Jne Jng Jnge Jnl Jnle Jno Jnp Jns Jnz Jo Jp Jpe Jpo Jrcxz Js Jz Loop  Kaddb Kaddd Kaddq Kaddw Kandb Kandd Kandnb Kandnd Kandnq Kandnw Kandq Kandw Keep KeepFree KeepPop KeepPush KeepReturn KeepSet Kmovb Kmovd Kmovq Kmovw Knotb Knotd Knotq Knotw Korb Kord Korq Kortestb Kortestd Kortestq Kortestw Korw Kshiftlb Kshiftld Kshiftlq Kshiftlw Kshiftrb Kshiftrd Kshiftrq Kshiftrw Ktestb Ktestd Ktestq Ktestw Kunpckb Kunpckd Kunpckq Kunpckw Kxnorb Kxnord Kxnorq Kxnorw Kxorb Kxord Kxorq Kxorw Label Lea Link LoadConstantIntoMaskRegister LoadShortStringFromMemoryToZmm LoadShortStringFromMemoryToZmm2 LocalData LocateIntelEmulator Lzcnt Macro MaskMemory MaskMemoryInRange4  Mov Movdqa Mulpd Neg Not OpenRead OpenWrite Or PeekR Pextrb Pextrd Pextrq Pextrw Pi32 Pi64 Pinsrb Pinsrd Pinsrq Pinsrw Pop PopEax PopR PopRR Popcnt Popfq PrintErrMemory PrintErrMemoryInHex PrintErrMemoryInHexNL PrintErrMemoryNL PrintErrNL PrintErrRaxInHex PrintErrRegisterInHex PrintErrString PrintErrStringNL PrintErrZF PrintMemory PrintMemoryInHex PrintNL PrintOutMemory PrintOutMemoryInHex PrintOutMemoryInHexNL PrintOutMemoryNL PrintOutNL PrintOutRaxInHex PrintOutRaxInReverseInHex PrintOutRegisterInHex PrintOutRegistersInHex PrintOutRflagsInHex PrintOutRipInHex PrintOutString PrintOutStringNL PrintOutZF PrintRaxInHex PrintRegisterInHex PrintString PrintUtf32 Pslldq Psrldq Push PushR PushRR Pushfq RComment Rb Rbwdq Rd Rdtsc ReadFile ReadTimeStampCounter RegisterSize ReorderSyscallRegisters RestoreFirstFour RestoreFirstFourExceptRax RestoreFirstFourExceptRaxAndRdi RestoreFirstSeven RestoreFirstSevenExceptRax RestoreFirstSevenExceptRaxAndRdi Ret Rq Rs Rutf8 Rw SaveFirstFour SaveFirstSeven Scope ScopeEnd SetLabel SetLengthOfShortString SetMaskRegister SetZF Seta Setae Setb Setbe Setc Sete Setg Setge Setl Setle Setna Setnae Setnb Setnbe Setnc Setne Setng Setnge Setnl Setno Setnp Setns Setnz Seto Setp Setpe Setpo Sets Setz Shl Shr Start StatSize StringLength Structure Sub Subroutine Syscall Test Then Trace Tzcnt UnReorderSyscallRegisters VERSION Vaddd Vaddpd Variable Vb Vcvtudq2pd Vcvtudq2ps Vcvtuqq2pd Vd Vdpps Vgetmantps Vmovd Vmovdqa32 Vmovdqa64 Vmovdqu Vmovdqu32 Vmovdqu64 Vmovdqu8 Vmovq Vmulpd Vpbroadcastb Vpbroadcastd Vpbroadcastq Vpbroadcastw Vpcmpeqb Vpcmpeqd Vpcmpeqq Vpcmpeqw Vpcmpub Vpcmpud Vpcmpuq Vpcmpuw Vpcompressd Vpcompressq Vpexpandd Vpexpandq Vpextrb Vpextrd Vpextrq Vpextrw Vpinsrb Vpinsrd Vpinsrq Vpinsrw Vpmullb Vpmulld Vpmullq Vpmullw Vprolq Vpsubb Vpsubd Vpsubq Vpsubw Vpxorq Vq Vr Vsqrtpd Vw Vx VxyzInit Vy Vz WaitPid Xchg Xor ah al ax bh bl bp bpl bx ch cl cs cx dh di dil dl ds dx eax ebp ebx ecx edi edx es esi esp fs gs k0 k1 k2 k3 k4 k5 k6 k7 mm0 mm1 mm2 mm3 mm4 mm5 mm6 mm7 r10 r10b r10d r10l r10w r11 r11b r11d r11l r11w r12 r12b r12d r12l r12w r13 r13b r13d r13l r13w r14 r14b r14d r14l r14w r15 r15b r15d r15l r15w r8 r8b r8d r8l r8w r9 r9b r9d r9l r9w rax rbp rbx rcx rdi rdx rflags rip rsi rsp si sil sp spl ss st0 st1 st2 st3 st4 st5 st6 st7 xmm0 xmm1 xmm10 xmm11 xmm12 xmm13 xmm14 xmm15 xmm16 xmm17 xmm18 xmm19 xmm2 xmm20 xmm21 xmm22 xmm23 xmm24 xmm25 xmm26 xmm27 xmm28 xmm29 xmm3 xmm30 xmm31 xmm4 xmm5 xmm6 xmm7 xmm8 xmm9 ymm0 ymm1 ymm10 ymm11 ymm12 ymm13 ymm14 ymm15 ymm16 ymm17 ymm18 ymm19 ymm2 ymm20 ymm21 ymm22 ymm23 ymm24 ymm25 ymm26 ymm27 ymm28 ymm29 ymm3 ymm30 ymm31 ymm4 ymm5 ymm6 ymm7 ymm8 ymm9 zmm0 zmm1 zmm10 zmm11 zmm12 zmm13 zmm14 zmm15 zmm16 zmm17 zmm18 zmm19 zmm2 zmm20 zmm21 zmm22 zmm23 zmm24 zmm25 zmm26 zmm27 zmm28 zmm29 zmm3 zmm30 zmm31 zmm4 zmm5 zmm6 zmm7 zmm8 zmm9);
 %EXPORT_TAGS  = (all => [@EXPORT, @EXPORT_OK]);
 
 # podDocumentation
@@ -15741,7 +15732,7 @@ if (1) {                                                                        
 END
  }
 
-latest:
+##latest:
 if (1) {
   my $b = CreateByteString;
   my $t = $b->CreateBlockMultiWayTree;
@@ -16026,17 +16017,17 @@ F09D 96BA 0A20 F09D918E F09D 91A0 F09D91A0 F09D 9196 F09D9194 F09D 919B 20E38090
 END
  }
 
-#latest:
+latest:
 if (1) {                                                                        #T setOrClearTreeBits
   ClearRegisters zmm0;
   my $b = CreateByteString;
   my $t = $b->CreateBlockMultiWayTree;
 
-  Mov r15, 3;
+  Mov r15, 8;
   $t->setTree  (r15, 0); PrintOutRegisterInHex zmm0;
   $t->isTree   (r15, 0); PrintOutZF;
 
-  Mov r15, 4;
+  Mov r15, 16;
   $t->isTree   (r15, 0); PrintOutZF;
   $t->setTree  (r15, 0); PrintOutRegisterInHex zmm0;
   $t->clearTree(r15, 0); PrintOutRegisterInHex zmm0;
