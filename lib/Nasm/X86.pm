@@ -5720,21 +5720,22 @@ sub Nasm::X86::BlockMultiWayTree::insertDataOrTree($$$$)                        
       Vpbroadcastd zmm22, r15d;                                                 # Load key
       KeepFree r15;
       Vpcmpud "k6{k7}", zmm22, zmm31, 0;                                        # Check for equal key
-      ClearRegisters k5;                                                        # Zero so we can check the result mask against zero
-      Ktestd k5, k6;                                                            # Check whether a key was equal
-
+#     ClearRegisters k5;                                                        # Zero so we can check the result mask against zero
+      Ktestd k6, k6;                                                            # Check whether a matching key was found - the operation clears the zero flag if the register is not zero
       IfNz                                                                      # Found the key so we just update the data field
-       {if ($first)                                                             # Insert sub tree if requested
+       {if ($first)                                                            # Insert sub tree if requested
          {Kmovq r15, k6;                                                        # Position of key just found
-          $bmt->isTree(r15, 31);                                                # Check that the data element is a tree
-          IfZ                                                                   # If the data element is alread y a tree then get its value and return it in the data variable
+          $bmt->isTree(r15, 31);                                                # Set the zero flag to indicate whether the existing data element is in fact a tree
+          IfNz                                                                  # If the data element is already a tree then get its value and return it in the data variable
            {Tzcnt r14, r15;                                                     # Trailing zeros
             my $w = $bmt->width;                                                # Width of keys and data
             $D->copy(getDFromZmm(30, "r14*$w"));                                # Data associated with the key
-            Jmp $success;                                                       # Got offset of sub tree
+            Jmp $success;                                                       # Return offset of sub tree
+           }
+          sub                                                                   # The existing element is not a tree so we mark it as such using the single bit in r15/k6
+           {$bmt->setTree(r15, 31);
            };
-          my $t = $bmt->bs->CreateBlockMultiWayTree;                            # Create sub tree
-          $D->copy($t->first);                                                  # Copy address of first  block
+          $D->copy($bmt->bs->CreateBlockMultiWayTree->first)                    # Create tree and copy offset of first  block
          }
         $D->setReg(r14);                                                        # Key to search for
         Vpbroadcastd "zmm30{k6}", r14d;                                         # Load data
@@ -5744,7 +5745,7 @@ sub Nasm::X86::BlockMultiWayTree::insertDataOrTree($$$$)                        
        };
 
       Vpcmpud "k6{k7}", zmm22, zmm31, 1;                                        # Check for elements that are greater
-      Ktestw   k6, k6;
+      Ktestw   k6, k6;                                                          # K6 contains a single bit marking the insertion point
       IfEq (sub                                                                 # K6 zero implies the latest key goes at the end
        {Kshiftlw k6, k7, 1;                                                     # Reach next empty field
         Kandnw   k6, k7, k6;                                                    # Remove back fill to leave a single bit at the next empty field
@@ -6063,7 +6064,7 @@ sub Nasm::X86::BlockMultiWayTree::isTree($$$)                                   
  } # isTree
 
 sub Nasm::X86::BlockMultiWayTree::setOrClearTree($$$$)                          #P Set or clear the tree bit in the numbered zmm register holding the keys of a node to indicate that the data element indicated by the specified register is an offset to a sub tree in the containing byte string.
-{my ($bmt, $set, $register, $zmm) = @_;                                         # Block multi way tree descriptor, set if true else clear, register holding data element index 0..13, numbered zmm register holding the keys for a node in the tree
+ {my ($bmt, $set, $register, $zmm) = @_;                                         # Block multi way tree descriptor, set if true else clear, register holding a single one in the lowest 14 bits at the insertion point, numbered zmm register holding the keys for a node in the tree
   @_ == 4 or confess;
 
   my $z = "zmm$zmm";                                                            # Full name of zmm register
@@ -16135,14 +16136,14 @@ ZF=1
 END
  }
 
-latest:
+#latest:
 if (1) {
   Mov r15, 0x100;                                                               # Given a register with a single one in it indicating the desired position,
   Mov r14, 0xFFDC;                                                              # Insert a zero into the register at that position shifting the bits above that position up left one to make space for the new zero.
   PrintOutRegisterInHex         r14, r15;
   InsertZeroIntoRegisterAtPoint r15, r14;
   PrintOutRegisterInHex r14;
-  Or r14, r15;
+  Or r14, r15;                                                                  # Replace the inserted zero with a one
   PrintOutRegisterInHex r14;
   ok Assemble(debug => 0, eq => <<END);
    r14: 0000 0000 0000 FFDC
@@ -16161,9 +16162,28 @@ if (1) {
   my $f = Vq(found);
 
   $t->insertTree($k, $d);  $d->outNL;
-  $t->insertTree($k, $d);  $d->outNL;                                           # Retrieve the sub tree
+  $t->insertTree($k, $d);  $d->outNL;                                           # Retrieve the sub tree rather than creating a new new sub tree
 
   ok Assemble(debug => 0, eq => <<END);
+data: 0000 0000 0000 0098
+data: 0000 0000 0000 0098
+END
+ }
+
+#latest:
+if (1) {                                                                        # Replace a scalar with a tree in the first node
+  my $b = CreateByteString;
+  my $t = $b->CreateBlockMultiWayTree;
+  my $k = Vq(key,  15);
+  my $d = Vq(data, 14);
+  my $f = Vq(found);
+
+  $t->insert    ($k, $d);  $d->outNL;
+  $t->insertTree($k, $d);  $d->outNL;                                           # Retrieve the sub tree rather than creating a new new sub tree
+  $t->insertTree($k, $d);  $d->outNL;
+
+  ok Assemble(debug => 1, eq => <<END);
+data: 0000 0000 0000 000E
 data: 0000 0000 0000 0098
 data: 0000 0000 0000 0098
 END
@@ -16175,7 +16195,7 @@ if (0) {
 END
  }
 
-ok 1 for 1..2;
+ok 1 for 1..1;
 
 unlink $_ for qw(hash print2 sde-log.txt sde-ptr-check.out.txt z.txt);          # Remove incidental files
 
