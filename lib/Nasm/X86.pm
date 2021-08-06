@@ -5266,6 +5266,7 @@ sub Nasm::X86::BlockMultiWayTree::transferTreeBits($$$$)                        
 sub Nasm::X86::BlockMultiWayTree::splitFullRoot($$)                             #P Split a full root block held in 31..29 and place the left block in 28..26 and the right block in 25..23. The left and right blocks should have their loop offsets set so they can be inserted into the root.
  {my ($bmt, $bs) = @_;                                                          # Block multi way tree descriptor, byte string locator
   @_ == 2 or confess;
+
   my $length      = $bmt->maxKeys;                                              # Length of block to split
   my $leftLength  = $length / 2;                                                # Left split point
   my $rightLength = $length - 1 - $leftLength;                                  # Right split point
@@ -5369,7 +5370,6 @@ sub Nasm::X86::BlockMultiWayTree::splitFullRoot($$)                             
 sub Nasm::X86::BlockMultiWayTree::splitFullLeftNode($)                          #P Split a full left node block held in 28..26 whose parent is in 31..29 and place the new right block in 25..23. The parent is assumed to be not full. The loop and length fields are assumed to be authoritative and hence are preserved.
  {my ($bmt) = @_;                                                               # Block multi way tree descriptor
   @_ == 1 or confess;
-  my $bs = $bmt->bs->bs;                                                        # Bytes string containing tree
 
   my $length      = $bmt->maxKeys;                                              # Length of block to split
   my $leftLength  = $length / 2;                                                # Left split point
@@ -5461,15 +5461,14 @@ sub Nasm::X86::BlockMultiWayTree::splitFullLeftNode($)                          
 
     SetLabel $success;                                                          # Insert completed successfully
     PopR @save;
-   } in => {bs => 3};
+   };
 
-  $s->call (bs => $bs);
+  $s->call;
  } # splitFullLeftNode
 
 sub Nasm::X86::BlockMultiWayTree::splitFullRightNode($)                         #P Split a full right node block held in 25..23 whose parent is in 31..29 and place the new left block in 25..23.  The loop and length fields are assumed to be authoritative and hence are preserved.
  {my ($bmt) = @_;                                                               # Block multi way tree descriptor, byte string locator
   @_ == 1 or confess;
-  my $bs = $bmt->bs->bs;                                                        # Bytes string containing tree
 
   my $length      = $bmt->maxKeys;                                              # Length of block to split
   my $leftLength  = $length / 2;                                                # Left split point
@@ -5577,9 +5576,9 @@ sub Nasm::X86::BlockMultiWayTree::splitFullRightNode($)                         
 
     SetLabel $success;                                                          # Insert completed successfully
     PopR @save;
-   } in => {bs => 3};
+   };
 
-  $s->call (bs => $bs);
+  $s->call;
  } # splitFullRightNode
 
 sub Nasm::X86::BlockMultiWayTree::findAndSplit($@)                              #P Find a key in a tree which is known to contain at least one key splitting full nodes along the path to the key.
@@ -15900,7 +15899,7 @@ if (1) {                                                                        
 END
  }
 
-##latest:
+#latest:
 if (1) {                                                                        #TNasm::X86::ByteString::CreateBlockMultiWayTree
   my $b = CreateByteString;
   my $t = $b->CreateBlockMultiWayTree;
@@ -16296,7 +16295,7 @@ Byte String
 END
  }
 
-latest:
+#latest:
 if (1) {                                                                        #TNasm::X86::BlockMultiWayTree::transferTreeBits
   my $B = Rb(0..63);
   Vmovdqu8 zmm0, "[$B]";
@@ -16316,9 +16315,8 @@ if (1) {                                                                        
   PrintOutStringNL "Split:";
   PrintOutRegisterInHex zmm1, zmm2, zmm3;
 
-  my $left  = $treeBits & ((1<<$t->leftLength)-1);
-  my $right = $treeBits >>    ($t->leftLength+1);
-     $right = $right    & ((1<<$t->rightLength)-1);
+  my $left  =  $treeBits & ((1<<$t->leftLength)  - 1);
+  my $right = ($treeBits >>    ($t->leftLength   + 1)) & ((1<<$t->rightLength) - 1);
 
   my $l = sprintf("%02X", $left);
   my $r = sprintf("%02X", $right);
