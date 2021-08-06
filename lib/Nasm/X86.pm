@@ -5384,7 +5384,7 @@ sub Nasm::X86::BlockMultiWayTree::splitFullRoot($)                              
   $s->call;
  } # splitFullRoot
 
-sub Nasm::X86::BlockMultiWayTree::splitFullLeftNode($)                          #P Split a full left node block held in 28..26 whose parent is in 31..29 and place the new right block in 25..23. The parent is assumed to be not full. The loop and length fields are assumed to be authoritative and hence are preserved.
+sub Nasm::X86::BlockMultiWayTree::splitFullLeftNode22($)                        #P Split a full left node block held in 28..26 whose parent is in 31..29 and place the new right block in 25..23. The parent is assumed to be not full. The loop and length fields are assumed to be authoritative and hence are preserved.
  {my ($bmt) = @_;                                                               # Block multi way tree descriptor
   @_ == 1 or confess;
 
@@ -5428,24 +5428,18 @@ sub Nasm::X86::BlockMultiWayTree::splitFullLeftNode($)                          
       &Vmovdqu32   (zmm $RN.  "{k7}",    $Test);                                # Save right node
      });
 
-    if (1)                                                                      # Prepare mask to reset moved keys
-     {my $B = "0b11".('0'x($rl+1)).('1'x($ll));                                 # Areas to retain
-      my $b = eval $B;
-      LoadConstantIntoMaskRegister(k7, $b);
-     }
+    LoadBitsIntoMaskRegister(k7, "11", -($rl+1), +$ll);                        # Mask to reset moved keys
 
     &Vmovdqu32   (zmm $LK."{k7}{z}",   $LK);                                    # Remove unused keys
     &Vmovdqu32   (zmm $LD."{k7}{z}",   $LD);                                    # Split data left
     If ($n,
     Then                                                                        # Split nodes left
-     {my $B = "0b10".('0'x($rl+1)).('1'x($ll));                                 # Areas to retain
-      my $b = eval $B;
-      LoadConstantIntoMaskRegister(k7, $b);                                     # Areas to retain
+     {LoadBitsIntoMaskRegister(k7, '10', -($rl+1), +$ll);
       &Vmovdqu32 (zmm $LN."{k7}{z}",   $LN);
      });
 
     $lo->zBroadCastD($Test);                                                    # Find index in parent of left node - broadcast offset of left node so we can locate it in the parent
-    LoadConstantIntoMaskRegister(k7, eval "0b".('1'x$length));                  # Nodes
+    LoadBitsIntoMaskRegister(k7, '', +$length);                                 # Nodes
     &Vpcmpud("k6{k7}", zmm($PN, $Test), 0);                                     # Check for equal offset - one of them will match to create the single insertion point in k6
 
     Kandnq k5, k6, k7;                                                          # Expansion mask
@@ -5476,7 +5470,7 @@ sub Nasm::X86::BlockMultiWayTree::splitFullLeftNode($)                          
   $s->call;
  } # splitFullLeftNode
 
-sub Nasm::X86::BlockMultiWayTree::splitFullRightNode($)                         #P Split a full right node block held in 25..23 whose parent is in 31..29 and place the new left block in 28..26.  The loop and length fields are assumed to be authoritative and hence are preserved.
+sub Nasm::X86::BlockMultiWayTree::splitFullRightNode22($)                         #P Split a full right node block held in 25..23 whose parent is in 31..29 and place the new left block in 28..26.  The loop and length fields are assumed to be authoritative and hence are preserved.
  {my ($bmt) = @_;                                                               # Block multi way tree descriptor, byte string locator
   @_ == 1 or confess;
 
@@ -5499,18 +5493,17 @@ sub Nasm::X86::BlockMultiWayTree::splitFullRightNode($)                         
     my $lo = $bmt->getLoop($LN);                                                # Offset of left block
     my $ro = $bmt->getLoop($RN);                                                # Offset of right block
 
-    LoadConstantIntoMaskRegister k7, eval "0b00".(1)x$length;                   # Left mask for keys and data
+    LoadBitsIntoMaskRegister(k7, "00", +$length);                               # Left mask for keys and data
     &Vmovdqu32(zmm $LK."{k7}", $RK);                                            # Copy right keys  to left node
     &Vmovdqu32(zmm $LD."{k7}", $RD);                                            # Copy right data  to left node
-    LoadConstantIntoMaskRegister k7, eval "0b01".(1)x$length;                   # Left mask for child nodes
+    LoadBitsIntoMaskRegister(k7, "01", +$length);                               # Left mask for child nodes
     &Vmovdqu32(zmm $LN."{k7}", $RN);                                            # Copy right nodes to left node
 
     my $k = getDFromZmm $LK, $ll * (my $w = $bmt->width);                       # Splitting key
     my $d = getDFromZmm $LD, $ll * $w;                                          # Splitting data
 
-    my $mr = eval "0b".('1'x$rl).('0'x($ll+1));                                 # Right mask
-    LoadConstantIntoMaskRegister(k6, $mr);                                      # Constant mask from one beyond split point to end of keys
-    LoadConstantIntoMaskRegister(k7, eval "0b".'1'x$rl);                        # Constant mask for compressed right keys
+    LoadBitsIntoMaskRegister(k6, '', +$rl, -($ll+1));                           # Constant mask from one beyond split point to end of keys
+    Kshiftrq k7, k6, $ll+1;                                                     # Constant mask for compressed right keys
 
     &Vmovdqu32   (zmm $Test."{k6}{z}", $LK);                                    # Split out right keys
     &Vpcompressd (zmm $Test."{k6}",    $Test);                                  # Compress right keys
@@ -5527,36 +5520,29 @@ sub Nasm::X86::BlockMultiWayTree::splitFullRightNode($)                         
       &Vmovdqu32   (zmm $RN.  "{k7}",    $Test);                                # Save right node
      });
 
-    my $Br = "0b11".('0'x($rl+2)).('1'x($ll-1));                                # Areas to retain on right
-    my $br = eval $Br;
-    LoadConstantIntoMaskRegister(k7, $br);                                      # Areas to retain
-
-    my $Lr = "0b11".('0'x($rl+1)).('1'x($ll));                                  # Areas to retain on left
-    my $lr = eval $Lr;
-    LoadConstantIntoMaskRegister(k6, $lr);                                      # Areas to retain
+    LoadBitsIntoMaskRegister(k7, '11', -($rl+2), +($ll-1));                     # Areas to retain
+    LoadBitsIntoMaskRegister(k6, '11', -($rl+1),  +$ll);
 
     &Vmovdqu32   (zmm $RK."{k7}{z}",   $RK);                                    # Remove unused keys on right
     &Vmovdqu32   (zmm $RD."{k7}{z}",   $RD);                                    # Remove unused data on right
+
     If ($n,
     Then                                                                        # Split nodes left
-     {my $Br = "0b10".('0'x($rl+2)).('1'x($ll-1));                              # Areas to retain
-      my $br = eval $Br;
-      LoadConstantIntoMaskRegister(k7, $br);
+     {LoadBitsIntoMaskRegister(k7, '10', -($rl+2), +($ll-1));
       &Vmovdqu32 (zmm $RN."{k7}{z}",   $RN);
      });
 
     &Vmovdqu32   (zmm $LK."{k6}{z}",   $LK);                                    # Remove unused keys on left
     &Vmovdqu32   (zmm $LD."{k6}{z}",   $LD);                                    # Remove unused data on left
+
     If ($n,
     Then                                                                        # Split nodes left
-     {my $Lr = "0b10".('0'x($rl+1)).('1'x($ll));                                # Areas to retain
-      my $lr = eval $Lr;
-      LoadConstantIntoMaskRegister(k6, $lr);
+     {LoadBitsIntoMaskRegister(k6, '10', -($rl+1), +$ll);
       &Vmovdqu32 (zmm $LN."{k6}{z}",   $LN);
      });
 
     $ro->zBroadCastD($Test);                                                    # Find index in parent of right node - broadcast offset of right node so we can locate it in the parent
-    LoadConstantIntoMaskRegister(k7, eval "0b".('1'x$length));                  # Nodes
+    LoadBitsIntoMaskRegister(k7, '', +$length);                                 # Nodes
     &Vpcmpud("k6{k7}", zmm($PN, $Test), 0);                                     # Check for equal offset - one of them will match to create the single insertion point in k6
 
     Kandnq k5, k6, k7;                                                          # Expansion mask
@@ -5585,6 +5571,136 @@ sub Nasm::X86::BlockMultiWayTree::splitFullRightNode($)                         
 
   $s->call;
  } # splitFullRightNode
+
+sub Nasm::X86::BlockMultiWayTree::splitFullLeftOrRightNode($$)                  #P Split a full a full left node (held in 28..26) or a full right node (held in 25..23) whose parent is in 31..29.
+ {my ($bmt, $right) = @_;                                                       # Block multi way tree descriptor,  0 left or 1 right
+  @_ == 2 or confess;
+
+  my $length = $bmt->maxKeys;                                                   # Length of block to split
+  my $ll = $bmt->leftLength;                                                    # Left split point
+  my $rl = $bmt->rightLength;                                                   # Right split point
+
+  my $PK = 31; my $PD = 30; my $PN = 29;                                        # Root key, data, node. These registers are saved in L<splitNode>
+  my $LK = 28; my $LD = 27; my $LN = 26;                                        # Key, data, node blocks in left child
+  my $RK = 25; my $RD = 24; my $RN = 23;                                        # Key, data, node blocks in right child
+  my $Test = 22;                                                                # Zmm used to hold test values via broadcast
+
+  my $s = Subroutine
+   {my ($parameters) = @_;                                                      # Parameters
+    my $success = Label;                                                        # Short circuit if ladders by jumping directly to the end after a successful push
+
+    If ($bmt->getLengthInKeys($right ? $RK : $LK) != $bmt->maxKeys,             # Only split full blocks
+    Then {Jmp $success});
+
+    my $n  = $bmt->getLoop($right ? $RD : $LD);                                 # Offset of node block or zero if there is no node block for the right node
+    my $lo = $bmt->getLoop($LN);                                                # Offset of left block
+    my $ro = $bmt->getLoop($RN);                                                # Offset of right block
+
+    if ($right)
+     {LoadBitsIntoMaskRegister(k7, "00", +$length);                             # Left mask for keys and data
+      &Vmovdqu32(zmm $LK."{k7}", $RK);                                          # Copy right keys  to left node
+      &Vmovdqu32(zmm $LD."{k7}", $RD);                                          # Copy right data  to left node
+      LoadBitsIntoMaskRegister(k7, "01", +$length);                             # Left mask for child nodes
+      &Vmovdqu32(zmm $LN."{k7}", $RN);                                          # Copy right nodes to left node
+     }
+
+    my $k = getDFromZmm $LK, $ll * (my $w = $bmt->width);                       # Splitting key
+    my $d = getDFromZmm $LD, $ll * $w;                                          # Splitting data
+
+    LoadBitsIntoMaskRegister(k6, '', +$rl, -($ll+1));                           # Constant mask from one beyond split point to end of keys
+    Kshiftrq k7, k6, $ll+1;                                                     # Constant mask for compressed right keys
+
+    &Vmovdqu32   (zmm $Test."{k6}{z}", $LK);                                    # Split out right keys
+    &Vpcompressd (zmm $Test."{k6}",    $Test);                                  # Compress right keys
+    &Vmovdqu32   (zmm $RK.  "{k7}",    $Test);                                  # Save right keys
+
+    &Vmovdqu32   (zmm $Test."{k6}{z}", $LD);                                    # Split out right data
+    &Vpcompressd (zmm $Test."{k6}",    $Test);                                  # Compress right data
+    &Vmovdqu32   (zmm $RD.  "{k7}",    $Test);                                  # Save right data
+
+    If ($n,
+    Then                                                                        # Split nodes right
+     {&Vmovdqu32   (zmm $Test."{k6}{z}", $LN);                                  # Split right nodes
+      &Vpcompressd (zmm $Test."{k6}",    $Test);                                # Compress right node
+      &Vmovdqu32   (zmm $RN.  "{k7}",    $Test);                                # Save right node
+     });
+
+    if ($right)
+     {LoadBitsIntoMaskRegister(k7, '11', -($rl+2), +($ll-1));                   # Areas to retain
+      LoadBitsIntoMaskRegister(k6, '11', -($rl+1),  +$ll);
+
+      &Vmovdqu32   (zmm $RK."{k7}{z}",   $RK);                                  # Remove unused keys on right
+      &Vmovdqu32   (zmm $RD."{k7}{z}",   $RD);                                  # Remove unused data on right
+
+      If ($n,
+      Then                                                                      # Split nodes left
+       {LoadBitsIntoMaskRegister(k7, '10', -($rl+2), +($ll-1));
+        &Vmovdqu32 (zmm $RN."{k7}{z}",   $RN);
+       });
+
+      &Vmovdqu32   (zmm $LK."{k6}{z}",   $LK);                                  # Remove unused keys on left
+      &Vmovdqu32   (zmm $LD."{k6}{z}",   $LD);                                  # Remove unused data on left
+
+      If ($n,
+      Then                                                                      # Split nodes left
+       {LoadBitsIntoMaskRegister(k6, '10', -($rl+1), +$ll);
+        &Vmovdqu32 (zmm $LN."{k6}{z}",   $LN);
+       });
+     }
+    else
+     {LoadBitsIntoMaskRegister(k7, "11", -($rl+1), +$ll);                       # Mask to reset moved keys
+
+      &Vmovdqu32   (zmm $LK."{k7}{z}",   $LK);                                  # Remove unused keys
+      &Vmovdqu32   (zmm $LD."{k7}{z}",   $LD);                                  # Split data left
+      If ($n,
+      Then                                                                      # Split nodes left
+       {LoadBitsIntoMaskRegister(k7, '10', -($rl+1), +$ll);
+        &Vmovdqu32 (zmm $LN."{k7}{z}",   $LN);
+       });
+     }
+    ($right ? $ro : $lo)->zBroadCastD($Test);                                   # Find index in parent of left node - broadcast offset of left node so we can locate it in the parent
+    LoadBitsIntoMaskRegister(k7, '', +$length);                                 # Nodes
+    &Vpcmpud("k6{k7}", zmm($PN, $Test), 0);                                     # Check for equal offset - one of them will match to create the single insertion point in k6
+
+    Kandnq k5, k6, k7;                                                          # Expansion mask
+    &Vpexpandd (zmm $PK."{k5}", $PK);                                           # Shift up keys
+    &Vpexpandd (zmm $PD."{k5}", $PD);                                           # Shift up keys
+    $k->zBroadCastD($Test);                                                     # Broadcast new key
+    &Vmovdqu32 (zmm $PK."{k6}", $Test);                                         # Insert new key
+    $d->zBroadCastD($Test);                                                     # Broadcast new data
+    &Vmovdqu32 (zmm $PD."{k6}", $Test);                                         # Insert new data
+
+    If ($n,
+    Then                                                                        # Insert new left node offset into parent nodes
+     {Kshiftlq k6, k6, 1 unless $right;                                         # Node insertion point
+      Kandnq k5, k6, k7;                                                        # Expansion mask
+      &Vpexpandd (zmm $PN."{k5}", $PN);                                         # Shift up nodes
+      ($right ? $lo : $ro)->zBroadCastD($Test);                                 # Broadcast left node offset
+      &Vmovdqu32 (zmm $PN."{k6}", $Test);                                       # Insert right node offset
+     });
+
+    my $l = $bmt->getLengthInKeys($PK);                                         # Length of parent
+            $bmt->putLengthInKeys($PK, $l + 1);                                 # New length of parent
+    $bmt->putLengthInKeys($LK, Cq(leftLength,  $ll));                           # Length of left node
+    $bmt->putLengthInKeys($RK, Cq(rightLength, $rl));                           # Length of right node
+
+    SetLabel $success;                                                          # Insert completed successfully
+   } name => "splitFullLeftOrRightNode_$right";
+
+  $s->call;
+ } # splitFullLeftOrRightNode
+
+sub Nasm::X86::BlockMultiWayTree::splitFullLeftNode($)                          #P Split a full left node block held in 28..26 whose parent is in 31..29 and place the new right block in 25..23. The parent is assumed to be not full. The loop and length fields are assumed to be authoritative and hence are preserved.
+ {my ($bmt) = @_;                                                               # Block multi way tree descriptor, byte string locator
+  @_ == 1 or confess;
+  $bmt->splitFullLeftOrRightNode(0);
+ }
+
+sub Nasm::X86::BlockMultiWayTree::splitFullRightNode($)                         #P Split a full right node block held in 25..23 whose parent is in 31..29 and place the new left block in 28..26.  The loop and length fields are assumed to be authoritative and hence are preserved.
+ {my ($bmt) = @_;                                                               # Block multi way tree descriptor, byte string locator
+  @_ == 1 or confess;
+  $bmt->splitFullLeftOrRightNode(1);
+ }
 
 sub Nasm::X86::BlockMultiWayTree::findAndSplit($@)                              #P Find a key in a tree which is known to contain at least one key splitting full nodes along the path to the key.
  {my ($bmt, @variables) = @_;                                                   # Block multi way tree descriptor, variables
