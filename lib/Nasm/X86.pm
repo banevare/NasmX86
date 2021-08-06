@@ -16135,17 +16135,20 @@ ZF=1
 END
  }
 
-#latest:
+latest:
 if (1) {
   Mov r15, 0x100;                                                               # Given a register with a single one in it indicating the desired position,
   Mov r14, 0xFFFF;                                                              # Insert a zero into the register at that position shifting the bits above that position up left one to make space for the new zero.
   PrintOutRegisterInHex         r14, r15;
   InsertZeroIntoRegisterAtPoint r15, r14;
   PrintOutRegisterInHex r14;
+  Or r14, r15;
+  PrintOutRegisterInHex r14;
   ok Assemble(debug => 0, eq => <<END);
    r14: 0000 0000 0000 FFFF
    r15: 0000 0000 0000 0100
    r14: 0000 0000 0001 FEFF
+   r14: 0000 0000 0001 FFFF
 END
  }
 
