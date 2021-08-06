@@ -5069,6 +5069,8 @@ sub Nasm::X86::BlockMultiWayTree::DescribeBlockMultiWayTree($;$)                
   my $b = RegisterSize zmm0;                                                    # Size of a block == size of a zmm register
   my $o = RegisterSize eax;                                                     # Size of a double word
 
+  my $length      = $b / $o - 2;                                                # Length of block to split
+
   confess "Maximum keys must be 14" unless $b / $o - 2 == 14;                   # Maximum number of keys is expected to be 14
 
   genHash(__PACKAGE__."::BlockMultiWayTree",                                    # Block multi way tree.
@@ -5086,6 +5088,8 @@ sub Nasm::X86::BlockMultiWayTree::DescribeBlockMultiWayTree($;$)                
     treeBits     => $b - $o * 2 + 2,                                            # Offset of tree bits in keys block.  The tree bits field is a word, each bit of which tells us whether the corresponding data element is the offset (or not) to a sub tree of this tree .
     up           => $b - $o * 2,                                                # Offset of up in data block.
     treeBitsMask => 0x3fff,                                                     # 14 tree bits
+    leftLength   => $length / 2,                                                # Left split length
+    rightLength  => $length - 1 - $length / 2,                                  # Right split length
    );
  }
 
@@ -5235,6 +5239,30 @@ sub Nasm::X86::BlockMultiWayTree::reParent($$$$$@)                              
   $s->call($bmt->address, @variables);
  } # reParent
 
+sub Nasm::X86::BlockMultiWayTree::transferTreeBits($$$$)                        #P Transfer tree bits when splitting a full node
+ {my ($b, $parent, $left, $right) = @_;                                         # Block multi way tree descriptor, numbered parent zmm, numbered left zmm, numbered right zmm
+
+  PushR my @save = (r14, r15);                                                  # Registers 14 and 15 are used to transfer the tree bits if any, zmm22 to compress fields
+  $b->getTreeBits($parent, r15);                                                # Transfer Tree bits
+  Cmp r15, 0;
+  IfNz                                                                          # Action required iff there are some tree bits
+   {Mov r14, r15;                                                               # Left tree bits
+    And r14, ((1 << $b->leftLength) - 1);                                       # Isolate left bits
+    $b->putTreeBits($left, r14);                                                # Save left tree bits
+
+    Mov r14, r15;                                                               # Right tree bits
+    Shr r14, $b->leftLength + 1;                                                # Isolate right bits
+    And  r14, ((1 << $b->rightLength) - 1);                                     # Remove any bits above
+    $b->putTreeBits($right, r14);                                               # Save right tree bits
+
+    Mov r14, r15;                                                               # Right tree bits
+    Shr r14, $b->leftLength;                                                    # Parent bit
+    And r14, 1;                                                                 # Only one bit
+    $b->putTreeBits($parent, r14);                                              # Save parent tree bits
+   };
+  PopR @save;
+ }
+
 sub Nasm::X86::BlockMultiWayTree::splitFullRoot($$)                             #P Split a full root block held in 31..29 and place the left block in 28..26 and the right block in 25..23. The left and right blocks should have their loop offsets set so they can be inserted into the root.
  {my ($bmt, $bs) = @_;                                                          # Block multi way tree descriptor, byte string locator
   @_ == 2 or confess;
@@ -5347,9 +5375,9 @@ sub Nasm::X86::BlockMultiWayTree::splitFullLeftNode($)                          
   my $leftLength  = $length / 2;                                                # Left split point
   my $rightLength = $length - 1 - $leftLength;                                  # Right split point
 
-  my $PK = 31; my $PD = 30; my $PN = 29;                                        # Root key, data, node. These registers are saved in L<splitNode>
-  my $LK = 28; my $LD = 27; my $LN = 26;                                        # Key, data, node blocks in left child
-  my $RK = 25; my $RD = 24; my $RN = 23;                                        # Key, data, node blocks in right child
+  my $PK = 31; my $PD = 30; my $PN = 29;                                        # Parent: Root key, data, node. These registers are saved in L<splitNode>
+  my $LK = 28; my $LD = 27; my $LN = 26;                                        # Left: Key, data, node blocks in left child
+  my $RK = 25; my $RD = 24; my $RN = 23;                                        # Right: Key, data, node blocks in right child
   my $Test = 22;                                                                # Zmm used to hold test values via broadcast
 
   my $s = Subroutine
@@ -5428,6 +5456,8 @@ sub Nasm::X86::BlockMultiWayTree::splitFullLeftNode($)                          
             $bmt->putLengthInKeys($PK, $l + 1);                                 # New length of parent
     $bmt->putLengthInKeys($LK, Cq(leftLength,  $leftLength));                   # Length of left node
     $bmt->putLengthInKeys($RK, Cq(rightLength, $rightLength));                  # Length of right node
+
+    $bmt->transferTreeBits($PK, $LK, $RK);                                      # Transfer any tree bits present
 
     SetLabel $success;                                                          # Insert completed successfully
     PopR @save;
@@ -16267,9 +16297,9 @@ END
  }
 
 latest:
-if (1) {                                                                        #TloadFromZmm
-  my $l = Rb(0..63);
-  Vmovdqu8 zmm0, "[$l]";
+if (1) {                                                                        #TNasm::X86::BlockMultiWayTree::transferTreeBits
+  my $B = Rb(0..63);
+  Vmovdqu8 zmm0, "[$B]";
   loadFromZmm r15, w, zmm, 14;
 
   my $b = CreateByteString;
@@ -16278,15 +16308,30 @@ if (1) {                                                                        
 
   PrintOutRegisterInHex zmm0, r15, r14;
 
-  Mov r14, 0xDCBA;
+  Mov r14, my $treeBits = 0xDCBA;
   $t->putTreeBits(1, r14);
   PrintOutRegisterInHex zmm1;
 
-  ok Assemble(debug => 1, eq => <<END);
+  $t->transferTreeBits(1, 2, 3);
+  PrintOutStringNL "Split:";
+  PrintOutRegisterInHex zmm1, zmm2, zmm3;
+
+  my $left  = $treeBits & ((1<<$t->leftLength)-1);
+  my $right = $treeBits >>    ($t->leftLength+1);
+     $right = $right    & ((1<<$t->rightLength)-1);
+
+  my $l = sprintf("%02X", $left);
+  my $r = sprintf("%02X", $right);
+
+  ok Assemble(debug => 0, eq => <<END);
   zmm0: 3F3E 3D3C 3B3A 3938   3736 3534 3332 3130   2F2E 2D2C 2B2A 2928   2726 2524 2322 2120   1F1E 1D1C 1B1A 1918   1716 1514 1312 1110   0F0E 0D0C 0B0A 0908   0706 0504 0302 0100
    r15: 0000 0000 0000 0F0E
    r14: 0000 0000 0000 3B3A
   zmm1: 0000 0000 DCBA 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+Split:
+  zmm1: 0000 0000 0001 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+  zmm2: 0000 0000 00$l 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+  zmm3: 0000 0000 00$r 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
 END
  }
 
