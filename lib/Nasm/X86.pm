@@ -531,7 +531,7 @@ sub RegisterSize($)                                                             
 sub ClearRegisters(@)                                                           # Clear registers by setting them to zero
  {my (@registers) = @_;                                                         # Registers
   for my $r(@registers)                                                         # Each register
-   {Keep $r;                                                                    # Register must not already be in use
+   {#Keep $r;                                                                   # Register must not already be in use
     my $size = RegisterSize $r;
     Xor    $r, $r     if $size == 8 and $r !~ m(\Ak);
     Kxorq  $r, $r, $r if $size == 8 and $r =~ m(\Ak);
@@ -5360,6 +5360,8 @@ sub Nasm::X86::BlockMultiWayTree::splitFullRoot($)                              
     $lo->putDIntoZmm($TN, 0);                                                   # Insert offset of left node in root nodes
     $ro->putDIntoZmm($TN, $w);                                                  # Insert offset of right node in root nodes
 
+    $bmt->transferTreeBits($TK, $LK, $RK);                                      # Transfer any tree bits present
+
     SetLabel $success;                                                          # Insert completed successfully
     PopR @save;
    };
@@ -5383,17 +5385,12 @@ sub Nasm::X86::BlockMultiWayTree::splitFullLeftNode($)                          
   my $s = Subroutine
    {my ($parameters) = @_;                                                      # Parameters
     my $success = Label;                                                        # Short circuit if ladders by jumping directly to the end after a successful push
-    my $B = $$parameters{bs};
-
-    PushR my @save = (k6, k7, zmm22);
 
     If ($bmt->getLengthInKeys($LK) != $bmt->maxKeys, sub {Jmp $success});       # Only split full blocks
 
     my $n  = $bmt->getLoop($LD);                                                # Offset of node block or zero if there is no node block for the left node
     my $lo = $bmt->getLoop($LN);                                                # Offset of left block
     my $ro = $bmt->getLoop($RN);                                                # Offset of right block
-
-    ClearRegisters k6, k7, zmm22;
 
     my $k = getDFromZmm $LK, $leftLength * (my $w = $bmt->width);               # Splitting key
     my $d = getDFromZmm $LD, $leftLength * $w;                                  # Splitting data
@@ -5409,6 +5406,7 @@ sub Nasm::X86::BlockMultiWayTree::splitFullLeftNode($)                          
     &Vmovdqu32   (zmm $Test."{k6}{z}", $LD);                                    # Split out right data
     &Vpcompressd (zmm $Test."{k6}",    $Test);                                  # Compress right data
     &Vmovdqu32   (zmm $RD.  "{k7}",    $Test);                                  # Save right data
+
     If ($n,
     Then                                                                        # Split nodes right
      {&Vmovdqu32   (zmm $Test."{k6}{z}", $LN);                                  # Split right nodes
@@ -5435,6 +5433,7 @@ sub Nasm::X86::BlockMultiWayTree::splitFullLeftNode($)                          
     $lo->zBroadCastD($Test);                                                    # Find index in parent of left node - broadcast offset of left node so we can locate it in the parent
     LoadConstantIntoMaskRegister(k7, eval "0b".('1'x$length));                  # Nodes
     &Vpcmpud("k6{k7}", zmm($PN, $Test), 0);                                     # Check for equal offset - one of them will match to create the single insertion point in k6
+
     Kandnq k5, k6, k7;                                                          # Expansion mask
     &Vpexpandd (zmm $PK."{k5}", $PK);                                           # Shift up keys
     &Vpexpandd (zmm $PD."{k5}", $PD);                                           # Shift up keys
@@ -5457,16 +5456,13 @@ sub Nasm::X86::BlockMultiWayTree::splitFullLeftNode($)                          
     $bmt->putLengthInKeys($LK, Cq(leftLength,  $leftLength));                   # Length of left node
     $bmt->putLengthInKeys($RK, Cq(rightLength, $rightLength));                  # Length of right node
 
-    $bmt->transferTreeBits($PK, $LK, $RK);                                      # Transfer any tree bits present
-
     SetLabel $success;                                                          # Insert completed successfully
-    PopR @save;
    };
 
   $s->call;
  } # splitFullLeftNode
 
-sub Nasm::X86::BlockMultiWayTree::splitFullRightNode($)                         #P Split a full right node block held in 25..23 whose parent is in 31..29 and place the new left block in 25..23.  The loop and length fields are assumed to be authoritative and hence are preserved.
+sub Nasm::X86::BlockMultiWayTree::splitFullRightNode($)                         #P Split a full right node block held in 25..23 whose parent is in 31..29 and place the new left block in 28..26.  The loop and length fields are assumed to be authoritative and hence are preserved.
  {my ($bmt) = @_;                                                               # Block multi way tree descriptor, byte string locator
   @_ == 1 or confess;
 
@@ -5482,16 +5478,12 @@ sub Nasm::X86::BlockMultiWayTree::splitFullRightNode($)                         
   my $s = Subroutine
    {my ($parameters) = @_;                                                      # Parameters
     my $success = Label;                                                        # Short circuit if ladders by jumping directly to the end after a successful push
-    my $B = $$parameters{bs};
-    PushR my @save = (k6, k7, zmm22);
 
     If ($bmt->getLengthInKeys($RK) != $bmt->maxKeys, sub {Jmp $success});       # Only split full blocks
 
     my $n  = $bmt->getLoop($RD);                                                # Offset of node block or zero if there is no node block for the right node
     my $lo = $bmt->getLoop($LN);                                                # Offset of left block
     my $ro = $bmt->getLoop($RN);                                                # Offset of right block
-
-    ClearRegisters k6, k7;                                                      # Clear mask registers
 
     LoadConstantIntoMaskRegister k7, eval "0b00".(1)x$length;                   # Left mask for keys and data
     &Vmovdqu32(zmm $LK."{k7}", $RK);                                            # Copy right keys  to left node
@@ -5575,7 +5567,6 @@ sub Nasm::X86::BlockMultiWayTree::splitFullRightNode($)                         
     $bmt->putLengthInKeys($RK, Cq(rightLength, $rightLength));                  # Length of right node
 
     SetLabel $success;                                                          # Insert completed successfully
-    PopR @save;
    };
 
   $s->call;
