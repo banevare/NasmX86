@@ -659,12 +659,25 @@ sub KeepFree(@)                                                                 
 
 #D2 Mask                                                                        # Operations on mask registers
 
-sub LoadConstantIntoMaskRegister($$)                                            # Load a constant into a mask register
- {my ($reg, $value) = @_;                                                       # Mask register to load, constant to load
+sub LoadConstantIntoMaskRegister($$)                                            # Set a mask register equal to a constant.
+ {my ($mask, $value) = @_;                                                      # Mask register to load, constant to load
+  $mask =~ m(\Ak[0-7])i or confess "Not a mask register $mask";
   PushR rax;
   Mov rax, $value;                                                              # Load a general register
-  Kmovq $reg, rax;                                                              # Load mask register
+  Kmovq $mask, rax;                                                             # Load mask register
   PopR rax;
+ }
+
+sub LoadBitsIntoMaskRegister($$@)                                               # Load a bit string specification into a mask register
+ {my ($mask, $prefix, @values) = @_;                                            # Mask register to load, prefix bits, +n 1 bits -n 0 bits
+  $mask =~ m(\Ak[0-7])i or confess "Not a mask register $mask";
+  my $b = "0b$prefix";
+  for my $v(@values)                                                            # String representation of bit string
+   {$b .= '1' x +$v if $v > 0;
+    $b .= '0' x -$v if $v < 0;
+    $v or confess "Count must be positive or negative bit not zero";
+   }
+  LoadConstantIntoMaskRegister($mask, eval $b)
  }
 
 my $Vpcmp = genHash("NasmX86::CompareCodes",                                    # Compare codes for Vpcmp
@@ -5083,7 +5096,7 @@ sub Nasm::X86::BlockMultiWayTree::DescribeBlockMultiWayTree($;$)                
     leftLength   => $length / 2,                                                # Left split length
     lengthOffset => $b - $o * 2,                                                # Offset of length in keys block.  The length field is a word - see: "MultiWayTree.svg"
     loop         => $b - $o,                                                    # Offset of keys, data, node loop.
-    maxKeys      => $b / $o - 2,                                                # Maximum number of keys.
+    maxKeys      => $length,                                                    # Maximum number of keys.
     maxNodes     => $b / $o - 1,                                                # Maximum number of children per parent.
     minKeys      => int($b / 2) - 1,                                            # Minimum number of keys.
     node         => $o * 3,                                                     # Offset of nodes in header.
@@ -5269,9 +5282,9 @@ sub Nasm::X86::BlockMultiWayTree::splitFullRoot($)                              
  {my ($bmt) = @_;                                                               # Block multi way tree descriptor
   @_ == 1 or confess;
 
-  my $length      = $bmt->maxKeys;                                              # Length of block to split
-  my $leftLength  = $length / 2;                                                # Left split point
-  my $rightLength = $length - 1 - $leftLength;                                  # Right split point
+  my $length = $bmt->maxKeys;                                                   # Length of block to split
+  my $ll = $bmt->leftLength;                                                    # Left split point
+  my $rl = $bmt->rightLength;                                                   # Right split point
 
   my $TK = 31; my $TD = 30; my $TN = 29;                                        # Root key, data, node
   my $LK = 28; my $LD = 27; my $LN = 26;                                        # Key, data, node blocks in left child
@@ -5301,24 +5314,23 @@ sub Nasm::X86::BlockMultiWayTree::splitFullRoot($)                              
     my $lo = $bmt->getLoop($LN);                                                # Offset of left block
     my $ro = $bmt->getLoop($RN);                                                # Offset of right block
 
-    LoadConstantIntoMaskRegister(k7, eval "0b11".'0'x$length);                  # Area to clear preserving loop and up/length
+    LoadBitsIntoMaskRegister(k7, "11",-$length);                                # Area to clear preserving loop and up/length
     &Vmovdqu32   (zmm $LK."{k7}{z}",   $LK);                                    # Clear left
     &Vmovdqu32   (zmm $LD."{k7}{z}",   $LD);
     &Vmovdqu32   (zmm $RK."{k7}{z}",   $RK);                                    # Clear right
     &Vmovdqu32   (zmm $RD."{k7}{z}",   $RD);
 
-    LoadConstantIntoMaskRegister(k7, eval "0b10".'0'x$length);                  # Area to clear preserving loop
+    LoadBitsIntoMaskRegister(k7, "10" -$length);                                # Area to clear preserving loop
     &Vmovdqu32   (zmm $LN."{k7}{z}",   $LN);                                    # Clear left
     &Vmovdqu32   (zmm $RK."{k7}{z}",   $RK);                                    # Clear right
 
-    LoadConstantIntoMaskRegister(k7, eval "0b".'1'x$leftLength);                # Constant mask up to the split point
+    LoadBitsIntoMaskRegister(k7, "",  +$ll);                                    # Constant mask up to the split point
     &Vmovdqu32   (zmm $LK."{k7}",      $TK);                                    # Split keys left
     &Vmovdqu32   (zmm $LD."{k7}",      $TD);                                    # Split data left
     If ($n, sub  {&Vmovdqu32 (zmm $LN."{k7}", $TN)});                           # Split nodes left
 
-    my $mr = eval "0b".('1'x$rightLength).('0'x($leftLength+1));                # Right mask
-    LoadConstantIntoMaskRegister(k6, $mr);                                      # Constant mask from one beyond split point to end of keys
-    LoadConstantIntoMaskRegister(k7, eval "0b".'1'x$rightLength);               # Constant mask for compressed right keys
+    LoadBitsIntoMaskRegister(k6, '',  +$rl, -($ll+1));                          # Constant mask from one beyond split point to end of keys
+    Kshiftrq k7, k6, $ll+1;                                                     # Constant mask for compressed right keys
 
     &Vmovdqu32   (zmm $Test."{k6}{z}", $TK);                                    # Split right keys
     &Vpcompressd (zmm $Test."{k6}",    $Test);                                  # Compress right keys
@@ -5335,26 +5347,27 @@ sub Nasm::X86::BlockMultiWayTree::splitFullRoot($)                              
       &Vmovdqu32   (zmm $RN.  "{k7}",    $Test);                                # Save right node
      });
 
-    my $k = getDFromZmm $TK, $leftLength * (my $w = $bmt->width);               # Splitting key
-    my $d = getDFromZmm $TD, $leftLength * $w;                                  # Splitting data
+    my $k = getDFromZmm $TK, $ll * (my $w = $bmt->width);                       # Splitting key
+    my $d = getDFromZmm $TD, $ll * $w;                                          # Splitting data
 
     LoadConstantIntoMaskRegister(k7, 1);                                        # Position of key, data in root node
     $k->zBroadCastD($Test);                                                     # Broadcast keys
     &Vmovdqu32 (zmm $TK."{k7}",  $Test);                                        # Insert key in root
     $d->zBroadCastD($Test);                                                     # Broadcast keys
     &Vmovdqu32 (zmm $TD."{k7}",  $Test);                                        # Insert data in root
-    LoadConstantIntoMaskRegister(k7, eval "0b11".('0'x($length-1)).'1');        # Unused fields
+    LoadBitsIntoMaskRegister(k7, "11", -($length-1), 1);                        # Unused fields
     &Vmovdqu32 (zmm $TK."{k7}{z}",  $TK);                                       # Clear unused keys in root
     &Vmovdqu32 (zmm $TD."{k7}{z}",  $TD);                                       # Clear unused data in root
+
     If ($n,
     Then
-     {LoadConstantIntoMaskRegister(k7, eval "0b1".('0'x($length)).'1');         # Unused fields
+     {LoadBitsIntoMaskRegister(k7, "1", -$length, 1);                           # Unused fields
       &Vmovdqu32 (zmm $TN."{k7}{z}",  $TN);                                     # Clear unused node in root
      });
 
     $bmt->putLengthInKeys($TK, Cq(one,  1));                                    # Set length of root keys
-    $bmt->putLengthInKeys($LK, Cq(leftLength,  $leftLength));                   # Length of left node
-    $bmt->putLengthInKeys($RK, Cq(rightLength, $rightLength));                  # Length of right node
+    $bmt->putLengthInKeys($LK, Cq(leftLength,  $ll));                           # Length of left node
+    $bmt->putLengthInKeys($RK, Cq(rightLength, $rl));                           # Length of right node
 
     $bmt->putUpIntoData($to, $LD);                                              # Set parent of left node
     $bmt->putUpIntoData($to, $RD);                                              # Set parent of right node
@@ -5375,9 +5388,9 @@ sub Nasm::X86::BlockMultiWayTree::splitFullLeftNode($)                          
  {my ($bmt) = @_;                                                               # Block multi way tree descriptor
   @_ == 1 or confess;
 
-  my $length      = $bmt->maxKeys;                                              # Length of block to split
-  my $leftLength  = $length / 2;                                                # Left split point
-  my $rightLength = $length - 1 - $leftLength;                                  # Right split point
+  my $length = $bmt->maxKeys;                                                   # Length of block to split
+  my $ll = $bmt->leftLength;                                                    # Left split point
+  my $rl = $bmt->rightLength;                                                   # Right split point
 
   my $PK = 31; my $PD = 30; my $PN = 29;                                        # Parent: Root key, data, node. These registers are saved in L<splitNode>
   my $LK = 28; my $LD = 27; my $LN = 26;                                        # Left: Key, data, node blocks in left child
@@ -5394,12 +5407,11 @@ sub Nasm::X86::BlockMultiWayTree::splitFullLeftNode($)                          
     my $lo = $bmt->getLoop($LN);                                                # Offset of left block
     my $ro = $bmt->getLoop($RN);                                                # Offset of right block
 
-    my $k = getDFromZmm $LK, $leftLength * (my $w = $bmt->width);               # Splitting key
-    my $d = getDFromZmm $LD, $leftLength * $w;                                  # Splitting data
+    my $k = getDFromZmm $LK, $ll * (my $w = $bmt->width);                       # Splitting key
+    my $d = getDFromZmm $LD, $ll * $w;                                          # Splitting data
 
-    my $mr = eval "0b".('1'x$rightLength).('0'x($leftLength+1));                # Right mask
-    LoadConstantIntoMaskRegister(k6, $mr);                                      # Constant mask from one beyond split point to end of keys
-    LoadConstantIntoMaskRegister(k7, eval "0b".'1'x$rightLength);               # Constant mask for compressed right keys
+    LoadBitsIntoMaskRegister(k6, '', +$rl, -($ll+1));                           # Constant mask from one beyond split point to end of keys
+    Kshiftrq k7, k6, $ll+1;                                                     # Constant mask for compressed right keys
 
     &Vmovdqu32   (zmm $Test."{k6}{z}", $LK);                                    # Split out right keys
     &Vpcompressd (zmm $Test."{k6}",    $Test);                                  # Compress right keys
@@ -5417,7 +5429,7 @@ sub Nasm::X86::BlockMultiWayTree::splitFullLeftNode($)                          
      });
 
     if (1)                                                                      # Prepare mask to reset moved keys
-     {my $B = "0b11".('0'x($rightLength+1)).('1'x($leftLength));                # Areas to retain
+     {my $B = "0b11".('0'x($rl+1)).('1'x($ll));                                 # Areas to retain
       my $b = eval $B;
       LoadConstantIntoMaskRegister(k7, $b);
      }
@@ -5426,7 +5438,7 @@ sub Nasm::X86::BlockMultiWayTree::splitFullLeftNode($)                          
     &Vmovdqu32   (zmm $LD."{k7}{z}",   $LD);                                    # Split data left
     If ($n,
     Then                                                                        # Split nodes left
-     {my $B = "0b10".('0'x($rightLength+1)).('1'x($leftLength));                # Areas to retain
+     {my $B = "0b10".('0'x($rl+1)).('1'x($ll));                                 # Areas to retain
       my $b = eval $B;
       LoadConstantIntoMaskRegister(k7, $b);                                     # Areas to retain
       &Vmovdqu32 (zmm $LN."{k7}{z}",   $LN);
@@ -5455,8 +5467,8 @@ sub Nasm::X86::BlockMultiWayTree::splitFullLeftNode($)                          
 
     my $l = $bmt->getLengthInKeys($PK);                                         # Length of parent
             $bmt->putLengthInKeys($PK, $l + 1);                                 # New length of parent
-    $bmt->putLengthInKeys($LK, Cq(leftLength,  $leftLength));                   # Length of left node
-    $bmt->putLengthInKeys($RK, Cq(rightLength, $rightLength));                  # Length of right node
+    $bmt->putLengthInKeys($LK, Cq(leftLength,  $ll));                           # Length of left node
+    $bmt->putLengthInKeys($RK, Cq(rightLength, $rl));                           # Length of right node
 
     SetLabel $success;                                                          # Insert completed successfully
    };
@@ -5468,9 +5480,9 @@ sub Nasm::X86::BlockMultiWayTree::splitFullRightNode($)                         
  {my ($bmt) = @_;                                                               # Block multi way tree descriptor, byte string locator
   @_ == 1 or confess;
 
-  my $length      = $bmt->maxKeys;                                              # Length of block to split
-  my $leftLength  = $length / 2;                                                # Left split point
-  my $rightLength = $length - 1 - $leftLength;                                  # Right split point
+  my $length = $bmt->maxKeys;                                                   # Length of block to split
+  my $ll = $bmt->leftLength;                                                    # Left split point
+  my $rl = $bmt->rightLength;                                                   # Right split point
 
   my $PK = 31; my $PD = 30; my $PN = 29;                                        # Root key, data, node. These registers are saved in L<splitNode>
   my $LK = 28; my $LD = 27; my $LN = 26;                                        # Key, data, node blocks in left child
@@ -5493,12 +5505,12 @@ sub Nasm::X86::BlockMultiWayTree::splitFullRightNode($)                         
     LoadConstantIntoMaskRegister k7, eval "0b01".(1)x$length;                   # Left mask for child nodes
     &Vmovdqu32(zmm $LN."{k7}", $RN);                                            # Copy right nodes to left node
 
-    my $k = getDFromZmm $LK, $leftLength * (my $w = $bmt->width);               # Splitting key
-    my $d = getDFromZmm $LD, $leftLength * $w;                                  # Splitting data
+    my $k = getDFromZmm $LK, $ll * (my $w = $bmt->width);                       # Splitting key
+    my $d = getDFromZmm $LD, $ll * $w;                                          # Splitting data
 
-    my $mr = eval "0b".('1'x$rightLength).('0'x($leftLength+1));                # Right mask
+    my $mr = eval "0b".('1'x$rl).('0'x($ll+1));                                 # Right mask
     LoadConstantIntoMaskRegister(k6, $mr);                                      # Constant mask from one beyond split point to end of keys
-    LoadConstantIntoMaskRegister(k7, eval "0b".'1'x$rightLength);               # Constant mask for compressed right keys
+    LoadConstantIntoMaskRegister(k7, eval "0b".'1'x$rl);                        # Constant mask for compressed right keys
 
     &Vmovdqu32   (zmm $Test."{k6}{z}", $LK);                                    # Split out right keys
     &Vpcompressd (zmm $Test."{k6}",    $Test);                                  # Compress right keys
@@ -5515,11 +5527,11 @@ sub Nasm::X86::BlockMultiWayTree::splitFullRightNode($)                         
       &Vmovdqu32   (zmm $RN.  "{k7}",    $Test);                                # Save right node
      });
 
-    my $Br = "0b11".('0'x($rightLength+2)).('1'x($leftLength-1));               # Areas to retain on right
+    my $Br = "0b11".('0'x($rl+2)).('1'x($ll-1));                                # Areas to retain on right
     my $br = eval $Br;
     LoadConstantIntoMaskRegister(k7, $br);                                      # Areas to retain
 
-    my $Lr = "0b11".('0'x($rightLength+1)).('1'x($leftLength));                 # Areas to retain on left
+    my $Lr = "0b11".('0'x($rl+1)).('1'x($ll));                                  # Areas to retain on left
     my $lr = eval $Lr;
     LoadConstantIntoMaskRegister(k6, $lr);                                      # Areas to retain
 
@@ -5527,7 +5539,7 @@ sub Nasm::X86::BlockMultiWayTree::splitFullRightNode($)                         
     &Vmovdqu32   (zmm $RD."{k7}{z}",   $RD);                                    # Remove unused data on right
     If ($n,
     Then                                                                        # Split nodes left
-     {my $Br = "0b10".('0'x($rightLength+2)).('1'x($leftLength-1));             # Areas to retain
+     {my $Br = "0b10".('0'x($rl+2)).('1'x($ll-1));                              # Areas to retain
       my $br = eval $Br;
       LoadConstantIntoMaskRegister(k7, $br);
       &Vmovdqu32 (zmm $RN."{k7}{z}",   $RN);
@@ -5537,7 +5549,7 @@ sub Nasm::X86::BlockMultiWayTree::splitFullRightNode($)                         
     &Vmovdqu32   (zmm $LD."{k6}{z}",   $LD);                                    # Remove unused data on left
     If ($n,
     Then                                                                        # Split nodes left
-     {my $Lr = "0b10".('0'x($rightLength+1)).('1'x($leftLength));               # Areas to retain
+     {my $Lr = "0b10".('0'x($rl+1)).('1'x($ll));                                # Areas to retain
       my $lr = eval $Lr;
       LoadConstantIntoMaskRegister(k6, $lr);
       &Vmovdqu32 (zmm $LN."{k6}{z}",   $LN);
@@ -5565,8 +5577,8 @@ sub Nasm::X86::BlockMultiWayTree::splitFullRightNode($)                         
 
     my $l = $bmt->getLengthInKeys($PK);                                         # Length of parent
             $bmt->putLengthInKeys($PK, $l + 1);                                 # New length of parent
-    $bmt->putLengthInKeys($LK, Cq(leftLength,  $leftLength));                   # Length of left node
-    $bmt->putLengthInKeys($RK, Cq(rightLength, $rightLength));                  # Length of right node
+    $bmt->putLengthInKeys($LK, Cq(leftLength,  $ll));                           # Length of left node
+    $bmt->putLengthInKeys($RK, Cq(rightLength, $rl));                           # Length of right node
 
     SetLabel $success;                                                          # Insert completed successfully
    };
