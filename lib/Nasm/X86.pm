@@ -5141,7 +5141,7 @@ sub Nasm::X86::BlockMultiWayTree::splitNode($$$$@)                              
 
         KeepFree zmm $N;                                                        # Reloading root
         $bmt->getKeysDataNode($p, $K, $D, $N);                                  # Load parent
-        $bmt->splitFullLeftNode($b);
+        $bmt->splitFullLeftNode;
         $bmt->putKeysDataNode($p, $K, $D, $N);                                  # Save parent
         $bmt->putKeysDataNode($n, 28, 27, 26);                                  # Save left
         my $r = $bmt->getLoop    (23);                                          # Offset of right keys
@@ -5156,7 +5156,7 @@ sub Nasm::X86::BlockMultiWayTree::splitNode($$$$@)                              
 
         KeepFree zmm $N;                                                        # Reloading root
         $bmt->getKeysDataNode($p, $K, $D, $N);                                  # Load parent
-        $bmt->splitFullRightNode($b);
+        $bmt->splitFullRightNode;
         $bmt->putKeysDataNode($p, $K, $D, $N);                                  # Save parent
         my $l = $bmt->getLoop    (26);                                          # Offset of left keys
         $bmt->putUpIntoData  ($p, 27);                                          # Reparent new block
@@ -5317,9 +5317,10 @@ sub Nasm::X86::BlockMultiWayTree::splitFullRoot($$)                             
   $s->call (bs => $bs);
  } # splitFullRoot
 
-sub Nasm::X86::BlockMultiWayTree::splitFullLeftNode($$)                         #P Split a full left node block held in 28..26 whose parent is in 31..29 and place the new right block in 25..23. The parent is assumed to be not full. The loop and length fields are assumed to be authoritative and hence are preserved.
- {my ($bmt, $bs) = @_;                                                          # Block multi way tree descriptor, byte string locator
-  @_ == 2 or confess;
+sub Nasm::X86::BlockMultiWayTree::splitFullLeftNode($)                          #P Split a full left node block held in 28..26 whose parent is in 31..29 and place the new right block in 25..23. The parent is assumed to be not full. The loop and length fields are assumed to be authoritative and hence are preserved.
+ {my ($bmt) = @_;                                                               # Block multi way tree descriptor
+  @_ == 1 or confess;
+  my $bs = $bmt->bs->bs;                                                        # Bytes string containing tree
 
   my $length      = $bmt->maxKeys;                                              # Length of block to split
   my $leftLength  = $length / 2;                                                # Left split point
@@ -5414,9 +5415,11 @@ sub Nasm::X86::BlockMultiWayTree::splitFullLeftNode($$)                         
   $s->call (bs => $bs);
  } # splitFullLeftNode
 
-sub Nasm::X86::BlockMultiWayTree::splitFullRightNode($$)                        #P Split a full right node block held in 25..23 whose parent is in 31..29 and place the new left block in 25..23.  The loop and length fields are assumed to be authoritative and hence are preserved.
- {my ($bmt, $bs) = @_;                                                          # Block multi way tree descriptor, byte string locator
-  @_ == 2 or confess;
+sub Nasm::X86::BlockMultiWayTree::splitFullRightNode($)                         #P Split a full right node block held in 25..23 whose parent is in 31..29 and place the new left block in 25..23.  The loop and length fields are assumed to be authoritative and hence are preserved.
+ {my ($bmt) = @_;                                                               # Block multi way tree descriptor, byte string locator
+  @_ == 1 or confess;
+  my $bs = $bmt->bs->bs;                                                        # Bytes string containing tree
+
   my $length      = $bmt->maxKeys;                                              # Length of block to split
   my $leftLength  = $length / 2;                                                # Left split point
   my $rightLength = $length - 1 - $leftLength;                                  # Right split point
@@ -5761,7 +5764,7 @@ sub Nasm::X86::BlockMultiWayTree::insertDataOrTree($$$$)                        
       Vpbroadcastd "zmm31{k6}", r15d;                                           # Load key
 
       if ($first)                                                               # Insert new sub tree - the  key was not found so there cannot be a sub tree present
-       {$D->copy($bmt->bs->CreateBlockMultiWayTree->first);                      # Create tree and copy offset of first block
+       {$D->copy($bmt->bs->CreateBlockMultiWayTree->first);                     # Create tree and copy offset of first block
         PushR r15;
         Kmovq r15, k6;                                                          # Position of key just found
         $bmt->setTree(r15, 31);                                                 # Mark new entry as a sub tree
@@ -5774,7 +5777,7 @@ sub Nasm::X86::BlockMultiWayTree::insertDataOrTree($$$$)                        
       $bmt->putLengthInKeys( 31, $l + 1);                                       # Set the length of the block
 
       If $l + 1 == $bmt->maxKeys,
-      Then                                                                      # Root is now full so we have to allocate node block for it and chain it in
+      Then                                                                      # Root is now full: allocate the node block for it and chain it in
        {$bmt->bs->allocZmmBlock($B, my $n = Vq(offset));                        # Children
         $bmt->putLoop($n, 30);                                                  # Set the link from data to node
         $bmt->putLoop($F, 29);                                                  # Set the link from node to key
@@ -15679,7 +15682,7 @@ if (1) {                                                                        
   Vmovdqu8 zmm24, "[$rd]";
   Vmovdqu8 zmm23, "[$rn]";
 
-   $t->splitFullLeftNode($b->bs);
+   $t->splitFullLeftNode;
 
   PrintOutRegisterInHex reverse zmm(23..31);
 
@@ -15725,7 +15728,7 @@ if (1) {                                                                        
   Vmovdqu8 zmm24, "[$rd]";
   Vmovdqu8 zmm23, "[$rn]";
 
-  $t->splitFullLeftNode($b->bs);
+  $t->splitFullLeftNode;
 
   PrintOutRegisterInHex reverse zmm(23..31);
 
@@ -15771,7 +15774,7 @@ if (1) {                                                                        
   Vmovdqu8 zmm24, "[$rd]";
   Vmovdqu8 zmm23, "[$rn]";
 
-  $t->splitFullRightNode($b->bs);
+  $t->splitFullRightNode;
 
   PrintOutRegisterInHex reverse zmm(23..31);
 
@@ -15817,7 +15820,7 @@ if (1) {                                                                        
   Vmovdqu8 zmm24, "[$rd]";
   Vmovdqu8 zmm23, "[$rn]";
 
-  $t->splitFullRightNode($b->bs);
+  $t->splitFullRightNode;
 
   PrintOutRegisterInHex reverse zmm(23..31);
 
