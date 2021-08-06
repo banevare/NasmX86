@@ -16236,8 +16236,6 @@ if (0) {
 END
  }
 
-ok 1 for 1..1;
-
 unlink $_ for qw(hash print2 sde-log.txt sde-ptr-check.out.txt z.txt);          # Remove incidental files
 
 lll "Finished:", time - $start,  "bytes assembled:",   totalBytesAssembled;
