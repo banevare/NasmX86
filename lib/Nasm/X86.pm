@@ -2117,6 +2117,20 @@ sub loadFromZmm($*$$)                                                           
   Add rsp, RegisterSize "zmm$zmm";                                              # Pop source register
  }
 
+sub putIntoZmm($*$$)                                                            # Put the specified register into the numbered zmm at the from the offset located in the numbered zmm.
+ {my ($register, $size, $zmm, $offset) = @_;                                    # Register to load, bwdq for size, numbered zmm register to load from, constant offset in bytes
+  @_ == 4 or confess;
+  $offset >= 0 && $offset <= RegisterSize zmm0 or confess "Out of range";
+
+  PushR "zmm$zmm";    ##Rewrite using masked move rather than stack             # Push source register
+
+  Mov "[rsp+$offset]", $register."b" if $size =~ m(b);                          # Load byte register from offset
+  Mov "[rsp+$offset]", $register."w" if $size =~ m(w);                          # Load word register from offset
+  Mov "[rsp+$offset]", $register."d" if $size =~ m(d);                          # Load double word register from offset
+  Mov "[rsp+$offset]", $register,    if $size =~ m(q);                          # Load register from offset
+  PopR "zmm$zmm";                                                               # Reload zmm
+ }
+
 
 sub getBwdqFromMm($$$)                                                          # Get the numbered byte|word|double word|quad word from the numbered zmm register and return it in a variable
  {my ($size, $mm, $offset) = @_;                                                # Size of get, register, offset in bytes either as a constant or as a variable
@@ -6112,6 +6126,18 @@ sub Nasm::X86::BlockMultiWayTree::clearTree($$$)                                
   @_ == 3 or confess;
   $bmt->setOrClearTree(0, $register, $zmm);
  } # clearTree
+
+sub Nasm::X86::BlockMultiWayTree::getTreeBits($$$)                              # Load the tree bits from the numbered zmm into the specified register.
+ {my ($bmt, $zmm, $register) = @_;                                              # Tree descriptor, numbered zmm, target register
+  loadFromZmm $register, w, $zmm, $bmt->treeBits;
+  And $register, $bmt->treeBitsMask;
+ }
+
+sub Nasm::X86::BlockMultiWayTree::putTreeBits($$$)                              # Put the tree bits in the specified register into the numbered zmm.
+ {my ($bmt, $zmm, $register) = @_;                                              # Tree descriptor, numbered zmm, target register
+  putIntoZmm $register, w, $zmm, $bmt->treeBits;
+  And $register, $bmt->treeBitsMask;
+ }
 
 #D2 Iteration                                                                   # Iterate through a tree non recursively
 
@@ -16240,12 +16266,6 @@ Byte String
 END
  }
 
-sub Nasm::X86::BlockMultiWayTree::getTreeBits($$$)                              # Load the tree bits from the numbered zmm into the specified register.
- {my ($bmt, $zmm, $register) = @_;                                              # Tree descriptor, numbered zmm, target register
-  loadFromZmm $register, w, zmm, $bmt->treeBits;
-  And $register, $bmt->treeBitsMask;
- }
-
 latest:
 if (1) {                                                                        #TloadFromZmm
   my $l = Rb(0..63);
@@ -16258,10 +16278,15 @@ if (1) {                                                                        
 
   PrintOutRegisterInHex zmm0, r15, r14;
 
+  Mov r14, 0xDCBA;
+  $t->putTreeBits(1, r14);
+  PrintOutRegisterInHex zmm1;
+
   ok Assemble(debug => 1, eq => <<END);
   zmm0: 3F3E 3D3C 3B3A 3938   3736 3534 3332 3130   2F2E 2D2C 2B2A 2928   2726 2524 2322 2120   1F1E 1D1C 1B1A 1918   1716 1514 1312 1110   0F0E 0D0C 0B0A 0908   0706 0504 0302 0100
    r15: 0000 0000 0000 0F0E
    r14: 0000 0000 0000 3B3A
+  zmm1: 0000 0000 DCBA 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
 END
  }
 
