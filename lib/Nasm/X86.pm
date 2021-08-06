@@ -5720,7 +5720,6 @@ sub Nasm::X86::BlockMultiWayTree::insertDataOrTree($$$$)                        
       Vpbroadcastd zmm22, r15d;                                                 # Load key
       KeepFree r15;
       Vpcmpud "k6{k7}", zmm22, zmm31, 0;                                        # Check for equal key
-#     ClearRegisters k5;                                                        # Zero so we can check the result mask against zero
       Ktestd k6, k6;                                                            # Check whether a matching key was found - the operation clears the zero flag if the register is not zero
       IfNz                                                                      # Found the key so we just update the data field
        {if ($first)                                                            # Insert sub tree if requested
