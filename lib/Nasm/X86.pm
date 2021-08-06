@@ -431,6 +431,29 @@ sub zmm(@)                                                                      
   map {"zmm$_"} @_;
  }
 
+sub ChooseRegisters($@)                                                         # Choose the specified numbers of registers excluding those on the specified list
+ {my ($number, @registers) = @_;                                                # Number of registers needed, Registers not to choose
+  my %r = ((map {"r$_"} 8..15), qw(rax rbx rcx rdx rsi rdi));
+  delete $r{$_} for @registers;
+  $number <= keys %r or confess "Not enough registers available";
+  keys %r
+ }
+
+sub InsertZeroIntoRegisterAtPoint($$)                                           # Insert a zero into the specified register at the point indicated by another register
+ {my ($point, $in) = @_;                                                        # Register with a single 1 at the insertion point, register to be inserted into.
+
+  PushR my @s = my ($mask, $low, $high) = ChooseRegisters(3, $in, $point);      # Choose three work registers and push them
+  Mov  $mask, $point;
+  Sub  $mask, 1;
+  Andn $high, $mask, $in;
+  Shl  $high, 1;
+  Mov  $low,  $in;
+  And  $low,  $mask;
+  Or   $low,  $high;
+  Mov  $in,   $low;
+  PopR @s;                                                                      # Restore stack
+ }
+
 #D2 Save and Restore                                                            # Saving and restoring registers via the stack
 
 my @syscallSequence = qw(rax rdi rsi rdx r10 r8 r9);                            # The parameter list sequence for system calls
@@ -5655,7 +5678,7 @@ sub Nasm::X86::BlockMultiWayTree::find($$$$)                                    
            key => $key, data => $data, found => $found);
  } # find
 
-sub Nasm::X86::BlockMultiWayTree::insertDataOrTree($$$$)                        # Insert a (key, data) pair into the tree
+sub Nasm::X86::BlockMultiWayTree::insertDataOrTree($$$$)                        # Insert either a key, data pair into the tree or create a sub tree at the specified key (if it does not already exist) and return the offset of the first block of the sub tree in the data variable.
  {my ($bmt, $first, $key, $data) = @_;                                          # Block multi way tree descriptor, variable addressing created sub tree, key as a dword, data as a dword
   @_ >= 2 or confess;
   my $b = $bmt->bs;                                                             # Underlying byte string
@@ -5674,14 +5697,20 @@ sub Nasm::X86::BlockMultiWayTree::insertDataOrTree($$$$)                        
     $bmt->getKeysDataNode($F, 31, 30, 29);                                      # Get the first block
 
     my $l = $bmt->getLengthInKeys(31);                                          # Length of the block
-    If  $l == 0,
+    If ($l == 0,                                                                # Check for  empty tree.
     Then                                                                        # Empty tree
      {$K->putDIntoZmm      (31, 0);                                             # Write key
       $bmt->putLengthInKeys(31, Cq(one, 1));                                    # Set the length of the block
+      if ($first)                                                               # Create and mark key as addressing a sub tree
+       {my $t = $bmt->bs->CreateBlockMultiWayTree;                              # Create sub tree
+        $D->copy($t->first);                                                    # Copy address of first  block
+        Mov r15, 1;
+        $bmt->setTree(r15,  31);                                                # Mark this key as addressing a tree
+       }
       $D->putDIntoZmm      (30, 0);                                             # Write data
       $bmt->putKeysData($F, 31, 30);                                            # Write the data block back into the underlying byte string
       Jmp $success;                                                             # Insert completed successfully
-     };
+     });
 
     my $n = $bmt->getLoop(30);                                                  # Get the offset of the node block
     If (($n == 0) & ($l < $bmt->maxKeys),
@@ -5694,8 +5723,19 @@ sub Nasm::X86::BlockMultiWayTree::insertDataOrTree($$$$)                        
       ClearRegisters k5;                                                        # Zero so we can check the result mask against zero
       Ktestd k5, k6;                                                            # Check whether a key was equal
 
-      IfNz                                                                      # We found a key
-       {$bmt->putLengthInKeys(31, $l + 1);                                      # Set the length of the block
+      IfNz                                                                      # Found the key so we just update the data field
+       {if ($first)                                                             # Insert sub tree if requested
+         {Kmovq r15, k6;                                                        # Position of key just found
+          $bmt->isTree(r15, 31);                                                # Check that the data element is a tree
+          IfZ                                                                   # If the data element is alread y a tree then get its value and return it in the data variable
+           {Tzcnt r14, r15;                                                     # Trailing zeros
+            my $w = $bmt->width;                                                # Width of keys and data
+            $D->copy(getDFromZmm(30, "r14*$w"));                                # Data associated with the key
+            Jmp $success;                                                       # Got offset of sub tree
+           };
+          my $t = $bmt->bs->CreateBlockMultiWayTree;                            # Create sub tree
+          $D->copy($t->first);                                                  # Copy address of first  block
+         }
         $D->setReg(r14);                                                        # Key to search for
         Vpbroadcastd "zmm30{k6}", r14d;                                         # Load data
         $bmt->putKeysData($F, 31, 30);                                          # Write the data block back into the underlying byte string
@@ -5780,22 +5820,25 @@ sub Nasm::X86::BlockMultiWayTree::insertDataOrTree($$$$)                        
 
     SetLabel $success;                                                          # Insert completed successfully
     PopR @save;
-   }  in => {bs => 3, first => 3, key => 3, data => 3};
+   }
+   name => "Nasm::X86::BlockMultiWayTree::insertDataOrTree_$first",
+   in => {bs => 3, first => 3, key => 3}, io => {data => 3};                    # Data either supplies the data or returns the offset of the sub tree
 
   $s->call($bmt->address, first => $bmt->first, key => $key, data => $data);
+
  } # insert
 
 sub Nasm::X86::BlockMultiWayTree::insert($$$)                                   # Insert a dword into into the specified tree at the specified key.
  {my ($bmt, $key, $data) = @_;                                                  # Block multi way tree descriptor, key as a dword, data as a dword
   @_ == 3 or confess;
-  $bmt->insertDataOrTree(undef, $key, $data)                                    # Insert data
+  $bmt->insertDataOrTree(0, $key, $data)                                        # Insert data
  }
 
 sub Nasm::X86::BlockMultiWayTree::insertTree($$$)                               # Insert a sub tree into the specified tree tree under the specified key and return a descriptor for it.  If the tree already exists, return a descriptor for it.
  {my ($bmt, $key, $data) = @_;                                                  # Block multi way tree descriptor, key as a dword, offset to data as a dword
   @_ == 3 or confess;
   my $first = Vq(first);                                                        # Variable containing offset to first block of the sub tree in the byte string
-  $bmt->insertDataOrTree($first, $key, $data)
+  $bmt->insertDataOrTree(1, $key, $data)
  }
 
 sub Nasm::X86::BlockMultiWayTree::getKeysData($$$$)                             # Load the keys and data blocks for a node
@@ -6515,7 +6558,7 @@ use vars qw(@ISA @EXPORT @EXPORT_OK %EXPORT_TAGS);
 
 @ISA          = qw(Exporter);
 @EXPORT       = qw();
-@EXPORT_OK    = qw(Add All8Structure AllocateAll8OnStack AllocateMemory And Andn Assemble Block Bswap Bt Btc Btr Bts Bzhi Call CallC ClassifyCharacters4 ClassifyInRange ClassifyRange ClassifyWithInRange ClassifyWithInRangeAndSaveOffset ClearMemory ClearRegisters ClearZF CloseFile Cmova Cmovae Cmovb Cmovbe Cmovc Cmove Cmovg Cmovge Cmovl Cmovle Cmovna Cmovnae Cmovnb Cmp Comment ConcatenateShortStrings ConvertUtf8ToUtf32 CopyMemory Cq CreateByteString Cstrlen DComment Db Dbwdq Dd Dec Dq Ds Dw Else Exit Extern Float32 Float64 For ForEver ForIn Fork FreeMemory GetLengthOfShortString GetNextUtf8CharAsUtf32 GetPPid GetPid GetPidInHex GetUid Hash ISA Idiv If IfEq IfGe IfGt IfLe IfLt IfNe IfNz IfZ Imul Inc Ja Jae Jb Jbe Jc Jcxz Je Jecxz Jg Jge Jl Jle Jmp Jna Jnae Jnb Jnbe Jnc Jne Jng Jnge Jnl Jnle Jno Jnp Jns Jnz Jo Jp Jpe Jpo Jrcxz Js Jz Loop  Kaddb Kaddd Kaddq Kaddw Kandb Kandd Kandnb Kandnd Kandnq Kandnw Kandq Kandw Keep KeepFree KeepPop KeepPush KeepReturn KeepSet Kmovb Kmovd Kmovq Kmovw Knotb Knotd Knotq Knotw Korb Kord Korq Kortestb Kortestd Kortestq Kortestw Korw Kshiftlb Kshiftld Kshiftlq Kshiftlw Kshiftrb Kshiftrd Kshiftrq Kshiftrw Ktestb Ktestd Ktestq Ktestw Kunpckb Kunpckd Kunpckq Kunpckw Kxnorb Kxnord Kxnorq Kxnorw Kxorb Kxord Kxorq Kxorw Label Lea Link LoadConstantIntoMaskRegister LoadShortStringFromMemoryToZmm LoadShortStringFromMemoryToZmm2 LocalData LocateIntelEmulator Lzcnt Macro MaskMemory MaskMemoryInRange4  Mov Movdqa Mulpd Neg Not OpenRead OpenWrite Or PeekR Pextrb Pextrd Pextrq Pextrw Pi32 Pi64 Pinsrb Pinsrd Pinsrq Pinsrw Pop PopEax PopR PopRR Popcnt Popfq PrintErrMemory PrintErrMemoryInHex PrintErrMemoryInHexNL PrintErrMemoryNL PrintErrNL PrintErrRaxInHex PrintErrRegisterInHex PrintErrString PrintErrStringNL PrintErrZF PrintMemory PrintMemoryInHex PrintNL PrintOutMemory PrintOutMemoryInHex PrintOutMemoryInHexNL PrintOutMemoryNL PrintOutNL PrintOutRaxInHex PrintOutRaxInReverseInHex PrintOutRegisterInHex PrintOutRegistersInHex PrintOutRflagsInHex PrintOutRipInHex PrintOutString PrintOutStringNL PrintOutZF PrintRaxInHex PrintRegisterInHex PrintString PrintUtf32 Pslldq Psrldq Push PushR PushRR Pushfq RComment Rb Rbwdq Rd Rdtsc ReadFile ReadTimeStampCounter RegisterSize ReorderSyscallRegisters RestoreFirstFour RestoreFirstFourExceptRax RestoreFirstFourExceptRaxAndRdi RestoreFirstSeven RestoreFirstSevenExceptRax RestoreFirstSevenExceptRaxAndRdi Ret Rq Rs Rutf8 Rw SaveFirstFour SaveFirstSeven Scope ScopeEnd SetLabel SetLengthOfShortString SetMaskRegister SetZF Seta Setae Setb Setbe Setc Sete Setg Setge Setl Setle Setna Setnae Setnb Setnbe Setnc Setne Setng Setnge Setnl Setno Setnp Setns Setnz Seto Setp Setpe Setpo Sets Setz Shl Shr Start StatSize StringLength Structure Sub Subroutine Syscall Test Then Trace Tzcnt UnReorderSyscallRegisters VERSION Vaddd Vaddpd Variable Vb Vcvtudq2pd Vcvtudq2ps Vcvtuqq2pd Vd Vdpps Vgetmantps Vmovd Vmovdqa32 Vmovdqa64 Vmovdqu Vmovdqu32 Vmovdqu64 Vmovdqu8 Vmovq Vmulpd Vpbroadcastb Vpbroadcastd Vpbroadcastq Vpbroadcastw Vpcmpeqb Vpcmpeqd Vpcmpeqq Vpcmpeqw Vpcmpub Vpcmpud Vpcmpuq Vpcmpuw Vpcompressd Vpcompressq Vpexpandd Vpexpandq Vpextrb Vpextrd Vpextrq Vpextrw Vpinsrb Vpinsrd Vpinsrq Vpinsrw Vpmullb Vpmulld Vpmullq Vpmullw Vprolq Vpsubb Vpsubd Vpsubq Vpsubw Vpxorq Vq Vr Vsqrtpd Vw Vx VxyzInit Vy Vz WaitPid Xchg Xor ah al ax bh bl bp bpl bx ch cl cs cx dh di dil dl ds dx eax ebp ebx ecx edi edx es esi esp fs gs k0 k1 k2 k3 k4 k5 k6 k7 mm0 mm1 mm2 mm3 mm4 mm5 mm6 mm7 r10 r10b r10d r10l r10w r11 r11b r11d r11l r11w r12 r12b r12d r12l r12w r13 r13b r13d r13l r13w r14 r14b r14d r14l r14w r15 r15b r15d r15l r15w r8 r8b r8d r8l r8w r9 r9b r9d r9l r9w rax rbp rbx rcx rdi rdx rflags rip rsi rsp si sil sp spl ss st0 st1 st2 st3 st4 st5 st6 st7 xmm0 xmm1 xmm10 xmm11 xmm12 xmm13 xmm14 xmm15 xmm16 xmm17 xmm18 xmm19 xmm2 xmm20 xmm21 xmm22 xmm23 xmm24 xmm25 xmm26 xmm27 xmm28 xmm29 xmm3 xmm30 xmm31 xmm4 xmm5 xmm6 xmm7 xmm8 xmm9 ymm0 ymm1 ymm10 ymm11 ymm12 ymm13 ymm14 ymm15 ymm16 ymm17 ymm18 ymm19 ymm2 ymm20 ymm21 ymm22 ymm23 ymm24 ymm25 ymm26 ymm27 ymm28 ymm29 ymm3 ymm30 ymm31 ymm4 ymm5 ymm6 ymm7 ymm8 ymm9 zmm0 zmm1 zmm10 zmm11 zmm12 zmm13 zmm14 zmm15 zmm16 zmm17 zmm18 zmm19 zmm2 zmm20 zmm21 zmm22 zmm23 zmm24 zmm25 zmm26 zmm27 zmm28 zmm29 zmm3 zmm30 zmm31 zmm4 zmm5 zmm6 zmm7 zmm8 zmm9);
+@EXPORT_OK    = qw(Add All8Structure AllocateAll8OnStack AllocateMemory And Andn Assemble Block Bswap Bt Btc Btr Bts Bzhi Call CallC ChooseRegisters ClassifyCharacters4 ClassifyInRange ClassifyRange ClassifyWithInRange ClassifyWithInRangeAndSaveOffset ClearMemory ClearRegisters ClearZF CloseFile Cmova Cmovae Cmovb Cmovbe Cmovc Cmove Cmovg Cmovge Cmovl Cmovle Cmovna Cmovnae Cmovnb Cmp Comment ConcatenateShortStrings ConvertUtf8ToUtf32 CopyMemory Cq CreateByteString Cstrlen DComment Db Dbwdq Dd Dec Dq Ds Dw Else Exit Extern Float32 Float64 For ForEver ForIn Fork FreeMemory GetLengthOfShortString GetNextUtf8CharAsUtf32 GetPPid GetPid GetPidInHex GetUid Hash ISA Idiv If IfEq IfGe IfGt IfLe IfLt IfNe IfNz IfZ Imul Inc InsertZeroIntoRegisterAtPoint Ja Jae Jb Jbe Jc Jcxz Je Jecxz Jg Jge Jl Jle Jmp Jna Jnae Jnb Jnbe Jnc Jne Jng Jnge Jnl Jnle Jno Jnp Jns Jnz Jo Jp Jpe Jpo Jrcxz Js Jz Loop  Kaddb Kaddd Kaddq Kaddw Kandb Kandd Kandnb Kandnd Kandnq Kandnw Kandq Kandw Keep KeepFree KeepPop KeepPush KeepReturn KeepSet Kmovb Kmovd Kmovq Kmovw Knotb Knotd Knotq Knotw Korb Kord Korq Kortestb Kortestd Kortestq Kortestw Korw Kshiftlb Kshiftld Kshiftlq Kshiftlw Kshiftrb Kshiftrd Kshiftrq Kshiftrw Ktestb Ktestd Ktestq Ktestw Kunpckb Kunpckd Kunpckq Kunpckw Kxnorb Kxnord Kxnorq Kxnorw Kxorb Kxord Kxorq Kxorw Label Lea Link LoadConstantIntoMaskRegister LoadShortStringFromMemoryToZmm LoadShortStringFromMemoryToZmm2 LocalData LocateIntelEmulator Lzcnt Macro MaskMemory MaskMemoryInRange4  Mov Movdqa Mulpd Neg Not OpenRead OpenWrite Or PeekR Pextrb Pextrd Pextrq Pextrw Pi32 Pi64 Pinsrb Pinsrd Pinsrq Pinsrw Pop PopEax PopR PopRR Popcnt Popfq PrintErrMemory PrintErrMemoryInHex PrintErrMemoryInHexNL PrintErrMemoryNL PrintErrNL PrintErrRaxInHex PrintErrRegisterInHex PrintErrString PrintErrStringNL PrintErrZF PrintMemory PrintMemoryInHex PrintNL PrintOutMemory PrintOutMemoryInHex PrintOutMemoryInHexNL PrintOutMemoryNL PrintOutNL PrintOutRaxInHex PrintOutRaxInReverseInHex PrintOutRegisterInHex PrintOutRegistersInHex PrintOutRflagsInHex PrintOutRipInHex PrintOutString PrintOutStringNL PrintOutZF PrintRaxInHex PrintRegisterInHex PrintString PrintUtf32 Pslldq Psrldq Push PushR PushRR Pushfq RComment Rb Rbwdq Rd Rdtsc ReadFile ReadTimeStampCounter RegisterSize ReorderSyscallRegisters RestoreFirstFour RestoreFirstFourExceptRax RestoreFirstFourExceptRaxAndRdi RestoreFirstSeven RestoreFirstSevenExceptRax RestoreFirstSevenExceptRaxAndRdi Ret Rq Rs Rutf8 Rw SaveFirstFour SaveFirstSeven Scope ScopeEnd SetLabel SetLengthOfShortString SetMaskRegister SetZF Seta Setae Setb Setbe Setc Sete Setg Setge Setl Setle Setna Setnae Setnb Setnbe Setnc Setne Setng Setnge Setnl Setno Setnp Setns Setnz Seto Setp Setpe Setpo Sets Setz Shl Shr Start StatSize StringLength Structure Sub Subroutine Syscall Test Then Trace Tzcnt UnReorderSyscallRegisters VERSION Vaddd Vaddpd Variable Vb Vcvtudq2pd Vcvtudq2ps Vcvtuqq2pd Vd Vdpps Vgetmantps Vmovd Vmovdqa32 Vmovdqa64 Vmovdqu Vmovdqu32 Vmovdqu64 Vmovdqu8 Vmovq Vmulpd Vpbroadcastb Vpbroadcastd Vpbroadcastq Vpbroadcastw Vpcmpeqb Vpcmpeqd Vpcmpeqq Vpcmpeqw Vpcmpub Vpcmpud Vpcmpuq Vpcmpuw Vpcompressd Vpcompressq Vpexpandd Vpexpandq Vpextrb Vpextrd Vpextrq Vpextrw Vpinsrb Vpinsrd Vpinsrq Vpinsrw Vpmullb Vpmulld Vpmullq Vpmullw Vprolq Vpsubb Vpsubd Vpsubq Vpsubw Vpxorq Vq Vr Vsqrtpd Vw Vx VxyzInit Vy Vz WaitPid Xchg Xor ah al ax bh bl bp bpl bx ch cl cs cx dh di dil dl ds dx eax ebp ebx ecx edi edx es esi esp fs gs k0 k1 k2 k3 k4 k5 k6 k7 mm0 mm1 mm2 mm3 mm4 mm5 mm6 mm7 r10 r10b r10d r10l r10w r11 r11b r11d r11l r11w r12 r12b r12d r12l r12w r13 r13b r13d r13l r13w r14 r14b r14d r14l r14w r15 r15b r15d r15l r15w r8 r8b r8d r8l r8w r9 r9b r9d r9l r9w rax rbp rbx rcx rdi rdx rflags rip rsi rsp si sil sp spl ss st0 st1 st2 st3 st4 st5 st6 st7 xmm0 xmm1 xmm10 xmm11 xmm12 xmm13 xmm14 xmm15 xmm16 xmm17 xmm18 xmm19 xmm2 xmm20 xmm21 xmm22 xmm23 xmm24 xmm25 xmm26 xmm27 xmm28 xmm29 xmm3 xmm30 xmm31 xmm4 xmm5 xmm6 xmm7 xmm8 xmm9 ymm0 ymm1 ymm10 ymm11 ymm12 ymm13 ymm14 ymm15 ymm16 ymm17 ymm18 ymm19 ymm2 ymm20 ymm21 ymm22 ymm23 ymm24 ymm25 ymm26 ymm27 ymm28 ymm29 ymm3 ymm30 ymm31 ymm4 ymm5 ymm6 ymm7 ymm8 ymm9 zmm0 zmm1 zmm10 zmm11 zmm12 zmm13 zmm14 zmm15 zmm16 zmm17 zmm18 zmm19 zmm2 zmm20 zmm21 zmm22 zmm23 zmm24 zmm25 zmm26 zmm27 zmm28 zmm29 zmm3 zmm30 zmm31 zmm4 zmm5 zmm6 zmm7 zmm8 zmm9);
 %EXPORT_TAGS  = (all => [@EXPORT, @EXPORT_OK]);
 
 # podDocumentation
@@ -15782,13 +15825,13 @@ END
  }
 
 ##latest:
-if (1) {
+if (1) {                                                                        #TNasm::X86::ByteString::CreateBlockMultiWayTree
   my $b = CreateByteString;
   my $t = $b->CreateBlockMultiWayTree;
   my $d = Vq(data);
   my $f = Vq(found);
 
-  Vq(count, 24)->for(sub       # 24
+  Vq(count, 24)->for(sub
    {my ($index, $start, $next, $end) = @_;
     my $k = $index + 1; my $d = $k + 0x100;
     $t->insert($k, $d);
@@ -16067,7 +16110,7 @@ END
  }
 
 #latest:
-if (1) {                                                                        #T setOrClearTreeBits
+if (1) {                                                                        #TsetOrClearTreeBits
   ClearRegisters zmm0;
   my $b = CreateByteString;
   my $t = $b->CreateBlockMultiWayTree;
@@ -16093,12 +16136,43 @@ END
  }
 
 #latest:
+if (1) {
+  Mov r15, 0x100;                                                               # Given a register with a single one in it indicating the desired position,
+  Mov r14, 0xFFFF;                                                              # Insert a zero into the register at that position shifting the bits above that position up left one to make space for the new zero.
+  PrintOutRegisterInHex         r14, r15;
+  InsertZeroIntoRegisterAtPoint r15, r14;
+  PrintOutRegisterInHex r14;
+  ok Assemble(debug => 0, eq => <<END);
+   r14: 0000 0000 0000 FFFF
+   r15: 0000 0000 0000 0100
+   r14: 0000 0000 0001 FEFF
+END
+ }
+
+#latest:
+if (1) {
+  my $b = CreateByteString;
+  my $t = $b->CreateBlockMultiWayTree;
+  my $k = Vq(key,  15);
+  my $d = Vq(data, 14);
+  my $f = Vq(found);
+
+  $t->insertTree($k, $d);  $d->outNL;
+  $t->insertTree($k, $d);  $d->outNL;                                           # Retrieve the sub tree
+
+  ok Assemble(debug => 0, eq => <<END);
+data: 0000 0000 0000 0098
+data: 0000 0000 0000 0098
+END
+ }
+
+#latest:
 if (0) {
   is_deeply Assemble(debug=>1), <<END;
 END
  }
 
-ok 1 for 1..4;
+ok 1 for 1..2;
 
 unlink $_ for qw(hash print2 sde-log.txt sde-ptr-check.out.txt z.txt);          # Remove incidental files
 
