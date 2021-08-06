@@ -5190,7 +5190,7 @@ sub Nasm::X86::BlockMultiWayTree::splitNode($$$$@)                              
        });
      },
     Then
-     {$bmt->splitFullRoot($b);                                                  # Root
+     {$bmt->splitFullRoot;                                                      # Root
       my $l = getDFromZmm($N, 0);
       my $r = getDFromZmm($N, $bmt->width);
       $bmt->putKeysDataNode($n, $K, $D, $N);                                    # Save root
@@ -5263,9 +5263,9 @@ sub Nasm::X86::BlockMultiWayTree::transferTreeBits($$$$)                        
   PopR @save;
  }
 
-sub Nasm::X86::BlockMultiWayTree::splitFullRoot($$)                             #P Split a full root block held in 31..29 and place the left block in 28..26 and the right block in 25..23. The left and right blocks should have their loop offsets set so they can be inserted into the root.
- {my ($bmt, $bs) = @_;                                                          # Block multi way tree descriptor, byte string locator
-  @_ == 2 or confess;
+sub Nasm::X86::BlockMultiWayTree::splitFullRoot($)                              #P Split a full root block held in 31..29 and place the left block in 28..26 and the right block in 25..23. The left and right blocks should have their loop offsets set so they can be inserted into the root.
+ {my ($bmt) = @_;                                                               # Block multi way tree descriptor
+  @_ == 1 or confess;
 
   my $length      = $bmt->maxKeys;                                              # Length of block to split
   my $leftLength  = $length / 2;                                                # Left split point
@@ -5362,9 +5362,9 @@ sub Nasm::X86::BlockMultiWayTree::splitFullRoot($$)                             
 
     SetLabel $success;                                                          # Insert completed successfully
     PopR @save;
-   } in => {bs => 3};
+   };
 
-  $s->call (bs => $bs);
+  $s->call;
  } # splitFullRoot
 
 sub Nasm::X86::BlockMultiWayTree::splitFullLeftNode($)                          #P Split a full left node block held in 28..26 whose parent is in 31..29 and place the new right block in 25..23. The parent is assumed to be not full. The loop and length fields are assumed to be authoritative and hence are preserved.
@@ -16254,7 +16254,7 @@ if (1) {                                                                        
   $t->insertTree($k, $d);  $d->outNL;                                           # Retrieve the sub tree rather than creating a new new sub tree
   $t->insertTree($k, $d);  $d->outNL;
 
-  ok Assemble(debug => 1, eq => <<END);
+  ok Assemble(debug => 0, eq => <<END);
 data: 0000 0000 0000 000E
 data: 0000 0000 0000 0098
 data: 0000 0000 0000 0098
@@ -16273,7 +16273,7 @@ if (1) {                                                                        
    }
 
   $b->dump;
-  ok Assemble(debug => 1, eq => <<END);                                         # Tree bits at 0x50
+  ok Assemble(debug => 0, eq => <<END);                                         # Tree bits at 0x50
 data: 0000 0000 0000 0098
 data: 0000 0000 0000 0118
 data: 0000 0000 0000 0198
