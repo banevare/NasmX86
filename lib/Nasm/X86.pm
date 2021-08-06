@@ -5722,13 +5722,12 @@ sub Nasm::X86::BlockMultiWayTree::insertDataOrTree($$$$)                        
       Vpcmpud "k6{k7}", zmm22, zmm31, 0;                                        # Check for equal key
       Ktestd k6, k6;                                                            # Check whether a matching key was found - the operation clears the zero flag if the register is not zero
       IfNz                                                                      # Found the key so we just update the data field
-       {if ($first)                                                            # Insert sub tree if requested
+       {if ($first)                                                             # Insert sub tree if requested
          {Kmovq r15, k6;                                                        # Position of key just found
           $bmt->isTree(r15, 31);                                                # Set the zero flag to indicate whether the existing data element is in fact a tree
           IfNz                                                                  # If the data element is already a tree then get its value and return it in the data variable
            {Tzcnt r14, r15;                                                     # Trailing zeros
-            my $w = $bmt->width;                                                # Width of keys and data
-            $D->copy(getDFromZmm(30, "r14*$w"));                                # Data associated with the key
+            $D->copy(getDFromZmm(30, "r14*$$bmt{width}"));                      # Data associated with the key
             Jmp $success;                                                       # Return offset of sub tree
            }
           sub                                                                   # The existing element is not a tree so we mark it as such using the single bit in r15/k6
@@ -5743,8 +5742,8 @@ sub Nasm::X86::BlockMultiWayTree::insertDataOrTree($$$$)                        
         Jmp $success;                                                           # Insert completed successfully
        };
 
-      Vpcmpud "k6{k7}", zmm22, zmm31, 1;                                        # Check for elements that are greater
-      Ktestw   k6, k6;                                                          # K6 contains a single bit marking the insertion point
+      Vpcmpud "k6{k7}", zmm22, zmm31, 1;                                        # Check for elements that are greater than an existing element
+      Ktestw   k6, k6;
       IfEq (sub                                                                 # K6 zero implies the latest key goes at the end
        {Kshiftlw k6, k7, 1;                                                     # Reach next empty field
         Kandnw   k6, k7, k6;                                                    # Remove back fill to leave a single bit at the next empty field
