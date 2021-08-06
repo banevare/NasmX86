@@ -5064,7 +5064,7 @@ sub Nasm::X86::BlockMultiWayTree::DescribeBlockMultiWayTree($;$)                
     length       => $b - $o * 2,                                                # Offset of length in keys block.  The length field is a word - see: "MultiWayTree.svg"
     treeBits     => $b - $o * 2 + 2,                                            # Offset of tree bits in keys block.  The tree bits field is a word, each bit of which tells us whether the corresponding data element is the offset (or not) to a sub tree of this tree .
     up           => $b - $o * 2,                                                # Offset of up in data block.
-    treeBitsMask => 0x3f,                                                       # 14 tree bits
+    treeBitsMask => 0x3fff,                                                     # 14 tree bits
    );
  }
 
@@ -5759,6 +5759,15 @@ sub Nasm::X86::BlockMultiWayTree::insertDataOrTree($$$$)                        
        });
 
       Vpbroadcastd "zmm31{k6}", r15d;                                           # Load key
+
+      if ($first)                                                               # Insert new sub tree - the  key was not found so there cannot be a sub tree present
+       {$D->copy($bmt->bs->CreateBlockMultiWayTree->first);                      # Create tree and copy offset of first block
+        PushR r15;
+        Kmovq r15, k6;                                                          # Position of key just found
+        $bmt->setTree(r15, 31);                                                 # Mark new entry as a sub tree
+        PopR r15;
+       }
+
       $D->setReg(r14);                                                          # Corresponding data
       Vpbroadcastd "zmm30{k6}", r14d;                                           # Load data
       KeepFree r14;
@@ -6062,8 +6071,10 @@ sub Nasm::X86::BlockMultiWayTree::isTree($$$)                                   
  } # isTree
 
 sub Nasm::X86::BlockMultiWayTree::setOrClearTree($$$$)                          #P Set or clear the tree bit in the numbered zmm register holding the keys of a node to indicate that the data element indicated by the specified register is an offset to a sub tree in the containing byte string.
- {my ($bmt, $set, $register, $zmm) = @_;                                         # Block multi way tree descriptor, set if true else clear, register holding a single one in the lowest 14 bits at the insertion point, numbered zmm register holding the keys for a node in the tree
+ {my ($bmt, $set, $register, $zmm) = @_;                                        # Block multi way tree descriptor, set if true else clear, register holding a single one in the lowest 14 bits at the insertion point, numbered zmm register holding the keys for a node in the tree
   @_ == 4 or confess;
+  $register =~ m(\Ar) or                                                        # Check register type
+    confess "General purpose register required, not $register";
 
   my $z = "zmm$zmm";                                                            # Full name of zmm register
   my $o = $$bmt{treeBits};                                                      # Tree bits to end of zmm
@@ -16157,7 +16168,6 @@ if (1) {
   my $t = $b->CreateBlockMultiWayTree;
   my $k = Vq(key,  15);
   my $d = Vq(data, 14);
-  my $f = Vq(found);
 
   $t->insertTree($k, $d);  $d->outNL;
   $t->insertTree($k, $d);  $d->outNL;                                           # Retrieve the sub tree rather than creating a new new sub tree
@@ -16174,7 +16184,6 @@ if (1) {                                                                        
   my $t = $b->CreateBlockMultiWayTree;
   my $k = Vq(key,  15);
   my $d = Vq(data, 14);
-  my $f = Vq(found);
 
   $t->insert    ($k, $d);  $d->outNL;
   $t->insertTree($k, $d);  $d->outNL;                                           # Retrieve the sub tree rather than creating a new new sub tree
@@ -16184,6 +16193,40 @@ if (1) {                                                                        
 data: 0000 0000 0000 000E
 data: 0000 0000 0000 0098
 data: 0000 0000 0000 0098
+END
+ }
+
+#latest:
+if (1) {                                                                        # Replace a scalar with a tree in the first node
+  my $b = CreateByteString;
+  my $t = $b->CreateBlockMultiWayTree;
+  my $k = Vq(key,  15);
+  my $d = Vq(data, 14);
+
+  for my $i(1..11)                                                              # Create 8 new sub trees
+   {$t->insertTree(Vq(key,  $i), $d);  $d->outNL;                               # Retrieve the sub tree rather than creating a new new sub tree
+   }
+
+  $b->dump;
+  ok Assemble(debug => 1, eq => <<END);                                         # Tree bits at 0x50
+data: 0000 0000 0000 0098
+data: 0000 0000 0000 0118
+data: 0000 0000 0000 0198
+data: 0000 0000 0000 0218
+data: 0000 0000 0000 0298
+data: 0000 0000 0000 0318
+data: 0000 0000 0000 0398
+data: 0000 0000 0000 0418
+data: 0000 0000 0000 0498
+data: 0000 0000 0000 0518
+data: 0000 0000 0000 0598
+Byte String
+  Size: 0000 0000 0000 1000
+  Used: 0000 0000 0000 0618
+0000: 0010 0000 0000 00001806 0000 0000 00000000 0000 0000 00000100 0000 0200 00000300 0000 0400 00000500 0000 0600 00000700 0000 0800 00000900 0000 0A00 0000
+0040: 0B00 0000 0000 00000000 0000 0000 00000B00 FF07 5800 00009800 0000 1801 00009801 0000 1802 00009802 0000 1803 00009803 0000 1804 00009804 0000 1805 0000
+0080: 9805 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+00C0: 0000 0000 0000 00000000 0000 0000 00000000 0000 D800 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
 END
  }
 
