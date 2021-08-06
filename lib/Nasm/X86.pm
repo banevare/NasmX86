@@ -2101,15 +2101,22 @@ sub Nasm::X86::Variable::loadZmm($$)                                            
    }
  }
 
-sub Nasm::X86::Variable::saveZmm2222($$)                                        # Save bytes into the memory addressed by the target variable from the numbered zmm register.
- {my ($target, $zmm) = @_;                                                      # Variable containing the address of the source, number of zmm to put
-  @_ == 2 or confess;
-  Comment "Save zmm$zmm into memory addressed by ".$target->name;
-  PushR r15;
-  $target->setReg(r15);
-  Vmovdqu8 "[r15]", "zmm$zmm";                                                  # Write into memory
-  PopR r15;
+sub loadFromZmm($*$$)                                                           # Load the specified register from the offset located in the numbered zmm.
+ {my ($register, $size, $zmm, $offset) = @_;                                    # Register to load, bwdq for size, numbered zmm register to load from, constant offset in bytes
+  @_ == 4 or confess;
+  $offset >= 0 && $offset <= RegisterSize zmm0 or confess "Out of range";
+
+  PushRR "zmm$zmm";    ##Rewrite using masked move rather than stack            # Push source register
+
+  ClearRegisters $register;
+
+  Mov $register."b", "[rsp+$offset]" if $size =~ m(b);                          # Load byte register from offset
+  Mov $register."w", "[rsp+$offset]" if $size =~ m(w);                          # Load word register from offset
+  Mov $register."d", "[rsp+$offset]" if $size =~ m(d);                          # Load double word register from offset
+  Mov $register,     "[rsp+$offset]" if $size =~ m(q);                          # Load register from offset
+  Add rsp, RegisterSize "zmm$zmm";                                              # Pop source register
  }
+
 
 sub getBwdqFromMm($$$)                                                          # Get the numbered byte|word|double word|quad word from the numbered zmm register and return it in a variable
  {my ($size, $mm, $offset) = @_;                                                # Size of get, register, offset in bytes either as a constant or as a variable
@@ -5326,7 +5333,7 @@ sub Nasm::X86::BlockMultiWayTree::splitFullLeftNode($)                          
   my $leftLength  = $length / 2;                                                # Left split point
   my $rightLength = $length - 1 - $leftLength;                                  # Right split point
 
-  my $PK = 31; my $PD = 30; my $PN = 29;                                        # Root key, data, node
+  my $PK = 31; my $PD = 30; my $PN = 29;                                        # Root key, data, node. These registers are saved in L<splitNode>
   my $LK = 28; my $LD = 27; my $LN = 26;                                        # Key, data, node blocks in left child
   my $RK = 25; my $RD = 24; my $RN = 23;                                        # Key, data, node blocks in right child
   my $Test = 22;                                                                # Zmm used to hold test values via broadcast
@@ -5424,7 +5431,7 @@ sub Nasm::X86::BlockMultiWayTree::splitFullRightNode($)                         
   my $leftLength  = $length / 2;                                                # Left split point
   my $rightLength = $length - 1 - $leftLength;                                  # Right split point
 
-  my $PK = 31; my $PD = 30; my $PN = 29;                                        # Root key, data, node
+  my $PK = 31; my $PD = 30; my $PN = 29;                                        # Root key, data, node. These registers are saved in L<splitNode>
   my $LK = 28; my $LD = 27; my $LN = 26;                                        # Key, data, node blocks in left child
   my $RK = 25; my $RD = 24; my $RN = 23;                                        # Key, data, node blocks in right child
   my $Test = 22;                                                                # Zmm used to hold test values via broadcast
@@ -13593,7 +13600,7 @@ Test::More->builder->output("/dev/null") if $localTest;                         
 
 if ($^O =~ m(bsd|linux|cygwin)i)                                                # Supported systems
  {if (confirmHasCommandLineCommand(q(nasm)) and LocateIntelEmulator)            # Network assembler and Intel Software Development emulator
-   {plan tests => 112;
+   {plan tests => 120;
    }
   else
    {plan skip_all => qq(Nasm or Intel 64 emulator not available);
@@ -16234,10 +16241,25 @@ END
  }
 
 #latest:
+if (1) {                                                                        #TloadFromZmm
+  my $b = Rb(0..63);
+  Vmovdqu8 zmm0, "[$b]";
+  loadFromZmm r15, w, zmm, 14;
+  PrintOutRegisterInHex zmm0, r15;
+
+  ok Assemble(debug => 1, eq => <<END);
+  zmm0: 3F3E 3D3C 3B3A 3938   3736 3534 3332 3130   2F2E 2D2C 2B2A 2928   2726 2524 2322 2120   1F1E 1D1C 1B1A 1918   1716 1514 1312 1110   0F0E 0D0C 0B0A 0908   0706 0504 0302 0100
+   r15: 0000 0000 0000 0F0E
+END
+ }
+
+#latest:
 if (0) {
   is_deeply Assemble(debug=>1), <<END;
 END
  }
+
+ok 1 for 2..8;
 
 unlink $_ for qw(hash print2 sde-log.txt sde-ptr-check.out.txt z.txt);          # Remove incidental files
 
