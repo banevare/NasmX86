@@ -10,9 +10,11 @@ use warnings FATAL => qw(all);
 use strict;
 use Carp qw(confess cluck);
 use Data::Dump qw(dump);
-use Data::Table::Text qw(confirmHasCommandLineCommand convertUtf32ToUtf8 currentDirectory evalFile fff fileMd5Sum fileSize findFiles firstNChars formatTable fpe fpf genHash lll owf pad readFile stringsAreNotEqual stringMd5Sum temporaryFile);
+use Data::Table::Text qw(makeDieConfess confirmHasCommandLineCommand convertUtf32ToUtf8 currentDirectory evalFile fff fileMd5Sum fileSize findFiles firstNChars formatTable fpe fpf genHash lll owf pad readFile stringsAreNotEqual stringMd5Sum temporaryFile);
 use Asm::C qw(:all);
 use feature qw(say current_sub);
+
+makeDieConfess;
 
 my %rodata;                                                                     # Read only data already written
 my %rodatas;                                                                    # Read only string already written
@@ -5075,21 +5077,21 @@ sub Nasm::X86::BlockMultiWayTree::DescribeBlockMultiWayTree($;$)                
 
   genHash(__PACKAGE__."::BlockMultiWayTree",                                    # Block multi way tree.
     bs           => $byteString,                                                # Byte string definition.
-    first        => ($header // Vq(first)),                                     # Variable addressing offset to first block of keys.
-    width        => $o,                                                         # Width of a key or data slot.
-    keys         => $o * 1,                                                     # Offset of keys in header.
     data         => $o * 2,                                                     # Offset of data in header.
-    node         => $o * 3,                                                     # Offset of nodes in header.
-    minKeys      => int($b / 2) - 1,                                            # Minimum number of keys.
+    first        => ($header // Vq(first)),                                     # Variable addressing offset to first block of keys.
+    keys         => $o * 1,                                                     # Offset of keys in header.
+    leftLength   => $length / 2,                                                # Left split length
+    lengthOffset => $b - $o * 2,                                                # Offset of length in keys block.  The length field is a word - see: "MultiWayTree.svg"
+    loop         => $b - $o,                                                    # Offset of keys, data, node loop.
     maxKeys      => $b / $o - 2,                                                # Maximum number of keys.
     maxNodes     => $b / $o - 1,                                                # Maximum number of children per parent.
-    loop         => $b - $o,                                                    # Offset of keys, data, node loop.
-    length       => $b - $o * 2,                                                # Offset of length in keys block.  The length field is a word - see: "MultiWayTree.svg"
-    treeBits     => $b - $o * 2 + 2,                                            # Offset of tree bits in keys block.  The tree bits field is a word, each bit of which tells us whether the corresponding data element is the offset (or not) to a sub tree of this tree .
-    up           => $b - $o * 2,                                                # Offset of up in data block.
-    treeBitsMask => 0x3fff,                                                     # 14 tree bits
-    leftLength   => $length / 2,                                                # Left split length
+    minKeys      => int($b / 2) - 1,                                            # Minimum number of keys.
+    node         => $o * 3,                                                     # Offset of nodes in header.
     rightLength  => $length - 1 - $length / 2,                                  # Right split length
+    treeBits     => $b - $o * 2 + 2,                                            # Offset of tree bits in keys block.  The tree bits field is a word, each bit of which tells us whether the corresponding data element is the offset (or not) to a sub tree of this tree .
+    treeBitsMask => 0x3fff,                                                     # 14 tree bits
+    up           => $b - $o * 2,                                                # Offset of up in data block.
+    width        => $o,                                                         # Width of a key or data slot.
    );
  }
 
@@ -5955,27 +5957,27 @@ sub Nasm::X86::BlockMultiWayTree::getLengthInKeys($$)                           
  {my ($bmt, $zmm) = @_;                                                         # Block multi way tree descriptor, zmm number
   @_ == 2 or confess;
 
-  getWFromZmm($zmm, $bmt->length);                                              # The length field as a variable
+  getWFromZmm($zmm, $bmt->lengthOffset);                                        # The length field as a variable
  }
 
 sub Nasm::X86::BlockMultiWayTree::putLengthInKeys($$$)                          # Get the length of the block in the numbered zmm from the specified variable
  {my ($bmt, $zmm, $length) = @_;                                                # Block multi way tree, zmm number, length variable
   @_ == 3 or confess;
   ref($length) or confess dump($length);
-  $length->putWIntoZmm($zmm, $bmt->length);                                     # Set the length field
+  $length->putWIntoZmm($zmm, $bmt->lengthOffset)                                # Set the length field
  }
 
 sub Nasm::X86::BlockMultiWayTree::getUpFromData($$)                             # Get the up offset from the data block in the numbered zmm and return it as a variable
  {my ($bmt, $zmm) = @_;                                                         # Block multi way tree descriptor, zmm number
   @_ == 2 or confess;
-  getDFromZmm($zmm, $bmt->length);                                              # The length field as a variable
+  getDFromZmm($zmm, $bmt->lengthOffset);                                        # The length field as a variable
  }
 
 sub Nasm::X86::BlockMultiWayTree::putUpIntoData($$$)                            # Put the offset of the parent keys block expressed as a variable into the numbered zmm
  {my ($bmt, $offset, $zmm) = @_;                                                # Block multi way tree descriptor, variable containing up offset, zmm number
   @_ == 3 or confess;
   defined($offset) or confess;
-  $offset->putDIntoZmm($zmm, $bmt->length);                                     # Save the up offset into the data block
+  $offset->putDIntoZmm($zmm, $bmt->lengthOffset);                               # Save the up offset into the data block
  }
 
 sub Nasm::X86::BlockMultiWayTree::getLoop($$)                                   # Return the value of the loop field as a variable
