@@ -5162,9 +5162,9 @@ sub Nasm::X86::BlockMultiWayTree::DescribeBlockMultiWayTree($;$)                
     treeBitsMask => 0x3fff,                                                     # 14 tree bits
     up           => $b - $o * 2,                                                # Offset of up in data block.
     width        => $o,                                                         # Width of a key or data slot.
-    found        => Vq(found),                                                  # Variable indicating whether the last find was successful or not
+    foundKey     => Vq(foundKey),                                               # Variable indicating whether the last find was successful or not
     foundData    => Vq(foundData),                                              # Variable containing the last data found
-    subTree      => Vq(subTree),                                                # Variable indicating whether the last find found a sub tree
+    foundSubTree => Vq(foundSubTree),                                           # Variable indicating whether the last find found a sub tree
    );
  }
 
@@ -5716,8 +5716,8 @@ sub Nasm::X86::BlockMultiWayTree::find($$$$)                                    
       my $l = $t->getLengthInKeys($zmmKeys);                                    # Length of the block
       If ($l == 0,
       Then                                                                      # Empty tree so we have not found the key
-       {$$p{found}  ->copy(Cq(zero, 0));                                        # Key not found
-        $$p{subTree}->copy(Cq(zero, 0));                                        # Not a sub tree
+       {$$p{found}       ->copy(Cq(zero, 0));                                   # Key not found
+        $$p{foundSubTree}->copy(Cq(zero, 0));                                   # Not a sub tree
         Jmp $success;                                                           # Return
        });
 
@@ -5729,9 +5729,10 @@ sub Nasm::X86::BlockMultiWayTree::find($$$$)                                    
         Tzcnt r14, r15;                                                         # Trailing zeros
         $$p{found}->copy(Cq(one, 1));                                           # Key found
         $$p{data} ->copy(getDFromZmm($zmmData, "r14*$W"));                      # Data associated with the key
+        $$p{foundKey} ->copy($$p{found});                                       # Copy found status associated with key
         $$p{foundData}->copy($$p{data});                                        # Copy data associated with key into descriptor
         $t->isTree(r15, $zmmKeys);                                              # Check whether the data so found is a sub tree
-        $$p{subTree}->copyZFInverted;                                           # Copy zero flag which opposes the notion that this element is a sub tree
+        $$p{foundSubTree}->copyZFInverted;                                      # Copy zero flag which opposes the notion that this element is a sub tree
         Jmp $success;                                                           # Return
        };
 
@@ -5759,12 +5760,14 @@ sub Nasm::X86::BlockMultiWayTree::find($$$$)                                    
     SetLabel $success;                                                          # Insert completed successfully
     PopR @save;
    }  in  => {bs   => 3, first => 3, key => 3},
-      out => {data => 3, found => 3, foundData => 3, subTree => 3};
+      out => {data => 3, found => 3,
+      foundKey => 3, foundData => 3, foundSubTree => 3};
 
   $s->call($t->address, first => $t->first,
            key => $key, data => $data, found => $found,
-           foundData => $t->foundData,
-           subTree   => $t->subTree);
+           foundKey     => $t->foundKey,
+           foundData    => $t->foundData,
+           foundSubTree => $t->foundSubTree);
  } # find
 
 sub Nasm::X86::BlockMultiWayTree::insertDataOrTree($$$$)                        # Insert either a key, data pair into the tree or create a sub tree at the specified key (if it does not already exist) and return the offset of the first block of the sub tree in the data variable.
@@ -15951,7 +15954,7 @@ if (1) {                                                                        
 END
  }
 
-#latest:
+latest:
 if (1) {                                                                        #TNasm::X86::ByteString::CreateBlockMultiWayTree
   my $b = CreateByteString;
   my $t = $b->CreateBlockMultiWayTree;
@@ -15991,6 +15994,8 @@ if (1) {                                                                        
 
     $t->find($iter->key, $d, $f);
     $f->out(' found: '); $d->out(' data: '); $D->outNL(' depth: ');
+$t->foundKey ->err(" found: ");
+$t->foundData->errNL(" data: ");
    });
 
   $t->find(Vq(key, 0xffff), $d, $f);  $f->outNL('Found: ');
@@ -16042,6 +16047,7 @@ Found: 0000 0000 0000 0000
 Found: 0000 0000 0000 0001
 END
  }
+exit;
 
 #latest:
 if (1) {
