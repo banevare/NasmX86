@@ -896,9 +896,9 @@ sub Subroutine(&%)                                                              
  {my ($body, %options) = @_;                                                    # Body, options.
   @_ >= 1 or confess;
   my $name    = $options{name} // [caller(1)]->[3];                             # Subroutine name
-  my %in      = ($options{in}  // {})->%*;                                      # Input parameters
-  my %out     = ($options{out} // {})->%*;                                      # Output parameters
-  my %io      = ($options{io}  // {})->%*;                                      # Update u=in place parameters
+  my @in      = ($options{in}  // [])->@*;                                      # Input parameters
+  my @out     = ($options{out} // [])->@*;                                      # Output parameters
+  my @io      = ($options{io}  // [])->@*;                                      # Update u=in place parameters
   my $comment = $options{comment};                                              # Optional comment describing sub
   Comment "Subroutine " .($comment) if $comment;                                # Assemble comment
 
@@ -907,23 +907,21 @@ sub Subroutine(&%)                                                              
   my $scope = &Scope;                                                           # Create a new scope
 
   my %p;
-  my sub checkSize($$)                                                          # Check the size of a parameter
-   {my ($name, $size) = @_;
-    confess "Invalid size $size for parameter: $name" unless $size =~ m(\A(1|2|3|4|5|6)\Z);
-    $p{$name} = Variable($size, $name);                                         # Make a value parameter variable
+  my sub check($)                                                               # Check a parameter
+   {my ($name) = @_;
+    $p{$name} = Variable(3, $name);                                             # Make a value parameter variable
    }
 
-  my sub checkIo($$)                                                            # Check an io parameter
-   {my ($name, $size) = @_;
-    confess "Invalid size $size for parameter: $name" unless $size =~ m(\A(1|2|3|4|5|6)\Z);
-    $p{$name} = Vr($name, $size);                                               # Make a reference  parameter variable
+  my sub checkIo($)                                                             # Check an io parameter
+   {my ($name) = @_;
+    $p{$name} = Vr($name, 3);                                                   # Make a reference  parameter variable
    }
 
-  checkSize($_, $in {$_}) for keys %in;
-  checkSize($_, $out{$_}) for keys %out;
-  checkIo  ($_, $io {$_}) for keys %io;
+  check  ($_) for @in;
+  check  ($_) for @out;
+  checkIo($_) for @io;
 
-  my $start = Label;                                                            # Jump over code
+  my $start = Label;                                                            # Jump over code - would be better to put it in a different section
   my $end   = Label;
   Jmp $end;
 
@@ -939,9 +937,9 @@ sub Subroutine(&%)                                                              
     scope     => $scope,
     name      => $name,
     comment   => $comment,
-    in        => {%in},
-    out       => {%out},
-    io        => {%io},
+    in        => {map {$_=>3} @in},
+    out       => {map {$_=>3} @out},
+    io        => {map {$_=>3} @io},
     variables => {%p},
    );
  }
@@ -2878,7 +2876,7 @@ sub AllocateMemory(@)                                                           
     $$p{address}->getReg(rax);                                                  # Amount of memory
 
     RestoreFirstSeven;
-   } in => {size => 3}, out => {address => 3};
+   } in => [qw(size)], out => [qw(address)];
 
   $s->call(@variables);
  }
@@ -2896,7 +2894,7 @@ sub FreeMemory(@)                                                               
     $$p{size}   ->setReg(rsi);                                                  # Length
     Syscall;
     RestoreFirstFour;
-   } in => {size => 3, address => 3};
+   } in => [qw(size address)];
 
   $s->call(@variables);
  }
@@ -2930,7 +2928,7 @@ sub ClearMemory(@)                                                              
      } rax, rdx, RegisterSize zmm0;
 
     PopR @save;
-   } in => {size => 3, address => 3};
+   } in => [qw(size address)];
 
   $s->call(@variables);
  }
@@ -2976,7 +2974,7 @@ sub MaskMemory(@)                                                               
      } rax, r9, $size;
 
     PopR @save;
-   } in => {size => 3, source => 3, mask => 3, match => 3, set => 3};           # Match is the character to match on in the source, set is the character to write into the mask at the corresponding position.
+   } in => [qw(size source mask match set)];                                    # Match is the character to match on in the source, set is the character to write into the mask at the corresponding position.
 
   $s->call(@variables);
  }
@@ -3052,7 +3050,7 @@ sub MaskMemoryInRange4(@)                                                       
      };
 
     PopR @save;
-   } in => {size => 3, source => 3, mask => 3, set => 3, low => 3, high => 3};
+   } in => [qw(size source mask set low high)];
 
   $s->call(@variables);
  } # MaskMemoryInRange4
@@ -3074,7 +3072,7 @@ sub CopyMemory(@)                                                               
       Mov "[rax+rdx]", "r8b";
      } rdx, rdi, 1;
     RestoreFirstSeven;
-   } in => {source => 3, target => 3, size => 3};
+   } in => [qw(source target size)];
 
   $s->call(@variables);
  }
@@ -3205,7 +3203,7 @@ sub ReadFile(@)                                                                 
     $$p{address}->getReg(rax);
     $$p{size}   ->getReg(rdi);
     RestoreFirstSeven;
-   } in => {file => 3}, out => {address => 3, size => 3};
+   } in => [qw(file)], out => [qw(address size)];
 
   $s->call(@variables);
  }
@@ -3234,7 +3232,7 @@ sub executeFileViaBash(@)                                                       
       Syscall;
      };
     RestoreFirstFour;
-   } in => {file => 3};
+   } in => [qw(file)];
 
   $s->call(@variables);
  }
@@ -3251,7 +3249,7 @@ sub unlinkFile(@)                                                               
     Mov rax, 87;
     Syscall;
     RestoreFirstFour;
-   } in => {file => 3};
+   } in => [qw(file)];
 
   $s->call(@variables);
  }
@@ -3404,7 +3402,7 @@ sub GetNextUtf8CharAsUtf32(@)                                                   
     SetLabel $success;
 
     PopR @save;
-   } in => {in => 3}, out => {out => 3, size => 3, fail => 3};
+   } in => [qw(in)], out => [qw(out  size  fail)];
 
   $s->call(@parameters);
  } # GetNextUtf8CharAsUtf32
@@ -3453,7 +3451,7 @@ sub ConvertUtf8ToUtf32(@)                                                       
     $$p{size32}->copy($size);                                                   # Size of allocation
     $$p{count} ->getReg(r12);                                                   # Number of unicode points converted from utf8 to utf32
     PopR @save;
-   } in => {u8 => 3, size8 => 3}, out => {u32 => 3, size32 => 3, count => 3};
+   } in => [qw(u8  size8)], out => [qw(u32 size32 count)];
 
   $s->call(@parameters);
  } # ConvertUtf8ToUtf32
@@ -3494,7 +3492,7 @@ sub ConvertUtf8ToUtf32(@)                                                       
 #
 #    SetLabel $finish;
 #    PopR @save;
-#   } in => {address => 3, size => 3};
+#   } in => [qw(address  size )];
 #
 #  $s->call(@parameters);
 # } # ClassifyCharacters4
@@ -3570,7 +3568,7 @@ sub ClassifyRange($@)                                                           
     SetLabel $finish;
     PopR @save;
    } name => "ClassifyRange_$recordOffsetInRange",
-     in   => {address => 3, size => 3};
+     in   => [qw(address size)];
 
   $s->call(@parameters);
  } # ClassifyRange
@@ -3736,7 +3734,7 @@ sub StringLength(@)                                                             
     Cstrlen;                                                                    # Length now in r15
     $$p{size}->getReg(r15);                                                     # Save length
     RestoreFirstFour;
-   } in => {string => 3}, out => {size => 3};
+   } in => [qw(string)], out => [qw(size)];
 
   $s->call(@parameters, my $z = Vq(size));                                      # Variable that holds the length of the string
   $z
@@ -3763,7 +3761,7 @@ sub CreateByteString(%)                                                         
     Mov $size->addr, rdx;                                                       # Size
 
     RestoreFirstFour;
-   } out => {bs => 3};
+   } out => [qw(bs)];
 
   $s->call(my $bs = Vq(bs));                                                    # Variable that holds the reference to the byte string
 
@@ -3831,7 +3829,7 @@ sub Nasm::X86::ByteString::length($@)                                           
     Sub rdx, $byteString->structure->size;
     $$p{size}->getReg(rdx);
     RestoreFirstFour;
-   } in => {bs=>3}, out => {size => 3};
+   } in => [qw(bs)], out => [qw(size)];
 
   $s->call($byteString->bs, @variables);
  }
@@ -3870,7 +3868,7 @@ sub Nasm::X86::ByteString::updateSpace($@)                                      
      });
 
     RestoreFirstFour;
-   } io => {bs=>3}, in=>{size => 3};
+   } io => [qw(bs)], in => [qw(size)];
 
   $s->call(@variables);
  } # updateSpace
@@ -3892,7 +3890,7 @@ sub Nasm::X86::ByteString::makeReadOnly($)                                      
     Mov rax, 10;
     Syscall;
     RestoreFirstFour;                                                           # Return the possibly expanded byte string
-   } in => {bs => 3};
+   } in => [qw(bs)];
 
   $s->call(bs => $byteString->bs);
  }
@@ -3913,7 +3911,7 @@ sub Nasm::X86::ByteString::makeWriteable($)                                     
     Mov rax, 10;
     Syscall;
     RestoreFirstFour;                                                           # Return the possibly expanded byte string
-   } in => {bs => 3};
+   } in => [qw(bs)];
 
   $s->call(bs => $byteString->bs);
  }
@@ -3937,7 +3935,7 @@ sub Nasm::X86::ByteString::allocate($@)                                         
     KeepFree rax, rdi, rsi;
 
     RestoreFirstFour;
-   } in => {bs => 3, size => 3}, out => {offset => 3};
+   } in => [qw(bs size)], out => [qw(offset)];
 
   $s->call($byteString->bs, @variables);
  }
@@ -4019,7 +4017,7 @@ sub Nasm::X86::ByteString::freeBlock($@)                                        
     $byteString->putBlock($$p{bs}, $$p{offset}, 31);                            # Link the freed block to the rest of the free chain
     $byteString->setFirstFreeBlock($$p{offset});                                # Set free chain field to point to latest free chain element
     PopR zmm31;
-   } in => {bs => 3, offset => 3};
+   } in => [qw(bs  offset)];
 
   $s->call($byteString->bs, @variables);
  }
@@ -4083,7 +4081,7 @@ sub Nasm::X86::ByteString::m($@)                                                
     Mov $used, rdi;
 
     RestoreFirstFour;
-   } io => { bs => 3}, in => {address => 3, size => 3};
+   } io => [qw(bs)], in => [qw(address size)];
 
   $s->call(@variables);
  }
@@ -4142,7 +4140,7 @@ sub Nasm::X86::ByteString::append($@)                                           
     Lea rsi, $byteString->data->addr;
     $byteString->m(bs=>$$p{target}, Vq(address, rsi), Vq(size, rdi));
     RestoreFirstFour;
-   } in => {target=>3, source=>3};
+   } in => [qw(target source)];
 
   $s->call(target=>$byteString->bs, @variables);
  }
@@ -4159,7 +4157,7 @@ sub Nasm::X86::ByteString::clear($)                                             
     Mov rdi, $byteString->structure->size;
     Mov $byteString->used->addr, rdi;
     PopR     @save;
-   } in => {bs => 3};
+   } in => [qw(bs)];
 
   $s->call(bs => $byteString->bs);
  }
@@ -4192,7 +4190,7 @@ sub Nasm::X86::ByteString::write($@)                                            
     $file->setReg(rax);
     CloseFile;
     RestoreFirstFour;
-   }  in => {bs => 3, file => 3};
+   }  in => [qw(bs  file )];
 
   $s->call(bs => $byteString->bs, @variables);
  }
@@ -4207,7 +4205,7 @@ sub Nasm::X86::ByteString::read($@)                                             
     ReadFile($$p{file}, (my $size = Vq(size)), my $address = Vq(address));
     $byteString->m($$p{bs}, $size, $address);                                   # Move data into byte string
     FreeMemory($size, $address);                                                # Free memory allocated by read
-   } io => {bs => 3}, in => {file => 3};
+   } io => [qw(bs)], in => [qw(file)];
 
   $s->call(bs => $byteString->bs, @variables);
  }
@@ -4226,7 +4224,7 @@ sub Nasm::X86::ByteString::out($)                                               
     Lea rax, $byteString->data->addr;                                           # Address of data field
     PrintOutMemory;
     RestoreFirstFour;
-   } in => {bs => 3};
+   } in => [qw(bs)];
 
   $s->call($byteString->bs);
  }
@@ -4419,7 +4417,7 @@ sub Nasm::X86::BlockString::dump($)                                             
     PrintOutNL;
 
     PopR @save;
-   } in => {bs => 3, first => 3};
+   } in => [qw(bs first)];
 
   $s->call($blockString->address, $blockString->first);
  }
@@ -4445,7 +4443,7 @@ sub Nasm::X86::BlockString::len($$)                                             
      };
     $$p{size}->copy($length);
     PopR @save;
-   } in => {bs => 3, first => 3}, out => {size => 3};
+   } in => [qw(bs first)], out => [qw(size)];
 
   $s->call($blockString->address, $blockString->first, $size);
  }
@@ -4495,7 +4493,7 @@ sub Nasm::X86::BlockString::concatenate($$)                                     
      };
 
     PopR @save;
-   } in => {sBs => 3, sFirst => 3, tBs => 3, tFirst => 3};
+   } in => [qw(sBs sFirst tBs tFirst)];
 
   $s->call(sBs => $source->address, sFirst => $source->first,
            tBs => $target->address, tFirst => $target->first);
@@ -4582,7 +4580,7 @@ sub Nasm::X86::BlockString::insertChar($@)                                      
      };
 
     PopR @save;
-   } in => {bs => 3, first => 3, character => 3, position => 3};
+   } in => [qw(bs first character position)];
 
   $s->call($blockString->address, first => $blockString->first, @variables)
  }
@@ -4626,7 +4624,7 @@ sub Nasm::X86::BlockString::deleteChar($@)                                      
      };
 
     PopR @save;
-   } in => {bs => 3, first => 3, position => 3};
+   } in => [qw(bs  first  position )];
 
   $s->call($blockString->address, first => $blockString->first, @variables)
  }
@@ -4668,7 +4666,7 @@ sub Nasm::X86::BlockString::getCharacter($@)                                    
      };
 
     PopR @save;
-   } in => {bs => 3, first => 3, position => 3}, out => {out => 3};
+   } in => [qw(bs  first  position )], out => [qw(out )];
 
   $s->call($blockString->address, first => $blockString->first, @variables)
  }
@@ -4726,7 +4724,7 @@ sub Nasm::X86::BlockString::append($@)                                          
       $blockString->putBlock($B, $new,  30);                                    # Put the modified new block
      };
     PopR @save;
-   }  in => {bs => 3, first => 3, source => 3, size => 3};
+   }  in => [qw(bs  first  source  size )];
 
   $s->call($blockString->address, $blockString->first, @variables);
  }
@@ -4776,7 +4774,7 @@ sub Nasm::X86::BlockString::clear($)                                            
      });
 
     PopR @save;
-   }  in => {bs => 3, first => 3};
+   }  in => [qw(bs  first )];
 
   $s->call($blockString->address, $blockString->first);
  }
@@ -4863,7 +4861,7 @@ sub Nasm::X86::BlockArray::dump($@)                                             
      });
 
     PopR @save;
-   }  in => {bs => 3, first => 3};
+   }  in => [qw(bs  first )];
 
   $s->call($blockArray->address, $blockArray->first, @variables);
  }
@@ -4944,7 +4942,7 @@ sub Nasm::X86::BlockArray::push($@)                                             
 
     SetLabel $success;
     PopR @save;
-   }  in => {bs => 3, first => 3, element => 3};
+   }  in => [qw(bs  first  element )];
 
   $s->call($blockArray->address, $blockArray->first, @variables);
  }
@@ -5028,7 +5026,7 @@ sub Nasm::X86::BlockArray::pop($@)                                              
 
     SetLabel $success;
     PopR @save;
-   }  in => {bs => 3, first => 3}, out => {element => 3};
+   }  in => [qw(bs  first )], out => [qw(element )];
 
   $s->call($blockArray->address, $blockArray->first, @variables);
  }
@@ -5078,7 +5076,7 @@ sub Nasm::X86::BlockArray::get($@)                                              
 
     SetLabel $success;
     PopR @save;
-   }  in => {bs => 3, first => 3, index => 3}, out => {element => 3};
+   }  in => [qw(bs  first  index )], out => [qw(element )];
 
   $s->call($blockArray->address, $blockArray->first, @variables);
  }
@@ -5129,7 +5127,7 @@ sub Nasm::X86::BlockArray::put($@)                                              
 
     SetLabel $success;
     PopR @save;
-   }  in => {bs => 3, first => 3, index => 3, element => 3};
+   }  in => [qw(bs  first  index  element )];
 
   $s->call($blockArray->address, $blockArray->first, @variables);
  }
@@ -5201,7 +5199,7 @@ sub Nasm::X86::BlockMultiWayTree::allocKeysDataNode($$$$@)                      
     $t->putLoop($k, $N);                                                        # Set the link from node  to key
    }
   name=>qq(Nasm::X86::BlockMultiWayTree::allocKeysDataNode::${K}::${D}::${N}),  # Create a subroutine for each combination of registers encountered
-  in => {bs => 3};
+  in => [qw(bs )];
 
   $s->call($t->address, @variables);
  } # allocKeysDataNode
@@ -5275,7 +5273,7 @@ sub Nasm::X86::BlockMultiWayTree::splitNode($$$$@)                              
 
     SetLabel $success;                                                          # Insert completed successfully
     PopR @save;
-   }  in => {bs => 3, node => 3, key => 3};
+   }  in => [qw(bs  node  key )];
 
   $s->call(bs=>$bs, node=>$node, key=>$key, @variables);
  } # splitNode
@@ -5309,7 +5307,7 @@ sub Nasm::X86::BlockMultiWayTree::reParent($$$$$@)                              
       Mov rsp, rdi;                                                             # Level stack
       PopR @save;
      });
-   }  in => {bs => 3};
+   }  in => [qw(bs )];
 
   $s->call($t->address, @variables);
  } # reParent
@@ -5682,8 +5680,8 @@ sub Nasm::X86::BlockMultiWayTree::findAndSplit($@)                              
 
     SetLabel $success;                                                          # Insert completed successfully
     PopR @save;
-   }  in  => {bs      => 3, first  => 3, key   => 3},
-      out => {compare => 3, offset => 3, index => 3};
+   }  in  => [qw(bs       first   key  )],
+      out => [qw(compare  offset  index)];
 
   $s->call($t->address, first => $t->first, @variables);
  } # findAndSplit
@@ -5759,9 +5757,8 @@ sub Nasm::X86::BlockMultiWayTree::find($$$$)                                    
 
     SetLabel $success;                                                          # Insert completed successfully
     PopR @save;
-   }  in  => {bs   => 3, first => 3, key => 3},
-      out => {data => 3, found => 3,
-      foundKey => 3, foundData => 3, foundSubTree => 3};
+   }  in  => [qw(bs   first key)],
+      out => [qw(data found foundKey foundData foundSubTree)];
 
   $s->call($t->address, first => $t->first,
            key => $key, data => $data, found => $found,
@@ -5922,7 +5919,7 @@ sub Nasm::X86::BlockMultiWayTree::insertDataOrTree($$$$)                        
     PopR @save;
    }
    name => "Nasm::X86::BlockMultiWayTree::insertDataOrTree_$first",
-   in => {bs => 3, first => 3, key => 3}, io => {data => 3};                    # Data either supplies the data or returns the offset of the sub tree
+   in   => [qw(bs first key)], io => [qw(data )];                    # Data either supplies the data or returns the offset of the sub tree
 
   $s->call($t->address, first => $t->first, key => $key, data => $data);
 
@@ -6077,7 +6074,7 @@ sub Nasm::X86::BlockMultiWayTree::leftOrRightMost($$@)                          
     PopR @save;
    } name => $dir == 0 ? "Nasm::X86::BlockMultiWayTree::leftMost"
                        : "Nasm::X86::BlockMultiWayTree::rightMost",
-     in => {bs => 3, node => 3}, out => {offset => 3};
+     in => [qw(bs  node )], out => [qw(offset )];
 
   $s->call($t->address, @variables);
  }
@@ -6141,7 +6138,7 @@ sub Nasm::X86::BlockMultiWayTree::depth($@)                                     
 
     SetLabel $success;                                                          # Insert completed successfully
     PopR @save;
-   }  in => {bs => 3, node => 3}, out => {depth => 3};
+   }  in => [qw(bs  node )], out => [qw(depth )];
 
   $s->call($t->address, @variables);
  } # depth
@@ -6348,7 +6345,7 @@ sub Nasm::X86::BlockMultiWayTree::Iterator::next($)                             
 
     PopR @save;
     SetLabel $success;
-   }  io => {node => 3, pos => 3, key => 3, data => 3, count => 3, more => 3};
+   }  io => [qw(node  pos  key  data  count  more )];
 
   $s->call($iter->node, $iter->pos,   $iter->key,                               # Call with iterator variables
            $iter->data, $iter->count, $iter->more);
@@ -11556,7 +11553,7 @@ B<Example:>
       $$p{f}->outNL('F1: ');
       $$p{f}++;
       $$p{f}->outNL('F2: ');
-     } name=> 'aaa', in => {c => 3}, io => {d => 3, e => 3, f => 3};
+     } name=> 'aaa', in => [qw(c )}, io => {d  e  f )};
 
     my $c = Cq(c, -1);
     my $d = Cq(d, -1);
@@ -15690,7 +15687,7 @@ if (1) {                                                                        
     $$p{f}->outNL('F1: ');
     $$p{f}++;
     $$p{f}->outNL('F2: ');
-   } name=> 'aaa', in => {c => 3}, io => {d => 3, e => 3, f => 3};
+   } name=> 'aaa', in => [qw(c)], io => [qw(d  e  f)];
 
   my $c = Cq(c, -1);
   my $d = Cq(d, -1);
@@ -15954,7 +15951,7 @@ if (1) {                                                                        
 END
  }
 
-latest:
+#latest:
 if (1) {                                                                        #TNasm::X86::ByteString::CreateBlockMultiWayTree
   my $b = CreateByteString;
   my $t = $b->CreateBlockMultiWayTree;
@@ -16047,7 +16044,7 @@ Found: 0000 0000 0000 0000
 Found: 0000 0000 0000 0001
 END
  }
-exit;
+
 
 #latest:
 if (1) {
