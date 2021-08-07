@@ -63,7 +63,7 @@ BEGIN{
   registerContaining("r${_}",  "r${_}l", "r${_}w", "r${_}b", "r${_}d") for 8..15;
   registerContaining("r${_}p", "e${_}p", "${_}p",  "${_}pl")           for qw(s b);
   registerContaining("r${_}i", "e${_}i", "${_}i", "${_}il")            for qw(s d);
-  my @i0 = qw(popfq pushfq rdtsc ret syscall);                                  # Zero operand instructions
+  my @i0 = qw(lahf popfq pushfq rdtsc ret syscall);                             # Zero operand instructions
 
   my @i1 = split /\s+/, <<END;                                                  # Single operand instructions
 bswap call dec idiv  inc jmp ja jae jb jbe jc jcxz je jecxz jg jge jl jle
@@ -1536,6 +1536,45 @@ sub Nasm::X86::Variable::copy($$)                                               
       Mov "[r14]", r15;
       PopR @save2;
      }
+    PopR @save;
+    return;
+   }
+
+  confess "Need more code";
+ }
+
+sub Nasm::X86::Variable::copyZF($$)                                             # Copy the current state of the zero flag into a variable
+ {my ($var) = @_;                                                               # Variable
+  @_ == 1 or confess;
+
+  my $a = $var->address;                                                        # Address of the variable
+
+  if ($var->size == 3)
+   {PushR my @save = (rax);
+    Lahf;                                                                       # Save flags to ah: (SF:ZF:0:AF:0:PF:1:CF)
+    Shr ah, 6;                                                                  # Put zero flag in bit zero
+    And ah, 1;                                                                  # Isolate zero flag
+    Mov $a, ah;                                                                 # Save zero flag
+    PopR @save;
+    return;
+   }
+
+  confess "Need more code";
+ }
+
+sub Nasm::X86::Variable::copyZFInverted($$)                                     # Copy the opposite of the current state of the zero flag into a variable
+ {my ($var) = @_;                                                               # Variable
+  @_ == 1 or confess;
+
+  my $a = $var->address;                                                        # Address of the variable
+
+  if ($var->size == 3)
+   {PushR my @save = (rax);
+    Lahf;                                                                       # Save flags to ah: (SF:ZF:0:AF:0:PF:1:CF)
+    Shr ah, 6;                                                                  # Put zero flag in bit zero
+    Not ah;                                                                     # Invert zero flag
+    And ah, 1;                                                                  # Isolate zero flag
+    Mov $a, ah;                                                                 # Save zero flag
     PopR @save;
     return;
    }
@@ -5123,6 +5162,9 @@ sub Nasm::X86::BlockMultiWayTree::DescribeBlockMultiWayTree($;$)                
     treeBitsMask => 0x3fff,                                                     # 14 tree bits
     up           => $b - $o * 2,                                                # Offset of up in data block.
     width        => $o,                                                         # Width of a key or data slot.
+    found        => Vq(found),                                                  # Variable indicating whether the last find was successful or not
+    foundData    => Vq(foundData),                                              # Variable containing the last data found
+    subTree      => Vq(subTree),                                                # Variable indicating whether the last find found a sub tree
    );
  }
 
@@ -5533,6 +5575,9 @@ sub Nasm::X86::BlockMultiWayTree::splitFullLeftOrRightNode($$)                  
     $d->zBroadCastD($Test);                                                     # Broadcast new data
     &Vmovdqu32 (zmm $PD."{k6}", $Test);                                         # Insert new data
 
+    Kmovq r15, k6;                                                              # Point at which to insert in parent
+    $bmt->transferTreeBitsFromLeftOrRight($right, r15, $PK, $LK, $RK);
+
     If ($n,
     Then                                                                        # Insert new left node offset into parent nodes
      {Kshiftlq k6, k6, 1 unless $right;                                         # Node insertion point
@@ -5671,7 +5716,8 @@ sub Nasm::X86::BlockMultiWayTree::find($$$$)                                    
       my $l = $bmt->getLengthInKeys($zmmKeys);                                  # Length of the block
       If ($l == 0,
       Then                                                                      # Empty tree so we have not found the key
-       {$$p{found}->copy(Cq(zero, 0));                                          # Key not found
+       {$$p{found}  ->copy(Cq(zero, 0));                                        # Key not found
+        $$p{subTree}->copy(Cq(zero, 0));                                        # Not a sub tree
         Jmp $success;                                                           # Return
        });
 
@@ -5682,7 +5728,9 @@ sub Nasm::X86::BlockMultiWayTree::find($$$$)                                    
        {Kmovq r15, $testMask;
         Tzcnt r14, r15;                                                         # Trailing zeros
         $$p{found}->copy(Cq(one, 1));                                           # Key found
-        $$p{data}->copy(getDFromZmm($zmmData, "r14*$W"));                       # Data associated with the key
+        $$p{data} ->copy(getDFromZmm($zmmData, "r14*$W"));                      # Data associated with the key
+#        $$p{foundData}->copy($$p{data});                                        # Copy data associated with key into descriptor
+#        $bmt->isTree(r15, $zmmKeys);
         Jmp $success;                                                           # Return
        };
 
@@ -5709,10 +5757,12 @@ sub Nasm::X86::BlockMultiWayTree::find($$$$)                                    
 
     SetLabel $success;                                                          # Insert completed successfully
     PopR @save;
-   }  in => {bs => 3, first => 3, key => 3}, out => {data => 3, found => 3};
+   }  in  => {bs   => 3, first => 3, key => 3},
+      out => {data => 3, found => 3, subTree => 3};
 
   $s->call($bmt->address, first => $bmt->first,
-           key => $key, data => $data, found => $found);
+           key => $key, data => $data, found => $found,
+           subTree => $bmt->subTree);
  } # find
 
 sub Nasm::X86::BlockMultiWayTree::insertDataOrTree($$$$)                        # Insert either a key, data pair into the tree or create a sub tree at the specified key (if it does not already exist) and return the offset of the first block of the sub tree in the data variable.
@@ -13780,6 +13830,22 @@ if (1) {
   ok Assemble =~ m(zmm0: 504F 4E4D 4C4B 4A49   4847 4645 4443 4241   706F 6E6D 6C6B 6A69   6867 6665 6463 6261   504F 4E4D 4C4B 4A49   4847 4645 4443 4241   706F 6E6D 6C6B 6A69   6867 6665 6463 6261)s;
  }
 
+if (1) {                                                                        #TNasm::X86::Variable::copyZF #TNasm::X86::Variable::copyZFInverted
+  Mov r15, 1;
+  my $z = Vq(zf);
+  Cmp r15, 1; $z->copyZF;         $z->outNL;
+  Cmp r15, 2; $z->copyZF;         $z->outNL;
+  Cmp r15, 1; $z->copyZFInverted; $z->outNL;
+  Cmp r15, 2; $z->copyZFInverted; $z->outNL;
+
+  is_deeply Assemble(debug=>0), <<END;
+zf: 0000 0000 0000 0001
+zf: 0000 0000 0000 0000
+zf: 0000 0000 0000 0000
+zf: 0000 0000 0000 0001
+END
+ }
+
 if (1) {                                                                        #TAllocateMemory #TNasm::X86::Variable::freeMemory
   my $N = Vq(size, 2048);
   my $q = Rs('a'..'p');
@@ -14041,7 +14107,7 @@ if (1) {                                                                        
   PrintOutMemory;                                                               # Print contents of memory to stdout
 
   my $r = Assemble;                                                             # Assemble and execute
-  ok stringMd5Sum($r) eq fileMd5Sum($0);                                          # Output contains this file
+  ok stringMd5Sum($r) eq fileMd5Sum($0);                                        # Output contains this file
  }
 
 #latest:;
@@ -15593,7 +15659,7 @@ if (1) {                                                                        
   my $r = $b->chain($b->bs, Vq(start, 0x18), 4);       $r->outNL("chain1: ");
   my $s = $b->chain($b->bs, $r, 4);                    $s->outNL("chain2: ");
   my $t = $b->chain($b->bs, $s, 4);                    $t->outNL("chain3: ");
-  my $A = $b->chain($b->bs, Vq(start, 0x18), 4, 4, 4); $A->outNL("chain4: ");           # Get a long chain
+  my $A = $b->chain($b->bs, Vq(start, 0x18), 4, 4, 4); $A->outNL("chain4: ");   # Get a long chain
 
   $b->putChain($b->bs, Vq(start, 0x18), Vq(end, 0xff), 4, 4, 4);                # Put at the end of a long chain
 
@@ -16125,34 +16191,7 @@ if (1) {                                                                        
   $out->out('outE : ');     $size->outNL(' size : ');
 
   $address->printOutMemoryInHexNL($l);
-                                                                                # Single character classifications
-#  Cq('newLine', 0x0A)->putBIntoZmm(0, 0);                                       #r 0x0 - open bracket  #r 0x1 - close bracket
-#  Cq('newLine', 0x02)->putBIntoZmm(0, 3);                                       #r 0x2 - new line,     #r 0x3 - new line acting as a semi-colon
-#  Cq('space',   0x20)->putBIntoZmm(0, 4);
-#  Cq('space',   0x05)->putBIntoZmm(0, 7);                                       #r 0x5 - space
-#
-#  my sub pu32($$)                                                               # Print some utf32 characters
-#   {my ($n, $m) = @_;                                                           # Variable: number of characters to print, variable: address of memory
-#    $n->for(sub
-#     {my ($index, $start, $next, $end) = @_;
-#      my $a = $m + $index * 4;
-#      $a->setReg(r15);
-#      KeepFree r15;
-#      Mov r15d, "[r15]";
-#      KeepFree r15;
-#      PrintOutRegisterInHex r15;
-#     });
-#   }
-#
-#  if (1)                                                                        # Classify a utf32 string
-#   {my $a = Dd(0x0001d5ba, 0x00000020, 0x0001d44e, 0x0000000a, 0x0001d5bb, 0x0001d429);
-#    my $t = Cq('test', $a);
-#    my $s = Cq('size', 6);
-#
-#    ClassifyCharacters4 address=>$t, size=>$s;
-#    PrintOutStringNL "Convert some utf8 to utf32";
-#    pu32($s, $t);
-#   }
+
   ok Assemble(debug => 0, eq => <<END);
 out1 : 0000 0000 0000 0024 size : 0000 0000 0000 0001
 out2 : 0000 0000 0000 00A2 size : 0000 0000 0000 0002
@@ -16419,7 +16458,7 @@ if (0) {
 END
  }
 
-ok 1 for 4..8;
+ok 1 for 5..8;
 
 unlink $_ for qw(hash print2 sde-log.txt sde-ptr-check.out.txt z.txt);          # Remove incidental files
 
