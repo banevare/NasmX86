@@ -435,10 +435,10 @@ sub zmm(@)                                                                      
 
 sub ChooseRegisters($@)                                                         # Choose the specified numbers of registers excluding those on the specified list
  {my ($number, @registers) = @_;                                                # Number of registers needed, Registers not to choose
-  my %r = ((map {"r$_"} 8..15), qw(rax rbx rcx rdx rsi rdi));
+  my %r = (map {"r$_"} 8..15);
   delete $r{$_} for @registers;
   $number <= keys %r or confess "Not enough registers available";
-  keys %r
+  sort keys %r
  }
 
 sub InsertZeroIntoRegisterAtPoint($$)                                           # Insert a zero into the specified register at the point indicated by another register
@@ -454,6 +454,12 @@ sub InsertZeroIntoRegisterAtPoint($$)                                           
   Or   $low,  $high;
   Mov  $in,   $low;
   PopR @s;                                                                      # Restore stack
+ }
+
+sub InsertOneIntoRegisterAtPoint($$)                                            # Insert a one into the specified register at the point indicated by another register
+ {my ($point, $in) = @_;                                                        # Register with a single 1 at the insertion point, register to be inserted into.
+  InsertZeroIntoRegisterAtPoint($point, $in);                                   # Insert a zero
+  Or $in, $point;                                                               # Make the zero a one
  }
 
 #D2 Save and Restore                                                            # Saving and restoring registers via the stack
@@ -695,7 +701,7 @@ sub If($$;$)                                                                    
  {my ($jump, $then, $else) = @_;                                                # Jump op code of variable, then - required , else - optional
   @_ >= 2 && @_ <= 3 or confess;
 
-  ref($jump) or $jump =~ m(\AJ(e|g|ge|gt|h|l|le|ne|nz|z)\Z)
+  ref($jump) or $jump =~ m(\AJ(c|e|g|ge|gt|h|l|le|nc|ne|nz|z)\Z)
              or confess "Invalid jump: $jump";
 
   if (ref($jump))                                                               # Variable reference - non zero then then else else
@@ -752,14 +758,24 @@ sub IfNe(&;&)                                                                   
   If(q(Je), $then, $else);                                                      # Opposite code
  }
 
-sub IfNz(&;&)                                                                   # If the zero is not set then execute the then body else the else body
+sub IfNz(&;&)                                                                   # If the zero flag is not set then execute the then body else the else body
  {my ($then, $else) = @_;                                                       # Then - required , else - optional
   If(q(Jz), $then, $else);                                                      # Opposite code
  }
 
-sub IfZ(&;&)                                                                    # If the zero is set then execute the then body else the else body
+sub IfZ(&;&)                                                                    # If the zero flag is set then execute the then body else the else body
  {my ($then, $else) = @_;                                                       # Then - required , else - optional
   If(q(Jnz), $then, $else);                                                     # Opposite code
+ }
+
+sub IfC(&;&)                                                                    # If the carry flag is set then execute the then body else the else body
+ {my ($then, $else) = @_;                                                       # Then - required , else - optional
+  If(q(Jnc), $then, $else);                                                     # Opposite code
+ }
+
+sub IfNc(&;&)                                                                   # If the carry flag is not set then execute the then body else the else body
+ {my ($then, $else) = @_;                                                       # Then - required , else - optional
+  If(q(Jc), $then, $else);                                                      # Opposite code
  }
 
 sub IfLt(&;&)                                                                   # If less than execute the then body else the else body
@@ -2120,6 +2136,8 @@ sub loadFromZmm($*$$)                                                           
  {my ($register, $size, $zmm, $offset) = @_;                                    # Register to load, bwdq for size, numbered zmm register to load from, constant offset in bytes
   @_ == 4 or confess;
   $offset >= 0 && $offset <= RegisterSize zmm0 or confess "Out of range";
+
+  $register =~ m(\Ar\d+) or confess "Choose r8..r15 not $register";
 
   PushRR "zmm$zmm";    ##Rewrite using masked move rather than stack            # Push source register
 
@@ -4175,7 +4193,7 @@ sub Nasm::X86::ByteString::out($)                                               
  }
 
 sub Nasm::X86::ByteString::dump($;$)                                            # Dump details of a byte string
- {my ($byteString, $depth) = @_;                                                # Byte string descriptor, optional amount of memory to dump
+ {my ($byteString, $depth) = @_;                                                # Byte string descriptor, optional amount of memory to dump  as the number of 64 byte blocks
   @_ == 1 or @_ == 2  or confess;
   $depth //= 4;                                                                 # Default depth
 
@@ -5254,27 +5272,49 @@ sub Nasm::X86::BlockMultiWayTree::reParent($$$$$@)                              
   $s->call($bmt->address, @variables);
  } # reParent
 
-sub Nasm::X86::BlockMultiWayTree::transferTreeBits($$$$)                        #P Transfer tree bits when splitting a full node
+sub Nasm::X86::BlockMultiWayTree::transferTreeBitsFromParent($$$$)              #P Transfer tree bits when splitting a full node
  {my ($b, $parent, $left, $right) = @_;                                         # Block multi way tree descriptor, numbered parent zmm, numbered left zmm, numbered right zmm
 
-  PushR my @save = (r14, r15);                                                  # Registers 14 and 15 are used to transfer the tree bits if any, zmm22 to compress fields
-  $b->getTreeBits($parent, r15);                                                # Transfer Tree bits
-  Cmp r15, 0;
+  PushR my @save = my ($whole, $half)  = (r15, r14);
+  $b->getTreeBits($parent, $whole);                                             # Transfer Tree bits
+  Cmp $whole, 0;
   IfNz                                                                          # Action required iff there are some tree bits
-   {Mov r14, r15;                                                               # Left tree bits
+   {Mov r14, $whole;                                                            # Left tree bits
     And r14, ((1 << $b->leftLength) - 1);                                       # Isolate left bits
     $b->putTreeBits($left, r14);                                                # Save left tree bits
 
-    Mov r14, r15;                                                               # Right tree bits
+    Mov r14, $whole;                                                            # Right tree bits
     Shr r14, $b->leftLength + 1;                                                # Isolate right bits
     And  r14, ((1 << $b->rightLength) - 1);                                     # Remove any bits above
     $b->putTreeBits($right, r14);                                               # Save right tree bits
 
-    Mov r14, r15;                                                               # Right tree bits
+    Mov r14, $whole;                                                            # Right tree bits
     Shr r14, $b->leftLength;                                                    # Parent bit
     And r14, 1;                                                                 # Only one bit
     $b->putTreeBits($parent, r14);                                              # Save parent tree bits
    };
+  PopR @save;
+ }
+
+sub Nasm::X86::BlockMultiWayTree::transferTreeBitsFromLeft($$$$)                #P Transfer tree bits when splitting a full left node
+ {my ($b, $point, $parent, $left, $right) = @_;                                 # Block multi way tree descriptor, register indicating point of left in parent, numbered parent zmm, numbered left zmm, numbered right zmm
+
+  PushR my @save = my ($whole, $half, $bits) = ChooseRegisters(3, $point);
+  $b->getTreeBits($left, $whole);                                               # Treet bits
+  Mov $half, $whole;                                                            # Right bits
+  Shr $half, $b->leftLength + 1;                                                # Isolate right bits
+  $b->putTreeBits($right, $half);                                               # Save right bits
+
+  $b->getTreeBits($parent, $bits);                                              # Get parent tree bits
+  InsertZeroIntoRegisterAtPoint($point, $bits);
+  Mov $half, $whole;                                                            # Tree bit of key being moved into parent from left
+  Shr $half, $b->leftLength+1;                                                  # Tree bit to move into parent is now in carry flag
+  IfC {Or $bits, $point};
+  $b->putTreeBits($parent, $bits);                                              # Put parent tree bits
+
+  Mov $half, $whole;                                                            # Left bits
+  And $half, ((1 << $b->leftLength) - 1);                                       # Remove any bits above
+  $b->putTreeBits($left, $half);                                                # Save left bits
   PopR @save;
  }
 
@@ -5375,7 +5415,7 @@ sub Nasm::X86::BlockMultiWayTree::splitFullRoot($)                              
     $lo->putDIntoZmm($TN, 0);                                                   # Insert offset of left node in root nodes
     $ro->putDIntoZmm($TN, $w);                                                  # Insert offset of right node in root nodes
 
-    $bmt->transferTreeBits($TK, $LK, $RK);                                      # Transfer any tree bits present
+    $bmt->transferTreeBitsFromParent($TK, $LK, $RK);                            # Transfer any tree bits present
 
     SetLabel $success;                                                          # Insert completed successfully
     PopR @save;
@@ -6566,7 +6606,7 @@ use vars qw(@ISA @EXPORT @EXPORT_OK %EXPORT_TAGS);
 
 @ISA          = qw(Exporter);
 @EXPORT       = qw();
-@EXPORT_OK    = qw(Add All8Structure AllocateAll8OnStack AllocateMemory And Andn Assemble Block Bswap Bt Btc Btr Bts Bzhi Call CallC ChooseRegisters ClassifyCharacters4 ClassifyInRange ClassifyRange ClassifyWithInRange ClassifyWithInRangeAndSaveOffset ClearMemory ClearRegisters ClearZF CloseFile Cmova Cmovae Cmovb Cmovbe Cmovc Cmove Cmovg Cmovge Cmovl Cmovle Cmovna Cmovnae Cmovnb Cmp Comment ConcatenateShortStrings ConvertUtf8ToUtf32 CopyMemory Cq CreateByteString Cstrlen DComment Db Dbwdq Dd Dec Dq Ds Dw Else Exit Extern Float32 Float64 For ForEver ForIn Fork FreeMemory GetLengthOfShortString GetNextUtf8CharAsUtf32 GetPPid GetPid GetPidInHex GetUid Hash ISA Idiv If IfEq IfGe IfGt IfLe IfLt IfNe IfNz IfZ Imul Inc InsertZeroIntoRegisterAtPoint Ja Jae Jb Jbe Jc Jcxz Je Jecxz Jg Jge Jl Jle Jmp Jna Jnae Jnb Jnbe Jnc Jne Jng Jnge Jnl Jnle Jno Jnp Jns Jnz Jo Jp Jpe Jpo Jrcxz Js Jz Loop  Kaddb Kaddd Kaddq Kaddw Kandb Kandd Kandnb Kandnd Kandnq Kandnw Kandq Kandw Keep KeepFree KeepPop KeepPush KeepReturn KeepSet Kmovb Kmovd Kmovq Kmovw Knotb Knotd Knotq Knotw Korb Kord Korq Kortestb Kortestd Kortestq Kortestw Korw Kshiftlb Kshiftld Kshiftlq Kshiftlw Kshiftrb Kshiftrd Kshiftrq Kshiftrw Ktestb Ktestd Ktestq Ktestw Kunpckb Kunpckd Kunpckq Kunpckw Kxnorb Kxnord Kxnorq Kxnorw Kxorb Kxord Kxorq Kxorw Label Lea Link LoadConstantIntoMaskRegister LoadShortStringFromMemoryToZmm LoadShortStringFromMemoryToZmm2 LocalData LocateIntelEmulator Lzcnt Macro MaskMemory MaskMemoryInRange4  Mov Movdqa Mulpd Neg Not OpenRead OpenWrite Or PeekR Pextrb Pextrd Pextrq Pextrw Pi32 Pi64 Pinsrb Pinsrd Pinsrq Pinsrw Pop PopEax PopR PopRR Popcnt Popfq PrintErrMemory PrintErrMemoryInHex PrintErrMemoryInHexNL PrintErrMemoryNL PrintErrNL PrintErrRaxInHex PrintErrRegisterInHex PrintErrString PrintErrStringNL PrintErrZF PrintMemory PrintMemoryInHex PrintNL PrintOutMemory PrintOutMemoryInHex PrintOutMemoryInHexNL PrintOutMemoryNL PrintOutNL PrintOutRaxInHex PrintOutRaxInReverseInHex PrintOutRegisterInHex PrintOutRegistersInHex PrintOutRflagsInHex PrintOutRipInHex PrintOutString PrintOutStringNL PrintOutZF PrintRaxInHex PrintRegisterInHex PrintString PrintUtf32 Pslldq Psrldq Push PushR PushRR Pushfq RComment Rb Rbwdq Rd Rdtsc ReadFile ReadTimeStampCounter RegisterSize ReorderSyscallRegisters RestoreFirstFour RestoreFirstFourExceptRax RestoreFirstFourExceptRaxAndRdi RestoreFirstSeven RestoreFirstSevenExceptRax RestoreFirstSevenExceptRaxAndRdi Ret Rq Rs Rutf8 Rw SaveFirstFour SaveFirstSeven Scope ScopeEnd SetLabel SetLengthOfShortString SetMaskRegister SetZF Seta Setae Setb Setbe Setc Sete Setg Setge Setl Setle Setna Setnae Setnb Setnbe Setnc Setne Setng Setnge Setnl Setno Setnp Setns Setnz Seto Setp Setpe Setpo Sets Setz Shl Shr Start StatSize StringLength Structure Sub Subroutine Syscall Test Then Trace Tzcnt UnReorderSyscallRegisters VERSION Vaddd Vaddpd Variable Vb Vcvtudq2pd Vcvtudq2ps Vcvtuqq2pd Vd Vdpps Vgetmantps Vmovd Vmovdqa32 Vmovdqa64 Vmovdqu Vmovdqu32 Vmovdqu64 Vmovdqu8 Vmovq Vmulpd Vpbroadcastb Vpbroadcastd Vpbroadcastq Vpbroadcastw Vpcmpeqb Vpcmpeqd Vpcmpeqq Vpcmpeqw Vpcmpub Vpcmpud Vpcmpuq Vpcmpuw Vpcompressd Vpcompressq Vpexpandd Vpexpandq Vpextrb Vpextrd Vpextrq Vpextrw Vpinsrb Vpinsrd Vpinsrq Vpinsrw Vpmullb Vpmulld Vpmullq Vpmullw Vprolq Vpsubb Vpsubd Vpsubq Vpsubw Vpxorq Vq Vr Vsqrtpd Vw Vx VxyzInit Vy Vz WaitPid Xchg Xor ah al ax bh bl bp bpl bx ch cl cs cx dh di dil dl ds dx eax ebp ebx ecx edi edx es esi esp fs gs k0 k1 k2 k3 k4 k5 k6 k7 mm0 mm1 mm2 mm3 mm4 mm5 mm6 mm7 r10 r10b r10d r10l r10w r11 r11b r11d r11l r11w r12 r12b r12d r12l r12w r13 r13b r13d r13l r13w r14 r14b r14d r14l r14w r15 r15b r15d r15l r15w r8 r8b r8d r8l r8w r9 r9b r9d r9l r9w rax rbp rbx rcx rdi rdx rflags rip rsi rsp si sil sp spl ss st0 st1 st2 st3 st4 st5 st6 st7 xmm0 xmm1 xmm10 xmm11 xmm12 xmm13 xmm14 xmm15 xmm16 xmm17 xmm18 xmm19 xmm2 xmm20 xmm21 xmm22 xmm23 xmm24 xmm25 xmm26 xmm27 xmm28 xmm29 xmm3 xmm30 xmm31 xmm4 xmm5 xmm6 xmm7 xmm8 xmm9 ymm0 ymm1 ymm10 ymm11 ymm12 ymm13 ymm14 ymm15 ymm16 ymm17 ymm18 ymm19 ymm2 ymm20 ymm21 ymm22 ymm23 ymm24 ymm25 ymm26 ymm27 ymm28 ymm29 ymm3 ymm30 ymm31 ymm4 ymm5 ymm6 ymm7 ymm8 ymm9 zmm0 zmm1 zmm10 zmm11 zmm12 zmm13 zmm14 zmm15 zmm16 zmm17 zmm18 zmm19 zmm2 zmm20 zmm21 zmm22 zmm23 zmm24 zmm25 zmm26 zmm27 zmm28 zmm29 zmm3 zmm30 zmm31 zmm4 zmm5 zmm6 zmm7 zmm8 zmm9);
+@EXPORT_OK    = qw(Add All8Structure AllocateAll8OnStack AllocateMemory And Andn Assemble Block Bswap Bt Btc Btr Bts Bzhi Call CallC ChooseRegisters ClassifyCharacters4 ClassifyInRange ClassifyRange ClassifyWithInRange ClassifyWithInRangeAndSaveOffset ClearMemory ClearRegisters ClearZF CloseFile Cmova Cmovae Cmovb Cmovbe Cmovc Cmove Cmovg Cmovge Cmovl Cmovle Cmovna Cmovnae Cmovnb Cmp Comment ConcatenateShortStrings ConvertUtf8ToUtf32 CopyMemory Cq CreateByteString Cstrlen DComment Db Dbwdq Dd Dec Dq Ds Dw Else Exit Extern Float32 Float64 For ForEver ForIn Fork FreeMemory GetLengthOfShortString GetNextUtf8CharAsUtf32 GetPPid GetPid GetPidInHex GetUid Hash ISA Idiv If IfC IfEq IfGe IfGt IfLe IfLt IfNc IfNe IfNz IfZ Imul Inc InsertZeroIntoRegisterAtPoint Ja Jae Jb Jbe Jc Jcxz Je Jecxz Jg Jge Jl Jle Jmp Jna Jnae Jnb Jnbe Jnc Jne Jng Jnge Jnl Jnle Jno Jnp Jns Jnz Jo Jp Jpe Jpo Jrcxz Js Jz Loop  Kaddb Kaddd Kaddq Kaddw Kandb Kandd Kandnb Kandnd Kandnq Kandnw Kandq Kandw Keep KeepFree KeepPop KeepPush KeepReturn KeepSet Kmovb Kmovd Kmovq Kmovw Knotb Knotd Knotq Knotw Korb Kord Korq Kortestb Kortestd Kortestq Kortestw Korw Kshiftlb Kshiftld Kshiftlq Kshiftlw Kshiftrb Kshiftrd Kshiftrq Kshiftrw Ktestb Ktestd Ktestq Ktestw Kunpckb Kunpckd Kunpckq Kunpckw Kxnorb Kxnord Kxnorq Kxnorw Kxorb Kxord Kxorq Kxorw Label Lea Link LoadConstantIntoMaskRegister LoadShortStringFromMemoryToZmm LoadShortStringFromMemoryToZmm2 LocalData LocateIntelEmulator Lzcnt Macro MaskMemory MaskMemoryInRange4  Mov Movdqa Mulpd Neg Not OpenRead OpenWrite Or PeekR Pextrb Pextrd Pextrq Pextrw Pi32 Pi64 Pinsrb Pinsrd Pinsrq Pinsrw Pop PopEax PopR PopRR Popcnt Popfq PrintErrMemory PrintErrMemoryInHex PrintErrMemoryInHexNL PrintErrMemoryNL PrintErrNL PrintErrRaxInHex PrintErrRegisterInHex PrintErrString PrintErrStringNL PrintErrZF PrintMemory PrintMemoryInHex PrintNL PrintOutMemory PrintOutMemoryInHex PrintOutMemoryInHexNL PrintOutMemoryNL PrintOutNL PrintOutRaxInHex PrintOutRaxInReverseInHex PrintOutRegisterInHex PrintOutRegistersInHex PrintOutRflagsInHex PrintOutRipInHex PrintOutString PrintOutStringNL PrintOutZF PrintRaxInHex PrintRegisterInHex PrintString PrintUtf32 Pslldq Psrldq Push PushR PushRR Pushfq RComment Rb Rbwdq Rd Rdtsc ReadFile ReadTimeStampCounter RegisterSize ReorderSyscallRegisters RestoreFirstFour RestoreFirstFourExceptRax RestoreFirstFourExceptRaxAndRdi RestoreFirstSeven RestoreFirstSevenExceptRax RestoreFirstSevenExceptRaxAndRdi Ret Rq Rs Rutf8 Rw SaveFirstFour SaveFirstSeven Scope ScopeEnd SetLabel SetLengthOfShortString SetMaskRegister SetZF Seta Setae Setb Setbe Setc Sete Setg Setge Setl Setle Setna Setnae Setnb Setnbe Setnc Setne Setng Setnge Setnl Setno Setnp Setns Setnz Seto Setp Setpe Setpo Sets Setz Shl Shr Start StatSize StringLength Structure Sub Subroutine Syscall Test Then Trace Tzcnt UnReorderSyscallRegisters VERSION Vaddd Vaddpd Variable Vb Vcvtudq2pd Vcvtudq2ps Vcvtuqq2pd Vd Vdpps Vgetmantps Vmovd Vmovdqa32 Vmovdqa64 Vmovdqu Vmovdqu32 Vmovdqu64 Vmovdqu8 Vmovq Vmulpd Vpbroadcastb Vpbroadcastd Vpbroadcastq Vpbroadcastw Vpcmpeqb Vpcmpeqd Vpcmpeqq Vpcmpeqw Vpcmpub Vpcmpud Vpcmpuq Vpcmpuw Vpcompressd Vpcompressq Vpexpandd Vpexpandq Vpextrb Vpextrd Vpextrq Vpextrw Vpinsrb Vpinsrd Vpinsrq Vpinsrw Vpmullb Vpmulld Vpmullq Vpmullw Vprolq Vpsubb Vpsubd Vpsubq Vpsubw Vpxorq Vq Vr Vsqrtpd Vw Vx VxyzInit Vy Vz WaitPid Xchg Xor ah al ax bh bl bp bpl bx ch cl cs cx dh di dil dl ds dx eax ebp ebx ecx edi edx es esi esp fs gs k0 k1 k2 k3 k4 k5 k6 k7 mm0 mm1 mm2 mm3 mm4 mm5 mm6 mm7 r10 r10b r10d r10l r10w r11 r11b r11d r11l r11w r12 r12b r12d r12l r12w r13 r13b r13d r13l r13w r14 r14b r14d r14l r14w r15 r15b r15d r15l r15w r8 r8b r8d r8l r8w r9 r9b r9d r9l r9w rax rbp rbx rcx rdi rdx rflags rip rsi rsp si sil sp spl ss st0 st1 st2 st3 st4 st5 st6 st7 xmm0 xmm1 xmm10 xmm11 xmm12 xmm13 xmm14 xmm15 xmm16 xmm17 xmm18 xmm19 xmm2 xmm20 xmm21 xmm22 xmm23 xmm24 xmm25 xmm26 xmm27 xmm28 xmm29 xmm3 xmm30 xmm31 xmm4 xmm5 xmm6 xmm7 xmm8 xmm9 ymm0 ymm1 ymm10 ymm11 ymm12 ymm13 ymm14 ymm15 ymm16 ymm17 ymm18 ymm19 ymm2 ymm20 ymm21 ymm22 ymm23 ymm24 ymm25 ymm26 ymm27 ymm28 ymm29 ymm3 ymm30 ymm31 ymm4 ymm5 ymm6 ymm7 ymm8 ymm9 zmm0 zmm1 zmm10 zmm11 zmm12 zmm13 zmm14 zmm15 zmm16 zmm17 zmm18 zmm19 zmm2 zmm20 zmm21 zmm22 zmm23 zmm24 zmm25 zmm26 zmm27 zmm28 zmm29 zmm3 zmm30 zmm31 zmm4 zmm5 zmm6 zmm7 zmm8 zmm9);
 %EXPORT_TAGS  = (all => [@EXPORT, @EXPORT_OK]);
 
 # podDocumentation
@@ -16229,7 +16269,7 @@ END
  }
 
 #latest:
-if (1) {                                                                        #TNasm::X86::BlockMultiWayTree::transferTreeBits
+if (1) {                                                                        #TNasm::X86::BlockMultiWayTree::transferTreeBitsFromParent
   my $B = Rb(0..63);
   Vmovdqu8 zmm0, "[$B]";
   loadFromZmm r15, w, zmm, 14;
@@ -16244,7 +16284,7 @@ if (1) {                                                                        
   $t->putTreeBits(1, r14);
   PrintOutRegisterInHex zmm1;
 
-  $t->transferTreeBits(1, 2, 3);
+  $t->transferTreeBitsFromParent(1, 2, 3);
   PrintOutStringNL "Split:";
   PrintOutRegisterInHex zmm1, zmm2, zmm3;
 
@@ -16267,12 +16307,101 @@ END
  }
 
 #latest:
+if (1) {                                                                        #TNasm::X86::BlockMultiWayTree::transferTreeBitsFromLeft
+  my $b = CreateByteString;
+  my $t = $b->CreateBlockMultiWayTree;
+  my $lR = "110110";
+  my $lP = "1";
+  my $lL = "1110111";
+
+  my $p1 = "01010_110010";
+  my $p2 = "1";
+
+  Mov r15, eval "0b$lR$lP$lL"; $t->putTreeBits(1, r15);
+  Mov r15, eval "0b$p1$p2";    $t->putTreeBits(0, r15);
+
+  PrintOutRegisterInHex zmm 0..1;
+
+  Mov r15, eval "0b10";
+  $t->transferTreeBitsFromLeft(r15, 0, 1, 2);
+  PrintOutRegisterInHex zmm 0..2;
+
+  my $epe = sprintf("%04X", eval "0b$p1$lP$p2");
+  my $ele = sprintf("%04X", eval "0b$lL"      );
+  my $ere = sprintf("%04X", eval "0b$lR"      );
+
+  ok Assemble(debug => 0, eq => <<END);
+  zmm0: 0000 0000 0565 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+  zmm1: 0000 0000 36F7 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+  zmm0: 0000 0000 $epe 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+  zmm1: 0000 0000 $ele 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+  zmm2: 0000 0000 $ere 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+END
+ }
+
+#latest:
+if (1) {                                                                        # Replace a scalar with a tree in the first node
+  my $b = CreateByteString;
+  my $t = $b->CreateBlockMultiWayTree;
+  my $k = Vq(key,  15);
+
+  for my $i(1..15)                                                              # Overflow the root node to force a split
+   {my $d = Vq(data, 2 * $i);
+    $t->insert    (Vq(key,  $i), $d) if     $i % 2;
+    $t->insertTree(Vq(key,  $i), $d) unless $i % 2;
+    $d->outNL;
+   }
+
+  $b->dump(20);
+  ok Assemble(debug => 0, eq => <<END);
+data: 0000 0000 0000 0002
+data: 0000 0000 0000 0098
+data: 0000 0000 0000 0006
+data: 0000 0000 0000 0118
+data: 0000 0000 0000 000A
+data: 0000 0000 0000 0198
+data: 0000 0000 0000 000E
+data: 0000 0000 0000 0218
+data: 0000 0000 0000 0012
+data: 0000 0000 0000 0298
+data: 0000 0000 0000 0016
+data: 0000 0000 0000 0318
+data: 0000 0000 0000 001A
+data: 0000 0000 0000 0398
+data: 0000 0000 0000 001E
+Byte String
+  Size: 0000 0000 0000 1000
+  Used: 0000 0000 0000 05D8
+0000: 0010 0000 0000 0000D805 0000 0000 00000000 0000 0000 00000800 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+0040: 0000 0000 0000 00000000 0000 0000 00000100 0100 5800 00001802 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+0080: 0000 0000 0000 00000000 0000 0000 00000000 0000 1804 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+00C0: 0000 0000 0000 00000000 0000 0000 00000000 0000 D800 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+0100: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+0140: 0000 0000 0000 00000000 0000 0000 00000000 0000 5801 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+0180: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+01C0: 0000 0000 0000 00000000 0000 0000 00000000 0000 D801 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+0200: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+0240: 0000 0000 0000 00000000 0000 0000 00000000 0000 5802 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+0280: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+02C0: 0000 0000 0000 00000000 0000 0000 00000000 0000 D802 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+0300: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+0340: 0000 0000 0000 00000000 0000 0000 00000000 0000 5803 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+0380: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+03C0: 0000 0000 0000 00000000 0000 0000 00000000 0000 D803 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+0400: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00005804 0000 1805 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+0440: 0000 0000 0000 00000000 0000 0000 00000000 0000 1800 00000100 0000 0200 00000300 0000 0400 00000500 0000 0600 00000700 0000 0000 00000000 0000 0000 0000
+0480: 0000 0000 0000 00000000 0000 0000 00000700 2A00 9804 00000200 0000 9800 00000600 0000 1801 00000A00 0000 9801 00000E00 0000 0000 00000000 0000 0000 0000
+04C0: 0000 0000 0000 00000000 0000 0000 00001800 0000 D804 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+END
+ }
+
+#latest:
 if (0) {
   is_deeply Assemble(debug=>1), <<END;
 END
  }
 
-ok 1 for 2..8;
+ok 1 for 4..8;
 
 unlink $_ for qw(hash print2 sde-log.txt sde-ptr-check.out.txt z.txt);          # Remove incidental files
 
