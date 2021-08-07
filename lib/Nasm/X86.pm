@@ -5296,26 +5296,37 @@ sub Nasm::X86::BlockMultiWayTree::transferTreeBitsFromParent($$$$)              
   PopR @save;
  }
 
-sub Nasm::X86::BlockMultiWayTree::transferTreeBitsFromLeft($$$$)                #P Transfer tree bits when splitting a full left node
- {my ($b, $point, $parent, $left, $right) = @_;                                 # Block multi way tree descriptor, register indicating point of left in parent, numbered parent zmm, numbered left zmm, numbered right zmm
+sub Nasm::X86::BlockMultiWayTree::transferTreeBitsFromLeftOrRight($$$$$)        #P Transfer tree bits when splitting a full left or right node
+ {my ($b, $rnl, $point, $parent, $left, $right) = @_;                           # Block multi way tree descriptor, 0 - left 1 - right, register indicating point of left in parent, numbered parent zmm, numbered left zmm, numbered right zmm
 
   PushR my @save = my ($whole, $half, $bits) = ChooseRegisters(3, $point);
-  $b->getTreeBits($left, $whole);                                               # Treet bits
+  $b->getTreeBits($rnl ? $right : $left, $whole);                               # Tree bits
+
   Mov $half, $whole;                                                            # Right bits
   Shr $half, $b->leftLength + 1;                                                # Isolate right bits
   $b->putTreeBits($right, $half);                                               # Save right bits
 
-  $b->getTreeBits($parent, $bits);                                              # Get parent tree bits
+  $b->getTreeBits($parent, $bits);                                              # Parent bits
   InsertZeroIntoRegisterAtPoint($point, $bits);
   Mov $half, $whole;                                                            # Tree bit of key being moved into parent from left
   Shr $half, $b->leftLength+1;                                                  # Tree bit to move into parent is now in carry flag
-  IfC {Or $bits, $point};
+  IfC {Or $bits, $point};                                                       # One parent bit
   $b->putTreeBits($parent, $bits);                                              # Put parent tree bits
 
   Mov $half, $whole;                                                            # Left bits
   And $half, ((1 << $b->leftLength) - 1);                                       # Remove any bits above
   $b->putTreeBits($left, $half);                                                # Save left bits
   PopR @save;
+ }
+
+sub Nasm::X86::BlockMultiWayTree::transferTreeBitsFromLeft($$$$)                #P Transfer tree bits when splitting a full left node
+ {my ($b, $point, $parent, $left, $right) = @_;                                 # Block multi way tree descriptor, register indicating point of left in parent, numbered parent zmm, numbered left zmm, numbered right zmm
+  $b->transferTreeBitsFromLeftOrRight(0, $point, $parent, $left, $right);
+ }
+
+sub Nasm::X86::BlockMultiWayTree::transferTreeBitsFromRight($$$$)               #P Transfer tree bits when splitting a full right node
+ {my ($b, $point, $parent, $left, $right) = @_;                                 # Block multi way tree descriptor, register indicating point of right in parent, numbered parent zmm, numbered left zmm, numbered right zmm
+  $b->transferTreeBitsFromLeftOrRight(1, $point, $parent, $left, $right);
  }
 
 sub Nasm::X86::BlockMultiWayTree::splitFullRoot($)                              #P Split a full root block held in 31..29 and place the left block in 28..26 and the right block in 25..23. The left and right blocks should have their loop offsets set so they can be inserted into the root.
@@ -16307,7 +16318,7 @@ END
  }
 
 #latest:
-if (1) {                                                                        #TNasm::X86::BlockMultiWayTree::transferTreeBitsFromLeft
+if (1) {                                                                        #TNasm::X86::BlockMultiWayTree::transferTreeBitsFromLeft #TNasm::X86::BlockMultiWayTree::transferTreeBitsFromRight
   my $b = CreateByteString;
   my $t = $b->CreateBlockMultiWayTree;
   my $lR = "110110";
@@ -16317,26 +16328,33 @@ if (1) {                                                                        
   my $p1 = "01010_110010";
   my $p2 = "1";
 
-  Mov r15, eval "0b$lR$lP$lL"; $t->putTreeBits(1, r15);
-  Mov r15, eval "0b$p1$p2";    $t->putTreeBits(0, r15);
-
-  PrintOutRegisterInHex zmm 0..1;
-
-  Mov r15, eval "0b10";
-  $t->transferTreeBitsFromLeft(r15, 0, 1, 2);
-  PrintOutRegisterInHex zmm 0..2;
-
   my $epe = sprintf("%04X", eval "0b$p1$lP$p2");
   my $ele = sprintf("%04X", eval "0b$lL"      );
   my $ere = sprintf("%04X", eval "0b$lR"      );
 
-  ok Assemble(debug => 0, eq => <<END);
+  my @expected;
+  for my $i(0..1)
+   {Mov r15, eval "0b$lR$lP$lL"; $t->putTreeBits(1+$i, r15);
+    Mov r15, eval "0b$p1$p2";    $t->putTreeBits(0,    r15);
+
+    PrintOutRegisterInHex zmm 0, 1+$i;
+
+    Mov r15, 0b10;
+    $t->transferTreeBitsFromLeft (r15, 0, 1, 2) unless $i;
+    $t->transferTreeBitsFromRight(r15, 0, 1, 2) if     $i;
+    PrintOutRegisterInHex zmm 0..2;
+
+    my $zzz = $i ? "zmm2" : "zmm1";
+    push @expected, <<END;
   zmm0: 0000 0000 0565 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
-  zmm1: 0000 0000 36F7 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+  $zzz: 0000 0000 36F7 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
   zmm0: 0000 0000 $epe 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
   zmm1: 0000 0000 $ele 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
   zmm2: 0000 0000 $ere 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
 END
+   }
+
+  ok Assemble(debug => 0, eq => join "", @expected);
  }
 
 #latest:
