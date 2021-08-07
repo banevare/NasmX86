@@ -5145,24 +5145,20 @@ sub Nasm::X86::BlockMultiWayTree::DescribeBlockMultiWayTree($;$)                
 
   genHash(__PACKAGE__."::BlockMultiWayTree",                                    # Block multi way tree.
     bs           => $byteString,                                                # Byte string definition.
-    data         => $o * 2,                                                     # Offset of data in header.
     first        => ($header // Vq(first)),                                     # Variable addressing offset to first block of keys.
-    keys         => $o * 1,                                                     # Offset of keys in header.
     leftLength   => $length / 2,                                                # Left split length
     lengthOffset => $b - $o * 2,                                                # Offset of length in keys block.  The length field is a word - see: "MultiWayTree.svg"
     loop         => $b - $o,                                                    # Offset of keys, data, node loop.
     maxKeys      => $length,                                                    # Maximum number of keys.
-    maxNodes     => $b / $o - 1,                                                # Maximum number of children per parent.
     minKeys      => int($b / 2) - 1,                                            # Minimum number of keys.
-    node         => $o * 3,                                                     # Offset of nodes in header.
     rightLength  => $length - 1 - $length / 2,                                  # Right split length
     treeBits     => $b - $o * 2 + 2,                                            # Offset of tree bits in keys block.  The tree bits field is a word, each bit of which tells us whether the corresponding data element is the offset (or not) to a sub tree of this tree .
     treeBitsMask => 0x3fff,                                                     # 14 tree bits
     up           => $b - $o * 2,                                                # Offset of up in data block.
     width        => $o,                                                         # Width of a key or data slot.
-    foundKey     => Vq(foundKey),                                               # Variable indicating whether the last find was successful or not
-    foundData    => Vq(foundData),                                              # Variable containing the last data found
-    foundSubTree => Vq(foundSubTree),                                           # Variable indicating whether the last find found a sub tree
+    found        => Vq(found),                                                  # Variable indicating whether the last find was successful or not
+    data         => Vq(data),                                                   # Variable containing the last data found
+    subTree      => Vq(subTree),                                                # Variable indicating whether the last find found a sub tree
    );
  }
 
@@ -5686,9 +5682,9 @@ sub Nasm::X86::BlockMultiWayTree::findAndSplit($@)                              
   $s->call($t->address, first => $t->first, @variables);
  } # findAndSplit
 
-sub Nasm::X86::BlockMultiWayTree::find($$$$)                                    # Find a key in a tree and  return its associated data.  The found variable will be set to true if the specified key has been found and the data variable will contain the data associated with the key.
- {my ($t, $key, $data, $found) = @_;                                            # Block multi way tree descriptor, key field to search for, data variable to receive result, found variable to show whether a result was found or not.
-  @_ == 4 or confess;
+sub Nasm::X86::BlockMultiWayTree::find($$)                                      # Find a key in a tree and test whether the found data is a sub tree.  The results are held in the variables "found", "data", "subTree" addressed by the tree descriptor.
+ {my ($t, $key) = @_;                                                           # Block multi way tree descriptor, key field to search for
+  @_ == 2 or confess;
   my $W = $t->width;                                                            # Width of keys and data
 
   my $s = Subroutine
@@ -5714,8 +5710,8 @@ sub Nasm::X86::BlockMultiWayTree::find($$$$)                                    
       my $l = $t->getLengthInKeys($zmmKeys);                                    # Length of the block
       If ($l == 0,
       Then                                                                      # Empty tree so we have not found the key
-       {$$p{found}       ->copy(Cq(zero, 0));                                   # Key not found
-        $$p{foundSubTree}->copy(Cq(zero, 0));                                   # Not a sub tree
+       {$$p{found}  ->copy(Cq(zero, 0));                                        # Key not found
+        $$p{subTree}->copy(Cq(zero, 0));                                        # Not a sub tree
         Jmp $success;                                                           # Return
        });
 
@@ -5727,10 +5723,8 @@ sub Nasm::X86::BlockMultiWayTree::find($$$$)                                    
         Tzcnt r14, r15;                                                         # Trailing zeros
         $$p{found}->copy(Cq(one, 1));                                           # Key found
         $$p{data} ->copy(getDFromZmm($zmmData, "r14*$W"));                      # Data associated with the key
-        $$p{foundKey} ->copy($$p{found});                                       # Copy found status associated with key
-        $$p{foundData}->copy($$p{data});                                        # Copy data associated with key into descriptor
         $t->isTree(r15, $zmmKeys);                                              # Check whether the data so found is a sub tree
-        $$p{foundSubTree}->copyZFInverted;                                      # Copy zero flag which opposes the notion that this element is a sub tree
+        $$p{subTree}->copyZFInverted;                                           # Copy zero flag which opposes the notion that this element is a sub tree
         Jmp $success;                                                           # Return
        };
 
@@ -5758,13 +5752,10 @@ sub Nasm::X86::BlockMultiWayTree::find($$$$)                                    
     SetLabel $success;                                                          # Insert completed successfully
     PopR @save;
    }  in  => [qw(bs   first key)],
-      out => [qw(data found foundKey foundData foundSubTree)];
+      out => [qw(data found data subTree)];
 
-  $s->call($t->address, first => $t->first,
-           key => $key, data => $data, found => $found,
-           foundKey     => $t->foundKey,
-           foundData    => $t->foundData,
-           foundSubTree => $t->foundSubTree);
+  $s->call($t->address, first => $t->first, key => $key, data => $t->data,
+           found => $t->found, subTree => $t->subTree);
  } # find
 
 sub Nasm::X86::BlockMultiWayTree::insertDataOrTree($$$$)                        # Insert either a key, data pair into the tree or create a sub tree at the specified key (if it does not already exist) and return the offset of the first block of the sub tree in the data variable.
@@ -15955,8 +15946,6 @@ END
 if (1) {                                                                        #TNasm::X86::ByteString::CreateBlockMultiWayTree
   my $b = CreateByteString;
   my $t = $b->CreateBlockMultiWayTree;
-  my $d = Vq(data);
-  my $f = Vq(found);
 
   Vq(count, 24)->for(sub
    {my ($index, $start, $next, $end) = @_;
@@ -15989,14 +15978,12 @@ if (1) {                                                                        
     $iter->data->out(' data: ');
     $iter->tree->depth($iter->node, my $D = Vq(depth));
 
-    $t->find($iter->key, $d, $f);
-    $f->out(' found: '); $d->out(' data: '); $D->outNL(' depth: ');
-$t->foundKey ->err(" found: ");
-$t->foundData->errNL(" data: ");
+    $t->find($iter->key);
+    $t->found->out(' found: '); $t->data->out(' data: '); $D->outNL(' depth: ');
    });
 
-  $t->find(Vq(key, 0xffff), $d, $f);  $f->outNL('Found: ');
-  $t->find(Vq(key, 0xd),    $d, $f);  $f->outNL('Found: ');
+  $t->find(Vq(key, 0xffff));  $t->found->outNL('Found: ');
+  $t->find(Vq(key, 0xd));     $t->found->outNL('Found: ');
 
   ok Assemble(debug => 0, eq => <<END);
 Root
@@ -16116,8 +16103,8 @@ if (1) {
   PrintOutRegisterInHex zmm28, zmm27, zmm26;
 
 
-  $t->find(Vq(key, 0xffff), $d, $f);  $f->outNL('Found: ');
-  $t->find(Vq(key, 0x1b),   $d, $f);  $f->outNL('Found: ');
+  $t->find(Vq(key, 0xffff));  $t->found->outNL('Found: ');
+  $t->find(Vq(key, 0x1b)  );  $t->found->outNL('Found: ');
 
   ok Assemble(debug => 0, eq => <<END);
 Root
