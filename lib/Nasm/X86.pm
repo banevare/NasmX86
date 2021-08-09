@@ -16039,7 +16039,6 @@ key: 0000 0000 0000 0018 data: 0000 0000 0000 0118 found: 0000 0000 0000 0001 da
 Found: 0000 0000 0000 0000
 Found: 0000 0000 0000 0001
 END
-exit;
  }
 
 #latest:
@@ -16256,10 +16255,9 @@ if (1) {
   my $b = CreateByteString;
   my $t = $b->CreateBlockMultiWayTree;
   my $k = Vq(key,  15);
-  my $d = Vq(data, 14);
 
-  $t->insertTree($k, $d);  $d->outNL;
-  $t->insertTree($k, $d);  $d->outNL;                                           # Retrieve the sub tree rather than creating a new new sub tree
+  $t->insertTree($k);  $t->data->outNL;
+  $t->insertTree($k);  $t->data->outNL;                                           # Retrieve the sub tree rather than creating a new new sub tree
 
   ok Assemble(debug => 0, eq => <<END);
 data: 0000 0000 0000 0098
@@ -16274,9 +16272,9 @@ if (1) {                                                                        
   my $k = Vq(key,  15);
   my $d = Vq(data, 14);
 
-  $t->insert    ($k, $d);  $d->outNL;
-  $t->insertTree($k, $d);  $d->outNL;                                           # Retrieve the sub tree rather than creating a new new sub tree
-  $t->insertTree($k, $d);  $d->outNL;
+  $t->insert($k, $d);  $d->outNL;
+  $t->insertTree($k);  $t->data->outNL;                                         # Retrieve the sub tree rather than creating a new new sub tree
+  $t->insertTree($k);  $t->data->outNL;
 
   ok Assemble(debug => 0, eq => <<END);
 data: 0000 0000 0000 000E
@@ -16293,7 +16291,7 @@ if (1) {                                                                        
   my $d = Vq(data, 14);
 
   for my $i(1..11)                                                              # Create new sub trees
-   {$t->insertTree(Vq(key,  $i), $d);  $d->outNL;                               # Retrieve the sub tree rather than creating a new new sub tree
+   {$t->insertTree(Vq(key,  $i));  $t->data->outNL;                             # Retrieve the sub tree rather than creating a new new sub tree
    }
 
   $b->dump;
@@ -16405,9 +16403,8 @@ if (1) {                                                                        
 
   for my $i(1..15)                                                              # Overflow the root node to force a split
    {my $d = Vq(data, 2 * $i);
-    $t->insert    (Vq(key,  $i), $d) if     $i % 2;
-    $t->insertTree(Vq(key,  $i), $d) unless $i % 2;
-    $d->outNL;
+    $t->insert    (Vq(key,  $i), $d),   $d->outNL if     $i % 2;
+    $t->insertTree(Vq(key,  $i)), $t->data->outNL unless $i % 2;
    }
 
   $b->dump(20);
