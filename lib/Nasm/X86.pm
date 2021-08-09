@@ -5353,19 +5353,19 @@ sub Nasm::X86::BlockMultiWayTree::transferTreeBitsFromParent($$$$)              
   $b->getTreeBits($parent, $whole);                                             # Transfer Tree bits
   Cmp $whole, 0;
   IfNz                                                                          # Action required iff there are some tree bits
-   {Mov r14, $whole;                                                            # Left tree bits
-    And r14, ((1 << $b->leftLength) - 1);                                       # Isolate left bits
-    $b->putTreeBits($left, r14);                                                # Save left tree bits
+   {Mov $half, $whole;                                                          # Left tree bits
+    And $half, ((1 << $b->leftLength) - 1);                                     # Isolate left bits
+    $b->putTreeBits($left, $half);                                              # Save left tree bits
 
-    Mov r14, $whole;                                                            # Right tree bits
-    Shr r14, $b->leftLength + 1;                                                # Isolate right bits
-    And  r14, ((1 << $b->rightLength) - 1);                                     # Remove any bits above
-    $b->putTreeBits($right, r14);                                               # Save right tree bits
+    Mov $half, $whole;                                                          # Right tree bits
+    Shr $half, $b->leftLength + 1;                                              # Isolate right bits
+    And  $half, ((1 << $b->rightLength) - 1);                                   # Remove any bits above
+    $b->putTreeBits($right, $half);                                             # Save right tree bits
 
-    Mov r14, $whole;                                                            # Right tree bits
-    Shr r14, $b->leftLength;                                                    # Parent bit
-    And r14, 1;                                                                 # Only one bit
-    $b->putTreeBits($parent, r14);                                              # Save parent tree bits
+    Mov $half, $whole;                                                          # Right tree bits
+    Shr $half, $b->leftLength;                                                  # Parent bit
+    And $half, 1;                                                               # Only one bit
+    $b->putTreeBits($parent, $half);                                            # Save parent tree bits
    };
   PopR @save;
  }
@@ -5919,13 +5919,13 @@ sub Nasm::X86::BlockMultiWayTree::insertDataOrTree($$$$)                        
     Then                                                                        # Found an equal key so update the data
      {$D->putDIntoZmm(30, $index * $t->width);                                  # Update data at key
       $t->putKeysDataNode($offset, 31, 30, 29);                                 # Rewrite data and keys
-      $t->setOrClearTree($tnd, r13, 31);                                       # Set or clear tree bit as necessary
+      $t->setOrClearTree($tnd, r13, 31);                                        # Set or clear tree bit as necessary
      },
     Else                                                                        # We have room for the insert because each block has been split to make it non full
      {If $compare > 0,
       Then                                                                      # Position at which to insert new key if it is greater than the indexed key
        {++$index;
-        Shl r13, 1;                                                             # Move point up to match
+##?     Shl r13, 1;                                                             # Move point up to match
        };
 
       my $length = $t->getLengthInKeys(31);                                     # Number of keys
@@ -5939,6 +5939,8 @@ sub Nasm::X86::BlockMultiWayTree::insertDataOrTree($$$$)                        
         Vpexpandd    "zmm30{k6}", zmm30;                                        # Shift up data
        };
 
+      $t->expandTreeBitsWithZeroOrOne($tnd, 31, r13);                           # Mark inserted key as referring to a tree or not
+
       ClearRegisters k7;
       $index->setMaskBit(k7);                                                   # Set bit at insertion point
       $K->setReg(r15);                                                          # Corresponding data
@@ -5948,8 +5950,6 @@ sub Nasm::X86::BlockMultiWayTree::insertDataOrTree($$$$)                        
       $t->putLengthInKeys(31, $length + 1);                                     # Set the new length of the block
       $t->putKeysDataNode($offset, 31, 30, 29);                                 # Rewrite data and keys
       $t->splitNode($B, $offset, $K);                                           # Split if the leaf has got too big
-
-      $t->expandTreeBitsWithZeroOrOne($tnd, 31, r13);                           # Mark inserted key as referring to a tree or not
      };
 
     SetLabel $success;                                                          # Insert completed successfully
@@ -16546,11 +16546,53 @@ if (1) {                                                                        
 END
  }
 
-#latest:
+latest:
 if (1) {                                                                        # Extended sub tree testing
   my $b  = CreateByteString;
   my $t  = $b->CreateBlockMultiWayTree;
-  my $L  = Vq(loop, 7);
+  my $L  = Vq(loop, 15);
+
+  $L->for(sub
+   {my ($i, $start, $next, $end) = @_;
+    my $l = $L - $i;
+    If ($i % 2 == 0, sub
+     {$t->insert($i, $l);
+      $t->insertTree($l);
+     });
+   });
+
+  ($L+2)->for(sub
+   {my ($i, $start, $next, $end) = @_;
+    $t->find($i);
+    $i->out('i: '); $t->found->out('  f: '); $t->data->out('  d: '); $t->subTree->outNL('  s: ');
+   });
+
+  ok Assemble(debug => 0, eq => <<END);
+i: 0000 0000 0000 0000  f: 0000 0000 0000 0001  d: 0000 0000 0000 000F  s: 0000 0000 0000 0000
+i: 0000 0000 0000 0001  f: 0000 0000 0000 0001  d: 0000 0000 0000 0398  s: 0000 0000 0000 0001
+i: 0000 0000 0000 0002  f: 0000 0000 0000 0001  d: 0000 0000 0000 000D  s: 0000 0000 0000 0000
+i: 0000 0000 0000 0003  f: 0000 0000 0000 0001  d: 0000 0000 0000 0398  s: 0000 0000 0000 0001
+i: 0000 0000 0000 0004  f: 0000 0000 0000 0001  d: 0000 0000 0000 000B  s: 0000 0000 0000 0000
+i: 0000 0000 0000 0005  f: 0000 0000 0000 0001  d: 0000 0000 0000 0318  s: 0000 0000 0000 0001
+i: 0000 0000 0000 0006  f: 0000 0000 0000 0001  d: 0000 0000 0000 0009  s: 0000 0000 0000 0000
+i: 0000 0000 0000 0007  f: 0000 0000 0000 0001  d: 0000 0000 0000 0298  s: 0000 0000 0000 0001
+i: 0000 0000 0000 0008  f: 0000 0000 0000 0001  d: 0000 0000 0000 0007  s: 0000 0000 0000 0000
+i: 0000 0000 0000 0009  f: 0000 0000 0000 0001  d: 0000 0000 0000 0218  s: 0000 0000 0000 0001
+i: 0000 0000 0000 000A  f: 0000 0000 0000 0001  d: 0000 0000 0000 0005  s: 0000 0000 0000 0000
+i: 0000 0000 0000 000B  f: 0000 0000 0000 0001  d: 0000 0000 0000 0198  s: 0000 0000 0000 0001
+i: 0000 0000 0000 000C  f: 0000 0000 0000 0001  d: 0000 0000 0000 0003  s: 0000 0000 0000 0000
+i: 0000 0000 0000 000D  f: 0000 0000 0000 0001  d: 0000 0000 0000 0118  s: 0000 0000 0000 0001
+i: 0000 0000 0000 000E  f: 0000 0000 0000 0001  d: 0000 0000 0000 0001  s: 0000 0000 0000 0000
+i: 0000 0000 0000 000F  f: 0000 0000 0000 0001  d: 0000 0000 0000 0098  s: 0000 0000 0000 0001
+i: 0000 0000 0000 0010  f: 0000 0000 0000 0000  d: 0000 0000 0000 0000  s: 0000 0000 0000 0000
+END
+ }
+
+latest:
+if (1) {                                                                        # Extended sub tree testing
+  my $b  = CreateByteString;
+  my $t  = $b->CreateBlockMultiWayTree;
+  my $L  = Vq(loop, 15);
 
   $L->for(sub
    {my ($i, $start, $next, $end) = @_;
@@ -16572,15 +16614,23 @@ PrintErrStringNL "Insert tree";
    });
 
   ok Assemble(debug => 0, eq => <<END);
-i: 0000 0000 0000 0000  f: 0000 0000 0000 0001  d: 0000 0000 0000 0007  s: 0000 0000 0000 0000
-i: 0000 0000 0000 0001  f: 0000 0000 0000 0001  d: 0000 0000 0000 0218  s: 0000 0000 0000 0001
-i: 0000 0000 0000 0002  f: 0000 0000 0000 0001  d: 0000 0000 0000 0005  s: 0000 0000 0000 0000
-i: 0000 0000 0000 0003  f: 0000 0000 0000 0001  d: 0000 0000 0000 0198  s: 0000 0000 0000 0001
-i: 0000 0000 0000 0004  f: 0000 0000 0000 0001  d: 0000 0000 0000 0003  s: 0000 0000 0000 0000
-i: 0000 0000 0000 0005  f: 0000 0000 0000 0001  d: 0000 0000 0000 0118  s: 0000 0000 0000 0001
-i: 0000 0000 0000 0006  f: 0000 0000 0000 0001  d: 0000 0000 0000 0001  s: 0000 0000 0000 0000
-i: 0000 0000 0000 0007  f: 0000 0000 0000 0001  d: 0000 0000 0000 0098  s: 0000 0000 0000 0001
-i: 0000 0000 0000 0008  f: 0000 0000 0000 0000  d: 0000 0000 0000 0000  s: 0000 0000 0000 0000
+i: 0000 0000 0000 0000  f: 0000 0000 0000 0001  d: 0000 0000 0000 000F  s: 0000 0000 0000 0000
+i: 0000 0000 0000 0001  f: 0000 0000 0000 0001  d: 0000 0000 0000 0398  s: 0000 0000 0000 0001
+i: 0000 0000 0000 0002  f: 0000 0000 0000 0001  d: 0000 0000 0000 000D  s: 0000 0000 0000 0000
+i: 0000 0000 0000 0003  f: 0000 0000 0000 0001  d: 0000 0000 0000 0398  s: 0000 0000 0000 0001
+i: 0000 0000 0000 0004  f: 0000 0000 0000 0001  d: 0000 0000 0000 000B  s: 0000 0000 0000 0000
+i: 0000 0000 0000 0005  f: 0000 0000 0000 0001  d: 0000 0000 0000 0318  s: 0000 0000 0000 0001
+i: 0000 0000 0000 0006  f: 0000 0000 0000 0001  d: 0000 0000 0000 0009  s: 0000 0000 0000 0000
+i: 0000 0000 0000 0007  f: 0000 0000 0000 0001  d: 0000 0000 0000 0298  s: 0000 0000 0000 0001
+i: 0000 0000 0000 0008  f: 0000 0000 0000 0001  d: 0000 0000 0000 0007  s: 0000 0000 0000 0000
+i: 0000 0000 0000 0009  f: 0000 0000 0000 0001  d: 0000 0000 0000 0218  s: 0000 0000 0000 0001
+i: 0000 0000 0000 000A  f: 0000 0000 0000 0001  d: 0000 0000 0000 0005  s: 0000 0000 0000 0000
+i: 0000 0000 0000 000B  f: 0000 0000 0000 0001  d: 0000 0000 0000 0198  s: 0000 0000 0000 0001
+i: 0000 0000 0000 000C  f: 0000 0000 0000 0001  d: 0000 0000 0000 0003  s: 0000 0000 0000 0000
+i: 0000 0000 0000 000D  f: 0000 0000 0000 0001  d: 0000 0000 0000 0118  s: 0000 0000 0000 0001
+i: 0000 0000 0000 000E  f: 0000 0000 0000 0001  d: 0000 0000 0000 0001  s: 0000 0000 0000 0000
+i: 0000 0000 0000 000F  f: 0000 0000 0000 0001  d: 0000 0000 0000 0098  s: 0000 0000 0000 0001
+i: 0000 0000 0000 0010  f: 0000 0000 0000 0000  d: 0000 0000 0000 0000  s: 0000 0000 0000 0000
 END
  }
 
@@ -16590,7 +16640,7 @@ if (0) {
 END
  }
 
-ok 1 for 7..8;
+ok 1 for 8..8;
 
 unlink $_ for qw(hash print2 sde-log.txt sde-ptr-check.out.txt z.txt);          # Remove incidental files
 
