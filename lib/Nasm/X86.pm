@@ -5710,6 +5710,10 @@ sub Nasm::X86::BlockMultiWayTree::find($$)                                      
     my $B = $$p{bs};                                                            # Byte string
     my $F = $$p{first};                                                         # First keys block
     my $K = $$p{key};                                                           # Key to find
+    $$p{found}  ->copy(Cq(zero, 0));                                            # Key not found
+    $$p{data}   ->copy(Cq(zero, 0));                                            # Data not yet found
+    $$p{subTree}->copy(Cq(zero, 0));                                            # Not yet a sub tree
+
 
     my $tree = $F->clone;                                                       # Start at the first key block
     PushR my @save = (k6, k7, r14, r15, zmm28, zmm29, zmm30, zmm31);
@@ -5726,9 +5730,7 @@ sub Nasm::X86::BlockMultiWayTree::find($$)                                      
       my $l = $t->getLengthInKeys($zmmKeys);                                    # Length of the block
       If ($l == 0,
       Then                                                                      # Empty tree so we have not found the key
-       {$$p{found}  ->copy(Cq(zero, 0));                                        # Key not found
-        $$p{subTree}->copy(Cq(zero, 0));                                        # Not a sub tree
-        Jmp $success;                                                           # Return
+       {Jmp $success;                                                           # Return
        });
 
       $l->setMaskFirst($lengthMask);                                            # Set the length mask
@@ -5747,8 +5749,7 @@ sub Nasm::X86::BlockMultiWayTree::find($$)                                      
       my $n = getDFromZmm($zmmNode, 0);                                         # First child empty implies we are on a leaf
       If ($n == 0,
       Then                                                                      # Zero implies that this is a leaf node
-       {$$p{found}->copy(Cq(zero, 0));                                          # Key not found
-        Jmp $success;                                                           # Return
+       {Jmp $success;                                                           # Return
        });
 
       Vpcmpud "$testMask\{$lengthMask}", "zmm$zmmTest", "zmm$zmmKeys", 1;       # Check for greater elements
@@ -5789,7 +5790,7 @@ sub Nasm::X86::BlockMultiWayTree::insertDataOrTree($$$$)                        
     my $K = $$p{key};                                                           # Key  to be inserted
     my $D = $$p{data};                                                          # Data to be inserted
 
-    PushR my @save = (k4, k5, k6, k7, r14, r15, zmm 22..31);
+    PushR my @save = (k4, k5, k6, k7, r13, r14, r15, zmm 22..31);
     $t->getKeysDataNode($F, 31, 30, 29);                                        # Get the first block
 
     my $l = $t->getLengthInKeys(31);                                            # Length of the block
@@ -5837,9 +5838,6 @@ sub Nasm::X86::BlockMultiWayTree::insertDataOrTree($$$$)                        
         KeepFree r14;
         Jmp $success;                                                           # Insert completed successfully
        };
-PrintErrStringNL "AAAA";
-PrintErrRegisterInHex k6;
-$D->errNL;
 
       Vpcmpud "k6{k7}", zmm22, zmm31, 1;                                        # Check for elements that are greater than an existing element
       Ktestw   k6, k6;
@@ -5853,19 +5851,18 @@ $D->errNL;
         Kshiftlw k5, k5, 1;
         Korw     k5, k4, k5;                                                    # Broadcast mask
         Kandnw   k6, k5, k7;                                                    # Expand mask
-        Vpexpandd    "zmm31{k5}", zmm31;                                        # Shift up keys
-        Vpexpandd    "zmm30{k5}", zmm30;                                        # Shift up data
+        Vpexpandd  "zmm31{k5}", zmm31;                                          # Shift up keys
+        Vpexpandd  "zmm30{k5}", zmm30;                                          # Shift up data
        });
 
       Vpbroadcastd "zmm31{k6}", r15d;                                           # Load key
 
-
-      if ($tnd)                                                                 # Insert new sub tree - the  key was not found so there cannot be a sub tree present
+      if ($tnd)                                                                 # Insert new sub tree
        {$D->copy($t->bs->CreateBlockMultiWayTree->first);                       # Create tree and copy offset of first block
-        PushR r15;
-        Kmovq r15, k6;                                                          # Position of key just found
-        $t->setTree(r15, 31);                                                   # Mark new entry as a sub tree
-        PopR r15;
+       }
+      if (1)                                                                    # Expand tree bits to match
+       {Kmovq r13, k6;                                                          # Position of key just found
+        $t->expandTreeBitsWithZeroOrOne($tnd, 31, r13);                         # Mark new entry as a sub tree
        }
 
       $D->setReg(r14);                                                          # Corresponding data
@@ -16484,7 +16481,7 @@ Byte String
 END
  }
 
-latest:
+#latest:
 if (1) {                                                                        # Extended sub tree testing
   my $b  = CreateByteString;
   my $t  = $b->CreateBlockMultiWayTree;
@@ -16520,11 +16517,11 @@ if (1) {                                                                        
 END
  }
 
-latest:
+#latest:
 if (1) {                                                                        # Extended sub tree testing
   my $b  = CreateByteString;
   my $t  = $b->CreateBlockMultiWayTree;
-  my $L  = Vq(loop, 3);
+  my $L  = Vq(loop, 7);
 
   $L->for(sub
    {my ($i, $start, $next, $end) = @_;
@@ -16546,11 +16543,15 @@ PrintErrStringNL "Insert tree";
    });
 
   ok Assemble(debug => 0, eq => <<END);
-i: 0000 0000 0000 0000  f: 0000 0000 0000 0001  d: 0000 0000 0000 0003  s: 0000 0000 0000 0000
-i: 0000 0000 0000 0001  f: 0000 0000 0000 0001  d: 0000 0000 0000 0118  s: 0000 0000 0000 0001
-i: 0000 0000 0000 0002  f: 0000 0000 0000 0001  d: 0000 0000 0000 0001  s: 0000 0000 0000 0000
-i: 0000 0000 0000 0003  f: 0000 0000 0000 0001  d: 0000 0000 0000 0098  s: 0000 0000 0000 0000
-i: 0000 0000 0000 0004  f: 0000 0000 0000 0000  d: 0000 0000 0000 0098  s: 0000 0000 0000 0000
+i: 0000 0000 0000 0000  f: 0000 0000 0000 0001  d: 0000 0000 0000 0007  s: 0000 0000 0000 0000
+i: 0000 0000 0000 0001  f: 0000 0000 0000 0001  d: 0000 0000 0000 0218  s: 0000 0000 0000 0001
+i: 0000 0000 0000 0002  f: 0000 0000 0000 0001  d: 0000 0000 0000 0005  s: 0000 0000 0000 0000
+i: 0000 0000 0000 0003  f: 0000 0000 0000 0001  d: 0000 0000 0000 0198  s: 0000 0000 0000 0001
+i: 0000 0000 0000 0004  f: 0000 0000 0000 0001  d: 0000 0000 0000 0003  s: 0000 0000 0000 0000
+i: 0000 0000 0000 0005  f: 0000 0000 0000 0001  d: 0000 0000 0000 0118  s: 0000 0000 0000 0001
+i: 0000 0000 0000 0006  f: 0000 0000 0000 0001  d: 0000 0000 0000 0001  s: 0000 0000 0000 0000
+i: 0000 0000 0000 0007  f: 0000 0000 0000 0001  d: 0000 0000 0000 0098  s: 0000 0000 0000 0001
+i: 0000 0000 0000 0008  f: 0000 0000 0000 0000  d: 0000 0000 0000 0000  s: 0000 0000 0000 0000
 END
  }
 
