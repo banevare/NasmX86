@@ -953,7 +953,7 @@ sub Nasm::X86::Sub::call($%)                                                    
     my $n = ref($p) ? $p->name : $p;
     defined($n) or confess "No name or variable";
     my $v = ref($p) ? $p       : shift @parameters;
-    unless ($sub->in->{$n} or $sub->out->{$n} or $sub->io->{$n})
+    unless ($sub->in->{$n} or $sub->out->{$n} or $sub->io->{$n})                # Describe valid parameters using a table
      {my @t;
       push @t, map {[q(in),  $_]} keys $sub->in ->%*;
       push @t, map {[q(io),  $_]} keys $sub->io ->%*;
@@ -990,6 +990,16 @@ sub cr(&@)                                                                      
   ReorderSyscallRegisters   @registers;
   &$body;
   UnReorderSyscallRegisters @registers;
+ }
+
+sub Comment2(@)                                                                 # Insert a comment into the assembly code
+ {my (@comment) = @_;                                                           # Text of comment
+  my $c = join "", @comment;
+  eval {confess};
+  my $p = dump($@);
+  push @text, <<END;
+; $c  $p
+END
  }
 
 sub Comment(@)                                                                  # Insert a comment into the assembly code
@@ -5759,7 +5769,7 @@ sub Nasm::X86::BlockMultiWayTree::find($$)                                      
  } # find
 
 sub Nasm::X86::BlockMultiWayTree::insertDataOrTree($$$$)                        # Insert either a key, data pair into the tree or create a sub tree at the specified key (if it does not already exist) and return the offset of the first block of the sub tree in the data variable.
- {my ($t, $first, $key, $data) = @_;                                            # Block multi way tree descriptor, variable addressing created sub tree, key as a dword, data as a dword
+ {my ($t, $tnd, $key, $data) = @_;                                              # Block multi way tree descriptor, 0 - data or 1 - tree, key as a dword, data as a dword
   @_ >= 2 or confess;
   my $b = $t->bs;                                                               # Underlying byte string
   my $W = RegisterSize zmm0;                                                    # The size of a block
@@ -5779,15 +5789,15 @@ sub Nasm::X86::BlockMultiWayTree::insertDataOrTree($$$$)                        
     my $l = $t->getLengthInKeys(31);                                            # Length of the block
     If ($l == 0,                                                                # Check for  empty tree.
     Then                                                                        # Empty tree
-     {$K->putDIntoZmm      (31, 0);                                             # Write key
+     {$K->putDIntoZmm    (31, 0);                                               # Write key
       $t->putLengthInKeys(31, Cq(one, 1));                                      # Set the length of the block
-      if ($first)                                                               # Create and mark key as addressing a sub tree
-       {my $t = $t->bs->CreateBlockMultiWayTree;                                # Create sub tree
-        $D->copy($t->first);                                                    # Copy address of first  block
+      if ($tnd)                                                                 # Create and mark key as addressing a sub tree
+       {my $T = $t->bs->CreateBlockMultiWayTree;                                # Create sub tree in the same byte string as parent tree
+        $D->copy($T->first);                                                    # Copy address of first  block
         Mov r15, 1;
-        $t->setTree(r15,  31);                                                  # Mark this key as addressing a tree
+        $T->setTree(r15,  31);                                                  # Mark this key as addressing a tree
        }
-      $D->putDIntoZmm      (30, 0);                                             # Write data
+      $D->putDIntoZmm    (30, 0);                                               # Write data
       $t->putKeysData($F, 31, 30);                                              # Write the data block back into the underlying byte string
       Jmp $success;                                                             # Insert completed successfully
      });
@@ -5802,7 +5812,7 @@ sub Nasm::X86::BlockMultiWayTree::insertDataOrTree($$$$)                        
       Vpcmpud "k6{k7}", zmm22, zmm31, 0;                                        # Check for equal key
       Ktestd k6, k6;                                                            # Check whether a matching key was found - the operation clears the zero flag if the register is not zero
       IfNz                                                                      # Found the key so we just update the data field
-       {if ($first)                                                             # Insert sub tree if requested
+       {if ($tnd)                                                               # Insert sub tree if requested
          {Kmovq r15, k6;                                                        # Position of key just found
           $t->isTree(r15, 31);                                                  # Set the zero flag to indicate whether the existing data element is in fact a tree
           IfNz                                                                  # If the data element is already a tree then get its value and return it in the data variable
@@ -5840,7 +5850,7 @@ sub Nasm::X86::BlockMultiWayTree::insertDataOrTree($$$$)                        
 
       Vpbroadcastd "zmm31{k6}", r15d;                                           # Load key
 
-      if ($first)                                                               # Insert new sub tree - the  key was not found so there cannot be a sub tree present
+      if ($tnd)                                                                 # Insert new sub tree - the  key was not found so there cannot be a sub tree present
        {$D->copy($t->bs->CreateBlockMultiWayTree->first);                       # Create tree and copy offset of first block
         PushR r15;
         Kmovq r15, k6;                                                          # Position of key just found
@@ -5909,11 +5919,11 @@ sub Nasm::X86::BlockMultiWayTree::insertDataOrTree($$$$)                        
     SetLabel $success;                                                          # Insert completed successfully
     PopR @save;
    }
-   name => "Nasm::X86::BlockMultiWayTree::insertDataOrTree_$first",
-   in   => [qw(bs first key)], io => [qw(data )];                    # Data either supplies the data or returns the offset of the sub tree
+   name => "Nasm::X86::BlockMultiWayTree::insertDataOrTree_$tnd",
+   in   => [qw(bs first key)], io => [qw(data)];                                # Data either supplies the data or returns the offset of the sub tree
 
-  $s->call($t->address, first => $t->first, key => $key, data => $data);
-
+  $s->call($t->address, first => $t->first, key => $key,
+    data => $tnd ? $t->data : $data);
  } # insert
 
 sub Nasm::X86::BlockMultiWayTree::insert($$$)                                   # Insert a dword into into the specified tree at the specified key.
@@ -5922,11 +5932,10 @@ sub Nasm::X86::BlockMultiWayTree::insert($$$)                                   
   $t->insertDataOrTree(0, $key, $data)                                          # Insert data
  }
 
-sub Nasm::X86::BlockMultiWayTree::insertTree($$$)                               # Insert a sub tree into the specified tree tree under the specified key and return a descriptor for it.  If the tree already exists, return a descriptor for it.
- {my ($t, $key, $data) = @_;                                                    # Block multi way tree descriptor, key as a dword, offset to data as a dword
-  @_ == 3 or confess;
-  my $first = Vq(first);                                                        # Variable containing offset to first block of the sub tree in the byte string
-  $t->insertDataOrTree(1, $key, $data)
+sub Nasm::X86::BlockMultiWayTree::insertTree($$)                                # Insert a sub tree into the specified tree tree under the specified key and return a descriptor for it.  If the tree already exists, return a descriptor for it.
+ {my ($t, $key) = @_;                                                           # Block multi way tree descriptor, key as a dword
+  @_ == 2 or confess;
+  $t->insertDataOrTree(1, $key, $t->data);
  }
 
 sub Nasm::X86::BlockMultiWayTree::getKeysData($$$$)                             # Load the keys and data blocks for a node
@@ -16030,8 +16039,8 @@ key: 0000 0000 0000 0018 data: 0000 0000 0000 0118 found: 0000 0000 0000 0001 da
 Found: 0000 0000 0000 0000
 Found: 0000 0000 0000 0001
 END
+exit;
  }
-
 
 #latest:
 if (1) {
@@ -16283,7 +16292,7 @@ if (1) {                                                                        
   my $k = Vq(key,  15);
   my $d = Vq(data, 14);
 
-  for my $i(1..11)                                                              # Create 8 new sub trees
+  for my $i(1..11)                                                              # Create new sub trees
    {$t->insertTree(Vq(key,  $i), $d);  $d->outNL;                               # Retrieve the sub tree rather than creating a new new sub tree
    }
 
@@ -16441,6 +16450,46 @@ Byte String
 0440: 0000 0000 0000 00000000 0000 0000 00000000 0000 1800 00000100 0000 0200 00000300 0000 0400 00000500 0000 0600 00000700 0000 0000 00000000 0000 0000 0000
 0480: 0000 0000 0000 00000000 0000 0000 00000700 2A00 9804 00000200 0000 9800 00000600 0000 1801 00000A00 0000 9801 00000E00 0000 0000 00000000 0000 0000 0000
 04C0: 0000 0000 0000 00000000 0000 0000 00001800 0000 D804 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+END
+ }
+
+#latest:
+if (0) {                                                                        # Extended sub tree testing
+  my $b  = CreateByteString;
+  my $t  = $b->CreateBlockMultiWayTree;
+  my $L  = Vq(loop, 9);
+  my $L2 = $L / 2;
+
+  $t->insert(Vq(key, 1), Vq(data, 15));
+  $t->find(Vq(key, 1));
+  $t->found->out('  f: '); $t->data->out('  d: '); $t->subTree->outNL('  s: ');
+
+  $b->dump;
+
+#  $L->for(sub
+#   {my ($i, $start, $next, $end) = @_;
+#    my $l = $L - $i;
+#    If ($i % 2, sub
+#     {$t->insert($i, $l);
+#      $t->insertTree($l);
+#     },
+#    sub
+#     {
+#       $t->insert($l, $i);
+#$i->out(' i: ');
+#$l->outNL('  l: ');
+#Jmp $end;
+#      $t->insertTree($i);
+#     });
+#   });
+#
+#  $L->for(sub
+#   {my ($i, $start, $next, $end) = @_;
+#    $t->find($i);
+#    $i->out('i: '); $t->found->out('  f: '); $t->data->out('  d: '); $t->subTree->outNL('  s: ');
+#   });
+
+  ok Assemble(debug => 0, eq => <<END);                                         # Tree bits at 0x50
 END
  }
 
