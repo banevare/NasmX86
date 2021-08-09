@@ -462,6 +462,12 @@ sub InsertOneIntoRegisterAtPoint($$)                                            
   Or $in, $point;                                                               # Make the zero a one
  }
 
+sub LoadZmm($@)                                                                 # Load a numbered zmm with the specified bytes
+ {my ($zmm, @bytes) = @_;                                                       # Numbered zmm, bytes
+  my $b = Rb(@bytes);
+  Vmovdqu8 "zmm$zmm", "[$b]";
+ }
+
 #D2 Save and Restore                                                            # Saving and restoring registers via the stack
 
 my @syscallSequence = qw(rax rdi rsi rdx r10 r8 r9);                            # The parameter list sequence for system calls
@@ -5831,6 +5837,9 @@ sub Nasm::X86::BlockMultiWayTree::insertDataOrTree($$$$)                        
         KeepFree r14;
         Jmp $success;                                                           # Insert completed successfully
        };
+PrintErrStringNL "AAAA";
+PrintErrRegisterInHex k6;
+$D->errNL;
 
       Vpcmpud "k6{k7}", zmm22, zmm31, 1;                                        # Check for elements that are greater than an existing element
       Ktestw   k6, k6;
@@ -5849,6 +5858,7 @@ sub Nasm::X86::BlockMultiWayTree::insertDataOrTree($$$$)                        
        });
 
       Vpbroadcastd "zmm31{k6}", r15d;                                           # Load key
+
 
       if ($tnd)                                                                 # Insert new sub tree - the  key was not found so there cannot be a sub tree present
        {$D->copy($t->bs->CreateBlockMultiWayTree->first);                       # Create tree and copy offset of first block
@@ -5883,7 +5893,7 @@ sub Nasm::X86::BlockMultiWayTree::insertDataOrTree($$$$)                        
     KeepFree zmm 29;
     $t->getKeysDataNode($offset, 31, 30, 29);
 
-    If $compare == 0,
+    If $compare == 0,                                                           # Duplicate key
     Then                                                                        # Found an equal key so update the data
      {$D->putDIntoZmm(30, $index * $t->width);                                  # Update data at key
       $t->putKeysDataNode($offset, 31, 30, 29);                                 # Rewrite data and keys
@@ -6202,6 +6212,30 @@ sub Nasm::X86::BlockMultiWayTree::putTreeBits($$$)                              
  {my ($t, $zmm, $register) = @_;                                                # Tree descriptor, numbered zmm, target register
   putIntoZmm $register, w, $zmm, $t->treeBits;
   And $register, $t->treeBitsMask;
+ }
+
+sub Nasm::X86::BlockMultiWayTree::expandTreeBitsWithZeroOrOne($$$$)             # Insert a zero or one into the tree bits field in the numbered zmm at the specified point
+ {my ($t, $onz, $zmm, $point) = @_;                                             # Tree descriptor, 0 - zero or 1 - one, numbered zmm, register indicating point
+  PushR my @save = my ($bits) = ChooseRegisters(1, $point);                     # Tree bits register
+  $t->getTreeBits($zmm, $bits);                                                 # Get tree bits
+  if ($onz)
+   {InsertOneIntoRegisterAtPoint($point, $bits);                                # Insert a one into the tree bits at the indicated location
+   }
+  else
+   {InsertZeroIntoRegisterAtPoint($point, $bits);                               # Insert a zero into the tree bits at the indicated location
+   }
+  $t->putTreeBits($zmm, $bits);                                                 # Put tree bits
+  PopR @save;
+ }
+
+sub Nasm::X86::BlockMultiWayTree::expandTreeBitsWithZero($$$)                   # Insert a zero into the tree bits field in the numbered zmm at the specified point
+ {my ($t, $zmm, $point) = @_;                                                   # Tree descriptor, numbered zmm, register indicating point
+  $t->expandTreeBitsWithZeroOrOne(0, $zmm, $point);                             # Insert a zero into the tree bits field in the numbered zmm at the specified point
+ }
+
+sub Nasm::X86::BlockMultiWayTree::expandTreeBitsWithOne($$$)                    # Insert a one into the tree bits field in the numbered zmm at the specified point
+ {my ($t, $zmm, $point) = @_;                                                   # Tree descriptor, numbered zmm, register indicating point
+  $t->expandTreeBitsWithZeroOrOne(1, $zmm, $point);                             # Insert a one into the tree bits field in the numbered zmm at the specified point
  }
 
 #D2 Iteration                                                                   # Iterate through a tree non recursively
@@ -16454,16 +16488,54 @@ latest:
 if (1) {                                                                        # Extended sub tree testing
   my $b  = CreateByteString;
   my $t  = $b->CreateBlockMultiWayTree;
+  LoadZmm(0, (0) x 58, 0xf7, (0) x 5);
+  PrintErrRegisterInHex zmm0;
+
+  Mov r15, 2;
+  $t->expandTreeBitsWithZero(0, r15); PrintOutRegisterInHex zmm0;
+  $t->expandTreeBitsWithZero(0, r15); PrintOutRegisterInHex zmm0;
+  $t->expandTreeBitsWithZero(0, r15); PrintOutRegisterInHex zmm0;
+  $t->expandTreeBitsWithZero(0, r15); PrintOutRegisterInHex zmm0;
+
+  LoadZmm(1, (0) x 58, 0xf0, (0) x 5);
+  PrintOutRegisterInHex zmm1;
+
+  Mov r15, 2;
+  $t->expandTreeBitsWithOne(1, r15); PrintOutRegisterInHex zmm1;
+  $t->expandTreeBitsWithOne(1, r15); PrintOutRegisterInHex zmm1;
+  $t->expandTreeBitsWithOne(1, r15); PrintOutRegisterInHex zmm1;
+  $t->expandTreeBitsWithOne(1, r15); PrintOutRegisterInHex zmm1;
+
+
+  ok Assemble(debug => 0, eq => <<END);
+  zmm0: 0000 0000 01ED 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+  zmm0: 0000 0000 03D9 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+  zmm0: 0000 0000 07B1 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+  zmm0: 0000 0000 0F61 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+  zmm1: 0000 0000 00F0 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+  zmm1: 0000 0000 01E2 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+  zmm1: 0000 0000 03C6 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+  zmm1: 0000 0000 078E 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+  zmm1: 0000 0000 0F1E 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+END
+ }
+
+latest:
+if (1) {                                                                        # Extended sub tree testing
+  my $b  = CreateByteString;
+  my $t  = $b->CreateBlockMultiWayTree;
   my $L  = Vq(loop, 3);
 
   $L->for(sub
    {my ($i, $start, $next, $end) = @_;
     my $l = $L - $i;
     If ($i % 2 == 0, sub
-     {$t->insert($i, $l);
+     {
+$i->err('Insert data:'); $l->errNL("  tree:");
+PrintErrStringNL "Insert data";
+      $t->insert($i, $l);
+PrintErrStringNL "Insert tree";
       $t->insertTree($l);
-$i->errNL;
-$l->errNL;
      });
    });
 
@@ -16488,7 +16560,7 @@ if (0) {
 END
  }
 
-ok 1 for 6..8;
+ok 1 for 7..8;
 
 unlink $_ for qw(hash print2 sde-log.txt sde-ptr-check.out.txt z.txt);          # Remove incidental files
 
