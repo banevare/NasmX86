@@ -16450,43 +16450,35 @@ Byte String
 END
  }
 
-#latest:
-if (0) {                                                                        # Extended sub tree testing
+latest:
+if (1) {                                                                        # Extended sub tree testing
   my $b  = CreateByteString;
   my $t  = $b->CreateBlockMultiWayTree;
-  my $L  = Vq(loop, 9);
-  my $L2 = $L / 2;
+  my $L  = Vq(loop, 3);
 
-  $t->insert(Vq(key, 1), Vq(data, 15));
-  $t->find(Vq(key, 1));
-  $t->found->out('  f: '); $t->data->out('  d: '); $t->subTree->outNL('  s: ');
+  $L->for(sub
+   {my ($i, $start, $next, $end) = @_;
+    my $l = $L - $i;
+    If ($i % 2 == 0, sub
+     {$t->insert($i, $l);
+      $t->insertTree($l);
+$i->errNL;
+$l->errNL;
+     });
+   });
 
-  $b->dump;
+  ($L+2)->for(sub
+   {my ($i, $start, $next, $end) = @_;
+    $t->find($i);
+    $i->out('i: '); $t->found->out('  f: '); $t->data->out('  d: '); $t->subTree->outNL('  s: ');
+   });
 
-#  $L->for(sub
-#   {my ($i, $start, $next, $end) = @_;
-#    my $l = $L - $i;
-#    If ($i % 2, sub
-#     {$t->insert($i, $l);
-#      $t->insertTree($l);
-#     },
-#    sub
-#     {
-#       $t->insert($l, $i);
-#$i->out(' i: ');
-#$l->outNL('  l: ');
-#Jmp $end;
-#      $t->insertTree($i);
-#     });
-#   });
-#
-#  $L->for(sub
-#   {my ($i, $start, $next, $end) = @_;
-#    $t->find($i);
-#    $i->out('i: '); $t->found->out('  f: '); $t->data->out('  d: '); $t->subTree->outNL('  s: ');
-#   });
-
-  ok Assemble(debug => 0, eq => <<END);                                         # Tree bits at 0x50
+  ok Assemble(debug => 0, eq => <<END);
+i: 0000 0000 0000 0000  f: 0000 0000 0000 0001  d: 0000 0000 0000 0003  s: 0000 0000 0000 0000
+i: 0000 0000 0000 0001  f: 0000 0000 0000 0001  d: 0000 0000 0000 0118  s: 0000 0000 0000 0001
+i: 0000 0000 0000 0002  f: 0000 0000 0000 0001  d: 0000 0000 0000 0001  s: 0000 0000 0000 0000
+i: 0000 0000 0000 0003  f: 0000 0000 0000 0001  d: 0000 0000 0000 0098  s: 0000 0000 0000 0000
+i: 0000 0000 0000 0004  f: 0000 0000 0000 0000  d: 0000 0000 0000 0098  s: 0000 0000 0000 0000
 END
  }
 
@@ -16496,7 +16488,7 @@ if (0) {
 END
  }
 
-ok 1 for 5..8;
+ok 1 for 6..8;
 
 unlink $_ for qw(hash print2 sde-log.txt sde-ptr-check.out.txt z.txt);          # Remove incidental files
 
