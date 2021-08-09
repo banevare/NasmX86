@@ -5811,6 +5811,7 @@ sub Nasm::X86::BlockMultiWayTree::insertDataOrTree($$$$)                        
     my $F = $$p{first};                                                         # First keys block
     my $K = $$p{key};                                                           # Key  to be inserted
     my $D = $$p{data};                                                          # Data to be inserted
+$K->errNL('key at start: ');
 
     PushR my @save = (k4, k5, k6, k7, r13, r14, r15, zmm 22..31);
     $t->getKeysDataNode($F, 31, 30, 29);                                        # Get the first block
@@ -5823,7 +5824,8 @@ sub Nasm::X86::BlockMultiWayTree::insertDataOrTree($$$$)                        
       if ($tnd)                                                                 # Create and mark key as addressing a sub tree
        {my $T = $t->bs->CreateBlockMultiWayTree;                                # Create sub tree in the same byte string as parent tree
         $D->copy($T->first);                                                    # Copy address of first  block
-        Mov r15, 1;
+$D->errNL('1: ');
+        Mov r15, 1;                                                             # Indicate first position
         $T->setTree(r15,  31);                                                  # Mark this key as addressing a tree
        }
       $D->putDIntoZmm    (30, 0);                                               # Write data
@@ -5854,6 +5856,7 @@ sub Nasm::X86::BlockMultiWayTree::insertDataOrTree($$$$)                        
            };
           $D->copy($t->bs->CreateBlockMultiWayTree->first)                      # Create tree and copy offset of first  block
          }
+$D->errNL('2: ');
         $D->setReg(r14);                                                        # Key to search for
         Vpbroadcastd "zmm30{k6}", r14d;                                         # Load data
         $t->putKeysData($F, 31, 30);                                            # Write the data block back into the underlying byte string
@@ -5886,6 +5889,7 @@ sub Nasm::X86::BlockMultiWayTree::insertDataOrTree($$$$)                        
        {Kmovq r13, k6;                                                          # Position of key just found
         $t->expandTreeBitsWithZeroOrOne($tnd, 31, r13);                         # Mark new entry as a sub tree
        }
+$K->err('key: '); $D->errNL('  3: ');
 
       $D->setReg(r14);                                                          # Corresponding data
       Vpbroadcastd "zmm30{k6}", r14d;                                           # Load data
@@ -5925,7 +5929,6 @@ sub Nasm::X86::BlockMultiWayTree::insertDataOrTree($$$$)                        
      {If $compare > 0,
       Then                                                                      # Position at which to insert new key if it is greater than the indexed key
        {++$index;
-##?     Shl r13, 1;                                                             # Move point up to match
        };
 
       my $length = $t->getLengthInKeys(31);                                     # Number of keys
@@ -5940,6 +5943,8 @@ sub Nasm::X86::BlockMultiWayTree::insertDataOrTree($$$$)                        
        };
 
       $t->expandTreeBitsWithZeroOrOne($tnd, 31, r13);                           # Mark inserted key as referring to a tree or not
+
+      $D->copy($t->bs->CreateBlockMultiWayTree->first) if $tnd;                  # Create tree and place its offset into data field
 
       ClearRegisters k7;
       $index->setMaskBit(k7);                                                   # Set bit at insertion point
@@ -16569,53 +16574,7 @@ if (1) {                                                                        
 
   ok Assemble(debug => 0, eq => <<END);
 i: 0000 0000 0000 0000  f: 0000 0000 0000 0001  d: 0000 0000 0000 000F  s: 0000 0000 0000 0000
-i: 0000 0000 0000 0001  f: 0000 0000 0000 0001  d: 0000 0000 0000 0398  s: 0000 0000 0000 0001
-i: 0000 0000 0000 0002  f: 0000 0000 0000 0001  d: 0000 0000 0000 000D  s: 0000 0000 0000 0000
-i: 0000 0000 0000 0003  f: 0000 0000 0000 0001  d: 0000 0000 0000 0398  s: 0000 0000 0000 0001
-i: 0000 0000 0000 0004  f: 0000 0000 0000 0001  d: 0000 0000 0000 000B  s: 0000 0000 0000 0000
-i: 0000 0000 0000 0005  f: 0000 0000 0000 0001  d: 0000 0000 0000 0318  s: 0000 0000 0000 0001
-i: 0000 0000 0000 0006  f: 0000 0000 0000 0001  d: 0000 0000 0000 0009  s: 0000 0000 0000 0000
-i: 0000 0000 0000 0007  f: 0000 0000 0000 0001  d: 0000 0000 0000 0298  s: 0000 0000 0000 0001
-i: 0000 0000 0000 0008  f: 0000 0000 0000 0001  d: 0000 0000 0000 0007  s: 0000 0000 0000 0000
-i: 0000 0000 0000 0009  f: 0000 0000 0000 0001  d: 0000 0000 0000 0218  s: 0000 0000 0000 0001
-i: 0000 0000 0000 000A  f: 0000 0000 0000 0001  d: 0000 0000 0000 0005  s: 0000 0000 0000 0000
-i: 0000 0000 0000 000B  f: 0000 0000 0000 0001  d: 0000 0000 0000 0198  s: 0000 0000 0000 0001
-i: 0000 0000 0000 000C  f: 0000 0000 0000 0001  d: 0000 0000 0000 0003  s: 0000 0000 0000 0000
-i: 0000 0000 0000 000D  f: 0000 0000 0000 0001  d: 0000 0000 0000 0118  s: 0000 0000 0000 0001
-i: 0000 0000 0000 000E  f: 0000 0000 0000 0001  d: 0000 0000 0000 0001  s: 0000 0000 0000 0000
-i: 0000 0000 0000 000F  f: 0000 0000 0000 0001  d: 0000 0000 0000 0098  s: 0000 0000 0000 0001
-i: 0000 0000 0000 0010  f: 0000 0000 0000 0000  d: 0000 0000 0000 0000  s: 0000 0000 0000 0000
-END
- }
-
-latest:
-if (1) {                                                                        # Extended sub tree testing
-  my $b  = CreateByteString;
-  my $t  = $b->CreateBlockMultiWayTree;
-  my $L  = Vq(loop, 15);
-
-  $L->for(sub
-   {my ($i, $start, $next, $end) = @_;
-    my $l = $L - $i;
-    If ($i % 2 == 0, sub
-     {
-$i->err('Insert data:'); $l->errNL("  tree:");
-PrintErrStringNL "Insert data";
-      $t->insert($i, $l);
-PrintErrStringNL "Insert tree";
-      $t->insertTree($l);
-     });
-   });
-
-  ($L+2)->for(sub
-   {my ($i, $start, $next, $end) = @_;
-    $t->find($i);
-    $i->out('i: '); $t->found->out('  f: '); $t->data->out('  d: '); $t->subTree->outNL('  s: ');
-   });
-
-  ok Assemble(debug => 0, eq => <<END);
-i: 0000 0000 0000 0000  f: 0000 0000 0000 0001  d: 0000 0000 0000 000F  s: 0000 0000 0000 0000
-i: 0000 0000 0000 0001  f: 0000 0000 0000 0001  d: 0000 0000 0000 0398  s: 0000 0000 0000 0001
+i: 0000 0000 0000 0001  f: 0000 0000 0000 0001  d: 0000 0000 0000 05D8  s: 0000 0000 0000 0001
 i: 0000 0000 0000 0002  f: 0000 0000 0000 0001  d: 0000 0000 0000 000D  s: 0000 0000 0000 0000
 i: 0000 0000 0000 0003  f: 0000 0000 0000 0001  d: 0000 0000 0000 0398  s: 0000 0000 0000 0001
 i: 0000 0000 0000 0004  f: 0000 0000 0000 0001  d: 0000 0000 0000 000B  s: 0000 0000 0000 0000
@@ -16640,7 +16599,7 @@ if (0) {
 END
  }
 
-ok 1 for 8..8;
+ok 1 for 7..8;
 
 unlink $_ for qw(hash print2 sde-log.txt sde-ptr-check.out.txt z.txt);          # Remove incidental files
 
