@@ -2123,35 +2123,57 @@ sub Nasm::X86::Variable::setMaskFirst($$)                                       
  {my ($length, $mask) = @_;                                                     # Variable containing length to set, mask register
   @_ == 2 or confess;
 
-  PushR my @save = (r14, r15);
-  Mov r15, -1;
-  $length->setReg(r14);
-  Bzhi r15, r15, r14;
-  Kmovq $mask, r15;
+  PushR my @save = my ($l, $b) = ChooseRegisters(2, $mask);                     # Choose two registers not the mask register
+  Mov $b, -1;
+  $length->setReg($l);
+  Bzhi $b, $b, $l;
+  Kmovq $mask, $b if $mask =~ m(\Ak)i;                                          # Set mask register if provided
+  Mov   $mask, $b if $mask =~ m(\Ar)i;                                          # Set general purpose register if provided
   PopR @save;
  }
 
 sub Nasm::X86::Variable::setMaskBit($$)                                         # Set a bit in the specified mask register retaining the other bits
- {my ($length, $mask) = @_;                                                     # Variable containing bit position to set, mask register
+ {my ($index, $mask) = @_;                                                      # Variable containing bit position to set, mask register
   @_ == 2 or confess;
-
-  PushR my @save = (r14, r15);
-  Kmovq r15, $mask;
-  $length->setReg(r14);
-  Bts r15, r14;
-  Kmovq $mask, r15;
+  $mask =~ m(\Ak)i or confess "Mask register required";
+  PushR my @save = my ($l, $b) = (r14, r15);
+  Kmovq $b, $mask;
+  $index->setReg($l);
+  Bts $b, $l;
+  Kmovq $mask, $b;                                                              # Set mask register if provided
   PopR @save;
  }
 
 sub Nasm::X86::Variable::clearMaskBit($$)                                       # Clear a bit in the specified mask register retaining the other bits
- {my ($length, $mask) = @_;                                                     # Variable containing bit position to clear, mask register
+ {my ($index, $mask) = @_;                                                      # Variable containing bit position to clear, mask register
+  @_ == 2 or confess;
+  $mask =~ m(\Ak)i or confess "Mask register required";
+
+  PushR my @save = my ($l, $b) = (r14, r15);
+  Kmovq $b, $mask;
+  $index->setReg($l);
+  Btc $b, $l;
+  Kmovq $mask, $b;                                                              # Set mask register if provided
+  PopR @save;
+ }
+
+sub Nasm::X86::Variable::setBit($$)                                             # Set a bit in the specified register retaining the other bits
+ {my ($index, $mask) = @_;                                                      # Variable containing bit position to set, mask register
   @_ == 2 or confess;
 
-  PushR my @save = (r14, r15);
-  Kmovq r15, $mask;
-  $length->setReg(r14);
-  Btc r15, r14;
-  Kmovq $mask, r15;
+  PushR my @save = my ($l) = ChooseRegisters(1, $mask);                         # Choose a register
+  $index->setReg($l);
+  Bts $mask, $l;
+  PopR @save;
+ }
+
+sub Nasm::X86::Variable::clearBit($$)                                       # Clear a bit in the specified mask register retaining the other bits
+ {my ($index, $mask) = @_;                                                      # Variable containing bit position to clear, mask register
+  @_ == 2 or confess;
+
+  PushR my @save = my ($l) = ChooseRegisters(1, $mask);                         # Choose a register
+  $index->setReg($l);
+  Btc $mask, $l;
   PopR @save;
  }
 
@@ -5890,15 +5912,20 @@ sub Nasm::X86::BlockMultiWayTree::insertDataOrTree($$$$)                        
     KeepFree zmm 29;
     $t->getKeysDataNode($offset, 31, 30, 29);
 
+    Mov r13, 0;
+    $index->setBit(r13);                                                        # Set point at the index
+
     If $compare == 0,                                                           # Duplicate key
     Then                                                                        # Found an equal key so update the data
      {$D->putDIntoZmm(30, $index * $t->width);                                  # Update data at key
       $t->putKeysDataNode($offset, 31, 30, 29);                                 # Rewrite data and keys
+      $t->setOrClearTree($tnd, r13, 31);                                       # Set or clear tree bit as necessary
      },
     Else                                                                        # We have room for the insert because each block has been split to make it non full
      {If $compare > 0,
       Then                                                                      # Position at which to insert new key if it is greater than the indexed key
        {++$index;
+        Shl r13, 1;                                                             # Move point up to match
        };
 
       my $length = $t->getLengthInKeys(31);                                     # Number of keys
@@ -5921,6 +5948,8 @@ sub Nasm::X86::BlockMultiWayTree::insertDataOrTree($$$$)                        
       $t->putLengthInKeys(31, $length + 1);                                     # Set the new length of the block
       $t->putKeysDataNode($offset, 31, 30, 29);                                 # Rewrite data and keys
       $t->splitNode($B, $offset, $K);                                           # Split if the leaf has got too big
+
+      $t->expandTreeBitsWithZeroOrOne($tnd, 31, r13);                           # Mark inserted key as referring to a tree or not
      };
 
     SetLabel $success;                                                          # Insert completed successfully
