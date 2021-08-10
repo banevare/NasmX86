@@ -1557,7 +1557,7 @@ sub Nasm::X86::Variable::copy($$)                                               
   confess "Need more code";
  }
 
-sub Nasm::X86::Variable::copyZF($$)                                             # Copy the current state of the zero flag into a variable
+sub Nasm::X86::Variable::copyZF($)                                              # Copy the current state of the zero flag into a variable
  {my ($var) = @_;                                                               # Variable
   @_ == 1 or confess;
 
@@ -1576,7 +1576,7 @@ sub Nasm::X86::Variable::copyZF($$)                                             
   confess "Need more code";
  }
 
-sub Nasm::X86::Variable::copyZFInverted($$)                                     # Copy the opposite of the current state of the zero flag into a variable
+sub Nasm::X86::Variable::copyZFInverted($)                                      # Copy the opposite of the current state of the zero flag into a variable
  {my ($var) = @_;                                                               # Variable
   @_ == 1 or confess;
 
@@ -5370,7 +5370,7 @@ sub Nasm::X86::BlockMultiWayTree::transferTreeBitsFromParent($$$$)              
   PopR @save;
  }
 
-sub Nasm::X86::BlockMultiWayTree::transferTreeBitsFromLeftOrRight($$$$$)        #P Transfer tree bits when splitting a full left or right node
+sub Nasm::X86::BlockMultiWayTree::transferTreeBitsFromLeftOrRight($$$$$$)       #P Transfer tree bits when splitting a full left or right node
  {my ($b, $rnl, $point, $parent, $left, $right) = @_;                           # Block multi way tree descriptor, 0 - left 1 - right, register indicating point of left in parent, numbered parent zmm, numbered left zmm, numbered right zmm
 
   PushR my @save = my ($whole, $half, $bits) = ChooseRegisters(3, $point);
@@ -5393,12 +5393,12 @@ sub Nasm::X86::BlockMultiWayTree::transferTreeBitsFromLeftOrRight($$$$$)        
   PopR @save;
  }
 
-sub Nasm::X86::BlockMultiWayTree::transferTreeBitsFromLeft($$$$)                #P Transfer tree bits when splitting a full left node
+sub Nasm::X86::BlockMultiWayTree::transferTreeBitsFromLeft($$$$$)               #P Transfer tree bits when splitting a full left node
  {my ($b, $point, $parent, $left, $right) = @_;                                 # Block multi way tree descriptor, register indicating point of left in parent, numbered parent zmm, numbered left zmm, numbered right zmm
   $b->transferTreeBitsFromLeftOrRight(0, $point, $parent, $left, $right);
  }
 
-sub Nasm::X86::BlockMultiWayTree::transferTreeBitsFromRight($$$$)               #P Transfer tree bits when splitting a full right node
+sub Nasm::X86::BlockMultiWayTree::transferTreeBitsFromRight($$$$$)              #P Transfer tree bits when splitting a full right node
  {my ($b, $point, $parent, $left, $right) = @_;                                 # Block multi way tree descriptor, register indicating point of right in parent, numbered parent zmm, numbered left zmm, numbered right zmm
   $b->transferTreeBitsFromLeftOrRight(1, $point, $parent, $left, $right);
  }
@@ -5631,13 +5631,13 @@ sub Nasm::X86::BlockMultiWayTree::splitFullLeftOrRightNode($$)                  
  } # splitFullLeftOrRightNode
 
 sub Nasm::X86::BlockMultiWayTree::splitFullLeftNode($)                          #P Split a full left node block held in 28..26 whose parent is in 31..29 and place the new right block in 25..23. The parent is assumed to be not full. The loop and length fields are assumed to be authoritative and hence are preserved.
- {my ($t) = @_;                                                                 # Block multi way tree descriptor, byte string locator
+ {my ($t) = @_;                                                                 # Block multi way tree descriptor
   @_ == 1 or confess;
   $t->splitFullLeftOrRightNode(0);
  }
 
 sub Nasm::X86::BlockMultiWayTree::splitFullRightNode($)                         #P Split a full right node block held in 25..23 whose parent is in 31..29 and place the new left block in 28..26.  The loop and length fields are assumed to be authoritative and hence are preserved.
- {my ($t) = @_;                                                                 # Block multi way tree descriptor, byte string locator
+ {my ($t) = @_;                                                                 # Block multi way tree descriptor
   @_ == 1 or confess;
   $t->splitFullLeftOrRightNode(1);
  }
@@ -7430,6 +7430,38 @@ Add zmm to the front of a list of register expressions
      Parameter  Description
   1  @r         Register numbers
 
+=head2 ChooseRegisters($number, @registers)
+
+Choose the specified numbers of registers excluding those on the specified list
+
+     Parameter   Description
+  1  $number     Number of registers needed
+  2  @registers  Registers not to choose
+
+=head2 InsertZeroIntoRegisterAtPoint($point, $in)
+
+Insert a zero into the specified register at the point indicated by another register
+
+     Parameter  Description
+  1  $point     Register with a single 1 at the insertion point
+  2  $in        Register to be inserted into.
+
+=head2 InsertOneIntoRegisterAtPoint($point, $in)
+
+Insert a one into the specified register at the point indicated by another register
+
+     Parameter  Description
+  1  $point     Register with a single 1 at the insertion point
+  2  $in        Register to be inserted into.
+
+=head2 LoadZmm($zmm, @bytes)
+
+Load a numbered zmm with the specified bytes
+
+     Parameter  Description
+  1  $zmm       Numbered zmm
+  2  @bytes     Bytes
+
 =head2 Save and Restore
 
 Saving and restoring registers via the stack
@@ -8410,12 +8442,12 @@ Free registers so that they can be reused
 
 Operations on mask registers
 
-=head3 LoadConstantIntoMaskRegister($reg, $value)
+=head3 LoadConstantIntoMaskRegister($mask, $value)
 
-Load a constant into a mask register
+Set a mask register equal to a constant.
 
      Parameter  Description
-  1  $reg       Mask register to load
+  1  $mask      Mask register to load
   2  $value     Constant to load
 
 B<Example:>
@@ -8470,6 +8502,15 @@ B<Example:>
   0123 4567
   END
 
+
+=head3 LoadBitsIntoMaskRegister($mask, $prefix, @values)
+
+Load a bit string specification into a mask register
+
+     Parameter  Description
+  1  $mask      Mask register to load
+  2  $prefix    Prefix bits
+  3  @values    +n 1 bits -n 0 bits
 
 =head1 Structured Programming
 
@@ -8538,7 +8579,7 @@ If not equal execute the then body else the else body
 
 =head2 IfNz($then, $else)
 
-If the zero is not set then execute the then body else the else body
+If the zero flag is not set then execute the then body else the else body
 
      Parameter  Description
   1  $then      Then - required
@@ -8546,7 +8587,23 @@ If the zero is not set then execute the then body else the else body
 
 =head2 IfZ($then, $else)
 
-If the zero is set then execute the then body else the else body
+If the zero flag is set then execute the then body else the else body
+
+     Parameter  Description
+  1  $then      Then - required
+  2  $else      Else - optional
+
+=head2 IfC($then, $else)
+
+If the carry flag is set then execute the then body else the else body
+
+     Parameter  Description
+  1  $then      Then - required
+  2  $else      Else - optional
+
+=head2 IfNc($then, $else)
+
+If the carry flag is not set then execute the then body else the else body
 
      Parameter  Description
   1  $then      Then - required
@@ -8693,6 +8750,13 @@ Call a subroutine with a reordering of the registers.
      Parameter   Description
   1  $body       Code to execute with reordered registers
   2  @registers  Registers to reorder
+
+=head2 Comment2(@comment)
+
+Insert a comment into the assembly code
+
+     Parameter  Description
+  1  @comment   Text of comment
 
 =head2 Comment(@comment)
 
@@ -9253,6 +9317,56 @@ Copy one variable into another
   1  $left      Left variable
   2  $right     Right variable
 
+=head3 Nasm::X86::Variable::copyZF($var)
+
+Copy the current state of the zero flag into a variable
+
+     Parameter  Description
+  1  $var       Variable
+
+B<Example:>
+
+
+    Mov r15, 1;
+    my $z = Vq(zf);
+    Cmp r15, 1; $z->copyZF;         $z->outNL;
+    Cmp r15, 2; $z->copyZF;         $z->outNL;
+    Cmp r15, 1; $z->copyZFInverted; $z->outNL;
+    Cmp r15, 2; $z->copyZFInverted; $z->outNL;
+
+    is_deeply Assemble(debug=>0), <<END;
+  zf: 0000 0000 0000 0001
+  zf: 0000 0000 0000 0000
+  zf: 0000 0000 0000 0000
+  zf: 0000 0000 0000 0001
+  END
+
+
+=head3 Nasm::X86::Variable::copyZFInverted($var)
+
+Copy the opposite of the current state of the zero flag into a variable
+
+     Parameter  Description
+  1  $var       Variable
+
+B<Example:>
+
+
+    Mov r15, 1;
+    my $z = Vq(zf);
+    Cmp r15, 1; $z->copyZF;         $z->outNL;
+    Cmp r15, 2; $z->copyZF;         $z->outNL;
+    Cmp r15, 1; $z->copyZFInverted; $z->outNL;
+    Cmp r15, 2; $z->copyZFInverted; $z->outNL;
+
+    is_deeply Assemble(debug=>0), <<END;
+  zf: 0000 0000 0000 0001
+  zf: 0000 0000 0000 0000
+  zf: 0000 0000 0000 0000
+  zf: 0000 0000 0000 0001
+  END
+
+
 =head3 Nasm::X86::Variable::clone($var)
 
 Clone a variable to create a new variable
@@ -9699,20 +9813,36 @@ Set the first bits in the specified mask register
   1  $length    Variable containing length to set
   2  $mask      Mask register
 
-=head3 Nasm::X86::Variable::setMaskBit($length, $mask)
+=head3 Nasm::X86::Variable::setMaskBit($index, $mask)
 
 Set a bit in the specified mask register retaining the other bits
 
      Parameter  Description
-  1  $length    Variable containing bit position to set
+  1  $index     Variable containing bit position to set
   2  $mask      Mask register
 
-=head3 Nasm::X86::Variable::clearMaskBit($length, $mask)
+=head3 Nasm::X86::Variable::clearMaskBit($index, $mask)
 
 Clear a bit in the specified mask register retaining the other bits
 
      Parameter  Description
-  1  $length    Variable containing bit position to clear
+  1  $index     Variable containing bit position to clear
+  2  $mask      Mask register
+
+=head3 Nasm::X86::Variable::setBit($index, $mask)
+
+Set a bit in the specified register retaining the other bits
+
+     Parameter  Description
+  1  $index     Variable containing bit position to set
+  2  $mask      Mask register
+
+=head3 Nasm::X86::Variable::clearBit($index, $mask)
+
+Clear a bit in the specified mask register retaining the other bits
+
+     Parameter  Description
+  1  $index     Variable containing bit position to clear
   2  $mask      Mask register
 
 =head3 Nasm::X86::Variable::setZmm($source, $zmm, $offset, $length)
@@ -9776,13 +9906,25 @@ Load bytes from the memory addressed by the specified source variable into the n
   1  $source    Variable containing the address of the source
   2  $zmm       Number of zmm to get
 
-=head3 Nasm::X86::Variable::saveZmm2222($target, $zmm)
+=head3 loadFromZmm($register, $size, $zmm, $offset)
 
-Save bytes into the memory addressed by the target variable from the numbered zmm register.
+Load the specified register from the offset located in the numbered zmm.
 
      Parameter  Description
-  1  $target    Variable containing the address of the source
-  2  $zmm       Number of zmm to put
+  1  $register  Register to load
+  2  $size      Bwdq for size
+  3  $zmm       Numbered zmm register to load from
+  4  $offset    Constant offset in bytes
+
+=head3 putIntoZmm($register, $size, $zmm, $offset)
+
+Put the specified register into the numbered zmm at the from the offset located in the numbered zmm.
+
+     Parameter  Description
+  1  $register  Register to load
+  2  $size      Bwdq for size
+  3  $zmm       Numbered zmm register to load from
+  4  $offset    Constant offset in bytes
 
 =head3 getBwdqFromMm($size, $mm, $offset)
 
@@ -10745,7 +10887,7 @@ B<Example:>
     PrintOutMemory;                                                               # Print contents of memory to stdout
 
     my $r = Assemble;                                                             # Assemble and execute
-    ok stringMd5Sum($r) eq fileMd5Sum($0);                                          # Output contains this file
+    ok stringMd5Sum($r) eq fileMd5Sum($0);                                        # Output contains this file
 
 
 =head3 PrintErrMemory()
@@ -11106,7 +11248,7 @@ B<Example:>
     PrintOutMemory;                                                               # Print contents of memory to stdout
 
     my $r = Assemble;                                                             # Assemble and execute
-    ok stringMd5Sum($r) eq fileMd5Sum($0);                                          # Output contains this file
+    ok stringMd5Sum($r) eq fileMd5Sum($0);                                        # Output contains this file
 
 
 =head3 executeFileViaBash(@variables)
@@ -11257,8 +11399,6 @@ B<Example:>
 
 
     my @p = my ($out, $size, $fail) = (Vq(out), Vq(size), Vq('fail'));
-    my $opens = Vq(opens);
-    my $class = Vq(class);
 
     my $Chars = Rb(0x24, 0xc2, 0xa2, 0xc9, 0x91, 0xE2, 0x82, 0xAC, 0xF0, 0x90, 0x8D, 0x88);
     my $chars = Vq(chars, $Chars);
@@ -11304,42 +11444,21 @@ AAAAAAAA);                        # A sample sentence to parse
     $out->out('outE : ');     $size->outNL(' size : ');
 
     $address->printOutMemoryInHexNL($l);
-                                                                                  # Single character classifications
-    Cq('newLine', 0x0A)->putBIntoZmm(0, 0);                                       #r 0x0 - open bracket  #r 0x1 - close bracket
-    Cq('newLine', 0x02)->putBIntoZmm(0, 3);                                       #r 0x2 - new line,     #r 0x3 - new line acting as a semi-colon
-    Cq('space',   0x20)->putBIntoZmm(0, 4);
-    Cq('space',   0x05)->putBIntoZmm(0, 7);                                       #r 0x5 - space
 
-    my sub pu32($$)                                                               # Print some utf32 characters
-     {my ($n, $m) = @_;                                                           # Variable: number of characters to print, variable: address of memory
-      $n->for(sub
-       {my ($index, $start, $next, $end) = @_;
-        my $a = $m + $index * 4;
-        $a->setReg(r15);
-        KeepFree r15;
-        Mov r15d, "[r15]";
-        KeepFree r15;
-        PrintOutRegisterInHex r15;
-       });
-     }
+    ok Assemble(debug => 0, eq => <<END);
+  out1 : 0000 0000 0000 0024 size : 0000 0000 0000 0001
+  out2 : 0000 0000 0000 00A2 size : 0000 0000 0000 0002
+  out3 : 0000 0000 0000 0251 size : 0000 0000 0000 0002
+  out4 : 0000 0000 0000 20AC size : 0000 0000 0000 0003
+  out5 : 0000 0000 0001 0348 size : 0000 0000 0000 0004
+  outA : 0000 0000 0001 D5BA size : 0000 0000 0000 0004
+  outB : 0000 0000 0000 000A size : 0000 0000 0000 0001
+  outC : 0000 0000 0000 0020 size : 0000 0000 0000 0001
+  outD : 0000 0000 0000 0020 size : 0000 0000 0000 0001
+  outE : 0000 0000 0000 0010 size : 0000 0000 0000 0002
+  F09D 96BA 0A20 F09D918E F09D 91A0 F09D91A0 F09D 9196 F09D9194 F09D 919B 20E38090 E380 90F0 9D96BB20 F09D 90A9 F09D90A5 F09D 90AE F09D90AC 20F0 9D96 BCE38091 E380 910A 4141
+  END
 
-    if (1)                                                                        # Classify a utf32 string
-     {my $a = Dd(0x0001d5ba, 0x00000020, 0x0001d44e, 0x0000000a, 0x0001d5bb, 0x0001d429);
-      my $t = Cq('test', $a);
-      my $s = Cq('size', 6);
-
-      ClassifyCharacters4 address=>$t, size=>$s;
-      PrintOutStringNL "Convert some utf8 to utf32";
-      pu32($s, $t);
-     }
-
-
-=head2 ClassifyCharacters4(@parameters)
-
-Classify the utf32 characters in a block of memory of specified length using the classification held in zmm0: zmm0 should be  formatted in double words with each word having the classification in the highest 8 bits and the utf32 character so classified in the lower 21 bits.  The classification bits are copied into the high unused) byte of each utf32 character in the block of memory.
-
-     Parameter    Description
-  1  @parameters  Parameters
 
 =head2 ClassifyInRange(@parameters)
 
@@ -11584,7 +11703,7 @@ B<Example:>
     my $r = $b->chain($b->bs, Vq(start, 0x18), 4);       $r->outNL("chain1: ");
     my $s = $b->chain($b->bs, $r, 4);                    $s->outNL("chain2: ");
     my $t = $b->chain($b->bs, $s, 4);                    $t->outNL("chain3: ");
-    my $A = $b->chain($b->bs, Vq(start, 0x18), 4, 4, 4); $A->outNL("chain4: ");           # Get a long chain
+    my $A = $b->chain($b->bs, Vq(start, 0x18), 4, 4, 4); $A->outNL("chain4: ");   # Get a long chain
 
     $b->putChain($b->bs, Vq(start, 0x18), Vq(end, 0xff), 4, 4, 4);                # Put at the end of a long chain
 
@@ -11610,7 +11729,7 @@ B<Example:>
       $$p{f}->outNL('F1: ');
       $$p{f}++;
       $$p{f}->outNL('F2: ');
-     } name=> 'aaa', in => [qw(c )}, io => {d  e  f )};
+     } name=> 'aaa', in => [qw(c)], io => [qw(d  e  f)];
 
     my $c = Cq(c, -1);
     my $d = Cq(d, -1);
@@ -11919,7 +12038,7 @@ Dump details of a byte string
 
      Parameter    Description
   1  $byteString  Byte string descriptor
-  2  $depth       Optional amount of memory to dump
+  2  $depth       Optional amount of memory to dump  as the number of 64 byte blocks
 
 =head1 Block Strings
 
@@ -12150,242 +12269,357 @@ Create a block multi way tree in a byte string
 B<Example:>
 
 
-    Mov r14, 0;
-    Kmovq k0, r14;
-    KeepFree r14;
-    Ktestq k0, k0;
-    IfZ {PrintOutStringNL "0 & 0 == 0"};
-    PrintOutZF;
+    my $b = CreateByteString;
+    my $t = $b->CreateBlockMultiWayTree;
 
-    LoadConstantIntoMaskRegister k1, 1;
-    Ktestq k1, k1;
-    IfNz {PrintOutStringNL "1 & 1 != 0"};
-    PrintOutZF;
+    Vq(count, 24)->for(sub
+     {my ($index, $start, $next, $end) = @_;
+      my $k = $index + 1; my $d = $k + 0x100;
+      $t->insert($k, $d);
+     });
 
-    LoadConstantIntoMaskRegister k2, eval "0b".(('1'x4).('0'x4))x2;
+    $t->getKeysDataNode($t->first, 31, 30, 29);
+    PrintOutStringNL "Root"; $t->first->outNL('First: ');
+    PrintOutRegisterInHex zmm31, zmm30, zmm29;
 
-    PrintOutRegisterInHex k0, k1, k2;
+    KeepFree zmm 26;
+    $t->getKeysDataNode(Vq(offset, 0xd8), 28,27,26);
+    PrintOutStringNL "Left";
+    PrintOutRegisterInHex zmm28, zmm27, zmm26;
 
-    Mov  r15, 0x89abcdef;
-    Mov  r14, 0x01234567;
-    Shl  r14, 32;
-    Or r15, r14;
-    Push r15;
-    Push r15;
-    KeepFree r15;
-    PopEax;  PrintRaxInHex($stdout, 3); PrintOutNL; KeepFree rax;
+    KeepFree zmm 26;
+    $t->getKeysDataNode(Vq(offset, 0x258), 28,27,26);
+    PrintOutStringNL "Left";
+    PrintOutRegisterInHex zmm28, zmm27, zmm26;
 
-    my $a = Vq('aaaa');
-    $a->pop;
-    $a->push;
-    $a->outNL;
+    KeepFree zmm 26;
+    $t->getKeysDataNode(Vq(offset, 0x198), 28,27,26);
+    PrintOutStringNL "Left";
+    PrintOutRegisterInHex zmm28, zmm27, zmm26;
 
-    PopEax;  PrintRaxInHex($stdout, 3); PrintOutNL; KeepFree rax;
+    $t->by(sub
+     {my ($iter, $end) = @_;
+      $iter->key ->out('key: ');
+      $iter->data->out(' data: ');
+      $iter->tree->depth($iter->node, my $D = Vq(depth));
+
+      $t->find($iter->key);
+      $t->found->out(' found: '); $t->data->out(' data: '); $D->outNL(' depth: ');
+     });
+
+    $t->find(Vq(key, 0xffff));  $t->found->outNL('Found: ');
+    $t->find(Vq(key, 0xd));     $t->found->outNL('Found: ');
 
     ok Assemble(debug => 0, eq => <<END);
-  0 & 0 == 0
-  ZF=1
-  1 & 1 != 0
-  ZF=0
-      k0: 0000 0000 0000 0000
-      k1: 0000 0000 0000 0001
-      k2: 0000 0000 0000 F0F0
-  89AB CDEF
-  aaaa: 89AB CDEF 0123 4567
-  0123 4567
+  Root
+  First: 0000 0000 0000 0018
+   zmm31: 0000 0058 0000 0002   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0010 0000 0008
+   zmm30: 0000 0098 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0110 0000 0108
+   zmm29: 0000 0018 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0198   0000 0258 0000 00D8
+  Left
+   zmm28: 0000 0118 0000 0007   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0007   0000 0006 0000 0005   0000 0004 0000 0003   0000 0002 0000 0001
+   zmm27: 0000 0158 0000 0018   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0107   0000 0106 0000 0105   0000 0104 0000 0103   0000 0102 0000 0101
+   zmm26: 0000 00D8 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+  Left
+   zmm28: 0000 0298 0000 0007   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 000F   0000 000E 0000 000D   0000 000C 0000 000B   0000 000A 0000 0009
+   zmm27: 0000 02D8 0000 0018   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 010F   0000 010E 0000 010D   0000 010C 0000 010B   0000 010A 0000 0109
+   zmm26: 0000 0258 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+  Left
+   zmm28: 0000 01D8 0000 0008   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0018 0000 0017   0000 0016 0000 0015   0000 0014 0000 0013   0000 0012 0000 0011
+   zmm27: 0000 0218 0000 0018   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0118 0000 0117   0000 0116 0000 0115   0000 0114 0000 0113   0000 0112 0000 0111
+   zmm26: 0000 0198 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+  key: 0000 0000 0000 0001 data: 0000 0000 0000 0101 found: 0000 0000 0000 0001 data: 0000 0000 0000 0101 depth: 0000 0000 0000 0002
+  key: 0000 0000 0000 0002 data: 0000 0000 0000 0102 found: 0000 0000 0000 0001 data: 0000 0000 0000 0102 depth: 0000 0000 0000 0002
+  key: 0000 0000 0000 0003 data: 0000 0000 0000 0103 found: 0000 0000 0000 0001 data: 0000 0000 0000 0103 depth: 0000 0000 0000 0002
+  key: 0000 0000 0000 0004 data: 0000 0000 0000 0104 found: 0000 0000 0000 0001 data: 0000 0000 0000 0104 depth: 0000 0000 0000 0002
+  key: 0000 0000 0000 0005 data: 0000 0000 0000 0105 found: 0000 0000 0000 0001 data: 0000 0000 0000 0105 depth: 0000 0000 0000 0002
+  key: 0000 0000 0000 0006 data: 0000 0000 0000 0106 found: 0000 0000 0000 0001 data: 0000 0000 0000 0106 depth: 0000 0000 0000 0002
+  key: 0000 0000 0000 0007 data: 0000 0000 0000 0107 found: 0000 0000 0000 0001 data: 0000 0000 0000 0107 depth: 0000 0000 0000 0002
+  key: 0000 0000 0000 0008 data: 0000 0000 0000 0108 found: 0000 0000 0000 0001 data: 0000 0000 0000 0108 depth: 0000 0000 0000 0001
+  key: 0000 0000 0000 0009 data: 0000 0000 0000 0109 found: 0000 0000 0000 0001 data: 0000 0000 0000 0109 depth: 0000 0000 0000 0002
+  key: 0000 0000 0000 000A data: 0000 0000 0000 010A found: 0000 0000 0000 0001 data: 0000 0000 0000 010A depth: 0000 0000 0000 0002
+  key: 0000 0000 0000 000B data: 0000 0000 0000 010B found: 0000 0000 0000 0001 data: 0000 0000 0000 010B depth: 0000 0000 0000 0002
+  key: 0000 0000 0000 000C data: 0000 0000 0000 010C found: 0000 0000 0000 0001 data: 0000 0000 0000 010C depth: 0000 0000 0000 0002
+  key: 0000 0000 0000 000D data: 0000 0000 0000 010D found: 0000 0000 0000 0001 data: 0000 0000 0000 010D depth: 0000 0000 0000 0002
+  key: 0000 0000 0000 000E data: 0000 0000 0000 010E found: 0000 0000 0000 0001 data: 0000 0000 0000 010E depth: 0000 0000 0000 0002
+  key: 0000 0000 0000 000F data: 0000 0000 0000 010F found: 0000 0000 0000 0001 data: 0000 0000 0000 010F depth: 0000 0000 0000 0002
+  key: 0000 0000 0000 0010 data: 0000 0000 0000 0110 found: 0000 0000 0000 0001 data: 0000 0000 0000 0110 depth: 0000 0000 0000 0001
+  key: 0000 0000 0000 0011 data: 0000 0000 0000 0111 found: 0000 0000 0000 0001 data: 0000 0000 0000 0111 depth: 0000 0000 0000 0002
+  key: 0000 0000 0000 0012 data: 0000 0000 0000 0112 found: 0000 0000 0000 0001 data: 0000 0000 0000 0112 depth: 0000 0000 0000 0002
+  key: 0000 0000 0000 0013 data: 0000 0000 0000 0113 found: 0000 0000 0000 0001 data: 0000 0000 0000 0113 depth: 0000 0000 0000 0002
+  key: 0000 0000 0000 0014 data: 0000 0000 0000 0114 found: 0000 0000 0000 0001 data: 0000 0000 0000 0114 depth: 0000 0000 0000 0002
+  key: 0000 0000 0000 0015 data: 0000 0000 0000 0115 found: 0000 0000 0000 0001 data: 0000 0000 0000 0115 depth: 0000 0000 0000 0002
+  key: 0000 0000 0000 0016 data: 0000 0000 0000 0116 found: 0000 0000 0000 0001 data: 0000 0000 0000 0116 depth: 0000 0000 0000 0002
+  key: 0000 0000 0000 0017 data: 0000 0000 0000 0117 found: 0000 0000 0000 0001 data: 0000 0000 0000 0117 depth: 0000 0000 0000 0002
+  key: 0000 0000 0000 0018 data: 0000 0000 0000 0118 found: 0000 0000 0000 0001 data: 0000 0000 0000 0118 depth: 0000 0000 0000 0002
+  Found: 0000 0000 0000 0000
+  Found: 0000 0000 0000 0001
   END
 
 
-=head2 Nasm::X86::BlockMultiWayTree::find($bmt, @variables)
+=head2 Nasm::X86::BlockMultiWayTree::find($t, $key)
 
-Find a key in a tree and  return its associated data
+Find a key in a tree and test whether the found data is a sub tree.  The results are held in the variables "found", "data", "subTree" addressed by the tree descriptor.
 
-     Parameter   Description
-  1  $bmt        Block multi way tree descriptor
-  2  @variables  Variables
+     Parameter  Description
+  1  $t         Block multi way tree descriptor
+  2  $key       Key field to search for
 
-=head2 Nasm::X86::BlockMultiWayTree::insert($bmt, @variables)
+=head2 Nasm::X86::BlockMultiWayTree::insertDataOrTree($t, $tnd, $key, $data)
 
-Insert a (key, data) pair into the tree
+Insert either a key, data pair into the tree or create a sub tree at the specified key (if it does not already exist) and return the offset of the first block of the sub tree in the data variable.
 
-     Parameter   Description
-  1  $bmt        Block multi way tree descriptor
-  2  @variables  Variables
+     Parameter  Description
+  1  $t         Block multi way tree descriptor
+  2  $tnd       0 - data or 1 - tree
+  3  $key       Key as a dword
+  4  $data      Data as a dword
 
-=head2 Nasm::X86::BlockMultiWayTree::getKeysData($bmt, $offset, $zmmKeys, $zmmData)
+=head2 Nasm::X86::BlockMultiWayTree::insert($t, $key, $data)
+
+Insert a dword into into the specified tree at the specified key.
+
+     Parameter  Description
+  1  $t         Block multi way tree descriptor
+  2  $key       Key as a dword
+  3  $data      Data as a dword
+
+=head2 Nasm::X86::BlockMultiWayTree::insertTree($t, $key)
+
+Insert a sub tree into the specified tree tree under the specified key and return a descriptor for it.  If the tree already exists, return a descriptor for it.
+
+     Parameter  Description
+  1  $t         Block multi way tree descriptor
+  2  $key       Key as a dword
+
+=head2 Nasm::X86::BlockMultiWayTree::getKeysData($t, $offset, $zmmKeys, $zmmData)
 
 Load the keys and data blocks for a node
 
      Parameter  Description
-  1  $bmt       Block multi way tree descriptor
+  1  $t         Block multi way tree descriptor
   2  $offset    Offset as a variable
   3  $zmmKeys   Numbered zmm for keys
   4  $zmmData   Numbered data for keys
 
-=head2 Nasm::X86::BlockMultiWayTree::putKeysData($bmt, $offset, $zmmKeys, $zmmData)
+=head2 Nasm::X86::BlockMultiWayTree::putKeysData($t, $offset, $zmmKeys, $zmmData)
 
 Save the key and data blocks for a node
 
      Parameter  Description
-  1  $bmt       Block multi way tree descriptor
+  1  $t         Block multi way tree descriptor
   2  $offset    Offset as a variable
   3  $zmmKeys   Numbered zmm for keys
   4  $zmmData   Numbered data for keys
 
-=head2 Nasm::X86::BlockMultiWayTree::getNode($bmt, $offset, $zmmNode)
+=head2 Nasm::X86::BlockMultiWayTree::getNode($t, $offset, $zmmNode)
 
 Load the child nodes for a node
 
      Parameter  Description
-  1  $bmt       Block multi way tree descriptor
+  1  $t         Block multi way tree descriptor
   2  $offset    Offset of nodes
   3  $zmmNode   Numbered zmm for keys
 
-=head2 Nasm::X86::BlockMultiWayTree::getKeysDataNode($bmt, $offset, $zmmKeys, $zmmData, $zmmNode)
+=head2 Nasm::X86::BlockMultiWayTree::getKeysDataNode($t, $offset, $zmmKeys, $zmmData, $zmmNode)
 
 Load the keys, data and child nodes for a node
 
      Parameter  Description
-  1  $bmt       Block multi way tree descriptor
+  1  $t         Block multi way tree descriptor
   2  $offset    Offset as a variable
   3  $zmmKeys   Numbered zmm for keys
   4  $zmmData   Numbered data for keys
   5  $zmmNode   Numbered numbered for keys
 
-=head2 Nasm::X86::BlockMultiWayTree::putKeysDataNode($bmt, $offset, $zmmKeys, $zmmData, $zmmNode)
+=head2 Nasm::X86::BlockMultiWayTree::putKeysDataNode($t, $offset, $zmmKeys, $zmmData, $zmmNode)
 
 Save the keys, data and child nodes for a node
 
      Parameter  Description
-  1  $bmt       Block multi way tree descriptor
+  1  $t         Block multi way tree descriptor
   2  $offset    Offset as a variable
   3  $zmmKeys   Numbered zmm for keys
   4  $zmmData   Numbered data for keys
   5  $zmmNode   Numbered numbered for keys
 
-=head2 Nasm::X86::BlockMultiWayTree::getLengthInKeys($bmt, $zmm)
+=head2 Nasm::X86::BlockMultiWayTree::getLengthInKeys($t, $zmm)
 
 Get the length of the keys block in the numbered zmm and return it as a variable
 
      Parameter  Description
-  1  $bmt       Block multi way tree descriptor
+  1  $t         Block multi way tree descriptor
   2  $zmm       Zmm number
 
-=head2 Nasm::X86::BlockMultiWayTree::putLengthInKeys($bmt, $zmm, $length)
+=head2 Nasm::X86::BlockMultiWayTree::putLengthInKeys($t, $zmm, $length)
 
 Get the length of the block in the numbered zmm from the specified variable
 
      Parameter  Description
-  1  $bmt       Block multi way tree
+  1  $t         Block multi way tree
   2  $zmm       Zmm number
   3  $length    Length variable
 
-=head2 Nasm::X86::BlockMultiWayTree::getUpFromData($bmt, $zmm)
+=head2 Nasm::X86::BlockMultiWayTree::getUpFromData($t, $zmm)
 
 Get the up offset from the data block in the numbered zmm and return it as a variable
 
      Parameter  Description
-  1  $bmt       Block multi way tree descriptor
+  1  $t         Block multi way tree descriptor
   2  $zmm       Zmm number
 
-=head2 Nasm::X86::BlockMultiWayTree::putUpIntoData($bmt, $offset, $zmm)
+=head2 Nasm::X86::BlockMultiWayTree::putUpIntoData($t, $offset, $zmm)
 
 Put the offset of the parent keys block expressed as a variable into the numbered zmm
 
      Parameter  Description
-  1  $bmt       Block multi way tree descriptor
+  1  $t         Block multi way tree descriptor
   2  $offset    Variable containing up offset
   3  $zmm       Zmm number
 
-=head2 Nasm::X86::BlockMultiWayTree::getLoop($bmt, $zmm)
+=head2 Nasm::X86::BlockMultiWayTree::getLoop($t, $zmm)
 
 Return the value of the loop field as a variable
 
      Parameter  Description
-  1  $bmt       Block multi way tree descriptor
+  1  $t         Block multi way tree descriptor
   2  $zmm       Numbered zmm
 
-=head2 Nasm::X86::BlockMultiWayTree::putLoop($bmt, $value, $zmm)
+=head2 Nasm::X86::BlockMultiWayTree::putLoop($t, $value, $zmm)
 
 Set the value of the loop field from a variable
 
      Parameter  Description
-  1  $bmt       Block multi way tree descriptor
+  1  $t         Block multi way tree descriptor
   2  $value     Variable containing offset of next loop entry
   3  $zmm       Numbered zmm
 
-=head2 Nasm::X86::BlockMultiWayTree::leftOrRightMost($bmt, $dir, @variables)
+=head2 Nasm::X86::BlockMultiWayTree::leftOrRightMost($t, $dir, @variables)
 
 Return the left most or right most node
 
      Parameter   Description
-  1  $bmt        Block multi way tree descriptor
+  1  $t          Block multi way tree descriptor
   2  $dir        Direction: left = 0 or right = 1
   3  @variables  Variables
 
-=head2 Nasm::X86::BlockMultiWayTree::leftMost($bmt, @variables)
+=head2 Nasm::X86::BlockMultiWayTree::leftMost($t, @variables)
 
 Return the left most node
 
      Parameter   Description
-  1  $bmt        Block multi way tree descriptor
+  1  $t          Block multi way tree descriptor
   2  @variables  Variables
 
-=head2 Nasm::X86::BlockMultiWayTree::rightMost($bmt, @variables)
+=head2 Nasm::X86::BlockMultiWayTree::rightMost($t, @variables)
 
 Return the right most node
 
      Parameter   Description
-  1  $bmt        Block multi way tree descriptor
+  1  $t          Block multi way tree descriptor
   2  @variables  Variables
 
-=head2 Nasm::X86::BlockMultiWayTree::nodeFromData($bmt, $data, $node)
+=head2 Nasm::X86::BlockMultiWayTree::nodeFromData($t, $data, $node)
 
 Load the the node block into the numbered zmm corresponding to the data block held in the numbered zmm.
 
      Parameter  Description
-  1  $bmt       Block multi way tree descriptor
+  1  $t         Block multi way tree descriptor
   2  $data      Numbered zmm containing data
   3  $node      Numbered zmm to hold node block
 
-=head2 Nasm::X86::BlockMultiWayTree::address($bmt)
+=head2 Nasm::X86::BlockMultiWayTree::address($t)
 
 Address of the byte string containing a block multi way tree
 
      Parameter  Description
-  1  $bmt       Block multi way tree descriptor
+  1  $t         Block multi way tree descriptor
 
-=head2 Nasm::X86::BlockMultiWayTree::allocBlock($bmt, @variables)
+=head2 Nasm::X86::BlockMultiWayTree::allocBlock($t, @variables)
 
 Allocate a block to hold a zmm register in the specified byte string and return the offset of the block in a variable
 
      Parameter   Description
-  1  $bmt        Block multi way tree descriptor
+  1  $t          Block multi way tree descriptor
   2  @variables  Variables
 
-=head2 Nasm::X86::BlockMultiWayTree::depth($bmt, @variables)
+=head2 Nasm::X86::BlockMultiWayTree::depth($t, @variables)
 
 Return the depth of a node within a tree.
 
      Parameter   Description
-  1  $bmt        Block multi way tree descriptor
+  1  $t          Block multi way tree descriptor
   2  @variables  Variables
 
-=head2 Nasm::X86::BlockMultiWayTree::iterator($b)
+=head2 Sub trees
+
+Construct trees of trees.
+
+=head3 Nasm::X86::BlockMultiWayTree::getTreeBits($t, $zmm, $register)
+
+Load the tree bits from the numbered zmm into the specified register.
+
+     Parameter  Description
+  1  $t         Tree descriptor
+  2  $zmm       Numbered zmm
+  3  $register  Target register
+
+=head3 Nasm::X86::BlockMultiWayTree::putTreeBits($t, $zmm, $register)
+
+Put the tree bits in the specified register into the numbered zmm.
+
+     Parameter  Description
+  1  $t         Tree descriptor
+  2  $zmm       Numbered zmm
+  3  $register  Target register
+
+=head3 Nasm::X86::BlockMultiWayTree::expandTreeBitsWithZeroOrOne($t, $onz, $zmm, $point)
+
+Insert a zero or one into the tree bits field in the numbered zmm at the specified point
+
+     Parameter  Description
+  1  $t         Tree descriptor
+  2  $onz       0 - zero or 1 - one
+  3  $zmm       Numbered zmm
+  4  $point     Register indicating point
+
+=head3 Nasm::X86::BlockMultiWayTree::expandTreeBitsWithZero($t, $zmm, $point)
+
+Insert a zero into the tree bits field in the numbered zmm at the specified point
+
+     Parameter  Description
+  1  $t         Tree descriptor
+  2  $zmm       Numbered zmm
+  3  $point     Register indicating point
+
+=head3 Nasm::X86::BlockMultiWayTree::expandTreeBitsWithOne($t, $zmm, $point)
+
+Insert a one into the tree bits field in the numbered zmm at the specified point
+
+     Parameter  Description
+  1  $t         Tree descriptor
+  2  $zmm       Numbered zmm
+  3  $point     Register indicating point
+
+=head2 Iteration
+
+Iterate through a tree non recursively
+
+=head3 Nasm::X86::BlockMultiWayTree::iterator($b)
 
 Iterate through a multi way tree
 
      Parameter  Description
   1  $b         Block multi way tree
 
-=head2 Nasm::X86::BlockMultiWayTree::Iterator::next($iter)
+=head3 Nasm::X86::BlockMultiWayTree::Iterator::next($iter)
 
 Next element in the tree
 
      Parameter  Description
   1  $iter      Iterator
 
-=head2 Nasm::X86::BlockMultiWayTree::by($b, $body)
+=head3 Nasm::X86::BlockMultiWayTree::by($b, $body)
 
 Call the specified body with each (key, data) from the specified tree in order
 
@@ -12572,6 +12806,10 @@ Expression that initializes the variable
 
 Variable addressing offset to first block of keys.
 
+=head4 found
+
+Variable indicating whether the last find was successful or not
+
 =head4 free
 
 Free chain offset
@@ -12579,10 +12817,6 @@ Free chain offset
 =head4 key
 
 Key at this position
-
-=head4 keys
-
-Offset of keys in header.
 
 =head4 label
 
@@ -12592,9 +12826,17 @@ Address in memory
 
 Size of the lanes in this variable
 
+=head4 leftLength
+
+Left split length
+
 =head4 length
 
-Offset of length in keys block.
+Maximum length in a block
+
+=head4 lengthOffset
+
+Offset of length in keys block.  The length field is a word - see: "MultiWayTree.svg"
 
 =head4 links
 
@@ -12607,10 +12849,6 @@ Offset of keys, data, node loop.
 =head4 maxKeys
 
 Maximum number of keys.
-
-=head4 maxNodes
-
-Maximum number of children per parent.
 
 =head4 minKeys
 
@@ -12656,6 +12894,10 @@ Purpose of this variable
 
 Reference to another variable
 
+=head4 rightLength
+
+Right split length
+
 =head4 saturate
 
 Computations should saturate rather then wrap if true
@@ -12680,9 +12922,21 @@ Number of slots in second and subsequent blocks
 
 Structure details
 
+=head4 subTree
+
+Variable indicating whether the last find found a sub tree
+
 =head4 tree
 
 Tree we are iterating over
+
+=head4 treeBits
+
+Offset of tree bits in keys block.  The tree bits field is a word, each bit of which tells us whether the corresponding data element is the offset (or not) to a sub tree of this tree .
+
+=head4 treeBitsMask
+
+14 tree bits
 
 =head4 up
 
@@ -12838,55 +13092,226 @@ Set the first free block field from a variable
   1  $byteString  Byte string descriptor
   2  $offset      First free block offset as a variable
 
-=head2 Nasm::X86::BlockMultiWayTree::allocKeysDataNode($bmt, $K, $D, $N, @variables)
+=head2 Nasm::X86::BlockMultiWayTree::allocKeysDataNode($t, $K, $D, $N, @variables)
 
 Allocate a keys/data/node block and place it in the numbered zmm registers
 
      Parameter   Description
-  1  $bmt        Block multi way tree descriptor
+  1  $t          Block multi way tree descriptor
   2  $K          Numbered zmm for keys
   3  $D          Numbered zmm for data
   4  $N          Numbered zmm for children
   5  @variables  Variables
 
-=head2 Nasm::X86::BlockMultiWayTree::splitNode($bmt, $bs, $node, $key, @variables)
+=head2 Nasm::X86::BlockMultiWayTree::splitNode($t, $bs, $node, $key, @variables)
 
 Split a node given its offset in a byte string retaining the key being inserted in the node split while putting the remainder to the left or right.
 
      Parameter   Description
-  1  $bmt        Block multi way tree descriptor
+  1  $t          Block multi way tree descriptor
   2  $bs         Backing byte string
   3  $node       Offset of node
   4  $key        Key
   5  @variables  Variables
 
-=head2 Nasm::X86::BlockMultiWayTree::reParent($bmt, $bs, $PK, $PD, $PN, @variables)
+=head2 Nasm::X86::BlockMultiWayTree::reParent($t, $bs, $PK, $PD, $PN, @variables)
 
 Reparent the children of a node held in registers. The children are in the backing byte string not registers.
 
      Parameter   Description
-  1  $bmt        Block multi way tree descriptor
+  1  $t          Block multi way tree descriptor
   2  $bs         Backing byte string
   3  $PK         Numbered zmm key node
   4  $PD         Numbered zmm data node
   5  $PN         Numbered zmm child node
   6  @variables  Variables
 
-=head2 Nasm::X86::BlockMultiWayTree::splitFullRoot($bmt, $bs)
+=head2 Nasm::X86::BlockMultiWayTree::transferTreeBitsFromParent($b, $parent, $left, $right)
+
+Transfer tree bits when splitting a full node
+
+     Parameter  Description
+  1  $b         Block multi way tree descriptor
+  2  $parent    Numbered parent zmm
+  3  $left      Numbered left zmm
+  4  $right     Numbered right zmm
+
+B<Example:>
+
+
+    my $B = Rb(0..63);
+    Vmovdqu8 zmm0, "[$B]";
+    loadFromZmm r15, w, zmm, 14;
+
+    my $b = CreateByteString;
+    my $t = $b->CreateBlockMultiWayTree;
+    $t->getTreeBits(0, r14);
+
+    PrintOutRegisterInHex zmm0, r15, r14;
+
+    Mov r14, my $treeBits = 0xDCBA;
+    $t->putTreeBits(1, r14);
+    PrintOutRegisterInHex zmm1;
+
+    $t->transferTreeBitsFromParent(1, 2, 3);
+    PrintOutStringNL "Split:";
+    PrintOutRegisterInHex zmm1, zmm2, zmm3;
+
+    my $left  =  $treeBits & ((1<<$t->leftLength)  - 1);
+    my $right = ($treeBits >>    ($t->leftLength   + 1)) & ((1<<$t->rightLength) - 1);
+
+    my $l = sprintf("%02X", $left);
+    my $r = sprintf("%02X", $right);
+
+    ok Assemble(debug => 0, eq => <<END);
+    zmm0: 3F3E 3D3C 3B3A 3938   3736 3534 3332 3130   2F2E 2D2C 2B2A 2928   2726 2524 2322 2120   1F1E 1D1C 1B1A 1918   1716 1514 1312 1110   0F0E 0D0C 0B0A 0908   0706 0504 0302 0100
+     r15: 0000 0000 0000 0F0E
+     r14: 0000 0000 0000 3B3A
+    zmm1: 0000 0000 DCBA 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+  Split:
+    zmm1: 0000 0000 0001 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+    zmm2: 0000 0000 00$l 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+    zmm3: 0000 0000 00$r 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+  END
+
+
+=head2 Nasm::X86::BlockMultiWayTree::transferTreeBitsFromLeftOrRight($b, $rnl, $point, $parent, $left, $right)
+
+Transfer tree bits when splitting a full left or right node
+
+     Parameter  Description
+  1  $b         Block multi way tree descriptor
+  2  $rnl       0 - left 1 - right
+  3  $point     Register indicating point of left in parent
+  4  $parent    Numbered parent zmm
+  5  $left      Numbered left zmm
+  6  $right     Numbered right zmm
+
+=head2 Nasm::X86::BlockMultiWayTree::transferTreeBitsFromLeft($b, $point, $parent, $left, $right)
+
+Transfer tree bits when splitting a full left node
+
+     Parameter  Description
+  1  $b         Block multi way tree descriptor
+  2  $point     Register indicating point of left in parent
+  3  $parent    Numbered parent zmm
+  4  $left      Numbered left zmm
+  5  $right     Numbered right zmm
+
+B<Example:>
+
+
+    my $b = CreateByteString;
+    my $t = $b->CreateBlockMultiWayTree;
+    my $lR = "110110";
+    my $lP = "1";
+    my $lL = "1110111";
+
+    my $p1 = "01010_110010";
+    my $p2 = "1";
+
+    my $epe = sprintf("%04X", eval "0b$p1$lP$p2");
+    my $ele = sprintf("%04X", eval "0b$lL"      );
+    my $ere = sprintf("%04X", eval "0b$lR"      );
+
+    my @expected;
+    for my $i(0..1)
+     {Mov r15, eval "0b$lR$lP$lL"; $t->putTreeBits(1+$i, r15);
+      Mov r15, eval "0b$p1$p2";    $t->putTreeBits(0,    r15);
+
+      PrintOutRegisterInHex zmm 0, 1+$i;
+
+      Mov r15, 0b10;
+      $t->transferTreeBitsFromLeft (r15, 0, 1, 2) unless $i;
+      $t->transferTreeBitsFromRight(r15, 0, 1, 2) if     $i;
+      PrintOutRegisterInHex zmm 0..2;
+
+      my $zzz = $i ? "zmm2" : "zmm1";
+      push @expected, <<END;
+    zmm0: 0000 0000 0565 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+    $zzz: 0000 0000 36F7 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+    zmm0: 0000 0000 $epe 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+    zmm1: 0000 0000 $ele 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+    zmm2: 0000 0000 $ere 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+  END
+     }
+
+    ok Assemble(debug => 0, eq => join "", @expected);
+
+
+=head2 Nasm::X86::BlockMultiWayTree::transferTreeBitsFromRight($b, $point, $parent, $left, $right)
+
+Transfer tree bits when splitting a full right node
+
+     Parameter  Description
+  1  $b         Block multi way tree descriptor
+  2  $point     Register indicating point of right in parent
+  3  $parent    Numbered parent zmm
+  4  $left      Numbered left zmm
+  5  $right     Numbered right zmm
+
+B<Example:>
+
+
+    my $b = CreateByteString;
+    my $t = $b->CreateBlockMultiWayTree;
+    my $lR = "110110";
+    my $lP = "1";
+    my $lL = "1110111";
+
+    my $p1 = "01010_110010";
+    my $p2 = "1";
+
+    my $epe = sprintf("%04X", eval "0b$p1$lP$p2");
+    my $ele = sprintf("%04X", eval "0b$lL"      );
+    my $ere = sprintf("%04X", eval "0b$lR"      );
+
+    my @expected;
+    for my $i(0..1)
+     {Mov r15, eval "0b$lR$lP$lL"; $t->putTreeBits(1+$i, r15);
+      Mov r15, eval "0b$p1$p2";    $t->putTreeBits(0,    r15);
+
+      PrintOutRegisterInHex zmm 0, 1+$i;
+
+      Mov r15, 0b10;
+      $t->transferTreeBitsFromLeft (r15, 0, 1, 2) unless $i;
+      $t->transferTreeBitsFromRight(r15, 0, 1, 2) if     $i;
+      PrintOutRegisterInHex zmm 0..2;
+
+      my $zzz = $i ? "zmm2" : "zmm1";
+      push @expected, <<END;
+    zmm0: 0000 0000 0565 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+    $zzz: 0000 0000 36F7 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+    zmm0: 0000 0000 $epe 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+    zmm1: 0000 0000 $ele 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+    zmm2: 0000 0000 $ere 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+  END
+     }
+
+    ok Assemble(debug => 0, eq => join "", @expected);
+
+
+=head2 Nasm::X86::BlockMultiWayTree::splitFullRoot($t)
 
 Split a full root block held in 31..29 and place the left block in 28..26 and the right block in 25..23. The left and right blocks should have their loop offsets set so they can be inserted into the root.
 
      Parameter  Description
-  1  $bmt       Block multi way tree descriptor
-  2  $bs        Byte string locator
+  1  $t         Block multi way tree descriptor
 
-=head2 Nasm::X86::BlockMultiWayTree::splitFullLeftNode($bmt, $bs)
+=head2 Nasm::X86::BlockMultiWayTree::splitFullLeftOrRightNode($t, $right)
+
+Split a full a full left node (held in 28..26) or a full right node (held in 25..23) whose parent is in 31..29.
+
+     Parameter  Description
+  1  $t         Block multi way tree descriptor
+  2  $right     0 left or 1 right
+
+=head2 Nasm::X86::BlockMultiWayTree::splitFullLeftNode($t)
 
 Split a full left node block held in 28..26 whose parent is in 31..29 and place the new right block in 25..23. The parent is assumed to be not full. The loop and length fields are assumed to be authoritative and hence are preserved.
 
      Parameter  Description
-  1  $bmt       Block multi way tree descriptor
-  2  $bs        Byte string locator
+  1  $t         Block multi way tree descriptor
 
 B<Example:>
 
@@ -12918,7 +13343,7 @@ B<Example:>
     Vmovdqu8 zmm24, "[$rd]";
     Vmovdqu8 zmm23, "[$rn]";
 
-     $t->splitFullLeftNode($b->bs);
+     $t->splitFullLeftNode;
 
     PrintOutRegisterInHex reverse zmm(23..31);
 
@@ -12935,13 +13360,12 @@ B<Example:>
   END
 
 
-=head2 Nasm::X86::BlockMultiWayTree::splitFullRightNode($bmt, $bs)
+=head2 Nasm::X86::BlockMultiWayTree::splitFullRightNode($t)
 
-Split a full right node block held in 25..23 whose parent is in 31..29 and place the new left block in 25..23.  The loop and length fields are assumed to be authoritative and hence are preserved.
+Split a full right node block held in 25..23 whose parent is in 31..29 and place the new left block in 28..26.  The loop and length fields are assumed to be authoritative and hence are preserved.
 
      Parameter  Description
-  1  $bmt       Block multi way tree descriptor
-  2  $bs        Byte string locator
+  1  $t         Block multi way tree descriptor
 
 B<Example:>
 
@@ -12973,7 +13397,7 @@ B<Example:>
     Vmovdqu8 zmm24, "[$rd]";
     Vmovdqu8 zmm23, "[$rn]";
 
-    $t->splitFullRightNode($b->bs);
+    $t->splitFullRightNode;
 
     PrintOutRegisterInHex reverse zmm(23..31);
 
@@ -12990,13 +13414,50 @@ B<Example:>
   END
 
 
-=head2 Nasm::X86::BlockMultiWayTree::findAndSplit($bmt, @variables)
+=head2 Nasm::X86::BlockMultiWayTree::findAndSplit($t, @variables)
 
 Find a key in a tree which is known to contain at least one key splitting full nodes along the path to the key.
 
      Parameter   Description
-  1  $bmt        Block multi way tree descriptor
+  1  $t          Block multi way tree descriptor
   2  @variables  Variables
+
+=head2 Nasm::X86::BlockMultiWayTree::isTree($t, $register, $zmm)
+
+Set the Zero Flag to oppose the tree bit in the numbered zmm register holding the keys of a node to indicate whether the data element indicated by the specified register is an offset to a sub tree in the containing byte string or not.
+
+     Parameter  Description
+  1  $t         Block multi way tree descriptor
+  2  $register  Word register holding a bit shifted into the position to test
+  3  $zmm       Numbered zmm register holding the keys for a node in the tree
+
+=head2 Nasm::X86::BlockMultiWayTree::setOrClearTree($t, $set, $register, $zmm)
+
+Set or clear the tree bit in the numbered zmm register holding the keys of a node to indicate that the data element indicated by the specified register is an offset to a sub tree in the containing byte string.
+
+     Parameter  Description
+  1  $t         Block multi way tree descriptor
+  2  $set       Set if true else clear
+  3  $register  Register holding a single one in the lowest 14 bits at the insertion point
+  4  $zmm       Numbered zmm register holding the keys for a node in the tree
+
+=head2 Nasm::X86::BlockMultiWayTree::setTree($t, $register, $zmm)
+
+Set the tree bit in the numbered zmm register holding the keys of a node to indicate that the data element indexed by the specified register is an offset to a sub tree in the containing byte string.
+
+     Parameter  Description
+  1  $t         Block multi way tree descriptor
+  2  $register  Register holding data element index 0..13
+  3  $zmm       Numbered zmm register holding the keys for a node in the tree
+
+=head2 Nasm::X86::BlockMultiWayTree::clearTree($t, $register, $zmm)
+
+Clear the tree bit in the numbered zmm register holding the keys of a node to indicate that the data element indexed by the specified register is an offset to a sub tree in the containing byte string.
+
+     Parameter  Description
+  1  $t         Block multi way tree descriptor
+  2  $register  Register holding data element index 0..13
+  3  $zmm       Numbered zmm register holding the keys for a node in the tree
 
 =head2 LocateIntelEmulator()
 
@@ -13031,7 +13492,7 @@ Total size in bytes of all files assembled during testing
 
 6 L<CallC|/CallC> - Call a C subroutine
 
-7 L<ClassifyCharacters4|/ClassifyCharacters4> - Classify the utf32 characters in a block of memory of specified length using the classification held in zmm0: zmm0 should be  formatted in double words with each word having the classification in the highest 8 bits and the utf32 character so classified in the lower 21 bits.
+7 L<ChooseRegisters|/ChooseRegisters> - Choose the specified numbers of registers excluding those on the specified list
 
 8 L<ClassifyInRange|/ClassifyInRange> - Character classification: classify the utf32 characters in a block of memory of specified length using a range specification held in zmm0, zmm1 formatted in double words with each word in zmm1 having the classification in the highest 8 bits and with zmm0 and zmm1 having the utf32 character at the start (zmm0) and end (zmm1) of each range in the lower 21 bits.
 
@@ -13051,649 +13512,705 @@ Total size in bytes of all files assembled during testing
 
 16 L<Comment|/Comment> - Insert a comment into the assembly code
 
-17 L<ConcatenateShortStrings|/ConcatenateShortStrings> - Concatenate the numbered source zmm containing a short string with the short string in the numbered target zmm.
+17 L<Comment2|/Comment2> - Insert a comment into the assembly code
 
-18 L<ConvertUtf8ToUtf32|/ConvertUtf8ToUtf32> - Convert a string of utf8 to an allocated block of utf32 and return its address and length.
+18 L<ConcatenateShortStrings|/ConcatenateShortStrings> - Concatenate the numbered source zmm containing a short string with the short string in the numbered target zmm.
 
-19 L<CopyMemory|/CopyMemory> - Copy memory, the target is addressed by rax, the length is in rdi, the source is addressed by rsi
+19 L<ConvertUtf8ToUtf32|/ConvertUtf8ToUtf32> - Convert a string of utf8 to an allocated block of utf32 and return its address and length.
 
-20 L<Cq|/Cq> - Define a quad constant
+20 L<CopyMemory|/CopyMemory> - Copy memory, the target is addressed by rax, the length is in rdi, the source is addressed by rsi
 
-21 L<cr|/cr> - Call a subroutine with a reordering of the registers.
+21 L<Cq|/Cq> - Define a quad constant
 
-22 L<CreateByteString|/CreateByteString> - Create an relocatable string of bytes in an arena and returns its address in rax.
+22 L<cr|/cr> - Call a subroutine with a reordering of the registers.
 
-23 L<Cstrlen|/Cstrlen> - Length of the C style string addressed by rax returning the length in r15
+23 L<CreateByteString|/CreateByteString> - Create an relocatable string of bytes in an arena and returns its address in rax.
 
-24 L<Db|/Db> - Layout bytes in the data segment and return their label
+24 L<Cstrlen|/Cstrlen> - Length of the C style string addressed by rax returning the length in r15
 
-25 L<Dbwdq|/Dbwdq> - Layout data
+25 L<Db|/Db> - Layout bytes in the data segment and return their label
 
-26 L<DComment|/DComment> - Insert a comment into the data segment
+26 L<Dbwdq|/Dbwdq> - Layout data
 
-27 L<Dd|/Dd> - Layout double words in the data segment and return their label
+27 L<DComment|/DComment> - Insert a comment into the data segment
 
-28 L<Dq|/Dq> - Layout quad words in the data segment and return their label
+28 L<Dd|/Dd> - Layout double words in the data segment and return their label
 
-29 L<Ds|/Ds> - Layout bytes in memory and return their label
+29 L<Dq|/Dq> - Layout quad words in the data segment and return their label
 
-30 L<Dw|/Dw> - Layout words in the data segment and return their label
+30 L<Ds|/Ds> - Layout bytes in memory and return their label
 
-31 L<Else|/Else> - Else body for an If statement
+31 L<Dw|/Dw> - Layout words in the data segment and return their label
 
-32 L<executeFileViaBash|/executeFileViaBash> - Execute the file named in the byte string addressed by rax with bash
+32 L<Else|/Else> - Else body for an If statement
 
-33 L<Exit|/Exit> - Exit with the specified return code or zero if no return code supplied.
+33 L<executeFileViaBash|/executeFileViaBash> - Execute the file named in the byte string addressed by rax with bash
 
-34 L<Extern|/Extern> - Name external references
+34 L<Exit|/Exit> - Exit with the specified return code or zero if no return code supplied.
 
-35 L<Float32|/Float32> - 32 bit float
+35 L<Extern|/Extern> - Name external references
 
-36 L<Float64|/Float64> - 64 bit float
+36 L<Float32|/Float32> - 32 bit float
 
-37 L<For|/For> - For - iterate the body as long as register is less than limit incrementing by increment each time
+37 L<Float64|/Float64> - 64 bit float
 
-38 L<ForEver|/ForEver> - Iterate for ever
+38 L<For|/For> - For - iterate the body as long as register is less than limit incrementing by increment each time
 
-39 L<ForIn|/ForIn> - For - iterate the full body as long as register plus increment is less than than limit incrementing by increment each time then increment the last body for the last non full block.
+39 L<ForEver|/ForEver> - Iterate for ever
 
-40 L<Fork|/Fork> - Fork
+40 L<ForIn|/ForIn> - For - iterate the full body as long as register plus increment is less than than limit incrementing by increment each time then increment the last body for the last non full block.
 
-41 L<FreeMemory|/FreeMemory> - Free memory
+41 L<Fork|/Fork> - Fork
 
-42 L<getBFromXmm|/getBFromXmm> - Get the byte from the numbered xmm register and return it in a variable
+42 L<FreeMemory|/FreeMemory> - Free memory
 
-43 L<getBFromZmm|/getBFromZmm> - Get the byte from the numbered zmm register and return it in a variable
+43 L<getBFromXmm|/getBFromXmm> - Get the byte from the numbered xmm register and return it in a variable
 
-44 L<getBwdqFromMm|/getBwdqFromMm> - Get the numbered byte|word|double word|quad word from the numbered zmm register and return it in a variable
+44 L<getBFromZmm|/getBFromZmm> - Get the byte from the numbered zmm register and return it in a variable
 
-45 L<getDFromXmm|/getDFromXmm> - Get the double word from the numbered xmm register and return it in a variable
+45 L<getBwdqFromMm|/getBwdqFromMm> - Get the numbered byte|word|double word|quad word from the numbered zmm register and return it in a variable
 
-46 L<getDFromZmm|/getDFromZmm> - Get the double word from the numbered zmm register and return it in a variable
+46 L<getDFromXmm|/getDFromXmm> - Get the double word from the numbered xmm register and return it in a variable
 
-47 L<GetLengthOfShortString|/GetLengthOfShortString> - Get the length of the short string held in the numbered zmm register into the specified register
+47 L<getDFromZmm|/getDFromZmm> - Get the double word from the numbered zmm register and return it in a variable
 
-48 L<GetNextUtf8CharAsUtf32|/GetNextUtf8CharAsUtf32> - Get the next utf8 encoded character from the addressed memory and return it as a utf32 char
+48 L<GetLengthOfShortString|/GetLengthOfShortString> - Get the length of the short string held in the numbered zmm register into the specified register
 
-49 L<GetPid|/GetPid> - Get process identifier
+49 L<GetNextUtf8CharAsUtf32|/GetNextUtf8CharAsUtf32> - Get the next utf8 encoded character from the addressed memory and return it as a utf32 char
 
-50 L<GetPidInHex|/GetPidInHex> - Get process identifier in hex as 8 zero terminated bytes in rax
+50 L<GetPid|/GetPid> - Get process identifier
 
-51 L<GetPPid|/GetPPid> - Get parent process identifier
+51 L<GetPidInHex|/GetPidInHex> - Get process identifier in hex as 8 zero terminated bytes in rax
 
-52 L<getQFromXmm|/getQFromXmm> - Get the quad word from the numbered xmm register and return it in a variable
+52 L<GetPPid|/GetPPid> - Get parent process identifier
 
-53 L<getQFromZmm|/getQFromZmm> - Get the quad word from the numbered zmm register and return it in a variable
+53 L<getQFromXmm|/getQFromXmm> - Get the quad word from the numbered xmm register and return it in a variable
 
-54 L<GetUid|/GetUid> - Get userid of current process
+54 L<getQFromZmm|/getQFromZmm> - Get the quad word from the numbered zmm register and return it in a variable
 
-55 L<getWFromXmm|/getWFromXmm> - Get the word from the numbered xmm register and return it in a variable
+55 L<GetUid|/GetUid> - Get userid of current process
 
-56 L<getWFromZmm|/getWFromZmm> - Get the word from the numbered zmm register and return it in a variable
+56 L<getWFromXmm|/getWFromXmm> - Get the word from the numbered xmm register and return it in a variable
 
-57 L<Hash|/Hash> - Hash a string addressed by rax with length held in rdi and return the hash code in r15
+57 L<getWFromZmm|/getWFromZmm> - Get the word from the numbered zmm register and return it in a variable
 
-58 L<hexTranslateTable|/hexTranslateTable> - Create/address a hex translate table and return its label
+58 L<Hash|/Hash> - Hash a string addressed by rax with length held in rdi and return the hash code in r15
 
-59 L<If|/If> - If
+59 L<hexTranslateTable|/hexTranslateTable> - Create/address a hex translate table and return its label
 
-60 L<IfEq|/IfEq> - If equal execute the then body else the else body
+60 L<If|/If> - If
 
-61 L<IfGe|/IfGe> - If greater than or equal execute the then body else the else body
+61 L<IfC|/IfC> - If the carry flag is set then execute the then body else the else body
 
-62 L<IfGt|/IfGt> - If greater than execute the then body else the else body
+62 L<IfEq|/IfEq> - If equal execute the then body else the else body
 
-63 L<IfLe|/IfLe> - If less than or equal execute the then body else the else body
+63 L<IfGe|/IfGe> - If greater than or equal execute the then body else the else body
 
-64 L<IfLt|/IfLt> - If less than execute the then body else the else body
+64 L<IfGt|/IfGt> - If greater than execute the then body else the else body
 
-65 L<IfNe|/IfNe> - If not equal execute the then body else the else body
+65 L<IfLe|/IfLe> - If less than or equal execute the then body else the else body
 
-66 L<IfNz|/IfNz> - If the zero is not set then execute the then body else the else body
+66 L<IfLt|/IfLt> - If less than execute the then body else the else body
 
-67 L<IfZ|/IfZ> - If the zero is set then execute the then body else the else body
+67 L<IfNc|/IfNc> - If the carry flag is not set then execute the then body else the else body
 
-68 L<Keep|/Keep> - Mark registers as in use so that they cannot be updated  until we explicitly free them.
+68 L<IfNe|/IfNe> - If not equal execute the then body else the else body
 
-69 L<KeepFree|/KeepFree> - Free registers so that they can be reused
+69 L<IfNz|/IfNz> - If the zero flag is not set then execute the then body else the else body
 
-70 L<KeepPop|/KeepPop> - Reset the status of the specified registers to the status quo ante the last push
+70 L<IfZ|/IfZ> - If the zero flag is set then execute the then body else the else body
 
-71 L<KeepPush|/KeepPush> - Push the current status of the specified registers and then mark them as free
+71 L<InsertOneIntoRegisterAtPoint|/InsertOneIntoRegisterAtPoint> - Insert a one into the specified register at the point indicated by another register
 
-72 L<KeepReturn|/KeepReturn> - Pop the specified register and mark it as in use to effect a subroutine return with this register.
+72 L<InsertZeroIntoRegisterAtPoint|/InsertZeroIntoRegisterAtPoint> - Insert a zero into the specified register at the point indicated by another register
 
-73 L<KeepSet|/KeepSet> - Confirm that the specified registers are in use
+73 L<Keep|/Keep> - Mark registers as in use so that they cannot be updated  until we explicitly free them.
 
-74 L<Label|/Label> - Create a unique label
+74 L<KeepFree|/KeepFree> - Free registers so that they can be reused
 
-75 L<Link|/Link> - Libraries to link with
+75 L<KeepPop|/KeepPop> - Reset the status of the specified registers to the status quo ante the last push
 
-76 L<LoadConstantIntoMaskRegister|/LoadConstantIntoMaskRegister> - Load a constant into a mask register
+76 L<KeepPush|/KeepPush> - Push the current status of the specified registers and then mark them as free
 
-77 L<LoadShortStringFromMemoryToZmm|/LoadShortStringFromMemoryToZmm> - Load the short string addressed by rax into the zmm register with the specified number
+77 L<KeepReturn|/KeepReturn> - Pop the specified register and mark it as in use to effect a subroutine return with this register.
 
-78 L<LoadShortStringFromMemoryToZmm2|/LoadShortStringFromMemoryToZmm2> - Load the short string addressed by rax into the zmm register with the specified number
+78 L<KeepSet|/KeepSet> - Confirm that the specified registers are in use
 
-79 L<LocalData|/LocalData> - Map local data
+79 L<Label|/Label> - Create a unique label
 
-80 L<LocateIntelEmulator|/LocateIntelEmulator> - Locate the Intel Software Development Emulator
+80 L<Link|/Link> - Libraries to link with
 
-81 L<Macro|/Macro> - Create a sub with optional parameters name=> the name of the subroutine so it can be reused rather than regenerated, comment=> a comment describing the sub
+81 L<LoadBitsIntoMaskRegister|/LoadBitsIntoMaskRegister> - Load a bit string specification into a mask register
 
-82 L<MaskMemory|/MaskMemory> - Write the specified byte into locations in the target mask that correspond to the locations in the source that contain the specified byte.
+82 L<LoadConstantIntoMaskRegister|/LoadConstantIntoMaskRegister> - Set a mask register equal to a constant.
 
-83 L<MaskMemoryInRange4|/MaskMemoryInRange4> - Write the specified byte into locations in the target mask that correspond to the locations in the source that contain 4 bytes in the specified range.
+83 L<loadFromZmm|/loadFromZmm> - Load the specified register from the offset located in the numbered zmm.
 
-84 L<Nasm::X86::BlockArray::address|/Nasm::X86::BlockArray::address> - Address of a block string
+84 L<LoadShortStringFromMemoryToZmm|/LoadShortStringFromMemoryToZmm> - Load the short string addressed by rax into the zmm register with the specified number
 
-85 L<Nasm::X86::BlockArray::allocBlock|/Nasm::X86::BlockArray::allocBlock> - Allocate a block to hold a zmm register in the specified byte string and return the offset of the block in a variable
+85 L<LoadShortStringFromMemoryToZmm2|/LoadShortStringFromMemoryToZmm2> - Load the short string addressed by rax into the zmm register with the specified number
 
-86 L<Nasm::X86::BlockArray::dump|/Nasm::X86::BlockArray::dump> - Dump a block array
+86 L<LoadZmm|/LoadZmm> - Load a numbered zmm with the specified bytes
 
-87 L<Nasm::X86::BlockArray::get|/Nasm::X86::BlockArray::get> - Get an element from the array
+87 L<LocalData|/LocalData> - Map local data
 
-88 L<Nasm::X86::BlockArray::pop|/Nasm::X86::BlockArray::pop> - Pop an element from an array
+88 L<LocateIntelEmulator|/LocateIntelEmulator> - Locate the Intel Software Development Emulator
 
-89 L<Nasm::X86::BlockArray::push|/Nasm::X86::BlockArray::push> - Push an element onto the array
+89 L<Macro|/Macro> - Create a sub with optional parameters name=> the name of the subroutine so it can be reused rather than regenerated, comment=> a comment describing the sub
 
-90 L<Nasm::X86::BlockArray::put|/Nasm::X86::BlockArray::put> - Put an element into an array as long as it is with in its limits established by pushing.
+90 L<MaskMemory|/MaskMemory> - Write the specified byte into locations in the target mask that correspond to the locations in the source that contain the specified byte.
 
-91 L<Nasm::X86::BlockMultiWayTree::address|/Nasm::X86::BlockMultiWayTree::address> - Address of the byte string containing a block multi way tree
+91 L<MaskMemoryInRange4|/MaskMemoryInRange4> - Write the specified byte into locations in the target mask that correspond to the locations in the source that contain 4 bytes in the specified range.
 
-92 L<Nasm::X86::BlockMultiWayTree::allocBlock|/Nasm::X86::BlockMultiWayTree::allocBlock> - Allocate a block to hold a zmm register in the specified byte string and return the offset of the block in a variable
+92 L<Nasm::X86::BlockArray::address|/Nasm::X86::BlockArray::address> - Address of a block string
 
-93 L<Nasm::X86::BlockMultiWayTree::allocKeysDataNode|/Nasm::X86::BlockMultiWayTree::allocKeysDataNode> - Allocate a keys/data/node block and place it in the numbered zmm registers
+93 L<Nasm::X86::BlockArray::allocBlock|/Nasm::X86::BlockArray::allocBlock> - Allocate a block to hold a zmm register in the specified byte string and return the offset of the block in a variable
 
-94 L<Nasm::X86::BlockMultiWayTree::by|/Nasm::X86::BlockMultiWayTree::by> - Call the specified body with each (key, data) from the specified tree in order
+94 L<Nasm::X86::BlockArray::dump|/Nasm::X86::BlockArray::dump> - Dump a block array
 
-95 L<Nasm::X86::BlockMultiWayTree::depth|/Nasm::X86::BlockMultiWayTree::depth> - Return the depth of a node within a tree.
+95 L<Nasm::X86::BlockArray::get|/Nasm::X86::BlockArray::get> - Get an element from the array
 
-96 L<Nasm::X86::BlockMultiWayTree::DescribeBlockMultiWayTree|/Nasm::X86::BlockMultiWayTree::DescribeBlockMultiWayTree> - Return a descriptor for a multi way block tree at the specified offset in the specified byte string
+96 L<Nasm::X86::BlockArray::pop|/Nasm::X86::BlockArray::pop> - Pop an element from an array
 
-97 L<Nasm::X86::BlockMultiWayTree::find|/Nasm::X86::BlockMultiWayTree::find> - Find a key in a tree and  return its associated data
+97 L<Nasm::X86::BlockArray::push|/Nasm::X86::BlockArray::push> - Push an element onto the array
 
-98 L<Nasm::X86::BlockMultiWayTree::findAndSplit|/Nasm::X86::BlockMultiWayTree::findAndSplit> - Find a key in a tree which is known to contain at least one key splitting full nodes along the path to the key.
+98 L<Nasm::X86::BlockArray::put|/Nasm::X86::BlockArray::put> - Put an element into an array as long as it is with in its limits established by pushing.
 
-99 L<Nasm::X86::BlockMultiWayTree::getKeysData|/Nasm::X86::BlockMultiWayTree::getKeysData> - Load the keys and data blocks for a node
+99 L<Nasm::X86::BlockMultiWayTree::address|/Nasm::X86::BlockMultiWayTree::address> - Address of the byte string containing a block multi way tree
 
-100 L<Nasm::X86::BlockMultiWayTree::getKeysDataNode|/Nasm::X86::BlockMultiWayTree::getKeysDataNode> - Load the keys, data and child nodes for a node
+100 L<Nasm::X86::BlockMultiWayTree::allocBlock|/Nasm::X86::BlockMultiWayTree::allocBlock> - Allocate a block to hold a zmm register in the specified byte string and return the offset of the block in a variable
 
-101 L<Nasm::X86::BlockMultiWayTree::getLengthInKeys|/Nasm::X86::BlockMultiWayTree::getLengthInKeys> - Get the length of the keys block in the numbered zmm and return it as a variable
+101 L<Nasm::X86::BlockMultiWayTree::allocKeysDataNode|/Nasm::X86::BlockMultiWayTree::allocKeysDataNode> - Allocate a keys/data/node block and place it in the numbered zmm registers
 
-102 L<Nasm::X86::BlockMultiWayTree::getLoop|/Nasm::X86::BlockMultiWayTree::getLoop> - Return the value of the loop field as a variable
+102 L<Nasm::X86::BlockMultiWayTree::by|/Nasm::X86::BlockMultiWayTree::by> - Call the specified body with each (key, data) from the specified tree in order
 
-103 L<Nasm::X86::BlockMultiWayTree::getNode|/Nasm::X86::BlockMultiWayTree::getNode> - Load the child nodes for a node
+103 L<Nasm::X86::BlockMultiWayTree::clearTree|/Nasm::X86::BlockMultiWayTree::clearTree> - Clear the tree bit in the numbered zmm register holding the keys of a node to indicate that the data element indexed by the specified register is an offset to a sub tree in the containing byte string.
 
-104 L<Nasm::X86::BlockMultiWayTree::getUpFromData|/Nasm::X86::BlockMultiWayTree::getUpFromData> - Get the up offset from the data block in the numbered zmm and return it as a variable
+104 L<Nasm::X86::BlockMultiWayTree::depth|/Nasm::X86::BlockMultiWayTree::depth> - Return the depth of a node within a tree.
 
-105 L<Nasm::X86::BlockMultiWayTree::insert|/Nasm::X86::BlockMultiWayTree::insert> - Insert a (key, data) pair into the tree
+105 L<Nasm::X86::BlockMultiWayTree::DescribeBlockMultiWayTree|/Nasm::X86::BlockMultiWayTree::DescribeBlockMultiWayTree> - Return a descriptor for a multi way block tree at the specified offset in the specified byte string
 
-106 L<Nasm::X86::BlockMultiWayTree::iterator|/Nasm::X86::BlockMultiWayTree::iterator> - Iterate through a multi way tree
+106 L<Nasm::X86::BlockMultiWayTree::expandTreeBitsWithOne|/Nasm::X86::BlockMultiWayTree::expandTreeBitsWithOne> - Insert a one into the tree bits field in the numbered zmm at the specified point
 
-107 L<Nasm::X86::BlockMultiWayTree::Iterator::next|/Nasm::X86::BlockMultiWayTree::Iterator::next> - Next element in the tree
+107 L<Nasm::X86::BlockMultiWayTree::expandTreeBitsWithZero|/Nasm::X86::BlockMultiWayTree::expandTreeBitsWithZero> - Insert a zero into the tree bits field in the numbered zmm at the specified point
 
-108 L<Nasm::X86::BlockMultiWayTree::leftMost|/Nasm::X86::BlockMultiWayTree::leftMost> - Return the left most node
+108 L<Nasm::X86::BlockMultiWayTree::expandTreeBitsWithZeroOrOne|/Nasm::X86::BlockMultiWayTree::expandTreeBitsWithZeroOrOne> - Insert a zero or one into the tree bits field in the numbered zmm at the specified point
 
-109 L<Nasm::X86::BlockMultiWayTree::leftOrRightMost|/Nasm::X86::BlockMultiWayTree::leftOrRightMost> - Return the left most or right most node
+109 L<Nasm::X86::BlockMultiWayTree::find|/Nasm::X86::BlockMultiWayTree::find> - Find a key in a tree and test whether the found data is a sub tree.
 
-110 L<Nasm::X86::BlockMultiWayTree::nodeFromData|/Nasm::X86::BlockMultiWayTree::nodeFromData> - Load the the node block into the numbered zmm corresponding to the data block held in the numbered zmm.
+110 L<Nasm::X86::BlockMultiWayTree::findAndSplit|/Nasm::X86::BlockMultiWayTree::findAndSplit> - Find a key in a tree which is known to contain at least one key splitting full nodes along the path to the key.
 
-111 L<Nasm::X86::BlockMultiWayTree::putKeysData|/Nasm::X86::BlockMultiWayTree::putKeysData> - Save the key and data blocks for a node
+111 L<Nasm::X86::BlockMultiWayTree::getKeysData|/Nasm::X86::BlockMultiWayTree::getKeysData> - Load the keys and data blocks for a node
 
-112 L<Nasm::X86::BlockMultiWayTree::putKeysDataNode|/Nasm::X86::BlockMultiWayTree::putKeysDataNode> - Save the keys, data and child nodes for a node
+112 L<Nasm::X86::BlockMultiWayTree::getKeysDataNode|/Nasm::X86::BlockMultiWayTree::getKeysDataNode> - Load the keys, data and child nodes for a node
 
-113 L<Nasm::X86::BlockMultiWayTree::putLengthInKeys|/Nasm::X86::BlockMultiWayTree::putLengthInKeys> - Get the length of the block in the numbered zmm from the specified variable
+113 L<Nasm::X86::BlockMultiWayTree::getLengthInKeys|/Nasm::X86::BlockMultiWayTree::getLengthInKeys> - Get the length of the keys block in the numbered zmm and return it as a variable
 
-114 L<Nasm::X86::BlockMultiWayTree::putLoop|/Nasm::X86::BlockMultiWayTree::putLoop> - Set the value of the loop field from a variable
+114 L<Nasm::X86::BlockMultiWayTree::getLoop|/Nasm::X86::BlockMultiWayTree::getLoop> - Return the value of the loop field as a variable
 
-115 L<Nasm::X86::BlockMultiWayTree::putUpIntoData|/Nasm::X86::BlockMultiWayTree::putUpIntoData> - Put the offset of the parent keys block expressed as a variable into the numbered zmm
+115 L<Nasm::X86::BlockMultiWayTree::getNode|/Nasm::X86::BlockMultiWayTree::getNode> - Load the child nodes for a node
 
-116 L<Nasm::X86::BlockMultiWayTree::reParent|/Nasm::X86::BlockMultiWayTree::reParent> - Reparent the children of a node held in registers.
+116 L<Nasm::X86::BlockMultiWayTree::getTreeBits|/Nasm::X86::BlockMultiWayTree::getTreeBits> - Load the tree bits from the numbered zmm into the specified register.
 
-117 L<Nasm::X86::BlockMultiWayTree::rightMost|/Nasm::X86::BlockMultiWayTree::rightMost> - Return the right most node
+117 L<Nasm::X86::BlockMultiWayTree::getUpFromData|/Nasm::X86::BlockMultiWayTree::getUpFromData> - Get the up offset from the data block in the numbered zmm and return it as a variable
 
-118 L<Nasm::X86::BlockMultiWayTree::splitFullLeftNode|/Nasm::X86::BlockMultiWayTree::splitFullLeftNode> - Split a full left node block held in 28.
+118 L<Nasm::X86::BlockMultiWayTree::insert|/Nasm::X86::BlockMultiWayTree::insert> - Insert a dword into into the specified tree at the specified key.
 
-119 L<Nasm::X86::BlockMultiWayTree::splitFullRightNode|/Nasm::X86::BlockMultiWayTree::splitFullRightNode> - Split a full right node block held in 25.
+119 L<Nasm::X86::BlockMultiWayTree::insertDataOrTree|/Nasm::X86::BlockMultiWayTree::insertDataOrTree> - Insert either a key, data pair into the tree or create a sub tree at the specified key (if it does not already exist) and return the offset of the first block of the sub tree in the data variable.
 
-120 L<Nasm::X86::BlockMultiWayTree::splitFullRoot|/Nasm::X86::BlockMultiWayTree::splitFullRoot> - Split a full root block held in 31.
+120 L<Nasm::X86::BlockMultiWayTree::insertTree|/Nasm::X86::BlockMultiWayTree::insertTree> - Insert a sub tree into the specified tree tree under the specified key and return a descriptor for it.
 
-121 L<Nasm::X86::BlockMultiWayTree::splitNode|/Nasm::X86::BlockMultiWayTree::splitNode> - Split a node given its offset in a byte string retaining the key being inserted in the node split while putting the remainder to the left or right.
+121 L<Nasm::X86::BlockMultiWayTree::isTree|/Nasm::X86::BlockMultiWayTree::isTree> - Set the Zero Flag to oppose the tree bit in the numbered zmm register holding the keys of a node to indicate whether the data element indicated by the specified register is an offset to a sub tree in the containing byte string or not.
 
-122 L<Nasm::X86::BlockString::address|/Nasm::X86::BlockString::address> - Address of a block string
+122 L<Nasm::X86::BlockMultiWayTree::iterator|/Nasm::X86::BlockMultiWayTree::iterator> - Iterate through a multi way tree
 
-123 L<Nasm::X86::BlockString::allocBlock|/Nasm::X86::BlockString::allocBlock> - Allocate a block to hold a zmm register in the specified byte string and return the offset of the block in a variable
+123 L<Nasm::X86::BlockMultiWayTree::Iterator::next|/Nasm::X86::BlockMultiWayTree::Iterator::next> - Next element in the tree
 
-124 L<Nasm::X86::BlockString::append|/Nasm::X86::BlockString::append> - Append the specified content in memory to the specified block string
+124 L<Nasm::X86::BlockMultiWayTree::leftMost|/Nasm::X86::BlockMultiWayTree::leftMost> - Return the left most node
 
-125 L<Nasm::X86::BlockString::clear|/Nasm::X86::BlockString::clear> - Clear the block by freeing all but the first block
+125 L<Nasm::X86::BlockMultiWayTree::leftOrRightMost|/Nasm::X86::BlockMultiWayTree::leftOrRightMost> - Return the left most or right most node
 
-126 L<Nasm::X86::BlockString::concatenate|/Nasm::X86::BlockString::concatenate> - Concatenate two block strings by appending a copy of the source to the target block string.
+126 L<Nasm::X86::BlockMultiWayTree::nodeFromData|/Nasm::X86::BlockMultiWayTree::nodeFromData> - Load the the node block into the numbered zmm corresponding to the data block held in the numbered zmm.
 
-127 L<Nasm::X86::BlockString::deleteChar|/Nasm::X86::BlockString::deleteChar> - Delete a character in a block string
+127 L<Nasm::X86::BlockMultiWayTree::putKeysData|/Nasm::X86::BlockMultiWayTree::putKeysData> - Save the key and data blocks for a node
 
-128 L<Nasm::X86::BlockString::dump|/Nasm::X86::BlockString::dump> - Dump a block string to sysout
+128 L<Nasm::X86::BlockMultiWayTree::putKeysDataNode|/Nasm::X86::BlockMultiWayTree::putKeysDataNode> - Save the keys, data and child nodes for a node
 
-129 L<Nasm::X86::BlockString::getBlock|/Nasm::X86::BlockString::getBlock> - Get the block with the specified offset in the specified block string and return it in the numbered zmm
+129 L<Nasm::X86::BlockMultiWayTree::putLengthInKeys|/Nasm::X86::BlockMultiWayTree::putLengthInKeys> - Get the length of the block in the numbered zmm from the specified variable
 
-130 L<Nasm::X86::BlockString::getBlockLength|/Nasm::X86::BlockString::getBlockLength> - Get the block length of the numbered zmm and return it in a variable
+130 L<Nasm::X86::BlockMultiWayTree::putLoop|/Nasm::X86::BlockMultiWayTree::putLoop> - Set the value of the loop field from a variable
 
-131 L<Nasm::X86::BlockString::getCharacter|/Nasm::X86::BlockString::getCharacter> - Get a character from a block string
+131 L<Nasm::X86::BlockMultiWayTree::putTreeBits|/Nasm::X86::BlockMultiWayTree::putTreeBits> - Put the tree bits in the specified register into the numbered zmm.
 
-132 L<Nasm::X86::BlockString::getNextAndPrevBlockOffsetFromZmm|/Nasm::X86::BlockString::getNextAndPrevBlockOffsetFromZmm> - Get the offsets of the next and previous blocks as variables from the specified zmm
+132 L<Nasm::X86::BlockMultiWayTree::putUpIntoData|/Nasm::X86::BlockMultiWayTree::putUpIntoData> - Put the offset of the parent keys block expressed as a variable into the numbered zmm
 
-133 L<Nasm::X86::BlockString::insertChar|/Nasm::X86::BlockString::insertChar> - Insert a character into a block string
+133 L<Nasm::X86::BlockMultiWayTree::reParent|/Nasm::X86::BlockMultiWayTree::reParent> - Reparent the children of a node held in registers.
 
-134 L<Nasm::X86::BlockString::len|/Nasm::X86::BlockString::len> - Find the length of a block string
+134 L<Nasm::X86::BlockMultiWayTree::rightMost|/Nasm::X86::BlockMultiWayTree::rightMost> - Return the right most node
 
-135 L<Nasm::X86::BlockString::putBlock|/Nasm::X86::BlockString::putBlock> - Write the numbered zmm to the block at the specified offset in the specified byte string
+135 L<Nasm::X86::BlockMultiWayTree::setOrClearTree|/Nasm::X86::BlockMultiWayTree::setOrClearTree> - Set or clear the tree bit in the numbered zmm register holding the keys of a node to indicate that the data element indicated by the specified register is an offset to a sub tree in the containing byte string.
 
-136 L<Nasm::X86::BlockString::putNextandPrevBlockOffsetIntoZmm|/Nasm::X86::BlockString::putNextandPrevBlockOffsetIntoZmm> - Save next and prev offsets into a zmm representing a block
+136 L<Nasm::X86::BlockMultiWayTree::setTree|/Nasm::X86::BlockMultiWayTree::setTree> - Set the tree bit in the numbered zmm register holding the keys of a node to indicate that the data element indexed by the specified register is an offset to a sub tree in the containing byte string.
 
-137 L<Nasm::X86::BlockString::setBlockLengthInZmm|/Nasm::X86::BlockString::setBlockLengthInZmm> - Set the block length of the numbered zmm to the specified length
+137 L<Nasm::X86::BlockMultiWayTree::splitFullLeftNode|/Nasm::X86::BlockMultiWayTree::splitFullLeftNode> - Split a full left node block held in 28.
 
-138 L<Nasm::X86::ByteString::allocate|/Nasm::X86::ByteString::allocate> - Allocate the amount of space indicated in rdi in the byte string addressed by rax and return the offset of the allocation in the arena in rdi
+138 L<Nasm::X86::BlockMultiWayTree::splitFullLeftOrRightNode|/Nasm::X86::BlockMultiWayTree::splitFullLeftOrRightNode> - Split a full a full left node (held in 28.
 
-139 L<Nasm::X86::ByteString::allocBlock|/Nasm::X86::ByteString::allocBlock> - Allocate a block to hold a zmm register in the specified byte string and return the offset of the block in a variable
+139 L<Nasm::X86::BlockMultiWayTree::splitFullRightNode|/Nasm::X86::BlockMultiWayTree::splitFullRightNode> - Split a full right node block held in 25.
 
-140 L<Nasm::X86::ByteString::allocZmmBlock|/Nasm::X86::ByteString::allocZmmBlock> - Allocate a block to hold a zmm register in the specified byte string and return the offset of the block in a variable
+140 L<Nasm::X86::BlockMultiWayTree::splitFullRoot|/Nasm::X86::BlockMultiWayTree::splitFullRoot> - Split a full root block held in 31.
 
-141 L<Nasm::X86::ByteString::append|/Nasm::X86::ByteString::append> - Append one byte string to another
+141 L<Nasm::X86::BlockMultiWayTree::splitNode|/Nasm::X86::BlockMultiWayTree::splitNode> - Split a node given its offset in a byte string retaining the key being inserted in the node split while putting the remainder to the left or right.
 
-142 L<Nasm::X86::ByteString::blockSize|/Nasm::X86::ByteString::blockSize> - Size of a block
+142 L<Nasm::X86::BlockMultiWayTree::transferTreeBitsFromLeft|/Nasm::X86::BlockMultiWayTree::transferTreeBitsFromLeft> - Transfer tree bits when splitting a full left node
 
-143 L<Nasm::X86::ByteString::chain|/Nasm::X86::ByteString::chain> - Return a variable with the end point of a chain of double words in the byte string starting at the specified variable.
+143 L<Nasm::X86::BlockMultiWayTree::transferTreeBitsFromLeftOrRight|/Nasm::X86::BlockMultiWayTree::transferTreeBitsFromLeftOrRight> - Transfer tree bits when splitting a full left or right node
 
-144 L<Nasm::X86::ByteString::char|/Nasm::X86::ByteString::char> - Append a character expressed as a decimal number to the byte string addressed by rax
+144 L<Nasm::X86::BlockMultiWayTree::transferTreeBitsFromParent|/Nasm::X86::BlockMultiWayTree::transferTreeBitsFromParent> - Transfer tree bits when splitting a full node
 
-145 L<Nasm::X86::ByteString::clear|/Nasm::X86::ByteString::clear> - Clear the byte string addressed by rax
+145 L<Nasm::X86::BlockMultiWayTree::transferTreeBitsFromRight|/Nasm::X86::BlockMultiWayTree::transferTreeBitsFromRight> - Transfer tree bits when splitting a full right node
 
-146 L<Nasm::X86::ByteString::CreateBlockArray|/Nasm::X86::ByteString::CreateBlockArray> - Create a block array in a byte string
+146 L<Nasm::X86::BlockString::address|/Nasm::X86::BlockString::address> - Address of a block string
 
-147 L<Nasm::X86::ByteString::CreateBlockMultiWayTree|/Nasm::X86::ByteString::CreateBlockMultiWayTree> - Create a block multi way tree in a byte string
+147 L<Nasm::X86::BlockString::allocBlock|/Nasm::X86::BlockString::allocBlock> - Allocate a block to hold a zmm register in the specified byte string and return the offset of the block in a variable
 
-148 L<Nasm::X86::ByteString::CreateBlockString|/Nasm::X86::ByteString::CreateBlockString> - Create a string from a doubly link linked list of 64 byte blocks linked via 4 byte offsets in the byte string addressed by rax and return its descriptor
+148 L<Nasm::X86::BlockString::append|/Nasm::X86::BlockString::append> - Append the specified content in memory to the specified block string
 
-149 L<Nasm::X86::ByteString::dump|/Nasm::X86::ByteString::dump> - Dump details of a byte string
+149 L<Nasm::X86::BlockString::clear|/Nasm::X86::BlockString::clear> - Clear the block by freeing all but the first block
 
-150 L<Nasm::X86::ByteString::firstFreeBlock|/Nasm::X86::ByteString::firstFreeBlock> - Create and load a variable with the first free block on the free block chain or zero if no such block in the given byte string
+150 L<Nasm::X86::BlockString::concatenate|/Nasm::X86::BlockString::concatenate> - Concatenate two block strings by appending a copy of the source to the target block string.
 
-151 L<Nasm::X86::ByteString::freeBlock|/Nasm::X86::ByteString::freeBlock> - Free a block in a byte string by placing it on the free chain
+151 L<Nasm::X86::BlockString::deleteChar|/Nasm::X86::BlockString::deleteChar> - Delete a character in a block string
 
-152 L<Nasm::X86::ByteString::getBlock|/Nasm::X86::ByteString::getBlock> - Get the block with the specified offset in the specified block string and return it in the numbered zmm
+152 L<Nasm::X86::BlockString::dump|/Nasm::X86::BlockString::dump> - Dump a block string to sysout
 
-153 L<Nasm::X86::ByteString::length|/Nasm::X86::ByteString::length> - Get the length of a byte string
+153 L<Nasm::X86::BlockString::getBlock|/Nasm::X86::BlockString::getBlock> - Get the block with the specified offset in the specified block string and return it in the numbered zmm
 
-154 L<Nasm::X86::ByteString::m|/Nasm::X86::ByteString::m> - Append the content with length rdi addressed by rsi to the byte string addressed by rax
+154 L<Nasm::X86::BlockString::getBlockLength|/Nasm::X86::BlockString::getBlockLength> - Get the block length of the numbered zmm and return it in a variable
 
-155 L<Nasm::X86::ByteString::makeReadOnly|/Nasm::X86::ByteString::makeReadOnly> - Make a byte string read only
+155 L<Nasm::X86::BlockString::getCharacter|/Nasm::X86::BlockString::getCharacter> - Get a character from a block string
 
-156 L<Nasm::X86::ByteString::makeWriteable|/Nasm::X86::ByteString::makeWriteable> - Make a byte string writable
+156 L<Nasm::X86::BlockString::getNextAndPrevBlockOffsetFromZmm|/Nasm::X86::BlockString::getNextAndPrevBlockOffsetFromZmm> - Get the offsets of the next and previous blocks as variables from the specified zmm
 
-157 L<Nasm::X86::ByteString::nl|/Nasm::X86::ByteString::nl> - Append a new line to the byte string addressed by rax
+157 L<Nasm::X86::BlockString::insertChar|/Nasm::X86::BlockString::insertChar> - Insert a character into a block string
 
-158 L<Nasm::X86::ByteString::out|/Nasm::X86::ByteString::out> - Print the specified byte string addressed by rax on sysout
+158 L<Nasm::X86::BlockString::len|/Nasm::X86::BlockString::len> - Find the length of a block string
 
-159 L<Nasm::X86::ByteString::putBlock|/Nasm::X86::ByteString::putBlock> - Write the numbered zmm to the block at the specified offset in the specified byte string
+159 L<Nasm::X86::BlockString::putBlock|/Nasm::X86::BlockString::putBlock> - Write the numbered zmm to the block at the specified offset in the specified byte string
 
-160 L<Nasm::X86::ByteString::putChain|/Nasm::X86::ByteString::putChain> - Write the double word in the specified variable to the double word location at the the specified offset in the specified byte string.
+160 L<Nasm::X86::BlockString::putNextandPrevBlockOffsetIntoZmm|/Nasm::X86::BlockString::putNextandPrevBlockOffsetIntoZmm> - Save next and prev offsets into a zmm representing a block
 
-161 L<Nasm::X86::ByteString::q|/Nasm::X86::ByteString::q> - Append a constant string to the byte string
+161 L<Nasm::X86::BlockString::setBlockLengthInZmm|/Nasm::X86::BlockString::setBlockLengthInZmm> - Set the block length of the numbered zmm to the specified length
 
-162 L<Nasm::X86::ByteString::ql|/Nasm::X86::ByteString::ql> - Append a quoted string containing new line characters to the byte string addressed by rax
+162 L<Nasm::X86::ByteString::allocate|/Nasm::X86::ByteString::allocate> - Allocate the amount of space indicated in rdi in the byte string addressed by rax and return the offset of the allocation in the arena in rdi
 
-163 L<Nasm::X86::ByteString::read|/Nasm::X86::ByteString::read> - Read the named file (terminated with a zero byte) and place it into the named byte string.
+163 L<Nasm::X86::ByteString::allocBlock|/Nasm::X86::ByteString::allocBlock> - Allocate a block to hold a zmm register in the specified byte string and return the offset of the block in a variable
 
-164 L<Nasm::X86::ByteString::setFirstFreeBlock|/Nasm::X86::ByteString::setFirstFreeBlock> - Set the first free block field from a variable
+164 L<Nasm::X86::ByteString::allocZmmBlock|/Nasm::X86::ByteString::allocZmmBlock> - Allocate a block to hold a zmm register in the specified byte string and return the offset of the block in a variable
 
-165 L<Nasm::X86::ByteString::updateSpace|/Nasm::X86::ByteString::updateSpace> - Make sure that the byte string addressed by rax has enough space to accommodate content of length rdi
+165 L<Nasm::X86::ByteString::append|/Nasm::X86::ByteString::append> - Append one byte string to another
 
-166 L<Nasm::X86::ByteString::write|/Nasm::X86::ByteString::write> - Write the content in a byte string addressed by rax to a temporary file and replace the byte string content with the name of the  temporary file
+166 L<Nasm::X86::ByteString::blockSize|/Nasm::X86::ByteString::blockSize> - Size of a block
 
-167 L<Nasm::X86::ByteString::z|/Nasm::X86::ByteString::z> - Append a trailing zero to the byte string addressed by rax
+167 L<Nasm::X86::ByteString::chain|/Nasm::X86::ByteString::chain> - Return a variable with the end point of a chain of double words in the byte string starting at the specified variable.
 
-168 L<Nasm::X86::LocalData::allocate8|/Nasm::X86::LocalData::allocate8> - Add some 8 byte local variables and return an array of variable definitions
+168 L<Nasm::X86::ByteString::char|/Nasm::X86::ByteString::char> - Append a character expressed as a decimal number to the byte string addressed by rax
 
-169 L<Nasm::X86::LocalData::free|/Nasm::X86::LocalData::free> - Free a local data area on the stack
+169 L<Nasm::X86::ByteString::clear|/Nasm::X86::ByteString::clear> - Clear the byte string addressed by rax
 
-170 L<Nasm::X86::LocalData::start|/Nasm::X86::LocalData::start> - Start a local data area on the stack
+170 L<Nasm::X86::ByteString::CreateBlockArray|/Nasm::X86::ByteString::CreateBlockArray> - Create a block array in a byte string
 
-171 L<Nasm::X86::LocalData::variable|/Nasm::X86::LocalData::variable> - Add a local variable
+171 L<Nasm::X86::ByteString::CreateBlockMultiWayTree|/Nasm::X86::ByteString::CreateBlockMultiWayTree> - Create a block multi way tree in a byte string
 
-172 L<Nasm::X86::LocalVariable::stack|/Nasm::X86::LocalVariable::stack> - Address a local variable on the stack
+172 L<Nasm::X86::ByteString::CreateBlockString|/Nasm::X86::ByteString::CreateBlockString> - Create a string from a doubly link linked list of 64 byte blocks linked via 4 byte offsets in the byte string addressed by rax and return its descriptor
 
-173 L<Nasm::X86::Scope::contains|/Nasm::X86::Scope::contains> - Check that the named parent scope contains the specified child scope.
+173 L<Nasm::X86::ByteString::dump|/Nasm::X86::ByteString::dump> - Dump details of a byte string
 
-174 L<Nasm::X86::Scope::currentlyVisible|/Nasm::X86::Scope::currentlyVisible> - Check that the named parent scope is currently visible
+174 L<Nasm::X86::ByteString::firstFreeBlock|/Nasm::X86::ByteString::firstFreeBlock> - Create and load a variable with the first free block on the free block chain or zero if no such block in the given byte string
 
-175 L<Nasm::X86::Structure::field|/Nasm::X86::Structure::field> - Add a field of the specified length with an optional comment
+175 L<Nasm::X86::ByteString::freeBlock|/Nasm::X86::ByteString::freeBlock> - Free a block in a byte string by placing it on the free chain
 
-176 L<Nasm::X86::StructureField::addr|/Nasm::X86::StructureField::addr> - Address a field in a structure by either the default register or the named register
+176 L<Nasm::X86::ByteString::getBlock|/Nasm::X86::ByteString::getBlock> - Get the block with the specified offset in the specified block string and return it in the numbered zmm
 
-177 L<Nasm::X86::Sub::call|/Nasm::X86::Sub::call> - Call a sub passing it some parameters
+177 L<Nasm::X86::ByteString::length|/Nasm::X86::ByteString::length> - Get the length of a byte string
 
-178 L<Nasm::X86::Variable::add|/Nasm::X86::Variable::add> - Add the right hand variable to the left hand variable and return the result as a new variable
+178 L<Nasm::X86::ByteString::m|/Nasm::X86::ByteString::m> - Append the content with length rdi addressed by rsi to the byte string addressed by rax
 
-179 L<Nasm::X86::Variable::address|/Nasm::X86::Variable::address> - Get the address of a variable with an optional offset
+179 L<Nasm::X86::ByteString::makeReadOnly|/Nasm::X86::ByteString::makeReadOnly> - Make a byte string read only
 
-180 L<Nasm::X86::Variable::allocateMemory|/Nasm::X86::Variable::allocateMemory> - Allocate the specified amount of memory via mmap and return its address
+180 L<Nasm::X86::ByteString::makeWriteable|/Nasm::X86::ByteString::makeWriteable> - Make a byte string writable
 
-181 L<Nasm::X86::Variable::and|/Nasm::X86::Variable::and> - And two variables
+181 L<Nasm::X86::ByteString::nl|/Nasm::X86::ByteString::nl> - Append a new line to the byte string addressed by rax
 
-182 L<Nasm::X86::Variable::arithmetic|/Nasm::X86::Variable::arithmetic> - Return a variable containing the result of an arithmetic operation on the left hand and right hand side variables
+182 L<Nasm::X86::ByteString::out|/Nasm::X86::ByteString::out> - Print the specified byte string addressed by rax on sysout
 
-183 L<Nasm::X86::Variable::assign|/Nasm::X86::Variable::assign> - Assign to the left hand side the value of the right hand side
+183 L<Nasm::X86::ByteString::putBlock|/Nasm::X86::ByteString::putBlock> - Write the numbered zmm to the block at the specified offset in the specified byte string
 
-184 L<Nasm::X86::Variable::boolean|/Nasm::X86::Variable::boolean> - Combine the left hand variable with the right hand variable via a boolean operator
+184 L<Nasm::X86::ByteString::putChain|/Nasm::X86::ByteString::putChain> - Write the double word in the specified variable to the double word location at the the specified offset in the specified byte string.
 
-185 L<Nasm::X86::Variable::clearMaskBit|/Nasm::X86::Variable::clearMaskBit> - Clear a bit in the specified mask register retaining the other bits
+185 L<Nasm::X86::ByteString::q|/Nasm::X86::ByteString::q> - Append a constant string to the byte string
 
-186 L<Nasm::X86::Variable::clearMemory|/Nasm::X86::Variable::clearMemory> - Clear the memory described in this variable
+186 L<Nasm::X86::ByteString::ql|/Nasm::X86::ByteString::ql> - Append a quoted string containing new line characters to the byte string addressed by rax
 
-187 L<Nasm::X86::Variable::clone|/Nasm::X86::Variable::clone> - Clone a variable to create a new variable
+187 L<Nasm::X86::ByteString::read|/Nasm::X86::ByteString::read> - Read the named file (terminated with a zero byte) and place it into the named byte string.
 
-188 L<Nasm::X86::Variable::copy|/Nasm::X86::Variable::copy> - Copy one variable into another
+188 L<Nasm::X86::ByteString::setFirstFreeBlock|/Nasm::X86::ByteString::setFirstFreeBlock> - Set the first free block field from a variable
 
-189 L<Nasm::X86::Variable::copyAddress|/Nasm::X86::Variable::copyAddress> - Copy a reference to a variable
+189 L<Nasm::X86::ByteString::updateSpace|/Nasm::X86::ByteString::updateSpace> - Make sure that the byte string addressed by rax has enough space to accommodate content of length rdi
 
-190 L<Nasm::X86::Variable::copyMemory|/Nasm::X86::Variable::copyMemory> - Copy from one block of memory to another
+190 L<Nasm::X86::ByteString::write|/Nasm::X86::ByteString::write> - Write the content in a byte string addressed by rax to a temporary file and replace the byte string content with the name of the  temporary file
 
-191 L<Nasm::X86::Variable::debug|/Nasm::X86::Variable::debug> - Dump the value of a variable on stdout with an indication of where the dump came from
+191 L<Nasm::X86::ByteString::z|/Nasm::X86::ByteString::z> - Append a trailing zero to the byte string addressed by rax
 
-192 L<Nasm::X86::Variable::dec|/Nasm::X86::Variable::dec> - Decrement a variable
+192 L<Nasm::X86::LocalData::allocate8|/Nasm::X86::LocalData::allocate8> - Add some 8 byte local variables and return an array of variable definitions
 
-193 L<Nasm::X86::Variable::divide|/Nasm::X86::Variable::divide> - Divide the left hand variable by the right hand variable and return the result as a new variable
+193 L<Nasm::X86::LocalData::free|/Nasm::X86::LocalData::free> - Free a local data area on the stack
 
-194 L<Nasm::X86::Variable::division|/Nasm::X86::Variable::division> - Return a variable containing the result or the remainder that occurs when the left hand side is divided by the right hand side
+194 L<Nasm::X86::LocalData::start|/Nasm::X86::LocalData::start> - Start a local data area on the stack
 
-195 L<Nasm::X86::Variable::dump|/Nasm::X86::Variable::dump> - Dump the value of a variable to the specified channel adding an optional title and new line if requested
+195 L<Nasm::X86::LocalData::variable|/Nasm::X86::LocalData::variable> - Add a local variable
 
-196 L<Nasm::X86::Variable::eq|/Nasm::X86::Variable::eq> - Check whether the left hand variable is equal to the right hand variable
+196 L<Nasm::X86::LocalVariable::stack|/Nasm::X86::LocalVariable::stack> - Address a local variable on the stack
 
-197 L<Nasm::X86::Variable::equals|/Nasm::X86::Variable::equals> - Equals operator
+197 L<Nasm::X86::Scope::contains|/Nasm::X86::Scope::contains> - Check that the named parent scope contains the specified child scope.
 
-198 L<Nasm::X86::Variable::err|/Nasm::X86::Variable::err> - Dump the value of a variable on stderr
+198 L<Nasm::X86::Scope::currentlyVisible|/Nasm::X86::Scope::currentlyVisible> - Check that the named parent scope is currently visible
 
-199 L<Nasm::X86::Variable::errNL|/Nasm::X86::Variable::errNL> - Dump the value of a variable on stderr and append a new line
+199 L<Nasm::X86::Structure::field|/Nasm::X86::Structure::field> - Add a field of the specified length with an optional comment
 
-200 L<Nasm::X86::Variable::for|/Nasm::X86::Variable::for> - Iterate the body limit times.
+200 L<Nasm::X86::StructureField::addr|/Nasm::X86::StructureField::addr> - Address a field in a structure by either the default register or the named register
 
-201 L<Nasm::X86::Variable::freeMemory|/Nasm::X86::Variable::freeMemory> - Free the memory addressed by this variable for the specified length
+201 L<Nasm::X86::Sub::call|/Nasm::X86::Sub::call> - Call a sub passing it some parameters
 
-202 L<Nasm::X86::Variable::ge|/Nasm::X86::Variable::ge> - Check whether the left hand variable is greater than or equal to the right hand variable
+202 L<Nasm::X86::Variable::add|/Nasm::X86::Variable::add> - Add the right hand variable to the left hand variable and return the result as a new variable
 
-203 L<Nasm::X86::Variable::getBFromZmm|/Nasm::X86::Variable::getBFromZmm> - Get the byte from the numbered zmm register and put it in a variable
+203 L<Nasm::X86::Variable::address|/Nasm::X86::Variable::address> - Get the address of a variable with an optional offset
 
-204 L<Nasm::X86::Variable::getConst|/Nasm::X86::Variable::getConst> - Load the variable from a constant in effect setting a variable to a specified value
+204 L<Nasm::X86::Variable::allocateMemory|/Nasm::X86::Variable::allocateMemory> - Allocate the specified amount of memory via mmap and return its address
 
-205 L<Nasm::X86::Variable::getDFromZmm|/Nasm::X86::Variable::getDFromZmm> - Get the double word from the numbered zmm register and put it in a variable
+205 L<Nasm::X86::Variable::and|/Nasm::X86::Variable::and> - And two variables
 
-206 L<Nasm::X86::Variable::getQFromZmm|/Nasm::X86::Variable::getQFromZmm> - Get the quad word from the numbered zmm register and put it in a variable
+206 L<Nasm::X86::Variable::arithmetic|/Nasm::X86::Variable::arithmetic> - Return a variable containing the result of an arithmetic operation on the left hand and right hand side variables
 
-207 L<Nasm::X86::Variable::getReg|/Nasm::X86::Variable::getReg> - Load the variable from the named registers
+207 L<Nasm::X86::Variable::assign|/Nasm::X86::Variable::assign> - Assign to the left hand side the value of the right hand side
 
-208 L<Nasm::X86::Variable::getWFromZmm|/Nasm::X86::Variable::getWFromZmm> - Get the word from the numbered zmm register and put it in a variable
+208 L<Nasm::X86::Variable::boolean|/Nasm::X86::Variable::boolean> - Combine the left hand variable with the right hand variable via a boolean operator
 
-209 L<Nasm::X86::Variable::gt|/Nasm::X86::Variable::gt> - Check whether the left hand variable is greater than the right hand variable
+209 L<Nasm::X86::Variable::clearBit|/Nasm::X86::Variable::clearBit> - Clear a bit in the specified mask register retaining the other bits
 
-210 L<Nasm::X86::Variable::inc|/Nasm::X86::Variable::inc> - Increment a variable
+210 L<Nasm::X86::Variable::clearMaskBit|/Nasm::X86::Variable::clearMaskBit> - Clear a bit in the specified mask register retaining the other bits
 
-211 L<Nasm::X86::Variable::incDec|/Nasm::X86::Variable::incDec> - Increment or decrement a variable
+211 L<Nasm::X86::Variable::clearMemory|/Nasm::X86::Variable::clearMemory> - Clear the memory described in this variable
 
-212 L<Nasm::X86::Variable::isRef|/Nasm::X86::Variable::isRef> - Check whether the specified  variable is a reference to another variable
+212 L<Nasm::X86::Variable::clone|/Nasm::X86::Variable::clone> - Clone a variable to create a new variable
 
-213 L<Nasm::X86::Variable::le|/Nasm::X86::Variable::le> - Check whether the left hand variable is less than or equal to the right hand variable
+213 L<Nasm::X86::Variable::copy|/Nasm::X86::Variable::copy> - Copy one variable into another
 
-214 L<Nasm::X86::Variable::loadZmm|/Nasm::X86::Variable::loadZmm> - Load bytes from the memory addressed by the specified source variable into the numbered zmm register.
+214 L<Nasm::X86::Variable::copyAddress|/Nasm::X86::Variable::copyAddress> - Copy a reference to a variable
 
-215 L<Nasm::X86::Variable::lt|/Nasm::X86::Variable::lt> - Check whether the left hand variable is less than the right hand variable
+215 L<Nasm::X86::Variable::copyMemory|/Nasm::X86::Variable::copyMemory> - Copy from one block of memory to another
 
-216 L<Nasm::X86::Variable::max|/Nasm::X86::Variable::max> - Maximum of two variables
+216 L<Nasm::X86::Variable::copyZF|/Nasm::X86::Variable::copyZF> - Copy the current state of the zero flag into a variable
 
-217 L<Nasm::X86::Variable::min|/Nasm::X86::Variable::min> - Minimum of two variables
+217 L<Nasm::X86::Variable::copyZFInverted|/Nasm::X86::Variable::copyZFInverted> - Copy the opposite of the current state of the zero flag into a variable
 
-218 L<Nasm::X86::Variable::minusAssign|/Nasm::X86::Variable::minusAssign> - Implement minus and assign
+218 L<Nasm::X86::Variable::debug|/Nasm::X86::Variable::debug> - Dump the value of a variable on stdout with an indication of where the dump came from
 
-219 L<Nasm::X86::Variable::mod|/Nasm::X86::Variable::mod> - Divide the left hand variable by the right hand variable and return the remainder as a new variable
+219 L<Nasm::X86::Variable::dec|/Nasm::X86::Variable::dec> - Decrement a variable
 
-220 L<Nasm::X86::Variable::ne|/Nasm::X86::Variable::ne> - Check whether the left hand variable is not equal to the right hand variable
+220 L<Nasm::X86::Variable::divide|/Nasm::X86::Variable::divide> - Divide the left hand variable by the right hand variable and return the result as a new variable
 
-221 L<Nasm::X86::Variable::or|/Nasm::X86::Variable::or> - Or two variables
+221 L<Nasm::X86::Variable::division|/Nasm::X86::Variable::division> - Return a variable containing the result or the remainder that occurs when the left hand side is divided by the right hand side
 
-222 L<Nasm::X86::Variable::out|/Nasm::X86::Variable::out> - Dump the value of a variable on stdout
+222 L<Nasm::X86::Variable::dump|/Nasm::X86::Variable::dump> - Dump the value of a variable to the specified channel adding an optional title and new line if requested
 
-223 L<Nasm::X86::Variable::outNL|/Nasm::X86::Variable::outNL> - Dump the value of a variable on stdout and append a new line
+223 L<Nasm::X86::Variable::eq|/Nasm::X86::Variable::eq> - Check whether the left hand variable is equal to the right hand variable
 
-224 L<Nasm::X86::Variable::plusAssign|/Nasm::X86::Variable::plusAssign> - Implement plus and assign
+224 L<Nasm::X86::Variable::equals|/Nasm::X86::Variable::equals> - Equals operator
 
-225 L<Nasm::X86::Variable::pop|/Nasm::X86::Variable::pop> - Pop a variable from the stack
+225 L<Nasm::X86::Variable::err|/Nasm::X86::Variable::err> - Dump the value of a variable on stderr
 
-226 L<Nasm::X86::Variable::printErrMemoryInHexNL|/Nasm::X86::Variable::printErrMemoryInHexNL> - Write the memory addressed by a variable to stderr
+226 L<Nasm::X86::Variable::errNL|/Nasm::X86::Variable::errNL> - Dump the value of a variable on stderr and append a new line
 
-227 L<Nasm::X86::Variable::printMemoryInHexNL|/Nasm::X86::Variable::printMemoryInHexNL> - Write the memory addressed by a variable to stdout or stderr
+227 L<Nasm::X86::Variable::for|/Nasm::X86::Variable::for> - Iterate the body limit times.
 
-228 L<Nasm::X86::Variable::printOutMemoryInHexNL|/Nasm::X86::Variable::printOutMemoryInHexNL> - Write the memory addressed by a variable to stdout
+228 L<Nasm::X86::Variable::freeMemory|/Nasm::X86::Variable::freeMemory> - Free the memory addressed by this variable for the specified length
 
-229 L<Nasm::X86::Variable::push|/Nasm::X86::Variable::push> - Push a variable onto the stack
+229 L<Nasm::X86::Variable::ge|/Nasm::X86::Variable::ge> - Check whether the left hand variable is greater than or equal to the right hand variable
 
-230 L<Nasm::X86::Variable::putBIntoXmm|/Nasm::X86::Variable::putBIntoXmm> - Place the value of the content variable at the byte in the numbered xmm register
+230 L<Nasm::X86::Variable::getBFromZmm|/Nasm::X86::Variable::getBFromZmm> - Get the byte from the numbered zmm register and put it in a variable
 
-231 L<Nasm::X86::Variable::putBIntoZmm|/Nasm::X86::Variable::putBIntoZmm> - Place the value of the content variable at the byte in the numbered zmm register
+231 L<Nasm::X86::Variable::getConst|/Nasm::X86::Variable::getConst> - Load the variable from a constant in effect setting a variable to a specified value
 
-232 L<Nasm::X86::Variable::putBwdqIntoMm|/Nasm::X86::Variable::putBwdqIntoMm> - Place the value of the content variable at the byte|word|double word|quad word in the numbered zmm register
+232 L<Nasm::X86::Variable::getDFromZmm|/Nasm::X86::Variable::getDFromZmm> - Get the double word from the numbered zmm register and put it in a variable
 
-233 L<Nasm::X86::Variable::putDIntoXmm|/Nasm::X86::Variable::putDIntoXmm> - Place the value of the content variable at the double word in the numbered xmm register
+233 L<Nasm::X86::Variable::getQFromZmm|/Nasm::X86::Variable::getQFromZmm> - Get the quad word from the numbered zmm register and put it in a variable
 
-234 L<Nasm::X86::Variable::putDIntoZmm|/Nasm::X86::Variable::putDIntoZmm> - Place the value of the content variable at the double word in the numbered zmm register
+234 L<Nasm::X86::Variable::getReg|/Nasm::X86::Variable::getReg> - Load the variable from the named registers
 
-235 L<Nasm::X86::Variable::putQIntoXmm|/Nasm::X86::Variable::putQIntoXmm> - Place the value of the content variable at the quad word in the numbered xmm register
+235 L<Nasm::X86::Variable::getWFromZmm|/Nasm::X86::Variable::getWFromZmm> - Get the word from the numbered zmm register and put it in a variable
 
-236 L<Nasm::X86::Variable::putQIntoZmm|/Nasm::X86::Variable::putQIntoZmm> - Place the value of the content variable at the quad word in the numbered zmm register
+236 L<Nasm::X86::Variable::gt|/Nasm::X86::Variable::gt> - Check whether the left hand variable is greater than the right hand variable
 
-237 L<Nasm::X86::Variable::putWIntoXmm|/Nasm::X86::Variable::putWIntoXmm> - Place the value of the content variable at the word in the numbered xmm register
+237 L<Nasm::X86::Variable::inc|/Nasm::X86::Variable::inc> - Increment a variable
 
-238 L<Nasm::X86::Variable::putWIntoZmm|/Nasm::X86::Variable::putWIntoZmm> - Place the value of the content variable at the word in the numbered zmm register
+238 L<Nasm::X86::Variable::incDec|/Nasm::X86::Variable::incDec> - Increment or decrement a variable
 
-239 L<Nasm::X86::Variable::saveZmm2222|/Nasm::X86::Variable::saveZmm2222> - Save bytes into the memory addressed by the target variable from the numbered zmm register.
+239 L<Nasm::X86::Variable::isRef|/Nasm::X86::Variable::isRef> - Check whether the specified  variable is a reference to another variable
 
-240 L<Nasm::X86::Variable::setMask|/Nasm::X86::Variable::setMask> - Set the mask register to ones starting at the specified position for the specified length and zeroes elsewhere
+240 L<Nasm::X86::Variable::le|/Nasm::X86::Variable::le> - Check whether the left hand variable is less than or equal to the right hand variable
 
-241 L<Nasm::X86::Variable::setMaskBit|/Nasm::X86::Variable::setMaskBit> - Set a bit in the specified mask register retaining the other bits
+241 L<Nasm::X86::Variable::loadZmm|/Nasm::X86::Variable::loadZmm> - Load bytes from the memory addressed by the specified source variable into the numbered zmm register.
 
-242 L<Nasm::X86::Variable::setMaskFirst|/Nasm::X86::Variable::setMaskFirst> - Set the first bits in the specified mask register
+242 L<Nasm::X86::Variable::lt|/Nasm::X86::Variable::lt> - Check whether the left hand variable is less than the right hand variable
 
-243 L<Nasm::X86::Variable::setReg|/Nasm::X86::Variable::setReg> - Set the named registers from the content of the variable
+243 L<Nasm::X86::Variable::max|/Nasm::X86::Variable::max> - Maximum of two variables
 
-244 L<Nasm::X86::Variable::setZmm|/Nasm::X86::Variable::setZmm> - Load bytes from the memory addressed by specified source variable into the numbered zmm register at the offset in the specified offset moving the number of bytes in the specified variable
+244 L<Nasm::X86::Variable::min|/Nasm::X86::Variable::min> - Minimum of two variables
 
-245 L<Nasm::X86::Variable::str|/Nasm::X86::Variable::str> - The name of the variable
+245 L<Nasm::X86::Variable::minusAssign|/Nasm::X86::Variable::minusAssign> - Implement minus and assign
 
-246 L<Nasm::X86::Variable::sub|/Nasm::X86::Variable::sub> - Subtract the right hand variable from the left hand variable and return the result as a new variable
+246 L<Nasm::X86::Variable::mod|/Nasm::X86::Variable::mod> - Divide the left hand variable by the right hand variable and return the remainder as a new variable
 
-247 L<Nasm::X86::Variable::times|/Nasm::X86::Variable::times> - Multiply the left hand variable by the right hand variable and return the result as a new variable
+247 L<Nasm::X86::Variable::ne|/Nasm::X86::Variable::ne> - Check whether the left hand variable is not equal to the right hand variable
 
-248 L<Nasm::X86::Variable::zBroadCastD|/Nasm::X86::Variable::zBroadCastD> - Broadcast a double word in a variable into the numbered zmm.
+248 L<Nasm::X86::Variable::or|/Nasm::X86::Variable::or> - Or two variables
 
-249 L<OpenRead|/OpenRead> - Open a file, whose name is addressed by rax, for read and return the file descriptor in rax
+249 L<Nasm::X86::Variable::out|/Nasm::X86::Variable::out> - Dump the value of a variable on stdout
 
-250 L<OpenWrite|/OpenWrite> - Create the file named by the terminated string addressed by rax for write
+250 L<Nasm::X86::Variable::outNL|/Nasm::X86::Variable::outNL> - Dump the value of a variable on stdout and append a new line
 
-251 L<PeekR|/PeekR> - Peek at register on stack
+251 L<Nasm::X86::Variable::plusAssign|/Nasm::X86::Variable::plusAssign> - Implement plus and assign
 
-252 L<PopEax|/PopEax> - We cannot pop a double word from the stack in 64 bit long mode using pop so we improvise
+252 L<Nasm::X86::Variable::pop|/Nasm::X86::Variable::pop> - Pop a variable from the stack
 
-253 L<PopR|/PopR> - Pop registers from the stack
+253 L<Nasm::X86::Variable::printErrMemoryInHexNL|/Nasm::X86::Variable::printErrMemoryInHexNL> - Write the memory addressed by a variable to stderr
 
-254 L<PopRR|/PopRR> - Pop registers from the stack without tracking
+254 L<Nasm::X86::Variable::printMemoryInHexNL|/Nasm::X86::Variable::printMemoryInHexNL> - Write the memory addressed by a variable to stdout or stderr
 
-255 L<PrintErrMemory|/PrintErrMemory> - Print the memory addressed by rax for a length of rdi on stderr
+255 L<Nasm::X86::Variable::printOutMemoryInHexNL|/Nasm::X86::Variable::printOutMemoryInHexNL> - Write the memory addressed by a variable to stdout
 
-256 L<PrintErrMemoryInHex|/PrintErrMemoryInHex> - Dump memory from the address in rax for the length in rdi on stderr
+256 L<Nasm::X86::Variable::push|/Nasm::X86::Variable::push> - Push a variable onto the stack
 
-257 L<PrintErrMemoryInHexNL|/PrintErrMemoryInHexNL> - Dump memory from the address in rax for the length in rdi and then print a new line
+257 L<Nasm::X86::Variable::putBIntoXmm|/Nasm::X86::Variable::putBIntoXmm> - Place the value of the content variable at the byte in the numbered xmm register
 
-258 L<PrintErrMemoryNL|/PrintErrMemoryNL> - Print the memory addressed by rax for a length of rdi followed by a new line on stderr
+258 L<Nasm::X86::Variable::putBIntoZmm|/Nasm::X86::Variable::putBIntoZmm> - Place the value of the content variable at the byte in the numbered zmm register
 
-259 L<PrintErrNL|/PrintErrNL> - Print a new line to stderr
+259 L<Nasm::X86::Variable::putBwdqIntoMm|/Nasm::X86::Variable::putBwdqIntoMm> - Place the value of the content variable at the byte|word|double word|quad word in the numbered zmm register
 
-260 L<PrintErrRaxInHex|/PrintErrRaxInHex> - Write the content of register rax in hexadecimal in big endian notation to stderr
+260 L<Nasm::X86::Variable::putDIntoXmm|/Nasm::X86::Variable::putDIntoXmm> - Place the value of the content variable at the double word in the numbered xmm register
 
-261 L<PrintErrRegisterInHex|/PrintErrRegisterInHex> - Print the named registers as hex strings on stderr
+261 L<Nasm::X86::Variable::putDIntoZmm|/Nasm::X86::Variable::putDIntoZmm> - Place the value of the content variable at the double word in the numbered zmm register
 
-262 L<PrintErrString|/PrintErrString> - Print a constant string to stderr.
+262 L<Nasm::X86::Variable::putQIntoXmm|/Nasm::X86::Variable::putQIntoXmm> - Place the value of the content variable at the quad word in the numbered xmm register
 
-263 L<PrintErrStringNL|/PrintErrStringNL> - Print a constant string followed by a new line to stderr
+263 L<Nasm::X86::Variable::putQIntoZmm|/Nasm::X86::Variable::putQIntoZmm> - Place the value of the content variable at the quad word in the numbered zmm register
 
-264 L<PrintErrZF|/PrintErrZF> - Print the zero flag without disturbing it on stderr
+264 L<Nasm::X86::Variable::putWIntoXmm|/Nasm::X86::Variable::putWIntoXmm> - Place the value of the content variable at the word in the numbered xmm register
 
-265 L<PrintMemory|/PrintMemory> - Print the memory addressed by rax for a length of rdi on the specified channel
+265 L<Nasm::X86::Variable::putWIntoZmm|/Nasm::X86::Variable::putWIntoZmm> - Place the value of the content variable at the word in the numbered zmm register
 
-266 L<PrintMemoryInHex|/PrintMemoryInHex> - Dump memory from the address in rax for the length in rdi on the specified channel.
+266 L<Nasm::X86::Variable::setBit|/Nasm::X86::Variable::setBit> - Set a bit in the specified register retaining the other bits
 
-267 L<PrintNL|/PrintNL> - Print a new line to stdout  or stderr
+267 L<Nasm::X86::Variable::setMask|/Nasm::X86::Variable::setMask> - Set the mask register to ones starting at the specified position for the specified length and zeroes elsewhere
 
-268 L<PrintOutMemory|/PrintOutMemory> - Print the memory addressed by rax for a length of rdi on stdout
+268 L<Nasm::X86::Variable::setMaskBit|/Nasm::X86::Variable::setMaskBit> - Set a bit in the specified mask register retaining the other bits
 
-269 L<PrintOutMemoryInHex|/PrintOutMemoryInHex> - Dump memory from the address in rax for the length in rdi on stdout
+269 L<Nasm::X86::Variable::setMaskFirst|/Nasm::X86::Variable::setMaskFirst> - Set the first bits in the specified mask register
 
-270 L<PrintOutMemoryInHexNL|/PrintOutMemoryInHexNL> - Dump memory from the address in rax for the length in rdi and then print a new line
+270 L<Nasm::X86::Variable::setReg|/Nasm::X86::Variable::setReg> - Set the named registers from the content of the variable
 
-271 L<PrintOutMemoryNL|/PrintOutMemoryNL> - Print the memory addressed by rax for a length of rdi followed by a new line on stdout
+271 L<Nasm::X86::Variable::setZmm|/Nasm::X86::Variable::setZmm> - Load bytes from the memory addressed by specified source variable into the numbered zmm register at the offset in the specified offset moving the number of bytes in the specified variable
 
-272 L<PrintOutNL|/PrintOutNL> - Print a new line to stderr
+272 L<Nasm::X86::Variable::str|/Nasm::X86::Variable::str> - The name of the variable
 
-273 L<PrintOutRaxInHex|/PrintOutRaxInHex> - Write the content of register rax in hexadecimal in big endian notation to stderr
+273 L<Nasm::X86::Variable::sub|/Nasm::X86::Variable::sub> - Subtract the right hand variable from the left hand variable and return the result as a new variable
 
-274 L<PrintOutRaxInReverseInHex|/PrintOutRaxInReverseInHex> - Write the content of register rax to stderr in hexadecimal in little endian notation
+274 L<Nasm::X86::Variable::times|/Nasm::X86::Variable::times> - Multiply the left hand variable by the right hand variable and return the result as a new variable
 
-275 L<PrintOutRegisterInHex|/PrintOutRegisterInHex> - Print the named registers as hex strings on stdout
+275 L<Nasm::X86::Variable::zBroadCastD|/Nasm::X86::Variable::zBroadCastD> - Broadcast a double word in a variable into the numbered zmm.
 
-276 L<PrintOutRegistersInHex|/PrintOutRegistersInHex> - Print the general purpose registers in hex
+276 L<OpenRead|/OpenRead> - Open a file, whose name is addressed by rax, for read and return the file descriptor in rax
 
-277 L<PrintOutRflagsInHex|/PrintOutRflagsInHex> - Print the flags register in hex
+277 L<OpenWrite|/OpenWrite> - Create the file named by the terminated string addressed by rax for write
 
-278 L<PrintOutRipInHex|/PrintOutRipInHex> - Print the instruction pointer in hex
+278 L<PeekR|/PeekR> - Peek at register on stack
 
-279 L<PrintOutString|/PrintOutString> - Print a constant string to stdout.
+279 L<PopEax|/PopEax> - We cannot pop a double word from the stack in 64 bit long mode using pop so we improvise
 
-280 L<PrintOutStringNL|/PrintOutStringNL> - Print a constant string followed by a new line to stdout
+280 L<PopR|/PopR> - Pop registers from the stack
 
-281 L<PrintOutZF|/PrintOutZF> - Print the zero flag without disturbing it on stdout
+281 L<PopRR|/PopRR> - Pop registers from the stack without tracking
 
-282 L<PrintRaxInHex|/PrintRaxInHex> - Write the content of register rax in hexadecimal in big endian notation to the specified channel
+282 L<PrintErrMemory|/PrintErrMemory> - Print the memory addressed by rax for a length of rdi on stderr
 
-283 L<PrintRegisterInHex|/PrintRegisterInHex> - Print the named registers as hex strings
+283 L<PrintErrMemoryInHex|/PrintErrMemoryInHex> - Dump memory from the address in rax for the length in rdi on stderr
 
-284 L<PrintString|/PrintString> - Print a constant string to the specified channel
+284 L<PrintErrMemoryInHexNL|/PrintErrMemoryInHexNL> - Dump memory from the address in rax for the length in rdi and then print a new line
 
-285 L<PrintUtf32|/PrintUtf32> - Print the specified number of utf32 characters at the specified address
+285 L<PrintErrMemoryNL|/PrintErrMemoryNL> - Print the memory addressed by rax for a length of rdi followed by a new line on stderr
 
-286 L<PushR|/PushR> - Push registers onto the stack
+286 L<PrintErrNL|/PrintErrNL> - Print a new line to stderr
 
-287 L<PushRR|/PushRR> - Push registers onto the stack without tracking
+287 L<PrintErrRaxInHex|/PrintErrRaxInHex> - Write the content of register rax in hexadecimal in big endian notation to stderr
 
-288 L<Rb|/Rb> - Layout bytes in the data segment and return their label
+288 L<PrintErrRegisterInHex|/PrintErrRegisterInHex> - Print the named registers as hex strings on stderr
 
-289 L<Rbwdq|/Rbwdq> - Layout data
+289 L<PrintErrString|/PrintErrString> - Print a constant string to stderr.
 
-290 L<RComment|/RComment> - Insert a comment into the read only data segment
+290 L<PrintErrStringNL|/PrintErrStringNL> - Print a constant string followed by a new line to stderr
 
-291 L<Rd|/Rd> - Layout double words in the data segment and return their label
+291 L<PrintErrZF|/PrintErrZF> - Print the zero flag without disturbing it on stderr
 
-292 L<ReadFile|/ReadFile> - Read a file whose name is addressed by rax into memory.
+292 L<PrintMemory|/PrintMemory> - Print the memory addressed by rax for a length of rdi on the specified channel
 
-293 L<ReadTimeStampCounter|/ReadTimeStampCounter> - Read the time stamp counter and return the time in nanoseconds in rax
+293 L<PrintMemoryInHex|/PrintMemoryInHex> - Dump memory from the address in rax for the length in rdi on the specified channel.
 
-294 L<RegisterSize|/RegisterSize> - Return the size of a register
+294 L<PrintNL|/PrintNL> - Print a new line to stdout  or stderr
 
-295 L<removeNonAsciiChars|/removeNonAsciiChars> - Return a copy of the specified string with all the non ascii characters removed
+295 L<PrintOutMemory|/PrintOutMemory> - Print the memory addressed by rax for a length of rdi on stdout
 
-296 L<ReorderSyscallRegisters|/ReorderSyscallRegisters> - Map the list of registers provided to the 64 bit system call sequence
+296 L<PrintOutMemoryInHex|/PrintOutMemoryInHex> - Dump memory from the address in rax for the length in rdi on stdout
 
-297 L<RestoreFirstFour|/RestoreFirstFour> - Restore the first 4 parameter registers
+297 L<PrintOutMemoryInHexNL|/PrintOutMemoryInHexNL> - Dump memory from the address in rax for the length in rdi and then print a new line
 
-298 L<RestoreFirstFourExceptRax|/RestoreFirstFourExceptRax> - Restore the first 4 parameter registers except rax so it can return its value
+298 L<PrintOutMemoryNL|/PrintOutMemoryNL> - Print the memory addressed by rax for a length of rdi followed by a new line on stdout
 
-299 L<RestoreFirstFourExceptRaxAndRdi|/RestoreFirstFourExceptRaxAndRdi> - Restore the first 4 parameter registers except rax  and rdi so we can return a pair of values
+299 L<PrintOutNL|/PrintOutNL> - Print a new line to stderr
 
-300 L<RestoreFirstSeven|/RestoreFirstSeven> - Restore the first 7 parameter registers
+300 L<PrintOutRaxInHex|/PrintOutRaxInHex> - Write the content of register rax in hexadecimal in big endian notation to stderr
 
-301 L<RestoreFirstSevenExceptRax|/RestoreFirstSevenExceptRax> - Restore the first 7 parameter registers except rax which is being used to return the result
+301 L<PrintOutRaxInReverseInHex|/PrintOutRaxInReverseInHex> - Write the content of register rax to stderr in hexadecimal in little endian notation
 
-302 L<RestoreFirstSevenExceptRaxAndRdi|/RestoreFirstSevenExceptRaxAndRdi> - Restore the first 7 parameter registers except rax and rdi which are being used to return the results
+302 L<PrintOutRegisterInHex|/PrintOutRegisterInHex> - Print the named registers as hex strings on stdout
 
-303 L<Rq|/Rq> - Layout quad words in the data segment and return their label
+303 L<PrintOutRegistersInHex|/PrintOutRegistersInHex> - Print the general purpose registers in hex
 
-304 L<Rs|/Rs> - Layout bytes in read only memory and return their label
+304 L<PrintOutRflagsInHex|/PrintOutRflagsInHex> - Print the flags register in hex
 
-305 L<Rutf8|/Rutf8> - Layout a utf8 encoded string as bytes in read only memory and return their label
+305 L<PrintOutRipInHex|/PrintOutRipInHex> - Print the instruction pointer in hex
 
-306 L<Rw|/Rw> - Layout words in the data segment and return their label
+306 L<PrintOutString|/PrintOutString> - Print a constant string to stdout.
 
-307 L<SaveFirstFour|/SaveFirstFour> - Save the first 4 parameter registers making any parameter registers read only
+307 L<PrintOutStringNL|/PrintOutStringNL> - Print a constant string followed by a new line to stdout
 
-308 L<SaveFirstSeven|/SaveFirstSeven> - Save the first 7 parameter registers
+308 L<PrintOutZF|/PrintOutZF> - Print the zero flag without disturbing it on stdout
 
-309 L<Scope|/Scope> - Create and stack a new scope and continue with it as the current scope
+309 L<PrintRaxInHex|/PrintRaxInHex> - Write the content of register rax in hexadecimal in big endian notation to the specified channel
 
-310 L<ScopeEnd|/ScopeEnd> - End the current scope and continue with the containing parent scope
+310 L<PrintRegisterInHex|/PrintRegisterInHex> - Print the named registers as hex strings
 
-311 L<SetLabel|/SetLabel> - Create (if necessary) and set a label in the code section returning the label so set.
+311 L<PrintString|/PrintString> - Print a constant string to the specified channel
 
-312 L<SetLengthOfShortString|/SetLengthOfShortString> - Set the length of the short string held in the numbered zmm register into the specified register
+312 L<PrintUtf32|/PrintUtf32> - Print the specified number of utf32 characters at the specified address
 
-313 L<SetMaskRegister|/SetMaskRegister> - Set the mask register to ones starting at the specified position for the specified length and zeroes elsewhere
+313 L<PushR|/PushR> - Push registers onto the stack
 
-314 L<SetZF|/SetZF> - Set the zero flag
+314 L<PushRR|/PushRR> - Push registers onto the stack without tracking
 
-315 L<Start|/Start> - Initialize the assembler
+315 L<putIntoZmm|/putIntoZmm> - Put the specified register into the numbered zmm at the from the offset located in the numbered zmm.
 
-316 L<StatSize|/StatSize> - Stat a file whose name is addressed by rax to get its size in rax
+316 L<Rb|/Rb> - Layout bytes in the data segment and return their label
 
-317 L<StringLength|/StringLength> - Length of a zero terminated string
+317 L<Rbwdq|/Rbwdq> - Layout data
 
-318 L<Structure|/Structure> - Create a structure addressed by a register
+318 L<RComment|/RComment> - Insert a comment into the read only data segment
 
-319 L<Subroutine|/Subroutine> - Create a subroutine that can be called in assembler code
+319 L<Rd|/Rd> - Layout double words in the data segment and return their label
 
-320 L<Then|/Then> - Then body for an If statement
+320 L<ReadFile|/ReadFile> - Read a file whose name is addressed by rax into memory.
 
-321 L<totalBytesAssembled|/totalBytesAssembled> - Total size in bytes of all files assembled during testing
+321 L<ReadTimeStampCounter|/ReadTimeStampCounter> - Read the time stamp counter and return the time in nanoseconds in rax
 
-322 L<Trace|/Trace> - Add tracing code
+322 L<RegisterSize|/RegisterSize> - Return the size of a register
 
-323 L<unlinkFile|/unlinkFile> - Unlink the named file
+323 L<removeNonAsciiChars|/removeNonAsciiChars> - Return a copy of the specified string with all the non ascii characters removed
 
-324 L<UnReorderSyscallRegisters|/UnReorderSyscallRegisters> - Recover the initial values in registers that were reordered
+324 L<ReorderSyscallRegisters|/ReorderSyscallRegisters> - Map the list of registers provided to the 64 bit system call sequence
 
-325 L<Variable|/Variable> - Create a new variable with the specified size and name initialized via an expression
+325 L<RestoreFirstFour|/RestoreFirstFour> - Restore the first 4 parameter registers
 
-326 L<Vb|/Vb> - Define a byte variable
+326 L<RestoreFirstFourExceptRax|/RestoreFirstFourExceptRax> - Restore the first 4 parameter registers except rax so it can return its value
 
-327 L<Vd|/Vd> - Define a double word variable
+327 L<RestoreFirstFourExceptRaxAndRdi|/RestoreFirstFourExceptRaxAndRdi> - Restore the first 4 parameter registers except rax  and rdi so we can return a pair of values
 
-328 L<Vq|/Vq> - Define a quad variable
+328 L<RestoreFirstSeven|/RestoreFirstSeven> - Restore the first 7 parameter registers
 
-329 L<Vr|/Vr> - Define a reference variable
+329 L<RestoreFirstSevenExceptRax|/RestoreFirstSevenExceptRax> - Restore the first 7 parameter registers except rax which is being used to return the result
 
-330 L<Vw|/Vw> - Define a word variable
+330 L<RestoreFirstSevenExceptRaxAndRdi|/RestoreFirstSevenExceptRaxAndRdi> - Restore the first 7 parameter registers except rax and rdi which are being used to return the results
 
-331 L<Vx|/Vx> - Define an xmm variable
+331 L<Rq|/Rq> - Layout quad words in the data segment and return their label
 
-332 L<VxyzInit|/VxyzInit> - Initialize an xyz register from general purpose registers
+332 L<Rs|/Rs> - Layout bytes in read only memory and return their label
 
-333 L<Vy|/Vy> - Define an ymm variable
+333 L<Rutf8|/Rutf8> - Layout a utf8 encoded string as bytes in read only memory and return their label
 
-334 L<Vz|/Vz> - Define an zmm variable
+334 L<Rw|/Rw> - Layout words in the data segment and return their label
 
-335 L<WaitPid|/WaitPid> - Wait for the pid in rax to complete
+335 L<SaveFirstFour|/SaveFirstFour> - Save the first 4 parameter registers making any parameter registers read only
 
-336 L<xmm|/xmm> - Add xmm to the front of a list of register expressions
+336 L<SaveFirstSeven|/SaveFirstSeven> - Save the first 7 parameter registers
 
-337 L<ymm|/ymm> - Add ymm to the front of a list of register expressions
+337 L<Scope|/Scope> - Create and stack a new scope and continue with it as the current scope
 
-338 L<zmm|/zmm> - Add zmm to the front of a list of register expressions
+338 L<ScopeEnd|/ScopeEnd> - End the current scope and continue with the containing parent scope
+
+339 L<SetLabel|/SetLabel> - Create (if necessary) and set a label in the code section returning the label so set.
+
+340 L<SetLengthOfShortString|/SetLengthOfShortString> - Set the length of the short string held in the numbered zmm register into the specified register
+
+341 L<SetMaskRegister|/SetMaskRegister> - Set the mask register to ones starting at the specified position for the specified length and zeroes elsewhere
+
+342 L<SetZF|/SetZF> - Set the zero flag
+
+343 L<Start|/Start> - Initialize the assembler
+
+344 L<StatSize|/StatSize> - Stat a file whose name is addressed by rax to get its size in rax
+
+345 L<StringLength|/StringLength> - Length of a zero terminated string
+
+346 L<Structure|/Structure> - Create a structure addressed by a register
+
+347 L<Subroutine|/Subroutine> - Create a subroutine that can be called in assembler code
+
+348 L<Then|/Then> - Then body for an If statement
+
+349 L<totalBytesAssembled|/totalBytesAssembled> - Total size in bytes of all files assembled during testing
+
+350 L<Trace|/Trace> - Add tracing code
+
+351 L<unlinkFile|/unlinkFile> - Unlink the named file
+
+352 L<UnReorderSyscallRegisters|/UnReorderSyscallRegisters> - Recover the initial values in registers that were reordered
+
+353 L<Variable|/Variable> - Create a new variable with the specified size and name initialized via an expression
+
+354 L<Vb|/Vb> - Define a byte variable
+
+355 L<Vd|/Vd> - Define a double word variable
+
+356 L<Vq|/Vq> - Define a quad variable
+
+357 L<Vr|/Vr> - Define a reference variable
+
+358 L<Vw|/Vw> - Define a word variable
+
+359 L<Vx|/Vx> - Define an xmm variable
+
+360 L<VxyzInit|/VxyzInit> - Initialize an xyz register from general purpose registers
+
+361 L<Vy|/Vy> - Define an ymm variable
+
+362 L<Vz|/Vz> - Define an zmm variable
+
+363 L<WaitPid|/WaitPid> - Wait for the pid in rax to complete
+
+364 L<xmm|/xmm> - Add xmm to the front of a list of register expressions
+
+365 L<ymm|/ymm> - Add ymm to the front of a list of register expressions
+
+366 L<zmm|/zmm> - Add zmm to the front of a list of register expressions
 
 =head1 Installation
 
@@ -13774,12 +14291,13 @@ World
 END
  }
 
-if (1) {                                                                        #TMov #TComment #TRs #TPrintOutMemory
+if (1) {                                                                        #TMov #TComment #TRs #TPrintOutMemory #TExit
   Comment "Print a string from memory";
   my $s = "Hello World";
   Mov rax, Rs($s);
   Mov rdi, length $s;
   PrintOutMemory;
+  Exit(0);
 
   ok Assemble =~ m(Hello World);
  }
@@ -13935,7 +14453,7 @@ if (1) {                                                                        
   is_deeply \@s, \@S;
  }
 
-if (1) {                                                                        #TIf
+if (1) {                                                                        #TIfNz
   Mov rax, 0;
   Test rax,rax;
   IfNz
@@ -14674,7 +15192,7 @@ if (1) {                                                                        
   ok Assemble =~ m(xmm0: 0000 0000 0000 0000   0000 0000 0000 0000);
  }
 
-if (1) {                                                                        #Tif #TifEq #TifNe #TifLe #TifLt #TifGe #TifGt
+if (1) {                                                                        #TIf #TIfEq #TIfNe #TIfLe #TIfLt #TIfGe #TIfGt
   my $cmp = sub
    {my ($a, $b) = @_;
 
@@ -14765,9 +15283,9 @@ if (1)                                                                          
  }
 
 #latest:;
-if (1) {                                                                        #TNasm::X86::Variable::dump  #TNasm::X86::Variable::print
+if (1) {                                                                        #TNasm::X86::Variable::dump  #TNasm::X86::Variable::print #TThen #TElse #TVq #TCq
   my $a = Vq(a, 3); $a->outNL;
-  my $b = Vq(b, 2); $b->outNL;
+  my $b = Cq(b, 2); $b->outNL;
   my $c = $a +  $b; $c->outNL;
   my $d = $c -  $a; $d->outNL;
   my $e = $d == $b; $e->outNL;
@@ -14776,7 +15294,14 @@ if (1) {                                                                        
   my $h = $g /  $b; $h->outNL;
   my $i = $a %  $b; $i->outNL;
 
-  If ($a == 3, sub{PrintOutStringNL "a == 3"});
+  If ($a == 3,
+  Then
+   {PrintOutStringNL "a == 3"
+   },
+  Else
+   {PrintOutStringNL "a != 3"
+   });
+
   ++$a; $a->outNL;
   --$a; $a->outNL;
 
