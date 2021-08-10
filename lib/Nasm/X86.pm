@@ -3973,7 +3973,7 @@ sub Nasm::X86::ByteString::allocate($@)                                         
     KeepFree rax, rdi, rsi;
 
     RestoreFirstFour;
-   } in => [qw(bs size)], out => [qw(offset)];
+   } in => [qw(size)], io => [qw(bs)], out => [qw(offset)];
 
   $s->call($byteString->bs, @variables);
  }
@@ -4055,7 +4055,7 @@ sub Nasm::X86::ByteString::freeBlock($@)                                        
     $byteString->putBlock($$p{bs}, $$p{offset}, 31);                            # Link the freed block to the rest of the free chain
     $byteString->setFirstFreeBlock($$p{offset});                                # Set free chain field to point to latest free chain element
     PopR zmm31;
-   } in => [qw(bs  offset)];
+   } in => [qw(offset)], io => [qw(bs)];
 
   $s->call($byteString->bs, @variables);
  }
@@ -4228,7 +4228,7 @@ sub Nasm::X86::ByteString::write($@)                                            
     $file->setReg(rax);
     CloseFile;
     RestoreFirstFour;
-   }  in => [qw(bs  file )];
+   }  in => [qw(file)], io => [qw(bs)];
 
   $s->call(bs => $byteString->bs, @variables);
  }
@@ -4455,7 +4455,7 @@ sub Nasm::X86::BlockString::dump($)                                             
     PrintOutNL;
 
     PopR @save;
-   } in => [qw(bs first)];
+   } in => [qw(first)], io => [qw(bs)];
 
   $s->call($blockString->address, $blockString->first);
  }
@@ -4481,7 +4481,7 @@ sub Nasm::X86::BlockString::len($$)                                             
      };
     $$p{size}->copy($length);
     PopR @save;
-   } in => [qw(bs first)], out => [qw(size)];
+   } in => [qw(first)], io => [qw(bs)], out => [qw(size)];
 
   $s->call($blockString->address, $blockString->first, $size);
  }
@@ -4618,7 +4618,7 @@ sub Nasm::X86::BlockString::insertChar($@)                                      
      };
 
     PopR @save;
-   } in => [qw(bs first character position)];
+   } in => [qw(first character position)], io => [qw(bs)];
 
   $s->call($blockString->address, first => $blockString->first, @variables)
  }
@@ -4662,7 +4662,7 @@ sub Nasm::X86::BlockString::deleteChar($@)                                      
      };
 
     PopR @save;
-   } in => [qw(bs  first  position )];
+   } in => [qw(first  position )], io => [qw(bs)];
 
   $s->call($blockString->address, first => $blockString->first, @variables)
  }
@@ -4704,7 +4704,7 @@ sub Nasm::X86::BlockString::getCharacter($@)                                    
      };
 
     PopR @save;
-   } in => [qw(bs  first  position )], out => [qw(out )];
+   } in => [qw(first  position )], io => [qw(bs)], out => [qw(out)];
 
   $s->call($blockString->address, first => $blockString->first, @variables)
  }
@@ -4762,7 +4762,7 @@ sub Nasm::X86::BlockString::append($@)                                          
       $blockString->putBlock($B, $new,  30);                                    # Put the modified new block
      };
     PopR @save;
-   }  in => [qw(bs  first  source  size )];
+   }  in => [qw(first source size)], io => [qw(bs)];
 
   $s->call($blockString->address, $blockString->first, @variables);
  }
@@ -4812,7 +4812,7 @@ sub Nasm::X86::BlockString::clear($)                                            
      });
 
     PopR @save;
-   }  in => [qw(bs  first )];
+   }  in => [qw(first )], io => [qw(bs)];
 
   $s->call($blockString->address, $blockString->first);
  }
@@ -4899,7 +4899,7 @@ sub Nasm::X86::BlockArray::dump($@)                                             
      });
 
     PopR @save;
-   }  in => [qw(bs  first )];
+   }  in => [qw(first)], io => [qw(bs)];
 
   $s->call($blockArray->address, $blockArray->first, @variables);
  }
@@ -4980,7 +4980,7 @@ sub Nasm::X86::BlockArray::push($@)                                             
 
     SetLabel $success;
     PopR @save;
-   }  in => [qw(bs  first  element )];
+   }  in => [qw(first  element)], io => [qw(bs)];
 
   $s->call($blockArray->address, $blockArray->first, @variables);
  }
@@ -5064,7 +5064,7 @@ sub Nasm::X86::BlockArray::pop($@)                                              
 
     SetLabel $success;
     PopR @save;
-   }  in => [qw(bs  first )], out => [qw(element )];
+   }  in => [qw(first)], io => [qw(bs)], out => [qw(element )];
 
   $s->call($blockArray->address, $blockArray->first, @variables);
  }
@@ -5114,7 +5114,7 @@ sub Nasm::X86::BlockArray::get($@)                                              
 
     SetLabel $success;
     PopR @save;
-   }  in => [qw(bs  first  index )], out => [qw(element )];
+   }  in => [qw(first index)], io => [qw(bs)], out => [qw(element )];
 
   $s->call($blockArray->address, $blockArray->first, @variables);
  }
@@ -5165,7 +5165,7 @@ sub Nasm::X86::BlockArray::put($@)                                              
 
     SetLabel $success;
     PopR @save;
-   }  in => [qw(bs  first  index  element )];
+   }  in => [qw(first index element )], io => [qw(bs)];
 
   $s->call($blockArray->address, $blockArray->first, @variables);
  }
@@ -5233,7 +5233,7 @@ sub Nasm::X86::BlockMultiWayTree::allocKeysDataNode($$$$@)                      
     $t->putLoop($k, $N);                                                        # Set the link from node  to key
    }
   name=>qq(Nasm::X86::BlockMultiWayTree::allocKeysDataNode::${K}::${D}::${N}),  # Create a subroutine for each combination of registers encountered
-  in => [qw(bs )];
+  io => [qw(bs)];
 
   $s->call($t->address, @variables);
  } # allocKeysDataNode
@@ -5307,7 +5307,7 @@ sub Nasm::X86::BlockMultiWayTree::splitNode($$$$@)                              
 
     SetLabel $success;                                                          # Insert completed successfully
     PopR @save;
-   }  in => [qw(bs  node  key )];
+   }  in => [qw(node key)], io => [qw(bs)];
 
   $s->call(bs=>$bs, node=>$node, key=>$key, @variables);
  } # splitNode
@@ -5341,7 +5341,7 @@ sub Nasm::X86::BlockMultiWayTree::reParent($$$$$@)                              
       Mov rsp, rdi;                                                             # Level stack
       PopR @save;
      });
-   }  in => [qw(bs )];
+   } io => [qw(bs)];
 
   $s->call($t->address, @variables);
  } # reParent
@@ -5504,9 +5504,9 @@ sub Nasm::X86::BlockMultiWayTree::splitFullRoot($)                              
 
     SetLabel $success;                                                          # Insert completed successfully
     PopR @save;
-   };
+   } io =>[qw(bs)];
 
-  $s->call;
+  $s->call (bs => $t->address);
  } # splitFullRoot
 
 sub Nasm::X86::BlockMultiWayTree::splitFullLeftOrRightNode($$)                  #P Split a full a full left node (held in 28..26) or a full right node (held in 25..23) whose parent is in 31..29.
@@ -5714,8 +5714,7 @@ sub Nasm::X86::BlockMultiWayTree::findAndSplit($@)                              
 
     SetLabel $success;                                                          # Insert completed successfully
     PopR @save;
-   }  in  => [qw(bs       first   key  )],
-      out => [qw(compare  offset  index)];
+   }  in => [qw(first key)], io => [qw(bs)], out => [qw(compare offset index)];
 
   $s->call($t->address, first => $t->first, @variables);
  } # findAndSplit
@@ -5729,9 +5728,9 @@ sub Nasm::X86::BlockMultiWayTree::find($$)                                      
    {my ($p) = @_;                                                               # Parameters
     my $success = Label;                                                        # Short circuit if ladders by jumping directly to the end after a successful push
 
-    my $B = $$p{bs};                                                            # Byte string
     my $F = $$p{first};                                                         # First keys block
     my $K = $$p{key};                                                           # Key to find
+
     $$p{found}  ->copy(Cq(zero, 0));                                            # Key not found
     $$p{data}   ->copy(Cq(zero, 0));                                            # Data not yet found
     $$p{subTree}->copy(Cq(zero, 0));                                            # Not yet a sub tree
@@ -5790,10 +5789,9 @@ sub Nasm::X86::BlockMultiWayTree::find($$)                                      
 
     SetLabel $success;                                                          # Insert completed successfully
     PopR @save;
-   }  in  => [qw(bs   first key)],
-      out => [qw(data found data subTree)];
+   }  in  => [qw(first key)],  out => [qw(data found data subTree)];
 
-  $s->call($t->address, first => $t->first, key => $key, data => $t->data,
+  $s->call(first => $t->first, key => $key, data => $t->data,
            found => $t->found, subTree => $t->subTree);
  } # find
 
@@ -5811,9 +5809,9 @@ sub Nasm::X86::BlockMultiWayTree::insertDataOrTree($$$$)                        
     my $F = $$p{first};                                                         # First keys block
     my $K = $$p{key};                                                           # Key  to be inserted
     my $D = $$p{data};                                                          # Data to be inserted
-$K->errNL('key at start: ');
 
     PushR my @save = (k4, k5, k6, k7, r13, r14, r15, zmm 22..31);
+    my $point = r13;                                                            # Insertion indicator
     $t->getKeysDataNode($F, 31, 30, 29);                                        # Get the first block
 
     my $l = $t->getLengthInKeys(31);                                            # Length of the block
@@ -5824,7 +5822,6 @@ $K->errNL('key at start: ');
       if ($tnd)                                                                 # Create and mark key as addressing a sub tree
        {my $T = $t->bs->CreateBlockMultiWayTree;                                # Create sub tree in the same byte string as parent tree
         $D->copy($T->first);                                                    # Copy address of first  block
-$D->errNL('1: ');
         Mov r15, 1;                                                             # Indicate first position
         $T->setTree(r15,  31);                                                  # Mark this key as addressing a tree
        }
@@ -5856,7 +5853,6 @@ $D->errNL('1: ');
            };
           $D->copy($t->bs->CreateBlockMultiWayTree->first)                      # Create tree and copy offset of first  block
          }
-$D->errNL('2: ');
         $D->setReg(r14);                                                        # Key to search for
         Vpbroadcastd "zmm30{k6}", r14d;                                         # Load data
         $t->putKeysData($F, 31, 30);                                            # Write the data block back into the underlying byte string
@@ -5886,10 +5882,9 @@ $D->errNL('2: ');
        {$D->copy($t->bs->CreateBlockMultiWayTree->first);                       # Create tree and copy offset of first block
        }
       if (1)                                                                    # Expand tree bits to match
-       {Kmovq r13, k6;                                                          # Position of key just found
-        $t->expandTreeBitsWithZeroOrOne($tnd, 31, r13);                         # Mark new entry as a sub tree
+       {Kmovq $point, k6;                                                       # Position of key just found
+        $t->expandTreeBitsWithZeroOrOne($tnd, 31, $point);                      # Mark new entry as a sub tree
        }
-$K->err('key: '); $D->errNL('  3: ');
 
       $D->setReg(r14);                                                          # Corresponding data
       Vpbroadcastd "zmm30{k6}", r14d;                                           # Load data
@@ -5916,19 +5911,20 @@ $K->err('key: '); $D->errNL('  3: ');
     KeepFree zmm 29;
     $t->getKeysDataNode($offset, 31, 30, 29);
 
-    Mov r13, 0;
-    $index->setBit(r13);                                                        # Set point at the index
+    Mov $point, 0;
+    $index->setBit($point);                                                     # Set point at the index
 
     If $compare == 0,                                                           # Duplicate key
     Then                                                                        # Found an equal key so update the data
      {$D->putDIntoZmm(30, $index * $t->width);                                  # Update data at key
       $t->putKeysDataNode($offset, 31, 30, 29);                                 # Rewrite data and keys
-      $t->setOrClearTree($tnd, r13, 31);                                        # Set or clear tree bit as necessary
+      $t->setOrClearTree($tnd, $point, 31);                                     # Set or clear tree bit as necessary
      },
     Else                                                                        # We have room for the insert because each block has been split to make it non full
      {If $compare > 0,
       Then                                                                      # Position at which to insert new key if it is greater than the indexed key
        {++$index;
+        Shl $point, 1;                                                             # Move point up as well
        };
 
       my $length = $t->getLengthInKeys(31);                                     # Number of keys
@@ -5942,9 +5938,9 @@ $K->err('key: '); $D->errNL('  3: ');
         Vpexpandd    "zmm30{k6}", zmm30;                                        # Shift up data
        };
 
-      $t->expandTreeBitsWithZeroOrOne($tnd, 31, r13);                           # Mark inserted key as referring to a tree or not
+      $t->expandTreeBitsWithZeroOrOne($tnd, 31, $point);                        # Mark inserted key as referring to a tree or not
 
-      $D->copy($t->bs->CreateBlockMultiWayTree->first) if $tnd;                  # Create tree and place its offset into data field
+      $D->copy($t->bs->CreateBlockMultiWayTree->first) if $tnd;                 # Create tree and place its offset into data field
 
       ClearRegisters k7;
       $index->setMaskBit(k7);                                                   # Set bit at insertion point
@@ -5961,7 +5957,7 @@ $K->err('key: '); $D->errNL('  3: ');
     PopR @save;
    }
    name => "Nasm::X86::BlockMultiWayTree::insertDataOrTree_$tnd",
-   in   => [qw(bs first key)], io => [qw(data)];                                # Data either supplies the data or returns the offset of the sub tree
+   in   => [qw(first key)], io => [qw(bs data)];                                # Data either supplies the data or returns the offset of the sub tree
 
   $s->call($t->address, first => $t->first, key => $key,
     data => $tnd ? $t->data : $data);
@@ -5982,17 +5978,15 @@ sub Nasm::X86::BlockMultiWayTree::insertTree($$)                                
 sub Nasm::X86::BlockMultiWayTree::getKeysData($$$$)                             # Load the keys and data blocks for a node
  {my ($t, $offset, $zmmKeys, $zmmData) = @_;                                    # Block multi way tree descriptor, offset as a variable, numbered zmm for keys, numbered data for keys
   @_ == 4 or confess;
-  my $b = $t->bs;                                                               # Underlying byte string
-  $b->getBlock($b->bs, $offset, $zmmKeys);                                      # Get the keys block
+  $t->bs->getBlock($t->address, $offset, $zmmKeys);                             # Get the keys block
   my $data = $t->getLoop($zmmKeys);                                             # Get the offset of the corresponding data block
-  $b->getBlock($b->bs, $data, $zmmData);                                        # Get the data block
+  $t->bs->getBlock($t->address, $data, $zmmData);                               # Get the data block
  }
 
 sub Nasm::X86::BlockMultiWayTree::putKeysData($$$$)                             # Save the key and data blocks for a node
  {my ($t, $offset, $zmmKeys, $zmmData) = @_;                                    # Block multi way tree descriptor, offset as a variable, numbered zmm for keys, numbered data for keys
   @_ == 4 or confess;
-  my $b = $t->bs;                                                               # Underlying byte string
-  $b->putBlock($b->bs, $offset, $zmmKeys);                                      # Put the keys block
+  $t->bs->putBlock($t->address, $offset, $zmmKeys);                             # Put the keys block
   my $data = $t->getLoop($zmmKeys);                                             # Get the offset of the corresponding data block
   my $up   = $t->getUpFromData($zmmData);                                       #DEBUG Check up pointer
   If ($up >= $offset,
@@ -6000,13 +5994,13 @@ sub Nasm::X86::BlockMultiWayTree::putKeysData($$$$)                             
    {PrintErrStringNL "Up is not less than node";
     Exit(0);
    });
-  $b->putBlock($b->bs, $data, $zmmData);                                        # Put the data block
+  $t->bs->putBlock($t->address, $data, $zmmData);                               # Put the data block
  }
 
 sub Nasm::X86::BlockMultiWayTree::getNode($$$)                                  # Load the child nodes for a node
  {my ($t, $offset, $zmmNode) = @_;                                              # Block multi way tree descriptor, offset of nodes, numbered zmm for keys
   @_ == 3 or confess;
-  $t->bs->getBlock($t->bs->bs, $offset, $zmmNode);                              # Get the node block
+  $t->bs->getBlock($t->address, $offset, $zmmNode);                             # Get the node block
  }
 
 sub Nasm::X86::BlockMultiWayTree::getKeysDataNode($$$$$)                        # Load the keys, data and child nodes for a node
@@ -6033,7 +6027,7 @@ sub Nasm::X86::BlockMultiWayTree::putKeysDataNode($$$$$)                        
   my $node = $t->getLoop($zmmData);                                             # Get the offset of the corresponding node block
   If ($node,
   Then                                                                          # Check for optional node block
-   {$t->bs->putBlock($t->bs->bs, $node, $zmmNode);                              # Put the node block
+   {$t->bs->putBlock($t->address, $node, $zmmNode);                             # Put the node block
    });
  }
 
@@ -6085,7 +6079,6 @@ sub Nasm::X86::BlockMultiWayTree::leftOrRightMost($$@)                          
   my $s = Subroutine
    {my ($p) = @_;                                                               # Parameters
 
-    my $B = $$p{bs};                                                            # Byte string
     my $F = $$p{node};                                                          # First block
     PushR my @save = (rax, zmm29, zmm30, zmm31);
 
@@ -6115,9 +6108,9 @@ sub Nasm::X86::BlockMultiWayTree::leftOrRightMost($$@)                          
     PopR @save;
    } name => $dir == 0 ? "Nasm::X86::BlockMultiWayTree::leftMost"
                        : "Nasm::X86::BlockMultiWayTree::rightMost",
-     in => [qw(bs  node )], out => [qw(offset )];
+     in => [qw(node )], out => [qw(offset )];
 
-  $s->call($t->address, @variables);
+  $s->call(@variables);
  }
 
 sub Nasm::X86::BlockMultiWayTree::leftMost($@)                                  # Return the left most node
@@ -6157,7 +6150,6 @@ sub Nasm::X86::BlockMultiWayTree::depth($@)                                     
    {my ($parameters) = @_;                                                      # Parameters
     my $success = Label;                                                        # Short circuit if ladders by jumping directly to the end after a successful push
 
-    my $B = $$parameters{bs};                                                   # Byte string
     my $N = $$parameters{node};                                                 # Starting node
 
     PushR my @save = (r14, r15, zmm30, zmm31);
@@ -6179,9 +6171,9 @@ sub Nasm::X86::BlockMultiWayTree::depth($@)                                     
 
     SetLabel $success;                                                          # Insert completed successfully
     PopR @save;
-   }  in => [qw(bs  node )], out => [qw(depth )];
+   }  in => [qw(node )], out => [qw(depth )];
 
-  $s->call($t->address, @variables);
+  $s->call(@variables);
  } # depth
 
 #D2 Sub trees                                                                   # Construct trees of trees.
@@ -6335,7 +6327,7 @@ sub Nasm::X86::BlockMultiWayTree::Iterator::next($)                             
 
       If ($nodes,
       Then                                                                      # Go left if there are child nodes
-       {$t->leftMost($t->address, $C, my $l = Vq(offset));
+       {$t->leftMost($C, my $l = Vq(offset));
         &$new($l, Cq(zero, 0));
        },
       Else
@@ -16520,7 +16512,7 @@ if (1) {                                                                        
   my $b  = CreateByteString;
   my $t  = $b->CreateBlockMultiWayTree;
   LoadZmm(0, (0) x 58, 0xf7, (0) x 5);
-  PrintErrRegisterInHex zmm0;
+  PrintOutRegisterInHex zmm0;
 
   Mov r15, 2;
   $t->expandTreeBitsWithZero(0, r15); PrintOutRegisterInHex zmm0;
@@ -16539,6 +16531,7 @@ if (1) {                                                                        
 
 
   ok Assemble(debug => 0, eq => <<END);
+  zmm0: 0000 0000 00F7 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
   zmm0: 0000 0000 01ED 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
   zmm0: 0000 0000 03D9 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
   zmm0: 0000 0000 07B1 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
@@ -16551,13 +16544,24 @@ if (1) {                                                                        
 END
  }
 
-latest:
+#latest:
 if (1) {                                                                        # Extended sub tree testing
-  my $b  = CreateByteString;
-  my $t  = $b->CreateBlockMultiWayTree;
-  my $L  = Vq(loop, 15);
+  my $N = 45; my $M = 0; # Fails at 0
+     $N % 2 == 1 or confess "Must be odd";
+  my $b = CreateByteString;
+  my $t = $b->CreateBlockMultiWayTree;
+  my $L = Vq(loop, $N);
+  my %I;
 
-  $L->for(sub
+  for(my $i = 0; $i < ($N-$M); ++$i)                                            # The insertions we intend to make
+   {my $l = $N - $i;
+    if ($i % 2 == 0)
+     {$I{$i} = $l;                                                              # Scalar
+      $I{$l} = -1;                                                              # Tree
+     }
+   }
+
+  ($L-$M)->for(sub                                                              # Do the planned insertions
    {my ($i, $start, $next, $end) = @_;
     my $l = $L - $i;
     If ($i % 2 == 0, sub
@@ -16566,30 +16570,87 @@ if (1) {                                                                        
      });
    });
 
-  ($L+2)->for(sub
+  ($L+2)->for(sub                                                               # Find each key
    {my ($i, $start, $next, $end) = @_;
     $t->find($i);
     $i->out('i: '); $t->found->out('  f: '); $t->data->out('  d: '); $t->subTree->outNL('  s: ');
    });
 
-  ok Assemble(debug => 0, eq => <<END);
-i: 0000 0000 0000 0000  f: 0000 0000 0000 0001  d: 0000 0000 0000 000F  s: 0000 0000 0000 0000
-i: 0000 0000 0000 0001  f: 0000 0000 0000 0001  d: 0000 0000 0000 05D8  s: 0000 0000 0000 0001
-i: 0000 0000 0000 0002  f: 0000 0000 0000 0001  d: 0000 0000 0000 000D  s: 0000 0000 0000 0000
-i: 0000 0000 0000 0003  f: 0000 0000 0000 0001  d: 0000 0000 0000 0398  s: 0000 0000 0000 0001
-i: 0000 0000 0000 0004  f: 0000 0000 0000 0001  d: 0000 0000 0000 000B  s: 0000 0000 0000 0000
-i: 0000 0000 0000 0005  f: 0000 0000 0000 0001  d: 0000 0000 0000 0318  s: 0000 0000 0000 0001
-i: 0000 0000 0000 0006  f: 0000 0000 0000 0001  d: 0000 0000 0000 0009  s: 0000 0000 0000 0000
-i: 0000 0000 0000 0007  f: 0000 0000 0000 0001  d: 0000 0000 0000 0298  s: 0000 0000 0000 0001
-i: 0000 0000 0000 0008  f: 0000 0000 0000 0001  d: 0000 0000 0000 0007  s: 0000 0000 0000 0000
-i: 0000 0000 0000 0009  f: 0000 0000 0000 0001  d: 0000 0000 0000 0218  s: 0000 0000 0000 0001
-i: 0000 0000 0000 000A  f: 0000 0000 0000 0001  d: 0000 0000 0000 0005  s: 0000 0000 0000 0000
-i: 0000 0000 0000 000B  f: 0000 0000 0000 0001  d: 0000 0000 0000 0198  s: 0000 0000 0000 0001
-i: 0000 0000 0000 000C  f: 0000 0000 0000 0001  d: 0000 0000 0000 0003  s: 0000 0000 0000 0000
-i: 0000 0000 0000 000D  f: 0000 0000 0000 0001  d: 0000 0000 0000 0118  s: 0000 0000 0000 0001
-i: 0000 0000 0000 000E  f: 0000 0000 0000 0001  d: 0000 0000 0000 0001  s: 0000 0000 0000 0000
-i: 0000 0000 0000 000F  f: 0000 0000 0000 0001  d: 0000 0000 0000 0098  s: 0000 0000 0000 0001
-i: 0000 0000 0000 0010  f: 0000 0000 0000 0000  d: 0000 0000 0000 0000  s: 0000 0000 0000 0000
+  Assemble(debug => 0);
+
+  if (1)                                                                        # Check output has right structure
+   {my @r = readFile(q(zzzOut.txt));
+
+    for my $l(@r)
+     {my @w = split /\s*\w:\s+/, $l;
+      shift @w; s/\s+//gs for @w; $_ = eval("0x$_") for @w;
+      my ($k, $f, $d, $s) = @w;
+                                                                                # Inserted
+      if (defined(my $D = $I{$k}))
+       {if ($D >= 0)                                                            # Scalar
+         {$f == 1  or warn "F != 1 at key $k";
+          $d == $D or warn "Wrong data    at key $k";
+          $s == 0  or warn "Wrong subTree at key $k";
+         }
+        else
+         {$d % 16 == 8 or warn "Wrong data    at key $k";
+          $s == 1      or warn "Wrong subTree at key $k";
+         }
+       }
+      else
+       {$f == 0 && $d == 0 && $s == 0 or confess "Find should fail at key $k";
+       }
+     }
+   };
+
+  is_deeply scalar(readFile(q(zzzOut.txt))), <<END if $N == 45;
+i: 0000 0000 0000 0000  f: 0000 0000 0000 0001  d: 0000 0000 0000 002D  s: 0000 0000 0000 0000
+i: 0000 0000 0000 0001  f: 0000 0000 0000 0001  d: 0000 0000 0000 0ED8  s: 0000 0000 0000 0001
+i: 0000 0000 0000 0002  f: 0000 0000 0000 0001  d: 0000 0000 0000 002B  s: 0000 0000 0000 0000
+i: 0000 0000 0000 0003  f: 0000 0000 0000 0001  d: 0000 0000 0000 0E58  s: 0000 0000 0000 0001
+i: 0000 0000 0000 0004  f: 0000 0000 0000 0001  d: 0000 0000 0000 0029  s: 0000 0000 0000 0000
+i: 0000 0000 0000 0005  f: 0000 0000 0000 0001  d: 0000 0000 0000 0DD8  s: 0000 0000 0000 0001
+i: 0000 0000 0000 0006  f: 0000 0000 0000 0001  d: 0000 0000 0000 0027  s: 0000 0000 0000 0000
+i: 0000 0000 0000 0007  f: 0000 0000 0000 0001  d: 0000 0000 0000 0D58  s: 0000 0000 0000 0001
+i: 0000 0000 0000 0008  f: 0000 0000 0000 0001  d: 0000 0000 0000 0025  s: 0000 0000 0000 0000
+i: 0000 0000 0000 0009  f: 0000 0000 0000 0001  d: 0000 0000 0000 0CD8  s: 0000 0000 0000 0001
+i: 0000 0000 0000 000A  f: 0000 0000 0000 0001  d: 0000 0000 0000 0023  s: 0000 0000 0000 0000
+i: 0000 0000 0000 000B  f: 0000 0000 0000 0001  d: 0000 0000 0000 0C58  s: 0000 0000 0000 0001
+i: 0000 0000 0000 000C  f: 0000 0000 0000 0001  d: 0000 0000 0000 0021  s: 0000 0000 0000 0000
+i: 0000 0000 0000 000D  f: 0000 0000 0000 0001  d: 0000 0000 0000 0BD8  s: 0000 0000 0000 0001
+i: 0000 0000 0000 000E  f: 0000 0000 0000 0001  d: 0000 0000 0000 001F  s: 0000 0000 0000 0000
+i: 0000 0000 0000 000F  f: 0000 0000 0000 0001  d: 0000 0000 0000 0B58  s: 0000 0000 0000 0001
+i: 0000 0000 0000 0010  f: 0000 0000 0000 0001  d: 0000 0000 0000 001D  s: 0000 0000 0000 0000
+i: 0000 0000 0000 0011  f: 0000 0000 0000 0001  d: 0000 0000 0000 0AD8  s: 0000 0000 0000 0001
+i: 0000 0000 0000 0012  f: 0000 0000 0000 0001  d: 0000 0000 0000 001B  s: 0000 0000 0000 0000
+i: 0000 0000 0000 0013  f: 0000 0000 0000 0001  d: 0000 0000 0000 0998  s: 0000 0000 0000 0001
+i: 0000 0000 0000 0014  f: 0000 0000 0000 0001  d: 0000 0000 0000 0019  s: 0000 0000 0000 0000
+i: 0000 0000 0000 0015  f: 0000 0000 0000 0001  d: 0000 0000 0000 0918  s: 0000 0000 0000 0001
+i: 0000 0000 0000 0016  f: 0000 0000 0000 0001  d: 0000 0000 0000 0017  s: 0000 0000 0000 0000
+i: 0000 0000 0000 0017  f: 0000 0000 0000 0001  d: 0000 0000 0000 0898  s: 0000 0000 0000 0001
+i: 0000 0000 0000 0018  f: 0000 0000 0000 0001  d: 0000 0000 0000 0015  s: 0000 0000 0000 0000
+i: 0000 0000 0000 0019  f: 0000 0000 0000 0001  d: 0000 0000 0000 0818  s: 0000 0000 0000 0001
+i: 0000 0000 0000 001A  f: 0000 0000 0000 0001  d: 0000 0000 0000 0013  s: 0000 0000 0000 0000
+i: 0000 0000 0000 001B  f: 0000 0000 0000 0001  d: 0000 0000 0000 06D8  s: 0000 0000 0000 0001
+i: 0000 0000 0000 001C  f: 0000 0000 0000 0001  d: 0000 0000 0000 0011  s: 0000 0000 0000 0000
+i: 0000 0000 0000 001D  f: 0000 0000 0000 0001  d: 0000 0000 0000 0658  s: 0000 0000 0000 0001
+i: 0000 0000 0000 001E  f: 0000 0000 0000 0001  d: 0000 0000 0000 000F  s: 0000 0000 0000 0000
+i: 0000 0000 0000 001F  f: 0000 0000 0000 0001  d: 0000 0000 0000 05D8  s: 0000 0000 0000 0001
+i: 0000 0000 0000 0020  f: 0000 0000 0000 0001  d: 0000 0000 0000 000D  s: 0000 0000 0000 0000
+i: 0000 0000 0000 0021  f: 0000 0000 0000 0001  d: 0000 0000 0000 0398  s: 0000 0000 0000 0001
+i: 0000 0000 0000 0022  f: 0000 0000 0000 0001  d: 0000 0000 0000 000B  s: 0000 0000 0000 0000
+i: 0000 0000 0000 0023  f: 0000 0000 0000 0001  d: 0000 0000 0000 0318  s: 0000 0000 0000 0001
+i: 0000 0000 0000 0024  f: 0000 0000 0000 0001  d: 0000 0000 0000 0009  s: 0000 0000 0000 0000
+i: 0000 0000 0000 0025  f: 0000 0000 0000 0001  d: 0000 0000 0000 0298  s: 0000 0000 0000 0001
+i: 0000 0000 0000 0026  f: 0000 0000 0000 0001  d: 0000 0000 0000 0007  s: 0000 0000 0000 0000
+i: 0000 0000 0000 0027  f: 0000 0000 0000 0001  d: 0000 0000 0000 0218  s: 0000 0000 0000 0001
+i: 0000 0000 0000 0028  f: 0000 0000 0000 0001  d: 0000 0000 0000 0005  s: 0000 0000 0000 0000
+i: 0000 0000 0000 0029  f: 0000 0000 0000 0001  d: 0000 0000 0000 0198  s: 0000 0000 0000 0001
+i: 0000 0000 0000 002A  f: 0000 0000 0000 0001  d: 0000 0000 0000 0003  s: 0000 0000 0000 0000
+i: 0000 0000 0000 002B  f: 0000 0000 0000 0001  d: 0000 0000 0000 0118  s: 0000 0000 0000 0001
+i: 0000 0000 0000 002C  f: 0000 0000 0000 0001  d: 0000 0000 0000 0001  s: 0000 0000 0000 0000
+i: 0000 0000 0000 002D  f: 0000 0000 0000 0001  d: 0000 0000 0000 0098  s: 0000 0000 0000 0001
+i: 0000 0000 0000 002E  f: 0000 0000 0000 0000  d: 0000 0000 0000 0000  s: 0000 0000 0000 0000
 END
  }
 
