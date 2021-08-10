@@ -5,7 +5,7 @@
 #-------------------------------------------------------------------------------
 # podDocumentation
 package Nasm::X86;
-our $VERSION = "20210730";
+our $VERSION = "20210810";
 use warnings FATAL => qw(all);
 use strict;
 use Carp qw(confess cluck);
@@ -692,7 +692,7 @@ sub LoadBitsIntoMaskRegister($$@)                                               
   LoadConstantIntoMaskRegister($mask, eval $b)
  }
 
-my $Vpcmp = genHash("NasmX86::CompareCodes",                                    # Compare codes for Vpcmp
+my $Vpcmp = genHash("NasmX86::CompareCodes",                                    # Compare codes for "Vpcmp"
   eq=>0,                                                                        # Equal
   lt=>1,                                                                        # Less than
   le=>2,                                                                        # Less than or equals
@@ -754,52 +754,52 @@ sub Else(&)                                                                     
   $body;
  }
 
-sub IfEq(&;&)                                                                   # If equal execute the then body else the else body
+sub IfEq($;$)                                                                   # If equal execute the then body else the else body
  {my ($then, $else) = @_;                                                       # Then - required , else - optional
   If(q(Jne), $then, $else);                                                     # Opposite code
  }
 
-sub IfNe(&;&)                                                                   # If not equal execute the then body else the else body
+sub IfNe($;$)                                                                   # If not equal execute the then body else the else body
  {my ($then, $else) = @_;                                                       # Then - required , else - optional
   If(q(Je), $then, $else);                                                      # Opposite code
  }
 
-sub IfNz(&;&)                                                                   # If the zero flag is not set then execute the then body else the else body
+sub IfNz($;$)                                                                   # If the zero flag is not set then execute the then body else the else body
  {my ($then, $else) = @_;                                                       # Then - required , else - optional
   If(q(Jz), $then, $else);                                                      # Opposite code
  }
 
-sub IfZ(&;&)                                                                    # If the zero flag is set then execute the then body else the else body
+sub IfZ($;$)                                                                    # If the zero flag is set then execute the then body else the else body
  {my ($then, $else) = @_;                                                       # Then - required , else - optional
   If(q(Jnz), $then, $else);                                                     # Opposite code
  }
 
-sub IfC(&;&)                                                                    # If the carry flag is set then execute the then body else the else body
+sub IfC($;$)                                                                    # If the carry flag is set then execute the then body else the else body
  {my ($then, $else) = @_;                                                       # Then - required , else - optional
   If(q(Jnc), $then, $else);                                                     # Opposite code
  }
 
-sub IfNc(&;&)                                                                   # If the carry flag is not set then execute the then body else the else body
+sub IfNc($;$)                                                                   # If the carry flag is not set then execute the then body else the else body
  {my ($then, $else) = @_;                                                       # Then - required , else - optional
   If(q(Jc), $then, $else);                                                      # Opposite code
  }
 
-sub IfLt(&;&)                                                                   # If less than execute the then body else the else body
+sub IfLt($;$)                                                                   # If less than execute the then body else the else body
  {my ($then, $else) = @_;                                                       # Then - required , else - optional
   If(q(Jge), $then, $else);                                                     # Opposite code
  }
 
-sub IfLe(&;&)                                                                   # If less than or equal execute the then body else the else body
+sub IfLe($;$)                                                                   # If less than or equal execute the then body else the else body
  {my ($then, $else) = @_;                                                       # Then - required , else - optional
   If(q(Jg), $then, $else);                                                      # Opposite code
  }
 
-sub IfGt(&;&)                                                                   # If greater than execute the then body else the else body
+sub IfGt($;$)                                                                   # If greater than execute the then body else the else body
  {my ($then, $else) = @_;                                                       # Then - required , else - optional
   If(q(Jle), $then, $else);                                                     # Opposite code
  }
 
-sub IfGe(&;&)                                                                   # If greater than or equal execute the then body else the else body
+sub IfGe($;$)                                                                   # If greater than or equal execute the then body else the else body
  {my ($then, $else) = @_;                                                       # Then - required , else - optional
   If(q(Jl), $then, $else);                                                      # Opposite code
  }
@@ -860,6 +860,7 @@ sub ForIn(&$$$$)                                                                
 
   Sub $limit, $register;                                                        # Size of remainder
   IfNz                                                                          # Non remainder
+  Then
    {&$last;                                                                     # Process remainder
    }
  }
@@ -1279,7 +1280,7 @@ sub PrintErrZF                                                                  
  {@_ == 0 or confess;
 
   Pushfq;
-  IfNz {PrintErrStringNL "ZF=0"} sub {PrintErrStringNL "ZF=1"};
+  IfNz Then {PrintErrStringNL "ZF=0"}, Else {PrintErrStringNL "ZF=1"};
   Popfq;
  }
 
@@ -1287,7 +1288,7 @@ sub PrintOutZF                                                                  
  {@_ == 0 or confess;
 
   Pushfq;
-  IfNz {PrintOutStringNL "ZF=0"} sub {PrintOutStringNL "ZF=1"};
+  IfNz Then {PrintOutStringNL "ZF=0"}, Else {PrintOutStringNL "ZF=1"};
   Popfq;
  }
 
@@ -2208,7 +2209,7 @@ sub Nasm::X86::Variable::loadZmm($$)                                            
  }
 
 sub loadFromZmm($*$$)                                                           # Load the specified register from the offset located in the numbered zmm.
- {my ($register, $size, $zmm, $offset) = @_;                                    # Register to load, bwdq for size, numbered zmm register to load from, constant offset in bytes
+ {my ($register, $size, $zmm, $offset) = @_;                                    # Register to load, "b|w|d|q" for size, numbered zmm register to load from, constant offset in bytes
   @_ == 4 or confess;
   $offset >= 0 && $offset <= RegisterSize zmm0 or confess "Out of range";
 
@@ -3259,9 +3260,10 @@ sub executeFileViaBash(@)                                                       
     Test rax, rax;
 
     IfNz                                                                        # Parent
+    Then
      {WaitPid;
-     }
-    sub                                                                         # Child
+     },
+    Else                                                                        # Child
      {KeepFree rax;
       $$p{file}->setReg(rdi);
       Mov rsi, 0;
@@ -3378,6 +3380,7 @@ sub GetNextUtf8CharAsUtf32(@)                                                   
     KeepFree r15;
     Cmp r14, 0x7f;                                                              # Ascii
     IfLe
+    Then
      {$$p{out}->getReg(r14);
       $$p{size}->copy(Cq(one, 1));
       Jmp $success;
@@ -3386,6 +3389,7 @@ sub GetNextUtf8CharAsUtf32(@)                                                   
 
     Cmp r14, 0xdf;                                                              # 2 bytes
     IfLe
+    Then
      {Mov r13b, "[r15+1]";
       And r13, 0x3f;
       And r14, 0x1f;
@@ -3399,6 +3403,7 @@ sub GetNextUtf8CharAsUtf32(@)                                                   
 
     Cmp r14, 0xef;                                                              # 3 bytes
     IfLe
+    Then
      {Mov r12b, "[r15+2]";
       And r12, 0x3f;
       Mov r13b, "[r15+1]";
@@ -3416,6 +3421,7 @@ sub GetNextUtf8CharAsUtf32(@)                                                   
 
     Cmp r14, 0xf7;                                                              # 4 bytes
     IfLe
+    Then
      {Mov r11b, "[r15+3]";
       And r11, 0x3f;
       Mov r12b, "[r15+2]";
@@ -3877,7 +3883,7 @@ sub Nasm::X86::ByteString::updateSpace($@)                                      
        {my ($start, $end) = @_;
         Shl rax, 1;                                                             # New byte string size - double the size of the old byte string
         Cmp rax, rdx;                                                           # Big enough?
-        IfGe {Jmp $end};                                                        # Big enough!
+        Jge $end;                                                                # Big enough!
        };
       my $newSize = Vq(size, rax);                                              # Save new byte string size
       AllocateMemory(size => $newSize, my $address = Vq(address));              # Create new byte string
@@ -5334,6 +5340,7 @@ sub Nasm::X86::BlockMultiWayTree::transferTreeBitsFromParent($$$$)              
   $b->getTreeBits($parent, $whole);                                             # Transfer Tree bits
   Cmp $whole, 0;
   IfNz                                                                          # Action required iff there are some tree bits
+  Then
    {Mov $half, $whole;                                                          # Left tree bits
     And $half, ((1 << $b->leftLength) - 1);                                     # Isolate left bits
     $b->putTreeBits($left, $half);                                              # Save left tree bits
@@ -5365,7 +5372,7 @@ sub Nasm::X86::BlockMultiWayTree::transferTreeBitsFromLeftOrRight($$$$$$)       
   InsertZeroIntoRegisterAtPoint($point, $bits);
   Mov $half, $whole;                                                            # Tree bit of key being moved into parent from left
   Shr $half, $b->leftLength+1;                                                  # Tree bit to move into parent is now in carry flag
-  IfC {Or $bits, $point};                                                       # One parent bit
+  IfC Then {Or $bits, $point};                                                  # One parent bit
   $b->putTreeBits($parent, $bits);                                              # Put parent tree bits
 
   Mov $half, $whole;                                                            # Left bits
@@ -5657,6 +5664,7 @@ sub Nasm::X86::BlockMultiWayTree::findAndSplit($@)                              
       Vpcmpud "$testMask\{$lengthMask}", "zmm$zmmKeys", "zmm$zmmTest", 0;       # Check for equal elements
       Ktestw   $testMask, $testMask;
       IfNz                                                                      # Result mask is non zero so we must have found the key
+      Then
        {Kmovq r15, $testMask;
         Tzcnt r14, r15;                                                         # Trailing zeros gives index
         $$p{compare}->copy(Cq(zero, 0));                                        # Key found
@@ -5668,6 +5676,7 @@ sub Nasm::X86::BlockMultiWayTree::findAndSplit($@)                              
       Vpcmpud "$testMask\{$lengthMask}", "zmm$zmmTest", "zmm$zmmKeys", 1;       # Check for greater elements
       Ktestw   $testMask, $testMask;
       IfNz                                                                      # Non zero implies that the key is less than some of the keys in the block
+      Then
        {Kmovq r15, $testMask;
         Tzcnt r14, r15;                                                         # Trailing zeros
         If ($node == 0,
@@ -5739,6 +5748,7 @@ sub Nasm::X86::BlockMultiWayTree::find($$)                                      
       Vpcmpud "$testMask\{$lengthMask}", "zmm$zmmKeys", "zmm$zmmTest", 0;       # Check for equal elements
       Ktestw   $testMask, $testMask;
       IfNz                                                                      # Result mask is non zero so we must have found the key
+      Then
        {Kmovq r15, $testMask;
         Tzcnt r14, r15;                                                         # Trailing zeros
         $$p{found}->copy(Cq(one, 1));                                           # Key found
@@ -5758,6 +5768,7 @@ sub Nasm::X86::BlockMultiWayTree::find($$)                                      
       Ktestw   $testMask, $testMask;
 
       IfNz                                                                      # Non zero implies that the key is less than some of the keys
+      Then
        {Kmovq r15, $testMask;
         Tzcnt r14, r15;                                                         # Trailing zeros
         $tree->copy(getDFromZmm($zmmNode, "r14*$W"));                           # Corresponding node
@@ -5821,15 +5832,17 @@ sub Nasm::X86::BlockMultiWayTree::insertDataOrTree($$$$)                        
       Vpcmpud "k6{k7}", zmm22, zmm31, 0;                                        # Check for equal key
       Ktestd k6, k6;                                                            # Check whether a matching key was found - the operation clears the zero flag if the register is not zero
       IfNz                                                                      # Found the key so we just update the data field
+      Then
        {if ($tnd)                                                               # Insert sub tree if requested
          {Kmovq r15, k6;                                                        # Position of key just found
           $t->isTree(r15, 31);                                                  # Set the zero flag to indicate whether the existing data element is in fact a tree
           IfNz                                                                  # If the data element is already a tree then get its value and return it in the data variable
+          Then
            {Tzcnt r14, r15;                                                     # Trailing zeros
             $D->copy(getDFromZmm(30, "r14*$$t{width}"));                        # Data associated with the key
             Jmp $success;                                                       # Return offset of sub tree
-           }
-          sub                                                                   # The existing element is not a tree so we mark it as such using the single bit in r15/k6
+           },
+          Else                                                                  # The existing element is not a tree so we mark it as such using the single bit in r15/k6
            {$t->setTree(r15, 31);
            };
           $D->copy($t->bs->CreateBlockMultiWayTree->first)                      # Create tree and copy offset of first  block
@@ -6169,7 +6182,7 @@ sub Nasm::X86::BlockMultiWayTree::isTree($$$)                                   
   And $register, $t->treeBitsMask;                                              # Mask tree bits to prevent tests outside the permitted area
   PushRR "zmm$zmm";                                                             # Put the keys on the stack
   Add rsp, RegisterSize zmm0;                                                   # Restore stack
-  And $register, "[rsp-$o]";                                                    # Test the tree bits - done here to avoid the effect on ZF of add
+  And $register, "[rsp-$o]";                                                    # Test the tree bits - done here to avoid the effect on the zero flag of add
   PopR $register;
  } # isTree
 
@@ -6420,9 +6433,10 @@ sub CallC($@)                                                                   
   Shr rax, 60;
   KeepFree rax;
   IfEq                                                                          # If we are 16 byte aligned push two twos
+  Then
    {Mov rax, 2; Push rax; Push rax; KeepFree rax;
-   }
-  sub                                                                           # If we are not 16 byte aligned push one one.
+   },
+  Else                                                                          # If we are not 16 byte aligned push one one.
    {Mov rax, 1; Push rax; KeepFree rax;
    };
 
@@ -6436,7 +6450,7 @@ sub CallC($@)                                                                   
   Pop r15;                                                                      # Decode and reset stack after 16 byte alignment
   Cmp r15, 2;                                                                   # Check for double push
   Pop r15;                                                                      # Single or double push
-  IfEq {Pop r15};                                                               # Double push
+  IfEq Then {Pop r15};                                                          # Double push
   PopR @order;
  }
 
@@ -6728,7 +6742,7 @@ the following examples.
 
 =head3 Avx512 instructions
 
-Use avx512 instructions to do 64 comparisons in parallel:
+Use B<Avx512> instructions to perform B<64> comparisons in parallel:
 
   my $P = "2F";                                                                 # Value to test for
   my $l = Rb 0;  Rb $_ for 1..RegisterSize zmm0;                                # 0..63
@@ -6788,37 +6802,34 @@ END
 Start a child process and wait for it, printing out the process identifiers of
 each process involved:
 
-  Fork;                                                                         # Fork
+   Fork;                                     # Fork
 
-  Test rax,rax;
-  If                                                                            # Parent
-   {Mov rbx, rax;
-    WaitPid;
-    PrintOutRegisterInHex rax;
-    PrintOutRegisterInHex rbx;
-    GetPid;                                                                     # Pid of parent as seen in parent
-    Mov rcx,rax;
-    PrintOutRegisterInHex rcx;
-   }
-  sub                                                                           # Child
-   {Mov r8,rax;
-    PrintOutRegisterInHex r8;
-    GetPid;                                                                     # Child pid as seen in child
-    Mov r9,rax;
-    PrintOutRegisterInHex r9;
-    GetPPid;                                                                    # Parent pid as seen in child
-    Mov r10,rax;
-    PrintOutRegisterInHex r10;
-   };
+   Test rax,rax;
+   IfNz                                      # Parent
+   Then
+    {Mov rbx, rax;
+     WaitPid;
+     GetPid;                                 # Pid of parent as seen in parent
+     Mov rcx,rax;
+     PrintOutRegisterInHex rax, rbx, rcx;
+    },
+   Else                                      # Child
+    {Mov r8,rax;
+     GetPid;                                 # Child pid as seen in child
+     Mov r9,rax;
+     GetPPid;                                # Parent pid as seen in child
+     Mov r10,rax;
+     PrintOutRegisterInHex r8, r9, r10;
+    };
 
-  my $r = Assemble;
+   my $r = Assemble;
 
-  #    r8: 0000 0000 0000 0000   #1 Return from fork as seen by child
-  #    r9: 0000 0000 0003 0C63   #2 Pid of child
-  #   r10: 0000 0000 0003 0C60   #3 Pid of parent from child
-  #   rax: 0000 0000 0003 0C63   #4 Return from fork as seen by parent
-  #   rbx: 0000 0000 0003 0C63   #5 Wait for child pid result
-  #   rcx: 0000 0000 0003 0C60   #6 Pid of parent
+ #    r8: 0000 0000 0000 0000   #1 Return from fork as seen by child
+ #    r9: 0000 0000 0003 0C63   #2 Pid of child
+ #   r10: 0000 0000 0003 0C60   #3 Pid of parent from child
+ #   rax: 0000 0000 0003 0C63   #4 Return from fork as seen by parent
+ #   rbx: 0000 0000 0003 0C63   #5 Wait for child pid result
+ #   rcx: 0000 0000 0003 0C60   #6 Pid of parent
 
 =head3 Read a file
 
@@ -6851,6 +6862,71 @@ Call B<C> functions by naming them as external and including their library:
   ok Assemble(eq => <<END);
 Hello World
 END
+
+=head3 Create a multi way tree using SIMD instructions
+
+Create a multiway tree as in L<Tree::Multi> using B<Avx512> instructions and
+iterate through it:
+
+  my $N = 12;
+  my $b = CreateByteString;                   # Resizable memory block
+  my $t = $b->CreateBlockMultiWayTree;        # Multi way tree in memory block
+
+  Cq(count, $N)->for(sub                      # Add some entries to the tree
+   {my ($index, $start, $next, $end) = @_;
+    my $k = $index + 1;
+    $t->insert($k,      $k + 0x100);
+    $t->insert($k + $N, $k + 0x200);
+   });
+
+  $t->by(sub                                  # Iterate through the tree
+   {my ($iter, $end) = @_;
+    $iter->key ->out('key: ');
+    $iter->data->out(' data: ');
+    $iter->tree->depth($iter->node, my $D = Vq(depth));
+
+    $t->find($iter->key);
+    $t->found->out(' found: '); $t->data->out(' data: '); $D->outNL(' depth: ');
+   });
+
+  $t->find(Cq(key, 0xffff));  $t->found->outNL('Found: ');  # Find some entries
+  $t->find(Cq(key, 0xd));     $t->found->outNL('Found: ');
+
+  If ($t->found,
+  Then
+   {$t->data->outNL("Data : ");
+   });
+
+  ok Assemble(debug => 0, eq => <<END);
+key: 0000 0000 0000 0001 data: 0000 0000 0000 0101 found: 0000 0000 0000 0001 data: 0000 0000 0000 0101 depth: 0000 0000 0000 0002
+key: 0000 0000 0000 0002 data: 0000 0000 0000 0102 found: 0000 0000 0000 0001 data: 0000 0000 0000 0102 depth: 0000 0000 0000 0002
+key: 0000 0000 0000 0003 data: 0000 0000 0000 0103 found: 0000 0000 0000 0001 data: 0000 0000 0000 0103 depth: 0000 0000 0000 0002
+key: 0000 0000 0000 0004 data: 0000 0000 0000 0104 found: 0000 0000 0000 0001 data: 0000 0000 0000 0104 depth: 0000 0000 0000 0002
+key: 0000 0000 0000 0005 data: 0000 0000 0000 0105 found: 0000 0000 0000 0001 data: 0000 0000 0000 0105 depth: 0000 0000 0000 0002
+key: 0000 0000 0000 0006 data: 0000 0000 0000 0106 found: 0000 0000 0000 0001 data: 0000 0000 0000 0106 depth: 0000 0000 0000 0002
+key: 0000 0000 0000 0007 data: 0000 0000 0000 0107 found: 0000 0000 0000 0001 data: 0000 0000 0000 0107 depth: 0000 0000 0000 0002
+key: 0000 0000 0000 0008 data: 0000 0000 0000 0108 found: 0000 0000 0000 0001 data: 0000 0000 0000 0108 depth: 0000 0000 0000 0002
+key: 0000 0000 0000 0009 data: 0000 0000 0000 0109 found: 0000 0000 0000 0001 data: 0000 0000 0000 0109 depth: 0000 0000 0000 0002
+key: 0000 0000 0000 000A data: 0000 0000 0000 010A found: 0000 0000 0000 0001 data: 0000 0000 0000 010A depth: 0000 0000 0000 0002
+key: 0000 0000 0000 000B data: 0000 0000 0000 010B found: 0000 0000 0000 0001 data: 0000 0000 0000 010B depth: 0000 0000 0000 0002
+key: 0000 0000 0000 000C data: 0000 0000 0000 010C found: 0000 0000 0000 0001 data: 0000 0000 0000 010C depth: 0000 0000 0000 0002
+key: 0000 0000 0000 000D data: 0000 0000 0000 0201 found: 0000 0000 0000 0001 data: 0000 0000 0000 0201 depth: 0000 0000 0000 0001
+key: 0000 0000 0000 000E data: 0000 0000 0000 0202 found: 0000 0000 0000 0001 data: 0000 0000 0000 0202 depth: 0000 0000 0000 0002
+key: 0000 0000 0000 000F data: 0000 0000 0000 0203 found: 0000 0000 0000 0001 data: 0000 0000 0000 0203 depth: 0000 0000 0000 0002
+key: 0000 0000 0000 0010 data: 0000 0000 0000 0204 found: 0000 0000 0000 0001 data: 0000 0000 0000 0204 depth: 0000 0000 0000 0002
+key: 0000 0000 0000 0011 data: 0000 0000 0000 0205 found: 0000 0000 0000 0001 data: 0000 0000 0000 0205 depth: 0000 0000 0000 0002
+key: 0000 0000 0000 0012 data: 0000 0000 0000 0206 found: 0000 0000 0000 0001 data: 0000 0000 0000 0206 depth: 0000 0000 0000 0002
+key: 0000 0000 0000 0013 data: 0000 0000 0000 0207 found: 0000 0000 0000 0001 data: 0000 0000 0000 0207 depth: 0000 0000 0000 0002
+key: 0000 0000 0000 0014 data: 0000 0000 0000 0208 found: 0000 0000 0000 0001 data: 0000 0000 0000 0208 depth: 0000 0000 0000 0002
+key: 0000 0000 0000 0015 data: 0000 0000 0000 0209 found: 0000 0000 0000 0001 data: 0000 0000 0000 0209 depth: 0000 0000 0000 0002
+key: 0000 0000 0000 0016 data: 0000 0000 0000 020A found: 0000 0000 0000 0001 data: 0000 0000 0000 020A depth: 0000 0000 0000 0002
+key: 0000 0000 0000 0017 data: 0000 0000 0000 020B found: 0000 0000 0000 0001 data: 0000 0000 0000 020B depth: 0000 0000 0000 0002
+key: 0000 0000 0000 0018 data: 0000 0000 0000 020C found: 0000 0000 0000 0001 data: 0000 0000 0000 020C depth: 0000 0000 0000 0002
+Found: 0000 0000 0000 0000
+Found: 0000 0000 0000 0001
+Data : 0000 0000 0000 0201
+END
+
 
 =head2 Installation
 
@@ -6948,7 +7024,7 @@ present. If the test fails we continue rather than calling L<Carp::confess>.
 Generate X86 assembler code using Perl as a macro pre-processor.
 
 
-Version "20210730".
+Version "20210810".
 
 
 The following sections describe the methods in each functional area of this
@@ -8387,15 +8463,15 @@ B<Example:>
 
     SetZF;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-    IfZ  {PrintOutStringNL "Zero"}      sub {PrintOutStringNL "NOT zero"};
+    IfZ  Then {PrintOutStringNL "Zero"},     Else {PrintOutStringNL "NOT zero"};
     ClearZF;
-    IfNz {PrintOutStringNL "NOT zero"}  sub {PrintOutStringNL "Zero"};
+    IfNz Then {PrintOutStringNL "NOT zero"}, Else {PrintOutStringNL "Zero"};
 
     Mov r15, 5;
-    Shr r15, 1; IfC  {PrintOutStringNL "Carry"}    sub {PrintOutStringNL "NO carry"};
-    Shr r15, 1; IfC  {PrintOutStringNL "Carry"}    sub {PrintOutStringNL "NO carry"};
-    Shr r15, 1; IfNc {PrintOutStringNL "NO carry"} sub {PrintOutStringNL "Carry"};
-    Shr r15, 1; IfNc {PrintOutStringNL "NO carry"} sub {PrintOutStringNL "Carry"};
+    Shr r15, 1; IfC  Then {PrintOutStringNL "Carry"}   , Else {PrintOutStringNL "NO carry"};
+    Shr r15, 1; IfC  Then {PrintOutStringNL "Carry"}   , Else {PrintOutStringNL "NO carry"};
+    Shr r15, 1; IfNc Then {PrintOutStringNL "NO carry"}, Else {PrintOutStringNL "Carry"};
+    Shr r15, 1; IfNc Then {PrintOutStringNL "NO carry"}, Else {PrintOutStringNL "Carry"};
 
     ok Assemble(debug=>0, eq => <<END);
   ZF=1
@@ -8436,17 +8512,17 @@ B<Example:>
     PrintOutZF;
 
     SetZF;
-    IfZ  {PrintOutStringNL "Zero"}      sub {PrintOutStringNL "NOT zero"};
+    IfZ  Then {PrintOutStringNL "Zero"},     Else {PrintOutStringNL "NOT zero"};
 
     ClearZF;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-    IfNz {PrintOutStringNL "NOT zero"}  sub {PrintOutStringNL "Zero"};
+    IfNz Then {PrintOutStringNL "NOT zero"}, Else {PrintOutStringNL "Zero"};
 
     Mov r15, 5;
-    Shr r15, 1; IfC  {PrintOutStringNL "Carry"}    sub {PrintOutStringNL "NO carry"};
-    Shr r15, 1; IfC  {PrintOutStringNL "Carry"}    sub {PrintOutStringNL "NO carry"};
-    Shr r15, 1; IfNc {PrintOutStringNL "NO carry"} sub {PrintOutStringNL "Carry"};
-    Shr r15, 1; IfNc {PrintOutStringNL "NO carry"} sub {PrintOutStringNL "Carry"};
+    Shr r15, 1; IfC  Then {PrintOutStringNL "Carry"}   , Else {PrintOutStringNL "NO carry"};
+    Shr r15, 1; IfC  Then {PrintOutStringNL "Carry"}   , Else {PrintOutStringNL "NO carry"};
+    Shr r15, 1; IfNc Then {PrintOutStringNL "NO carry"}, Else {PrintOutStringNL "Carry"};
+    Shr r15, 1; IfNc Then {PrintOutStringNL "NO carry"}, Else {PrintOutStringNL "Carry"};
 
     ok Assemble(debug=>0, eq => <<END);
   ZF=1
@@ -8537,14 +8613,14 @@ B<Example:>
     Kmovq k0, r14;
     KeepFree r14;
     Ktestq k0, k0;
-    IfZ {PrintOutStringNL "0 & 0 == 0"};
+    IfZ Then {PrintOutStringNL "0 & 0 == 0"};
     PrintOutZF;
 
 
     LoadConstantIntoMaskRegister k1, 1;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     Ktestq k1, k1;
-    IfNz {PrintOutStringNL "1 & 1 != 0"};
+    IfNz Then {PrintOutStringNL "1 & 1 != 0"};
     PrintOutZF;
 
 
@@ -8645,7 +8721,7 @@ B<Example:>
         KeepFree rax;
         my $Op = ucfirst $op;
 
-        eval qq(If$Op {PrintOutStringNL("$a $op $b")} sub {PrintOutStringNL("$a NOT $op $b")});  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+        eval qq(If$Op Then {PrintOutStringNL("$a $op $b")}, Else {PrintOutStringNL("$a NOT $op $b")});  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
         $@ and confess $@;
        }
@@ -8792,7 +8868,7 @@ B<Example:>
         Cmp rax, $b;
         KeepFree rax;
         my $Op = ucfirst $op;
-        eval qq(If$Op {PrintOutStringNL("$a $op $b")} sub {PrintOutStringNL("$a NOT $op $b")});
+        eval qq(If$Op Then {PrintOutStringNL("$a $op $b")}, Else {PrintOutStringNL("$a NOT $op $b")});
         $@ and confess $@;
        }
      };
@@ -8840,7 +8916,7 @@ B<Example:>
         Cmp rax, $b;
         KeepFree rax;
         my $Op = ucfirst $op;
-        eval qq(If$Op {PrintOutStringNL("$a $op $b")} sub {PrintOutStringNL("$a NOT $op $b")});
+        eval qq(If$Op Then {PrintOutStringNL("$a $op $b")}, Else {PrintOutStringNL("$a NOT $op $b")});
         $@ and confess $@;
        }
      };
@@ -8885,8 +8961,10 @@ B<Example:>
 
     IfNz  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
+    Then
      {PrintOutRegisterInHex rax;
-     } sub
+     },
+    Else
      {PrintOutRegisterInHex rbx;
      };
     KeepFree rax;
@@ -8895,8 +8973,10 @@ B<Example:>
 
     IfNz  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
+    Then
      {PrintOutRegisterInHex rcx;
-     } sub
+     },
+    Else
      {PrintOutRegisterInHex rdx;
      };
 
@@ -8927,16 +9007,16 @@ B<Example:>
 
     SetZF;
 
-    IfZ  {PrintOutStringNL "Zero"}      sub {PrintOutStringNL "NOT zero"};  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+    IfZ  Then {PrintOutStringNL "Zero"},     Else {PrintOutStringNL "NOT zero"};  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     ClearZF;
-    IfNz {PrintOutStringNL "NOT zero"}  sub {PrintOutStringNL "Zero"};
+    IfNz Then {PrintOutStringNL "NOT zero"}, Else {PrintOutStringNL "Zero"};
 
     Mov r15, 5;
-    Shr r15, 1; IfC  {PrintOutStringNL "Carry"}    sub {PrintOutStringNL "NO carry"};
-    Shr r15, 1; IfC  {PrintOutStringNL "Carry"}    sub {PrintOutStringNL "NO carry"};
-    Shr r15, 1; IfNc {PrintOutStringNL "NO carry"} sub {PrintOutStringNL "Carry"};
-    Shr r15, 1; IfNc {PrintOutStringNL "NO carry"} sub {PrintOutStringNL "Carry"};
+    Shr r15, 1; IfC  Then {PrintOutStringNL "Carry"}   , Else {PrintOutStringNL "NO carry"};
+    Shr r15, 1; IfC  Then {PrintOutStringNL "Carry"}   , Else {PrintOutStringNL "NO carry"};
+    Shr r15, 1; IfNc Then {PrintOutStringNL "NO carry"}, Else {PrintOutStringNL "Carry"};
+    Shr r15, 1; IfNc Then {PrintOutStringNL "NO carry"}, Else {PrintOutStringNL "Carry"};
 
     ok Assemble(debug=>0, eq => <<END);
   ZF=1
@@ -8976,19 +9056,19 @@ B<Example:>
     PrintOutZF;
 
     SetZF;
-    IfZ  {PrintOutStringNL "Zero"}      sub {PrintOutStringNL "NOT zero"};
+    IfZ  Then {PrintOutStringNL "Zero"},     Else {PrintOutStringNL "NOT zero"};
     ClearZF;
-    IfNz {PrintOutStringNL "NOT zero"}  sub {PrintOutStringNL "Zero"};
+    IfNz Then {PrintOutStringNL "NOT zero"}, Else {PrintOutStringNL "Zero"};
 
     Mov r15, 5;
 
-    Shr r15, 1; IfC  {PrintOutStringNL "Carry"}    sub {PrintOutStringNL "NO carry"};  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+    Shr r15, 1; IfC  Then {PrintOutStringNL "Carry"}   , Else {PrintOutStringNL "NO carry"};  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
 
-    Shr r15, 1; IfC  {PrintOutStringNL "Carry"}    sub {PrintOutStringNL "NO carry"};  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+    Shr r15, 1; IfC  Then {PrintOutStringNL "Carry"}   , Else {PrintOutStringNL "NO carry"};  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-    Shr r15, 1; IfNc {PrintOutStringNL "NO carry"} sub {PrintOutStringNL "Carry"};
-    Shr r15, 1; IfNc {PrintOutStringNL "NO carry"} sub {PrintOutStringNL "Carry"};
+    Shr r15, 1; IfNc Then {PrintOutStringNL "NO carry"}, Else {PrintOutStringNL "Carry"};
+    Shr r15, 1; IfNc Then {PrintOutStringNL "NO carry"}, Else {PrintOutStringNL "Carry"};
 
     ok Assemble(debug=>0, eq => <<END);
   ZF=1
@@ -9028,18 +9108,18 @@ B<Example:>
     PrintOutZF;
 
     SetZF;
-    IfZ  {PrintOutStringNL "Zero"}      sub {PrintOutStringNL "NOT zero"};
+    IfZ  Then {PrintOutStringNL "Zero"},     Else {PrintOutStringNL "NOT zero"};
     ClearZF;
-    IfNz {PrintOutStringNL "NOT zero"}  sub {PrintOutStringNL "Zero"};
+    IfNz Then {PrintOutStringNL "NOT zero"}, Else {PrintOutStringNL "Zero"};
 
     Mov r15, 5;
-    Shr r15, 1; IfC  {PrintOutStringNL "Carry"}    sub {PrintOutStringNL "NO carry"};
-    Shr r15, 1; IfC  {PrintOutStringNL "Carry"}    sub {PrintOutStringNL "NO carry"};
+    Shr r15, 1; IfC  Then {PrintOutStringNL "Carry"}   , Else {PrintOutStringNL "NO carry"};
+    Shr r15, 1; IfC  Then {PrintOutStringNL "Carry"}   , Else {PrintOutStringNL "NO carry"};
 
-    Shr r15, 1; IfNc {PrintOutStringNL "NO carry"} sub {PrintOutStringNL "Carry"};  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+    Shr r15, 1; IfNc Then {PrintOutStringNL "NO carry"}, Else {PrintOutStringNL "Carry"};  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
 
-    Shr r15, 1; IfNc {PrintOutStringNL "NO carry"} sub {PrintOutStringNL "Carry"};  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+    Shr r15, 1; IfNc Then {PrintOutStringNL "NO carry"}, Else {PrintOutStringNL "Carry"};  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
 
     ok Assemble(debug=>0, eq => <<END);
@@ -9076,7 +9156,7 @@ B<Example:>
         Cmp rax, $b;
         KeepFree rax;
         my $Op = ucfirst $op;
-        eval qq(If$Op {PrintOutStringNL("$a $op $b")} sub {PrintOutStringNL("$a NOT $op $b")});
+        eval qq(If$Op Then {PrintOutStringNL("$a $op $b")}, Else {PrintOutStringNL("$a NOT $op $b")});
         $@ and confess $@;
        }
      };
@@ -9124,7 +9204,7 @@ B<Example:>
         Cmp rax, $b;
         KeepFree rax;
         my $Op = ucfirst $op;
-        eval qq(If$Op {PrintOutStringNL("$a $op $b")} sub {PrintOutStringNL("$a NOT $op $b")});
+        eval qq(If$Op Then {PrintOutStringNL("$a $op $b")}, Else {PrintOutStringNL("$a NOT $op $b")});
         $@ and confess $@;
        }
      };
@@ -9172,7 +9252,7 @@ B<Example:>
         Cmp rax, $b;
         KeepFree rax;
         my $Op = ucfirst $op;
-        eval qq(If$Op {PrintOutStringNL("$a $op $b")} sub {PrintOutStringNL("$a NOT $op $b")});
+        eval qq(If$Op Then {PrintOutStringNL("$a $op $b")}, Else {PrintOutStringNL("$a NOT $op $b")});
         $@ and confess $@;
        }
      };
@@ -9220,7 +9300,7 @@ B<Example:>
         Cmp rax, $b;
         KeepFree rax;
         my $Op = ucfirst $op;
-        eval qq(If$Op {PrintOutStringNL("$a $op $b")} sub {PrintOutStringNL("$a NOT $op $b")});
+        eval qq(If$Op Then {PrintOutStringNL("$a $op $b")}, Else {PrintOutStringNL("$a NOT $op $b")});
         $@ and confess $@;
        }
      };
@@ -9266,7 +9346,7 @@ B<Example:>
      {my ($start, $end) = @_;
       PrintOutRegisterInHex rax;
       Cmp rax, 3;
-      IfGe {Jmp $end};
+      Jge $end;
       Inc rax;
       PrintOutRegisterInHex rax
       Jmp $start;
@@ -9298,7 +9378,7 @@ B<Example:>
 
      {my ($start, $end, $next) = @_;
       Cmp rax, 3;
-      IfGe {Jmp $end};
+      Jge $end;
       PrintOutRegisterInHex rax;
      } rax, 16, 1;
 
@@ -9465,6 +9545,26 @@ Print a constant string to stdout.
      Parameter  Description
   1  @string    String
 
+B<Example:>
+
+
+    my $q = Rs('abababab');
+    Mov(rax, "[$q]");
+
+    PrintOutString "rax: ";  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+
+    PrintOutRaxInHex;
+    PrintOutNL;
+    Xor rax, rax;
+
+    PrintOutString "rax: ";  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+
+    PrintOutRaxInHex;
+    PrintOutNL;
+
+    ok Assemble =~ m(rax: 6261 6261 6261 6261.*rax: 0000 0000 0000 0000)s;
+
+
 =head2 PrintErrStringNL(@string)
 
 Print a constant string followed by a new line to stderr
@@ -9628,7 +9728,9 @@ B<Example:>
     PrintOutRegisterInHex r8;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
 
-    ok Assemble =~ m(r8: 6867 6665 6463 6261)s;
+    ok Assemble(debug=>0, eq => <<END);
+      r8: 6867 6665 6463 6261
+  END
 
 
 =head2 PrintOutRegistersInHex()
@@ -9690,15 +9792,15 @@ B<Example:>
 
 
     SetZF;
-    IfZ  {PrintOutStringNL "Zero"}      sub {PrintOutStringNL "NOT zero"};
+    IfZ  Then {PrintOutStringNL "Zero"},     Else {PrintOutStringNL "NOT zero"};
     ClearZF;
-    IfNz {PrintOutStringNL "NOT zero"}  sub {PrintOutStringNL "Zero"};
+    IfNz Then {PrintOutStringNL "NOT zero"}, Else {PrintOutStringNL "Zero"};
 
     Mov r15, 5;
-    Shr r15, 1; IfC  {PrintOutStringNL "Carry"}    sub {PrintOutStringNL "NO carry"};
-    Shr r15, 1; IfC  {PrintOutStringNL "Carry"}    sub {PrintOutStringNL "NO carry"};
-    Shr r15, 1; IfNc {PrintOutStringNL "NO carry"} sub {PrintOutStringNL "Carry"};
-    Shr r15, 1; IfNc {PrintOutStringNL "NO carry"} sub {PrintOutStringNL "Carry"};
+    Shr r15, 1; IfC  Then {PrintOutStringNL "Carry"}   , Else {PrintOutStringNL "NO carry"};
+    Shr r15, 1; IfC  Then {PrintOutStringNL "Carry"}   , Else {PrintOutStringNL "NO carry"};
+    Shr r15, 1; IfNc Then {PrintOutStringNL "NO carry"}, Else {PrintOutStringNL "Carry"};
+    Shr r15, 1; IfNc Then {PrintOutStringNL "NO carry"}, Else {PrintOutStringNL "Carry"};
 
     ok Assemble(debug=>0, eq => <<END);
   ZF=1
@@ -10635,7 +10737,7 @@ Load the specified register from the offset located in the numbered zmm.
 
      Parameter  Description
   1  $register  Register to load
-  2  $size      Bwdq for size
+  2  $size      "b|w|d|q" for size
   3  $zmm       Numbered zmm register to load from
   4  $offset    Constant offset in bytes
 
@@ -11082,12 +11184,12 @@ B<Example:>
     Kmovq k0, r14;
     KeepFree r14;
     Ktestq k0, k0;
-    IfZ {PrintOutStringNL "0 & 0 == 0"};
+    IfZ Then {PrintOutStringNL "0 & 0 == 0"};
     PrintOutZF;
 
     LoadConstantIntoMaskRegister k1, 1;
     Ktestq k1, k1;
-    IfNz {PrintOutStringNL "1 & 1 != 0"};
+    IfNz Then {PrintOutStringNL "1 & 1 != 0"};
     PrintOutZF;
 
     LoadConstantIntoMaskRegister k2, eval "0b".(('1'x4).('0'x4))x2;
@@ -11248,26 +11350,20 @@ B<Example:>
 
     Test rax,rax;
     IfNz                                                                          # Parent
+    Then
      {Mov rbx, rax;
       WaitPid;
-      PrintOutRegisterInHex rax;
-      PrintOutRegisterInHex rbx;
-      KeepFree rax;
       GetPid;                                                                     # Pid of parent as seen in parent
       Mov rcx,rax;
-      PrintOutRegisterInHex rcx;
-     }
-    sub                                                                           # Child
+      PrintOutRegisterInHex rax, rbx, rcx;
+     },
+    Else                                                                          # Child
      {Mov r8,rax;
-      PrintOutRegisterInHex r8;
-      KeepFree rax;
       GetPid;                                                                     # Child pid as seen in child
       Mov r9,rax;
-      PrintOutRegisterInHex r9;
-      KeepFree rax;
       GetPPid;                                                                    # Parent pid as seen in child
       Mov r10,rax;
-      PrintOutRegisterInHex r10;
+      PrintOutRegisterInHex r8, r9, r10;
      };
 
     my $r = Assemble;
@@ -11299,30 +11395,24 @@ B<Example:>
 
     Test rax,rax;
     IfNz                                                                          # Parent
+    Then
      {Mov rbx, rax;
       WaitPid;
-      PrintOutRegisterInHex rax;
-      PrintOutRegisterInHex rbx;
-      KeepFree rax;
 
       GetPid;                                                                     # Pid of parent as seen in parent  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
       Mov rcx,rax;
-      PrintOutRegisterInHex rcx;
-     }
-    sub                                                                           # Child
+      PrintOutRegisterInHex rax, rbx, rcx;
+     },
+    Else                                                                          # Child
      {Mov r8,rax;
-      PrintOutRegisterInHex r8;
-      KeepFree rax;
 
       GetPid;                                                                     # Child pid as seen in child  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
       Mov r9,rax;
-      PrintOutRegisterInHex r9;
-      KeepFree rax;
       GetPPid;                                                                    # Parent pid as seen in child
       Mov r10,rax;
-      PrintOutRegisterInHex r10;
+      PrintOutRegisterInHex r8, r9, r10;
      };
 
     my $r = Assemble;
@@ -11370,28 +11460,22 @@ B<Example:>
 
     Test rax,rax;
     IfNz                                                                          # Parent
+    Then
      {Mov rbx, rax;
       WaitPid;
-      PrintOutRegisterInHex rax;
-      PrintOutRegisterInHex rbx;
-      KeepFree rax;
       GetPid;                                                                     # Pid of parent as seen in parent
       Mov rcx,rax;
-      PrintOutRegisterInHex rcx;
-     }
-    sub                                                                           # Child
+      PrintOutRegisterInHex rax, rbx, rcx;
+     },
+    Else                                                                          # Child
      {Mov r8,rax;
-      PrintOutRegisterInHex r8;
-      KeepFree rax;
       GetPid;                                                                     # Child pid as seen in child
       Mov r9,rax;
-      PrintOutRegisterInHex r9;
-      KeepFree rax;
 
       GetPPid;                                                                    # Parent pid as seen in child  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
       Mov r10,rax;
-      PrintOutRegisterInHex r10;
+      PrintOutRegisterInHex r8, r9, r10;
      };
 
     my $r = Assemble;
@@ -11440,28 +11524,22 @@ B<Example:>
 
     Test rax,rax;
     IfNz                                                                          # Parent
+    Then
      {Mov rbx, rax;
 
       WaitPid;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-      PrintOutRegisterInHex rax;
-      PrintOutRegisterInHex rbx;
-      KeepFree rax;
       GetPid;                                                                     # Pid of parent as seen in parent
       Mov rcx,rax;
-      PrintOutRegisterInHex rcx;
-     }
-    sub                                                                           # Child
+      PrintOutRegisterInHex rax, rbx, rcx;
+     },
+    Else                                                                          # Child
      {Mov r8,rax;
-      PrintOutRegisterInHex r8;
-      KeepFree rax;
       GetPid;                                                                     # Child pid as seen in child
       Mov r9,rax;
-      PrintOutRegisterInHex r9;
-      KeepFree rax;
       GetPPid;                                                                    # Parent pid as seen in child
       Mov r10,rax;
-      PrintOutRegisterInHex r10;
+      PrintOutRegisterInHex r8, r9, r10;
      };
 
     my $r = Assemble;
@@ -12986,35 +13064,18 @@ Create a block multi way tree in a byte string
 B<Example:>
 
 
-    my $b = CreateByteString;
-    my $t = $b->CreateBlockMultiWayTree;
+    my $N = 12;
+    my $b = CreateByteString;                                                     # Resizable memory block
+    my $t = $b->CreateBlockMultiWayTree;                                          # Multi way tree in memory block
 
-    Vq(count, 24)->for(sub
+    Cq(count, $N)->for(sub                                                        # Add some entries to the tree
      {my ($index, $start, $next, $end) = @_;
-      my $k = $index + 1; my $d = $k + 0x100;
-      $t->insert($k, $d);
+      my $k = $index + 1;
+      $t->insert($k,      $k + 0x100);
+      $t->insert($k + $N, $k + 0x200);
      });
 
-    $t->getKeysDataNode($t->first, 31, 30, 29);
-    PrintOutStringNL "Root"; $t->first->outNL('First: ');
-    PrintOutRegisterInHex zmm31, zmm30, zmm29;
-
-    KeepFree zmm 26;
-    $t->getKeysDataNode(Vq(offset, 0xd8), 28,27,26);
-    PrintOutStringNL "Left";
-    PrintOutRegisterInHex zmm28, zmm27, zmm26;
-
-    KeepFree zmm 26;
-    $t->getKeysDataNode(Vq(offset, 0x258), 28,27,26);
-    PrintOutStringNL "Left";
-    PrintOutRegisterInHex zmm28, zmm27, zmm26;
-
-    KeepFree zmm 26;
-    $t->getKeysDataNode(Vq(offset, 0x198), 28,27,26);
-    PrintOutStringNL "Left";
-    PrintOutRegisterInHex zmm28, zmm27, zmm26;
-
-    $t->by(sub
+    $t->by(sub                                                                    # Iterate through the tree
      {my ($iter, $end) = @_;
       $iter->key ->out('key: ');
       $iter->data->out(' data: ');
@@ -13024,27 +13085,14 @@ B<Example:>
       $t->found->out(' found: '); $t->data->out(' data: '); $D->outNL(' depth: ');
      });
 
-    $t->find(Vq(key, 0xffff));  $t->found->outNL('Found: ');
-    $t->find(Vq(key, 0xd));     $t->found->outNL('Found: ');
+    $t->find(Cq(key, 0xffff));  $t->found->outNL('Found: ');                      # Find some entries
+    $t->find(Cq(key, 0xd));     $t->found->outNL('Found: ');
+    If ($t->found,
+    Then
+     {$t->data->outNL("Data : ");
+     });
 
     ok Assemble(debug => 0, eq => <<END);
-  Root
-  First: 0000 0000 0000 0018
-   zmm31: 0000 0058 0000 0002   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0010 0000 0008
-   zmm30: 0000 0098 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0110 0000 0108
-   zmm29: 0000 0018 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0198   0000 0258 0000 00D8
-  Left
-   zmm28: 0000 0118 0000 0007   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0007   0000 0006 0000 0005   0000 0004 0000 0003   0000 0002 0000 0001
-   zmm27: 0000 0158 0000 0018   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0107   0000 0106 0000 0105   0000 0104 0000 0103   0000 0102 0000 0101
-   zmm26: 0000 00D8 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
-  Left
-   zmm28: 0000 0298 0000 0007   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 000F   0000 000E 0000 000D   0000 000C 0000 000B   0000 000A 0000 0009
-   zmm27: 0000 02D8 0000 0018   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 010F   0000 010E 0000 010D   0000 010C 0000 010B   0000 010A 0000 0109
-   zmm26: 0000 0258 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
-  Left
-   zmm28: 0000 01D8 0000 0008   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0018 0000 0017   0000 0016 0000 0015   0000 0014 0000 0013   0000 0012 0000 0011
-   zmm27: 0000 0218 0000 0018   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0118 0000 0117   0000 0116 0000 0115   0000 0114 0000 0113   0000 0112 0000 0111
-   zmm26: 0000 0198 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
   key: 0000 0000 0000 0001 data: 0000 0000 0000 0101 found: 0000 0000 0000 0001 data: 0000 0000 0000 0101 depth: 0000 0000 0000 0002
   key: 0000 0000 0000 0002 data: 0000 0000 0000 0102 found: 0000 0000 0000 0001 data: 0000 0000 0000 0102 depth: 0000 0000 0000 0002
   key: 0000 0000 0000 0003 data: 0000 0000 0000 0103 found: 0000 0000 0000 0001 data: 0000 0000 0000 0103 depth: 0000 0000 0000 0002
@@ -13052,25 +13100,26 @@ B<Example:>
   key: 0000 0000 0000 0005 data: 0000 0000 0000 0105 found: 0000 0000 0000 0001 data: 0000 0000 0000 0105 depth: 0000 0000 0000 0002
   key: 0000 0000 0000 0006 data: 0000 0000 0000 0106 found: 0000 0000 0000 0001 data: 0000 0000 0000 0106 depth: 0000 0000 0000 0002
   key: 0000 0000 0000 0007 data: 0000 0000 0000 0107 found: 0000 0000 0000 0001 data: 0000 0000 0000 0107 depth: 0000 0000 0000 0002
-  key: 0000 0000 0000 0008 data: 0000 0000 0000 0108 found: 0000 0000 0000 0001 data: 0000 0000 0000 0108 depth: 0000 0000 0000 0001
+  key: 0000 0000 0000 0008 data: 0000 0000 0000 0108 found: 0000 0000 0000 0001 data: 0000 0000 0000 0108 depth: 0000 0000 0000 0002
   key: 0000 0000 0000 0009 data: 0000 0000 0000 0109 found: 0000 0000 0000 0001 data: 0000 0000 0000 0109 depth: 0000 0000 0000 0002
   key: 0000 0000 0000 000A data: 0000 0000 0000 010A found: 0000 0000 0000 0001 data: 0000 0000 0000 010A depth: 0000 0000 0000 0002
   key: 0000 0000 0000 000B data: 0000 0000 0000 010B found: 0000 0000 0000 0001 data: 0000 0000 0000 010B depth: 0000 0000 0000 0002
   key: 0000 0000 0000 000C data: 0000 0000 0000 010C found: 0000 0000 0000 0001 data: 0000 0000 0000 010C depth: 0000 0000 0000 0002
-  key: 0000 0000 0000 000D data: 0000 0000 0000 010D found: 0000 0000 0000 0001 data: 0000 0000 0000 010D depth: 0000 0000 0000 0002
-  key: 0000 0000 0000 000E data: 0000 0000 0000 010E found: 0000 0000 0000 0001 data: 0000 0000 0000 010E depth: 0000 0000 0000 0002
-  key: 0000 0000 0000 000F data: 0000 0000 0000 010F found: 0000 0000 0000 0001 data: 0000 0000 0000 010F depth: 0000 0000 0000 0002
-  key: 0000 0000 0000 0010 data: 0000 0000 0000 0110 found: 0000 0000 0000 0001 data: 0000 0000 0000 0110 depth: 0000 0000 0000 0001
-  key: 0000 0000 0000 0011 data: 0000 0000 0000 0111 found: 0000 0000 0000 0001 data: 0000 0000 0000 0111 depth: 0000 0000 0000 0002
-  key: 0000 0000 0000 0012 data: 0000 0000 0000 0112 found: 0000 0000 0000 0001 data: 0000 0000 0000 0112 depth: 0000 0000 0000 0002
-  key: 0000 0000 0000 0013 data: 0000 0000 0000 0113 found: 0000 0000 0000 0001 data: 0000 0000 0000 0113 depth: 0000 0000 0000 0002
-  key: 0000 0000 0000 0014 data: 0000 0000 0000 0114 found: 0000 0000 0000 0001 data: 0000 0000 0000 0114 depth: 0000 0000 0000 0002
-  key: 0000 0000 0000 0015 data: 0000 0000 0000 0115 found: 0000 0000 0000 0001 data: 0000 0000 0000 0115 depth: 0000 0000 0000 0002
-  key: 0000 0000 0000 0016 data: 0000 0000 0000 0116 found: 0000 0000 0000 0001 data: 0000 0000 0000 0116 depth: 0000 0000 0000 0002
-  key: 0000 0000 0000 0017 data: 0000 0000 0000 0117 found: 0000 0000 0000 0001 data: 0000 0000 0000 0117 depth: 0000 0000 0000 0002
-  key: 0000 0000 0000 0018 data: 0000 0000 0000 0118 found: 0000 0000 0000 0001 data: 0000 0000 0000 0118 depth: 0000 0000 0000 0002
+  key: 0000 0000 0000 000D data: 0000 0000 0000 0201 found: 0000 0000 0000 0001 data: 0000 0000 0000 0201 depth: 0000 0000 0000 0001
+  key: 0000 0000 0000 000E data: 0000 0000 0000 0202 found: 0000 0000 0000 0001 data: 0000 0000 0000 0202 depth: 0000 0000 0000 0002
+  key: 0000 0000 0000 000F data: 0000 0000 0000 0203 found: 0000 0000 0000 0001 data: 0000 0000 0000 0203 depth: 0000 0000 0000 0002
+  key: 0000 0000 0000 0010 data: 0000 0000 0000 0204 found: 0000 0000 0000 0001 data: 0000 0000 0000 0204 depth: 0000 0000 0000 0002
+  key: 0000 0000 0000 0011 data: 0000 0000 0000 0205 found: 0000 0000 0000 0001 data: 0000 0000 0000 0205 depth: 0000 0000 0000 0002
+  key: 0000 0000 0000 0012 data: 0000 0000 0000 0206 found: 0000 0000 0000 0001 data: 0000 0000 0000 0206 depth: 0000 0000 0000 0002
+  key: 0000 0000 0000 0013 data: 0000 0000 0000 0207 found: 0000 0000 0000 0001 data: 0000 0000 0000 0207 depth: 0000 0000 0000 0002
+  key: 0000 0000 0000 0014 data: 0000 0000 0000 0208 found: 0000 0000 0000 0001 data: 0000 0000 0000 0208 depth: 0000 0000 0000 0002
+  key: 0000 0000 0000 0015 data: 0000 0000 0000 0209 found: 0000 0000 0000 0001 data: 0000 0000 0000 0209 depth: 0000 0000 0000 0002
+  key: 0000 0000 0000 0016 data: 0000 0000 0000 020A found: 0000 0000 0000 0001 data: 0000 0000 0000 020A depth: 0000 0000 0000 0002
+  key: 0000 0000 0000 0017 data: 0000 0000 0000 020B found: 0000 0000 0000 0001 data: 0000 0000 0000 020B depth: 0000 0000 0000 0002
+  key: 0000 0000 0000 0018 data: 0000 0000 0000 020C found: 0000 0000 0000 0001 data: 0000 0000 0000 020C depth: 0000 0000 0000 0002
   Found: 0000 0000 0000 0000
   Found: 0000 0000 0000 0001
+  Data : 0000 0000 0000 0201
   END
 
 
@@ -15189,16 +15238,20 @@ if (1) {                                                                        
   Mov rax, 0;
   Test rax,rax;
   IfNz
+  Then
    {PrintOutRegisterInHex rax;
-   } sub
+   },
+  Else
    {PrintOutRegisterInHex rbx;
    };
   KeepFree rax;
   Mov rax, 1;
   Test rax,rax;
   IfNz
+  Then
    {PrintOutRegisterInHex rcx;
-   } sub
+   },
+  Else
    {PrintOutRegisterInHex rdx;
    };
 
@@ -15210,26 +15263,20 @@ if (1) {                                                                        
 
   Test rax,rax;
   IfNz                                                                          # Parent
+  Then
    {Mov rbx, rax;
     WaitPid;
-    PrintOutRegisterInHex rax;
-    PrintOutRegisterInHex rbx;
-    KeepFree rax;
     GetPid;                                                                     # Pid of parent as seen in parent
     Mov rcx,rax;
-    PrintOutRegisterInHex rcx;
-   }
-  sub                                                                           # Child
+    PrintOutRegisterInHex rax, rbx, rcx;
+   },
+  Else                                                                          # Child
    {Mov r8,rax;
-    PrintOutRegisterInHex r8;
-    KeepFree rax;
     GetPid;                                                                     # Child pid as seen in child
     Mov r9,rax;
-    PrintOutRegisterInHex r9;
-    KeepFree rax;
     GetPPid;                                                                    # Parent pid as seen in child
     Mov r10,rax;
-    PrintOutRegisterInHex r10;
+    PrintOutRegisterInHex r8, r9, r10;
    };
 
   my $r = Assemble;
@@ -15292,7 +15339,7 @@ if (1) {                                                                        
   For
    {my ($start, $end, $next) = @_;
     Cmp rax, 3;
-    IfGe {Jmp $end};
+    Jge $end;
     PrintOutRegisterInHex rax;
    } rax, 16, 1;
 
@@ -15309,7 +15356,7 @@ if (1) {                                                                        
    {my ($start, $end) = @_;
     PrintOutRegisterInHex rax;
     Cmp rax, 3;
-    IfGe {Jmp $end};
+    Jge $end;
     Inc rax;
     PrintOutRegisterInHex rax
     Jmp $start;
@@ -15650,15 +15697,15 @@ if (1) {                                                                        
   PrintOutZF;
 
   SetZF;
-  IfZ  {PrintOutStringNL "Zero"}      sub {PrintOutStringNL "NOT zero"};
+  IfZ  Then {PrintOutStringNL "Zero"},     Else {PrintOutStringNL "NOT zero"};
   ClearZF;
-  IfNz {PrintOutStringNL "NOT zero"}  sub {PrintOutStringNL "Zero"};
+  IfNz Then {PrintOutStringNL "NOT zero"}, Else {PrintOutStringNL "Zero"};
 
   Mov r15, 5;
-  Shr r15, 1; IfC  {PrintOutStringNL "Carry"}    sub {PrintOutStringNL "NO carry"};
-  Shr r15, 1; IfC  {PrintOutStringNL "Carry"}    sub {PrintOutStringNL "NO carry"};
-  Shr r15, 1; IfNc {PrintOutStringNL "NO carry"} sub {PrintOutStringNL "Carry"};
-  Shr r15, 1; IfNc {PrintOutStringNL "NO carry"} sub {PrintOutStringNL "Carry"};
+  Shr r15, 1; IfC  Then {PrintOutStringNL "Carry"}   , Else {PrintOutStringNL "NO carry"};
+  Shr r15, 1; IfC  Then {PrintOutStringNL "Carry"}   , Else {PrintOutStringNL "NO carry"};
+  Shr r15, 1; IfNc Then {PrintOutStringNL "NO carry"}, Else {PrintOutStringNL "Carry"};
+  Shr r15, 1; IfNc Then {PrintOutStringNL "NO carry"}, Else {PrintOutStringNL "Carry"};
 
   ok Assemble(debug=>0, eq => <<END);
 ZF=1
@@ -15957,7 +16004,7 @@ if (1) {                                                                        
       Cmp rax, $b;
       KeepFree rax;
       my $Op = ucfirst $op;
-      eval qq(If$Op {PrintOutStringNL("$a $op $b")} sub {PrintOutStringNL("$a NOT $op $b")});
+      eval qq(If$Op Then {PrintOutStringNL("$a $op $b")}, Else {PrintOutStringNL("$a NOT $op $b")});
       $@ and confess $@;
      }
    };
@@ -17063,12 +17110,12 @@ if (1) {                                                                        
   Kmovq k0, r14;
   KeepFree r14;
   Ktestq k0, k0;
-  IfZ {PrintOutStringNL "0 & 0 == 0"};
+  IfZ Then {PrintOutStringNL "0 & 0 == 0"};
   PrintOutZF;
 
   LoadConstantIntoMaskRegister k1, 1;
   Ktestq k1, k1;
-  IfNz {PrintOutStringNL "1 & 1 != 0"};
+  IfNz Then {PrintOutStringNL "1 & 1 != 0"};
   PrintOutZF;
 
   LoadConstantIntoMaskRegister k2, eval "0b".(('1'x4).('0'x4))x2;
@@ -17290,7 +17337,7 @@ END
  }
 
 #latest:
-if (1) {                                                                        #TNasm::X86::ByteString::CreateBlockMultiWayTree
+if (1) {
   my $b = CreateByteString;
   my $t = $b->CreateBlockMultiWayTree;
 
@@ -17319,19 +17366,6 @@ if (1) {                                                                        
   PrintOutStringNL "Left";
   PrintOutRegisterInHex zmm28, zmm27, zmm26;
 
-  $t->by(sub
-   {my ($iter, $end) = @_;
-    $iter->key ->out('key: ');
-    $iter->data->out(' data: ');
-    $iter->tree->depth($iter->node, my $D = Vq(depth));
-
-    $t->find($iter->key);
-    $t->found->out(' found: '); $t->data->out(' data: '); $D->outNL(' depth: ');
-   });
-
-  $t->find(Vq(key, 0xffff));  $t->found->outNL('Found: ');
-  $t->find(Vq(key, 0xd));     $t->found->outNL('Found: ');
-
   ok Assemble(debug => 0, eq => <<END);
 Root
 First: 0000 0000 0000 0018
@@ -17350,6 +17384,40 @@ Left
  zmm28: 0000 01D8 0000 0008   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0018 0000 0017   0000 0016 0000 0015   0000 0014 0000 0013   0000 0012 0000 0011
  zmm27: 0000 0218 0000 0018   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0118 0000 0117   0000 0116 0000 0115   0000 0114 0000 0113   0000 0112 0000 0111
  zmm26: 0000 0198 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+END
+ }
+
+#latest:
+if (1) {                                                                        #TNasm::X86::ByteString::CreateBlockMultiWayTree
+  my $N = 12;
+  my $b = CreateByteString;                                                     # Resizable memory block
+  my $t = $b->CreateBlockMultiWayTree;                                          # Multi way tree in memory block
+
+  Cq(count, $N)->for(sub                                                        # Add some entries to the tree
+   {my ($index, $start, $next, $end) = @_;
+    my $k = $index + 1;
+    $t->insert($k,      $k + 0x100);
+    $t->insert($k + $N, $k + 0x200);
+   });
+
+  $t->by(sub                                                                    # Iterate through the tree
+   {my ($iter, $end) = @_;
+    $iter->key ->out('key: ');
+    $iter->data->out(' data: ');
+    $iter->tree->depth($iter->node, my $D = Vq(depth));
+
+    $t->find($iter->key);
+    $t->found->out(' found: '); $t->data->out(' data: '); $D->outNL(' depth: ');
+   });
+
+  $t->find(Cq(key, 0xffff));  $t->found->outNL('Found: ');                      # Find some entries
+  $t->find(Cq(key, 0xd));     $t->found->outNL('Found: ');
+  If ($t->found,
+  Then
+   {$t->data->outNL("Data : ");
+   });
+
+  ok Assemble(debug => 0, eq => <<END);
 key: 0000 0000 0000 0001 data: 0000 0000 0000 0101 found: 0000 0000 0000 0001 data: 0000 0000 0000 0101 depth: 0000 0000 0000 0002
 key: 0000 0000 0000 0002 data: 0000 0000 0000 0102 found: 0000 0000 0000 0001 data: 0000 0000 0000 0102 depth: 0000 0000 0000 0002
 key: 0000 0000 0000 0003 data: 0000 0000 0000 0103 found: 0000 0000 0000 0001 data: 0000 0000 0000 0103 depth: 0000 0000 0000 0002
@@ -17357,25 +17425,26 @@ key: 0000 0000 0000 0004 data: 0000 0000 0000 0104 found: 0000 0000 0000 0001 da
 key: 0000 0000 0000 0005 data: 0000 0000 0000 0105 found: 0000 0000 0000 0001 data: 0000 0000 0000 0105 depth: 0000 0000 0000 0002
 key: 0000 0000 0000 0006 data: 0000 0000 0000 0106 found: 0000 0000 0000 0001 data: 0000 0000 0000 0106 depth: 0000 0000 0000 0002
 key: 0000 0000 0000 0007 data: 0000 0000 0000 0107 found: 0000 0000 0000 0001 data: 0000 0000 0000 0107 depth: 0000 0000 0000 0002
-key: 0000 0000 0000 0008 data: 0000 0000 0000 0108 found: 0000 0000 0000 0001 data: 0000 0000 0000 0108 depth: 0000 0000 0000 0001
+key: 0000 0000 0000 0008 data: 0000 0000 0000 0108 found: 0000 0000 0000 0001 data: 0000 0000 0000 0108 depth: 0000 0000 0000 0002
 key: 0000 0000 0000 0009 data: 0000 0000 0000 0109 found: 0000 0000 0000 0001 data: 0000 0000 0000 0109 depth: 0000 0000 0000 0002
 key: 0000 0000 0000 000A data: 0000 0000 0000 010A found: 0000 0000 0000 0001 data: 0000 0000 0000 010A depth: 0000 0000 0000 0002
 key: 0000 0000 0000 000B data: 0000 0000 0000 010B found: 0000 0000 0000 0001 data: 0000 0000 0000 010B depth: 0000 0000 0000 0002
 key: 0000 0000 0000 000C data: 0000 0000 0000 010C found: 0000 0000 0000 0001 data: 0000 0000 0000 010C depth: 0000 0000 0000 0002
-key: 0000 0000 0000 000D data: 0000 0000 0000 010D found: 0000 0000 0000 0001 data: 0000 0000 0000 010D depth: 0000 0000 0000 0002
-key: 0000 0000 0000 000E data: 0000 0000 0000 010E found: 0000 0000 0000 0001 data: 0000 0000 0000 010E depth: 0000 0000 0000 0002
-key: 0000 0000 0000 000F data: 0000 0000 0000 010F found: 0000 0000 0000 0001 data: 0000 0000 0000 010F depth: 0000 0000 0000 0002
-key: 0000 0000 0000 0010 data: 0000 0000 0000 0110 found: 0000 0000 0000 0001 data: 0000 0000 0000 0110 depth: 0000 0000 0000 0001
-key: 0000 0000 0000 0011 data: 0000 0000 0000 0111 found: 0000 0000 0000 0001 data: 0000 0000 0000 0111 depth: 0000 0000 0000 0002
-key: 0000 0000 0000 0012 data: 0000 0000 0000 0112 found: 0000 0000 0000 0001 data: 0000 0000 0000 0112 depth: 0000 0000 0000 0002
-key: 0000 0000 0000 0013 data: 0000 0000 0000 0113 found: 0000 0000 0000 0001 data: 0000 0000 0000 0113 depth: 0000 0000 0000 0002
-key: 0000 0000 0000 0014 data: 0000 0000 0000 0114 found: 0000 0000 0000 0001 data: 0000 0000 0000 0114 depth: 0000 0000 0000 0002
-key: 0000 0000 0000 0015 data: 0000 0000 0000 0115 found: 0000 0000 0000 0001 data: 0000 0000 0000 0115 depth: 0000 0000 0000 0002
-key: 0000 0000 0000 0016 data: 0000 0000 0000 0116 found: 0000 0000 0000 0001 data: 0000 0000 0000 0116 depth: 0000 0000 0000 0002
-key: 0000 0000 0000 0017 data: 0000 0000 0000 0117 found: 0000 0000 0000 0001 data: 0000 0000 0000 0117 depth: 0000 0000 0000 0002
-key: 0000 0000 0000 0018 data: 0000 0000 0000 0118 found: 0000 0000 0000 0001 data: 0000 0000 0000 0118 depth: 0000 0000 0000 0002
+key: 0000 0000 0000 000D data: 0000 0000 0000 0201 found: 0000 0000 0000 0001 data: 0000 0000 0000 0201 depth: 0000 0000 0000 0001
+key: 0000 0000 0000 000E data: 0000 0000 0000 0202 found: 0000 0000 0000 0001 data: 0000 0000 0000 0202 depth: 0000 0000 0000 0002
+key: 0000 0000 0000 000F data: 0000 0000 0000 0203 found: 0000 0000 0000 0001 data: 0000 0000 0000 0203 depth: 0000 0000 0000 0002
+key: 0000 0000 0000 0010 data: 0000 0000 0000 0204 found: 0000 0000 0000 0001 data: 0000 0000 0000 0204 depth: 0000 0000 0000 0002
+key: 0000 0000 0000 0011 data: 0000 0000 0000 0205 found: 0000 0000 0000 0001 data: 0000 0000 0000 0205 depth: 0000 0000 0000 0002
+key: 0000 0000 0000 0012 data: 0000 0000 0000 0206 found: 0000 0000 0000 0001 data: 0000 0000 0000 0206 depth: 0000 0000 0000 0002
+key: 0000 0000 0000 0013 data: 0000 0000 0000 0207 found: 0000 0000 0000 0001 data: 0000 0000 0000 0207 depth: 0000 0000 0000 0002
+key: 0000 0000 0000 0014 data: 0000 0000 0000 0208 found: 0000 0000 0000 0001 data: 0000 0000 0000 0208 depth: 0000 0000 0000 0002
+key: 0000 0000 0000 0015 data: 0000 0000 0000 0209 found: 0000 0000 0000 0001 data: 0000 0000 0000 0209 depth: 0000 0000 0000 0002
+key: 0000 0000 0000 0016 data: 0000 0000 0000 020A found: 0000 0000 0000 0001 data: 0000 0000 0000 020A depth: 0000 0000 0000 0002
+key: 0000 0000 0000 0017 data: 0000 0000 0000 020B found: 0000 0000 0000 0001 data: 0000 0000 0000 020B depth: 0000 0000 0000 0002
+key: 0000 0000 0000 0018 data: 0000 0000 0000 020C found: 0000 0000 0000 0001 data: 0000 0000 0000 020C depth: 0000 0000 0000 0002
 Found: 0000 0000 0000 0000
 Found: 0000 0000 0000 0001
+Data : 0000 0000 0000 0201
 END
  }
 
@@ -17836,7 +17905,7 @@ END
 
 #latest:
 if (1) {                                                                        # Extended sub tree testing
-  my $N = 45; my $M = 0; # Fails at 0
+  my $N = 45; my $M = 0;
      $N % 2 == 1 or confess "Must be odd";
   my $b = CreateByteString;
   my $t = $b->CreateBlockMultiWayTree;
@@ -17950,7 +18019,7 @@ if (0) {
 END
  }
 
-ok 1 for 7..8;
+ok 1 for 8..8;
 
 unlink $_ for qw(hash print2 sde-log.txt sde-ptr-check.out.txt z.txt);          # Remove incidental files
 
