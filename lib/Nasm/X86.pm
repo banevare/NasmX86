@@ -1436,12 +1436,12 @@ sub Vd(*;$%)                                                                    
   &Variable(2, @_)
  }
 
-sub Vq(*;$%)                                                                    # Define a quad variable
+sub V(*;$%)                                                                    # Define a quad variable
  {my ($name, $expr, %options) = @_;                                             # Name of variable, initializing expression, options
   &Variable(3, @_)
  }
 
-sub Cq(*;$%)                                                                    # Define a quad constant
+sub K(*;$%)                                                                    # Define a quad constant
  {my ($name, $expr, %options) = @_;                                             # Name of variable, initializing expression, options
   &Variable(3, @_, constant=>1)
  }
@@ -1604,7 +1604,7 @@ sub Nasm::X86::Variable::clone($)                                               
   my $a = $var->address;
   if ($var->size == 3)
    {Comment "Clone ".$var->name;
-    my $new = Vq('Clone of '.$var->name);
+    my $new = V('Clone of '.$var->name);
     PushR my @save = (r15);
     Mov r15, $var->address;
     Mov $new->address, r15;
@@ -1715,7 +1715,7 @@ sub Nasm::X86::Variable::arithmetic($$$$)                                       
       Mov r14, "[r14]";
      }
     &$op(r15, r14);
-    my $v = Vq(join(' ', '('.$left->name, $name, (ref($right) ? $right->name : $right).')'), r15);
+    my $v = V(join(' ', '('.$left->name, $name, (ref($right) ? $right->name : $right).')'), r15);
     PopR @save;
     return $v;
    }
@@ -1762,7 +1762,7 @@ sub Nasm::X86::Variable::division($$$)                                          
     Mov rax, $l;
     Mov r15, $r;
     Idiv r15;
-    my $v = Vq(join(' ', '('.$left->name, $op, (ref($right) ? $right->name : '').')'), $op eq "%" ? rdx : rax);
+    my $v = V(join(' ', '('.$left->name, $op, (ref($right) ? $right->name : '').')'), $op eq "%" ? rdx : rax);
     PopR @regs;
     return $v;
    }
@@ -1808,7 +1808,7 @@ sub Nasm::X86::Variable::boolean($$$$)                                          
     KeepFree r15;
 
     &$sub(sub {Mov  r15, 1;  KeepFree r15}, sub {Mov  r15, 0;  KeepFree r15});
-    my $v = Vq(join(' ', '('.$left->name, $op, (ref($right) ? $right->name : '').')'), r15);
+    my $v = V(join(' ', '('.$left->name, $op, (ref($right) ? $right->name : '').')'), r15);
     PopR r15;
     return $v;
    }
@@ -2040,7 +2040,7 @@ sub Nasm::X86::Variable::min($$)                                                
   Cmp r14, r15;
   IfLt(sub {Mov r12, r14; KeepFree r12},
        sub {Mov r12, r15; KeepFree r12});
-  my $r = Vq("Minimum(".$left->name.", ".$right->name.")", r12);
+  my $r = V("Minimum(".$left->name.", ".$right->name.")", r12);
   PopR @save;
   $r
  }
@@ -2053,7 +2053,7 @@ sub Nasm::X86::Variable::max($$)                                                
   Cmp r14, r15;
   &IfGt(sub {Mov r12, r14; KeepFree r12},
         sub {Mov r12, r15; KeepFree r12});
-  my $r = Vq("Maximum(".$left->name.", ".$right->name.")", r12);
+  my $r = V("Maximum(".$left->name.", ".$right->name.")", r12);
   PopR @save;
   $r
  }
@@ -2072,7 +2072,7 @@ sub Nasm::X86::Variable::and($$)                                                
       &IfNe(sub {Add r14, 1});
      }
    );
-  my $r = Vq("And(".$left->name.", ".$right->name.")", r14);
+  my $r = V("And(".$left->name.", ".$right->name.")", r14);
   PopR @save;
   $r
  }
@@ -2091,7 +2091,7 @@ sub Nasm::X86::Variable::or($$)                                                 
       &IfEq(sub {Mov r14, 0});
      }
    );
-  my $r = Vq("Or(".$left->name.", ".$right->name.")", r14);
+  my $r = V("Or(".$left->name.", ".$right->name.")", r14);
   PopR @save;
   $r
  }
@@ -2271,7 +2271,7 @@ sub getBwdqFromMm($$$)                                                          
   Mov r15,  "[rsp+$o]" if $size =~ m(q);                                        # Load register from offset
   Add rsp, RegisterSize $mm;                                                    # Pop source register
 
-  my $v = Vq("$size at offset $offset in $mm", r15);                            # Create variable
+  my $v = V("$size at offset $offset in $mm", r15);                            # Create variable
      $v->getReg(r15);                                                           # Load variable
   PopR r15;
 
@@ -2495,7 +2495,7 @@ sub Nasm::X86::Variable::allocateMemory(@)                                      
  {my ($size) = @_;                                                              # Size
   @_ >= 1 or confess;
   $size->name eq q(size) or confess "Need size";
-  &AllocateMemory(size => $size, my $a = Vq(address));
+  &AllocateMemory(size => $size, my $a = V(address));
   $a
  }
 
@@ -2505,7 +2505,7 @@ sub Nasm::X86::Variable::for($&)                                                
  {my ($limit, $body) = @_;                                                      # Limit, Body
   @_ == 2 or confess;
   Comment "Variable::For $limit";
-  my $index = Vq(q(index), 0);                                                  # The index that will be incremented
+  my $index = V(q(index), 0);                                                  # The index that will be incremented
   my $start = Label;
   my $next  = Label;
   my $end   = Label;
@@ -2956,7 +2956,7 @@ sub ClearMemory(@)                                                              
     And rsi, 0x3f;
     Test rsi, rsi;
     IfNz sub                                                                    # Need to align so that the rest of the clear can be done in full zmm blocks
-     {Vq(align, rsi)->setMaskFirst(k7);                                         # Set mask bits
+     {V(align, rsi)->setMaskFirst(k7);                                         # Set mask bits
       Vmovdqu8 "[rax]{k7}", zmm0;                                               # Masked move to memory
       Add rax, rsi;                                                             # Update point to clear from
       Sub rdi, rsi;                                                             # Reduce clear length
@@ -2996,7 +2996,7 @@ sub MaskMemory22(@)                                                             
     And r10, 0x3f;
     Test r10, r10;
     IfNz sub                                                                    # Need to align so that the rest of the clear can be done in full zmm blocks
-     {Vq(align, r10)->setMaskFirst(k7);                                         # Set mask bits
+     {V(align, r10)->setMaskFirst(k7);                                         # Set mask bits
       Vmovdqu8 "zmm0\{k7}", "[rax]";                                            # Load first incomplete block of source
       Vpcmpub  "k6{k7}", zmm0, zmm1, 0;                                         # Characters in source that match
       Vmovdqu8 "[rdx]{k6}", zmm2;                                               # Write set byte into mask at match points
@@ -3078,7 +3078,7 @@ sub MaskMemoryInRange4_22(@)                                                    
     Test r10, r10;
     IfNz sub                                                                    # Need to align so that the rest of the mask can be done in full zmm blocks
      {my $finished = Label;                                                     # Point where we have finished the initial comparisons
-      Vq(align, r10)->setMaskFirst(k7);                                         # Set mask bits
+      V(align, r10)->setMaskFirst(k7);                                         # Set mask bits
       Vmovdqu8 "zmm0\{k7}", "[rax]";                                            # Load first incomplete block of source
       check($_, $finished) for 2..5;  last4;                                    # Check a range
       Vmovdqu8 "[rdx]{k7}", zmm1;                                               # Write set byte into mask at match points
@@ -3382,7 +3382,7 @@ sub GetNextUtf8CharAsUtf32(@)                                                   
     IfLe
     Then
      {$$p{out}->getReg(r14);
-      $$p{size}->copy(Cq(one, 1));
+      $$p{size}->copy(K(one, 1));
       Jmp $success;
       KeepFree rax, r11, r12, r13, r14, r15;
      };
@@ -3396,7 +3396,7 @@ sub GetNextUtf8CharAsUtf32(@)                                                   
       Shl r14, 6;
       Or  r14,  r13;
       $$p{out}->getReg(r14);
-      $$p{size}->copy(Cq(two, 2));
+      $$p{size}->copy(K(two, 2));
       Jmp $success;
       KeepFree rax, r11, r12, r13, r14, r15;
      };
@@ -3414,7 +3414,7 @@ sub GetNextUtf8CharAsUtf32(@)                                                   
       Or  r14,  r13;
       Or  r14,  r12;
       $$p{out}->getReg(r14);
-      $$p{size}->copy(Cq(three, 3));
+      $$p{size}->copy(K(three, 3));
       Jmp $success;
       KeepFree rax, r11, r12, r13, r14, r15;
      };
@@ -3436,7 +3436,7 @@ sub GetNextUtf8CharAsUtf32(@)                                                   
       Or  r14,  r12;
       Or  r14,  r11;
       $$p{out}->getReg(r14);
-      $$p{size}->copy(Cq(four, 4));
+      $$p{size}->copy(K(four, 4));
       Jmp $success;
       KeepFree rax, r11, r12, r13, r14, r15;
      };
@@ -3462,7 +3462,7 @@ sub ConvertUtf8ToUtf32(@)                                                       
     PushR my @save = (r10, r11, r12, r13, r14, r15);
 
     my $size = $$p{size8} * 4;                                                  # Estimated length for utf32
-    AllocateMemory size => $size, my $address = Vq(address);
+    AllocateMemory size => $size, my $address = V(address);
 
      $$p{u8}            ->setReg(r14);                                          # Current position in input string
     ($$p{u8}+$$p{size8})->setReg(r15);                                          # Upper limit of input string
@@ -3471,8 +3471,8 @@ sub ConvertUtf8ToUtf32(@)                                                       
 
     ForEver sub                                                                 # Loop through input string  converting each utf8 sequence to utf32
      {my ($start, $end) = @_;
-      my @p = my ($out, $size, $fail) = (Vq(out), Vq(size), Vq('fail'));
-      GetNextUtf8CharAsUtf32 Vq(in, r14), @p;                                   # Get next utf 8 character and convert it to utf32
+      my @p = my ($out, $size, $fail) = (V(out), V(size), V('fail'));
+      GetNextUtf8CharAsUtf32 V(in, r14), @p;                                   # Get next utf 8 character and convert it to utf32
       If ($fail,
       Then
        {PrintErrStringNL "Invalid utf8 character at index:";
@@ -3761,14 +3761,14 @@ sub StringLength(@)                                                             
     RestoreFirstFour;
    } in => [qw(string)], out => [qw(size)];
 
-  $s->call(@parameters, my $z = Vq(size));                                      # Variable that holds the length of the string
+  $s->call(@parameters, my $z = V(size));                                      # Variable that holds the length of the string
   $z
  }
 
 sub CreateByteString(%)                                                         # Create an relocatable string of bytes in an arena and returns its address in rax. Optionally add a chain header so that 64 byte blocks of memory can be freed and reused within the byte string.
  {my (%options) = @_;                                                           # free=>1 adds a free chain.
   Comment "Create byte string";
-  my $N = Vq(size, 4096);                                                       # Initial size of string
+  my $N = V(size, 4096);                                                       # Initial size of string
 
   my ($string, $size, $used, $free) = All8Structure 3;                          # String base
   my $data = $string->field(0, "start of data");                                # Start of data
@@ -3788,7 +3788,7 @@ sub CreateByteString(%)                                                         
     RestoreFirstFour;
    } out => [qw(bs)];
 
-  $s->call(my $bs = Vq(bs));                                                    # Variable that holds the reference to the byte string
+  $s->call(my $bs = V(bs));                                                    # Variable that holds the reference to the byte string
 
   genHash(__PACKAGE__."::ByteString",                                           # Definition of byte string
     structure => $string,                                                       # Structure details
@@ -3811,7 +3811,7 @@ sub Nasm::X86::ByteString::chain($$$@)                                          
    {KeepFree r15;
     Mov r15d, "dword[r14+r15+$o]";                                               # Step through each offset
    }
-  my $r = Vq(join (' ', @offsets), r15);                                        # Create a variable with the result
+  my $r = V(join (' ', @offsets), r15);                                        # Create a variable with the result
   PopR @save;
   $r
  }
@@ -3871,8 +3871,8 @@ sub Nasm::X86::ByteString::updateSpace($@)                                      
     Comment "Allocate more space for a byte string";
     SaveFirstFour;
     $$p{bs}->setReg(rax);                                                       # Address byte string
-    my $oldSize = Vq(oldSize, $size);                                           # Size
-    my $oldUsed = Vq(oldUsed, $used);                                           # Used
+    my $oldSize = V(oldSize, $size);                                           # Size
+    my $oldUsed = V(oldUsed, $used);                                           # Used
     my $minSize = $oldUsed + $$p{size};                                         # Minimum size of new string
     KeepFree rax;
     If ($minSize > $oldSize,
@@ -3885,8 +3885,8 @@ sub Nasm::X86::ByteString::updateSpace($@)                                      
         Cmp rax, rdx;                                                           # Big enough?
         Jge $end;                                                                # Big enough!
        };
-      my $newSize = Vq(size, rax);                                              # Save new byte string size
-      AllocateMemory(size => $newSize, my $address = Vq(address));              # Create new byte string
+      my $newSize = V(size, rax);                                              # Save new byte string size
+      AllocateMemory(size => $newSize, my $address = V(address));              # Create new byte string
       CopyMemory(target  => $address, source => $$p{bs}, size => $oldUsed);     # Copy old byte string into new byte string
       FreeMemory(address => $$p{bs},  size   => $oldSize);                      # Free previous memory previously occupied byte string
       $$p{bs}->copy($address);                                                  # Save new byte string address
@@ -3989,7 +3989,7 @@ sub Nasm::X86::ByteString::allocZmmBlock($@)                                    
     PopR zmm31;
    },
   Else
-   {$byteString->allocate(Vq(size, RegisterSize(zmm0)), @variables);
+   {$byteString->allocate(V(size, RegisterSize(zmm0)), @variables);
    });
  }
 
@@ -3997,7 +3997,7 @@ sub Nasm::X86::ByteString::allocBlock($)                                        
  {my ($byteString) = @_;                                                        # Byte string
   @_ == 1 or confess;
   $byteString->allocZmmBlock                                                    # Allocate a zmm block
-   ($byteString->bs, Vq(size, RegisterSize(zmm0)), my $o = Vq(offset));
+   ($byteString->bs, V(size, RegisterSize(zmm0)), my $o = V(offset));
   $o                                                                            # Offset as a variable
  }
 
@@ -4010,7 +4010,7 @@ sub Nasm::X86::ByteString::firstFreeBlock($)                                    
   $byteString->bs->setReg(rax);                                                 #P Address underlying byte string
   KeepFree rax;
   Mov rax, $byteString->free->addr;                                             # Content of free chain pointer
-  my $v = Vq('free', rax);                                                      # Remainder of the free chain
+  my $v = V('free', rax);                                                      # Remainder of the free chain
   PopR rax;
   $v
  }
@@ -4091,7 +4091,7 @@ sub Nasm::X86::ByteString::m($@)                                                
     Comment "Append memory to a byte string";
     SaveFirstFour;
     $$p{bs}->setReg(rax);
-    my $oldUsed = Vq("used", $used);
+    my $oldUsed = V("used", $used);
     $byteString->updateSpace($$p{bs}, $$p{size});                               # Update space if needed
 
     my $target  = $oldUsed + $$p{bs};
@@ -4118,8 +4118,8 @@ sub Nasm::X86::ByteString::q($$)                                                
   my $s = Rs($string);
 
   my $bs = $byteString->bs;                                                     # Move data
-  my $ad = Vq(address, $s);
-  my $sz = Vq(size, length($string));
+  my $ad = V(address, $s);
+  my $sz = V(size, length($string));
   $byteString->m($bs, $ad, $sz);
  }
 
@@ -4136,7 +4136,7 @@ sub Nasm::X86::ByteString::char($$)                                             
  {my ($byteString, $char) = @_;                                                 # Byte string descriptor, number of character to be appended
   @_ == 2 or confess;
   my $s = Rb(ord($char));
-  $byteString->m($byteString->bs, Vq(address, $s), Vq(size, 1));                # Move data
+  $byteString->m($byteString->bs, V(address, $s), V(size, 1));                # Move data
  }
 
 sub Nasm::X86::ByteString::nl($)                                                # Append a new line to the byte string addressed by rax
@@ -4163,7 +4163,7 @@ sub Nasm::X86::ByteString::append($@)                                           
     Mov rdi, $byteString->used->addr;
     Sub rdi, $byteString->structure->size;
     Lea rsi, $byteString->data->addr;
-    $byteString->m(bs=>$$p{target}, Vq(address, rsi), Vq(size, rdi));
+    $byteString->m(bs=>$$p{target}, V(address, rsi), V(size, rdi));
     RestoreFirstFour;
    } in => [qw(target source)];
 
@@ -4198,7 +4198,7 @@ sub Nasm::X86::ByteString::write($@)                                            
 
     $$p{file}->setReg(rax);
     OpenWrite;                                                                  # Open file
-    my $file = Vq('fd', rax);                                                   # File descriptor
+    my $file = V('fd', rax);                                                   # File descriptor
     KeepFree rax;
 
     $$p{bs}->setReg(rax);                                                       # Write file
@@ -4227,7 +4227,7 @@ sub Nasm::X86::ByteString::read($@)                                             
   my $s = Subroutine
    {my ($p) = @_;                                                               # Parameters
     Comment "Read a byte string";
-    ReadFile($$p{file}, (my $size = Vq(size)), my $address = Vq(address));
+    ReadFile($$p{file}, (my $size = V(size)), my $address = V(address));
     $byteString->m($$p{bs}, $size, $address);                                   # Move data into byte string
     FreeMemory($size, $address);                                                # Free memory allocated by read
    } io => [qw(bs)], in => [qw(file)];
@@ -4311,7 +4311,7 @@ sub Nasm::X86::ByteString::CreateBlockString($)                                 
     next    => $b - 1 * $o,                                                     # Location of next offset in block in bytes
     prev    => $b - 2 * $o,                                                     # Location of prev offset in block in bytes
     length  => $b - 2 * $o - 1,                                                 # Maximum length in a block
-    first   => Vq('first'),                                                     # Variable addressing first block in block string
+    first   => V('first'),                                                     # Variable addressing first block in block string
    );
 
   my $first = $s->allocBlock;                                                   # Allocate first block
@@ -4379,7 +4379,7 @@ sub Nasm::X86::BlockString::getNextAndPrevBlockOffsetFromZmm($$)                
   $L->setReg(r15);                                                              # Links
   Mov r14d, r15d;                                                               # Next
   Shr r15, RegisterSize(r14d) * 8;                                              # Prev
-  my @r = (Vq("Next block offset", r15), Vq("Prev block offset", r14));         # Result
+  my @r = (V("Next block offset", r15), V("Prev block offset", r14));         # Result
   PopR @regs;                                                                   # Free work registers
   @r;                                                                           # Return (next, prev)
  }
@@ -4393,21 +4393,21 @@ sub Nasm::X86::BlockString::putNextandPrevBlockOffsetIntoZmm($$$$)              
     $prev->setReg(r15);                                                         # Prev offset
     Shl r14, RegisterSize(r14d) * 8;                                            # Prev high
     Or r15, r14;                                                                # Links in one register
-    my $l = Vq("Links", r15);                                                   # Links as variable
+    my $l = V("Links", r15);                                                   # Links as variable
     $l->putQIntoZmm($zmm, $blockString->links);                                 # Load links into zmm
     PopR @regs;                                                                 # Free work registers
    }
   elsif ($next)                                                                 # Set just next
    {PushR my @regs = (r15);                                                     # Work registers
     $next->setReg(r15);                                                         # Next offset
-    my $l = Vq("Links", r15);                                                   # Links as variable
+    my $l = V("Links", r15);                                                   # Links as variable
     $l->putDIntoZmm($zmm, $blockString->next);                                  # Load links into zmm
     PopR @regs;                                                                 # Free work registers
    }
   elsif ($prev)                                                                 # Set just prev
    {PushR my @regs = (r15);                                                     # Work registers
     $prev->setReg(r15);                                                         # Next offset
-    my $l = Vq("Links", r15);                                                   # Links as variable
+    my $l = V("Links", r15);                                                   # Links as variable
     $l->putDIntoZmm($zmm, $blockString->prev);                                  # Load links into zmm
     PopR @regs;                                                                 # Free work registers
    }
@@ -4537,10 +4537,10 @@ sub Nasm::X86::BlockString::insertChar($@)                                      
     my $c = $$p{character};                                                     # The character to insert
     my $P = $$p{position};                                                      # The position in the block string at which we want to insert the character
     $blockString->getBlock($B, $F, 31);                                         # The first source block
-    my $C = Vq('Current character position', 0);                                # Current character position
+    my $C = V('Current character position', 0);                                # Current character position
     my $L = $blockString->getBlockLength(31);                                   # Length of last block
-    my $M   = Vq('Block length', $blockString->length);                         # Maximum length of a block
-    my $One = Vq('One', 1);                                                     # Literal one
+    my $M   = V('Block length', $blockString->length);                         # Maximum length of a block
+    my $One = V('One', 1);                                                     # Literal one
     my $current = $F;                                                           # Current position in scan of block chain
 
     ForEver                                                                     # Each block in source string
@@ -4593,7 +4593,7 @@ sub Nasm::X86::BlockString::insertChar($@)                                      
       Then                                                                      # Last source block
        {$c->setReg(r15);                                                        # Character to insert
         Push r15;
-        $blockString->append($B, $F, Vq(size, 1), Vq(source, rsp));             # Append character if we go beyond limit
+        $blockString->append($B, $F, V(size, 1), V(source, rsp));             # Append character if we go beyond limit
         Pop  r15;
         Jmp $end;
        });
@@ -4622,7 +4622,7 @@ sub Nasm::X86::BlockString::deleteChar($@)                                      
     my $F = $$p{first};                                                         # The first block in block string
     my $P = $$p{position};                                                      # The position in the block string at which we want to insert the character
     $blockString->getBlock($B, $F, 31);                                         # The first source block
-    my $C = Vq('Current character position', 0);                                # Current character position
+    my $C = V('Current character position', 0);                                # Current character position
     my $L = $blockString->getBlockLength(31);                                   # Length of last block
     my $current = $F;                                                           # Current position in scan of block chain
 
@@ -4666,7 +4666,7 @@ sub Nasm::X86::BlockString::getCharacter($@)                                    
     my $F = $$p{first};                                                         # The first block in block string
     my $P = $$p{position};                                                      # The position in the block string at which we want to insert the character
     $blockString->getBlock($B, $F, 31);                                         # The first source block
-    my $C = Vq('Current character position', 0);                                # Current character position
+    my $C = V('Current character position', 0);                                # Current character position
     my $L = $blockString->getBlockLength(31);                                   # Length of last block
 
     ForEver                                                                     # Each block in source string
@@ -4703,9 +4703,9 @@ sub Nasm::X86::BlockString::append($@)                                          
   my $s = Subroutine
    {my ($p) = @_;                                                               # Parameters
     my $success = Label;                                                        # Append completed successfully
-    my $Z       = Vq(zero, 0);                                                  # Zero
-    my $O       = Vq(one,  1);                                                  # One
-    my $L       = Vq(size, $blockString->length);                               # Length of a full block
+    my $Z       = V(zero, 0);                                                  # Zero
+    my $O       = V(one,  1);                                                  # One
+    my $L       = V(size, $blockString->length);                               # Length of a full block
     my $B       = $$p{bs};                                                      # Underlying block string
     my $source  = $$p{source};                                                  # Address of content to be appended
     my $size    = $$p{size};                                                    # Size of content
@@ -4775,7 +4775,7 @@ sub Nasm::X86::BlockString::clear($)                                            
      {$$p{bs}->setReg(rax);                                                     # Address underlying byte string
       Lea r14, $blockString->bs->free->addr;                                    # Address of address of free chain
       Mov r15, "[r14]";                                                         # Address of free chain
-      my $rfc = Vq('next', r15);                                                # Remainder of the free chain
+      my $rfc = V('next', r15);                                                # Remainder of the free chain
 
       If ($second == $last,
       Then                                                                      # Two blocks on the chain
@@ -4784,7 +4784,7 @@ sub Nasm::X86::BlockString::clear($)                                            
         $blockString->putBlock($$p{bs}, $second, 30);                           # Put the second block
        },
       Else                                                                      # Three or more blocks on the chain
-       {my $z = Vq(zero, 0);                                                    # A variable with zero in it
+       {my $z = V(zero, 0);                                                    # A variable with zero in it
         $blockString->getBlock($$p{bs}, $second, 30);                           # Get the second block
         $blockString->getBlock($$p{bs}, $last,   31);                           # Get the last block
         $blockString->putNextandPrevBlockOffsetIntoZmm(30, undef, $z);          # Reset prev pointer in second block
@@ -4818,7 +4818,7 @@ sub Nasm::X86::ByteString::CreateBlockArray($)                                  
   my $s = genHash(__PACKAGE__."::BlockArray",                                   # Block string definition
     bs     => $byteString,                                                      # Bytes string definition
     width  => $o,                                                               # Width of each element
-    first  => Vq('first'),                                                      # Variable addressing first block in block string
+    first  => V('first'),                                                      # Variable addressing first block in block string
     slots1 => $b / $o - 1,                                                      # Number of slots in first block
     slots2 => $b / $o,                                                          # Number of slots in second and subsequent blocks
    );
@@ -5027,7 +5027,7 @@ sub Nasm::X86::BlockArray::pop($@)                                              
           my $S = getDFromZmm(31, ($size / $N + 1) * $w);                       # Address secondary block from first block
           $b       ->getBlock($B, $S, 30);                                      # Load secondary block
           $E->getDFromZmm(30, 0);                                               # Get first element from secondary block
-          Vq(zero, 0)->putDIntoZmm(31, ($size / $N + 1) * $w);                  # Zero at offset of secondary block in first block
+          V(zero, 0)->putDIntoZmm(31, ($size / $N + 1) * $w);                  # Zero at offset of secondary block in first block
           ($size-1)->putDIntoZmm(31, 0);                                        # Save new size in first block
           $b       ->freeBlock($B, offset=>$S);                                 # Free the secondary block
           $b       ->putBlock ($B, $F, 31);                                     # Put the first  block back into memory
@@ -5170,16 +5170,16 @@ sub Nasm::X86::ByteString::DescribeBlockMultiWayTree($)                         
 
   genHash(__PACKAGE__."::BlockMultiWayTree",                                    # Block multi way tree.
     bs           => $byteString,                                                # Byte string definition.
-    data         => Vq(data),                                                   # Variable containing the last data found
-    first        => Vq(first),                                                  # Variable addressing offset to first block of keys.
-    found        => Vq(found),                                                  # Variable indicating whether the last find was successful or not
+    data         => V(data),                                                   # Variable containing the last data found
+    first        => V(first),                                                  # Variable addressing offset to first block of keys.
+    found        => V(found),                                                  # Variable indicating whether the last find was successful or not
     leftLength   => $length / 2,                                                # Left split length
     lengthOffset => $b - $o * 2,                                                # Offset of length in keys block.  The length field is a word - see: "MultiWayTree.svg"
     loop         => $b - $o,                                                    # Offset of keys, data, node loop.
     maxKeys      => $length,                                                    # Maximum number of keys.
     minKeys      => int($b / 2) - 1,                                            # Minimum number of keys.
     rightLength  => $length - 1 - $length / 2,                                  # Right split length
-    subTree      => Vq(subTree),                                                # Variable indicating whether the last find found a sub tree
+    subTree      => V(subTree),                                                # Variable indicating whether the last find found a sub tree
     treeBits     => $b - $o * 2 + 2,                                            # Offset of tree bits in keys block.  The tree bits field is a word, each bit of which tells us whether the corresponding data element is the offset (or not) to a sub tree of this tree .
     treeBitsMask => 0x3fff,                                                     # 14 tree bits
     up           => $b - $o * 2,                                                # Offset of up in data block.
@@ -5220,9 +5220,9 @@ sub Nasm::X86::BlockMultiWayTree::allocKeysDataNode($$$$@)                      
    {my ($parameters) = @_;                                                      # Parameters
 
     my $B = $$parameters{bs};                                                   # Byte string
-    $t->bs->allocZmmBlock($B, my $k = Vq(offset));                              # Keys
-    $t->bs->allocZmmBlock($B, my $d = Vq(offset));                              # Data
-    $t->bs->allocZmmBlock($B, my $n = Vq(offset));                              # Children
+    $t->bs->allocZmmBlock($B, my $k = V(offset));                              # Keys
+    $t->bs->allocZmmBlock($B, my $d = V(offset));                              # Data
+    $t->bs->allocZmmBlock($B, my $n = V(offset));                              # Children
 
     $t->putLoop($d, $K);                                                        # Set the link from key to data
     $t->putLoop($n, $D);                                                        # Set the link from data to node
@@ -5325,7 +5325,7 @@ sub Nasm::X86::BlockMultiWayTree::reParent($$$$$@)                              
       Mov rdi, rsp;                                                             # Save stack base
       PushRR "zmm$PN";                                                          # Child nodes on stack
       my $w = $t->width; my $l = $t->loop; my $u = $t->up;                      # Steps we will make along the chain
-      my $s = Vq(start);
+      my $s = V(start);
       $L->for(sub                                                               # Each child
        {my ($index, $start, $next, $end) = @_;
         &PopEax;                                                                # The nodes are double words but we cannot pop a double word from the stack in 64 bit long mode using pop
@@ -5487,9 +5487,9 @@ sub Nasm::X86::BlockMultiWayTree::splitFullRoot($)                              
       &Vmovdqu32 (zmm $TN."{k7}{z}",  $TN);                                     # Clear unused node in root
      });
 
-    $t->putLengthInKeys($TK, Cq(one,  1));                                      # Set length of root keys
-    $t->putLengthInKeys($LK, Cq(leftLength,  $ll));                             # Length of left node
-    $t->putLengthInKeys($RK, Cq(rightLength, $rl));                             # Length of right node
+    $t->putLengthInKeys($TK, K(one,  1));                                      # Set length of root keys
+    $t->putLengthInKeys($LK, K(leftLength,  $ll));                             # Length of left node
+    $t->putLengthInKeys($RK, K(rightLength, $rl));                             # Length of right node
 
     $t->putUpIntoData($to, $LD);                                                # Set parent of left node
     $t->putUpIntoData($to, $RD);                                                # Set parent of right node
@@ -5618,8 +5618,8 @@ sub Nasm::X86::BlockMultiWayTree::splitFullLeftOrRightNode($$)                  
 
     my $l = $t->getLengthInKeys($PK);                                           # Length of parent
             $t->putLengthInKeys($PK, $l + 1);                                   # New length of parent
-    $t->putLengthInKeys($LK, Cq(leftLength,  $ll));                             # Length of left node
-    $t->putLengthInKeys($RK, Cq(rightLength, $rl));                             # Length of right node
+    $t->putLengthInKeys($LK, K(leftLength,  $ll));                             # Length of left node
+    $t->putLengthInKeys($RK, K(rightLength, $rl));                             # Length of right node
 
     SetLabel $success;                                                          # Insert completed successfully
    } name => "splitFullLeftOrRightNode_$right";
@@ -5676,7 +5676,7 @@ sub Nasm::X86::BlockMultiWayTree::findAndSplit($@)                              
       Then
        {Kmovq r15, $testMask;
         Tzcnt r14, r15;                                                         # Trailing zeros gives index
-        $$p{compare}->copy(Cq(zero, 0));                                        # Key found
+        $$p{compare}->copy(K(zero, 0));                                        # Key found
         $$p{index}  ->getReg(r14);                                              # Index from trailing zeros
         $$p{offset} ->copy($tree);                                              # Offset of matching block
         Jmp $success;                                                           # Return
@@ -5690,7 +5690,7 @@ sub Nasm::X86::BlockMultiWayTree::findAndSplit($@)                              
         Tzcnt r14, r15;                                                         # Trailing zeros
         If ($node == 0,
         Then                                                                    # We are on a leaf
-         {$$p{compare}->copy(Cq(minusOne, -1));                                 # Key less than
+         {$$p{compare}->copy(K(minusOne, -1));                                 # Key less than
           $$p{index}  ->getReg(r14);                                            # Index from trailing zeros
           $$p{offset} ->copy($tree);                                            # Offset of matching block
           Jmp $success;                                                         # Return
@@ -5702,7 +5702,7 @@ sub Nasm::X86::BlockMultiWayTree::findAndSplit($@)                              
       if (1)                                                                    # Key greater than all keys in block
        {If ($node == 0,
         Then                                                                    # We have reached a leaf
-         {$$p{compare}->copy(Cq(plusOne, +1));                                  # Key greater than last key
+         {$$p{compare}->copy(K(plusOne, +1));                                  # Key greater than last key
           $$p{index}  ->copy($l-1);                                             # Index of last key which we are greater than
           $$p{offset} ->copy($tree);                                            # Offset of matching block
           Jmp $success
@@ -5730,9 +5730,9 @@ sub Nasm::X86::BlockMultiWayTree::find($$)                                      
     my $F = $$p{first};                                                         # First keys block
     my $K = $$p{key};                                                           # Key to find
 
-    $$p{found}  ->copy(Cq(zero, 0));                                            # Key not found
-    $$p{data}   ->copy(Cq(zero, 0));                                            # Data not yet found
-    $$p{subTree}->copy(Cq(zero, 0));                                            # Not yet a sub tree
+    $$p{found}  ->copy(K(zero, 0));                                            # Key not found
+    $$p{data}   ->copy(K(zero, 0));                                            # Data not yet found
+    $$p{subTree}->copy(K(zero, 0));                                            # Not yet a sub tree
 
 
     my $tree = $F->clone;                                                       # Start at the first key block
@@ -5744,7 +5744,7 @@ sub Nasm::X86::BlockMultiWayTree::find($$)                                      
     Vpbroadcastd "zmm$zmmTest", r15d;
     KeepFree r15;
 
-    Cq(loop, 99)->for(sub                                                       # Step down through tree
+    K(loop, 99)->for(sub                                                       # Step down through tree
      {my ($index, $start, $next, $end) = @_;
       $t->getKeysDataNode($tree, $zmmKeys, $zmmData, $zmmNode);                 # Get the keys block
       my $l = $t->getLengthInKeys($zmmKeys);                                    # Length of the block
@@ -5760,7 +5760,7 @@ sub Nasm::X86::BlockMultiWayTree::find($$)                                      
       Then
        {Kmovq r15, $testMask;
         Tzcnt r14, r15;                                                         # Trailing zeros
-        $$p{found}->copy(Cq(one, 1));                                           # Key found
+        $$p{found}->copy(K(one, 1));                                           # Key found
         $$p{data} ->copy(getDFromZmm($zmmData, "r14*$W"));                      # Data associated with the key
         $t->isTree(r15, $zmmKeys);                                              # Check whether the data so found is a sub tree
         $$p{subTree}->copyZFInverted;                                           # Copy zero flag which opposes the notion that this element is a sub tree
@@ -5829,7 +5829,7 @@ sub Nasm::X86::BlockMultiWayTree::insertDataOrTree($$$$)                        
     If ($l == 0,                                                                # Check for  empty tree.
     Then                                                                        # Empty tree
      {$K->putDIntoZmm    (31, 0);                                               # Write key
-      $t->putLengthInKeys(31, Cq(one, 1));                                      # Set the length of the block
+      $t->putLengthInKeys(31, K(one, 1));                                      # Set the length of the block
       if ($tnd)                                                                 # Create and mark key as addressing a sub tree
        {my $T = $t->bs->CreateBlockMultiWayTree;                                # Create sub tree in the same byte string as parent tree
         $D->copy($T->first);                                                    # Copy address of first  block
@@ -5906,7 +5906,7 @@ sub Nasm::X86::BlockMultiWayTree::insertDataOrTree($$$$)                        
 
       If $l + 1 == $t->maxKeys,
       Then                                                                      # Root is now full: allocate the node block for it and chain it in
-       {$t->bs->allocZmmBlock($B, my $n = Vq(offset));                          # Children
+       {$t->bs->allocZmmBlock($B, my $n = V(offset));                          # Children
         $t->putLoop($n, 30);                                                    # Set the link from data to node
         $t->putLoop($F, 29);                                                    # Set the link from node to key
        };
@@ -5916,9 +5916,9 @@ sub Nasm::X86::BlockMultiWayTree::insertDataOrTree($$$$)                        
       Jmp $success;                                                             # Insert completed successfully
      });
 
-    my $compare = Vq(compare);                                                  # Comparison result
-    my $offset  = Vq(offset);                                                   # Offset of result
-    my $index   = Vq('index');                                                  # Index of result
+    my $compare = V(compare);                                                  # Comparison result
+    my $offset  = V(offset);                                                   # Offset of result
+    my $index   = V('index');                                                  # Index of result
     $t->findAndSplit($K, $compare, $offset, $index);                            # Split node if full
 
     KeepFree zmm 29;
@@ -6102,7 +6102,7 @@ sub Nasm::X86::BlockMultiWayTree::leftOrRightMost($$@)                          
     my $F = $$p{node};                                                          # First block
     PushR my @save = (rax, zmm29, zmm30, zmm31);
 
-    Cq(loopLimit, 9)->for(sub                                                   # Loop a reasonable number of times
+    K(loopLimit, 9)->for(sub                                                   # Loop a reasonable number of times
      {my ($index, $start, $next, $end) = @_;
       $t->getKeysDataNode($F, 31, 30, 29);                                      # Get the first keys block
       my $n = getDFromZmm(29, 0);                                               # Get the node block offset from the data block loop
@@ -6175,7 +6175,7 @@ sub Nasm::X86::BlockMultiWayTree::depth($@)                                     
     PushR my @save = (r14, r15, zmm30, zmm31);
     my $tree = $N->clone;                                                       # Start at the specified node
 
-    Cq(loop, 9)->for(sub                                                        # Step up through tree
+    K(loop, 9)->for(sub                                                        # Step up through tree
      {my ($index, $start, $next, $end) = @_;
       $t->getKeysData($tree, 31, 30);                                           # Get the keys block
       my $p = $t->getUpFromData(30);                                            # Parent
@@ -6287,22 +6287,22 @@ sub Nasm::X86::BlockMultiWayTree::iterator($)                                   
  {my ($b) = @_;                                                                 # Block multi way tree
   @_ == 1 or confess;
 
-  my $node = Vq(node);                                                          # The current node
+  my $node = V(node);                                                          # The current node
   $node->copy($b->first);                                                       # Start at the first node in the tree
 
   my $i = genHash(__PACKAGE__.'::BlockMultiWayTree::Iterator',                  # Iterator
     tree  => $b,                                                                # Tree we are iterating over
     node  => $node,                                                             # Current node within tree
-    pos   => Vq('pos'),                                                         # Current position within node
-    key   => Vq(key),                                                           # Key at this position
-    data  => Vq(data),                                                          # Data at this position
-    count => Vq(count),                                                         # Counter - number of node
-    more  => Vq(more),                                                          # Iteration not yet finished
+    pos   => V('pos'),                                                         # Current position within node
+    key   => V(key),                                                           # Key at this position
+    data  => V(data),                                                          # Data at this position
+    count => V(count),                                                         # Counter - number of node
+    more  => V(more),                                                          # Iteration not yet finished
    );
 
-  $i->pos  ->copy(Vq('pos', -1));                                               # Initialize iterator
-  $i->count->copy(Vq(count,  0));
-  $i->more ->copy(Vq(more,   1));
+  $i->pos  ->copy(V('pos', -1));                                               # Initialize iterator
+  $i->count->copy(V(count,  0));
+  $i->more ->copy(V(more,   1));
   $i->next;                                                                     # First element if any
  }
 
@@ -6347,14 +6347,14 @@ sub Nasm::X86::BlockMultiWayTree::Iterator::next($)                             
 
       If ($nodes,
       Then                                                                      # Go left if there are child nodes
-       {$t->leftMost($C, my $l = Vq(offset));
-        &$new($l, Cq(zero, 0));
+       {$t->leftMost($C, my $l = V(offset));
+        &$new($l, K(zero, 0));
        },
       Else
        {my $l = $t->getLengthInKeys(31);                                        # Number of keys
         If ($l,
         Then                                                                    # Start with the current node as it is a leaf
-         {&$new($C, Cq(zero, 0));
+         {&$new($C, K(zero, 0));
          },
         Else
          {&$done;
@@ -6384,7 +6384,7 @@ sub Nasm::X86::BlockMultiWayTree::Iterator::next($)                             
         Vpcmpud k7, "zmm".$zmmPN, "zmm".$zmmTest, 0;                            # Check for equal offset - one of them will match to create the single insertion point in k6
         Kmovw r14d, k7;                                                         # Bit mask ready for count
         Tzcnt r14, r14;                                                         # Number of leading zeros gives us the position of the child in the parent
-        my $i = Vq(indexInParent, r14);                                         # Index in parent
+        my $i = V(indexInParent, r14);                                         # Index in parent
         my $l = $t->getLengthInKeys($zmmPK);                                    # Length of parent
 
         If ($i < $l,
@@ -6416,8 +6416,8 @@ sub Nasm::X86::BlockMultiWayTree::Iterator::next($)                             
      },
     Then                                                                        # Node
      {my $offsetAtI = getDFromZmm(29, $i * $iter->tree->width);
-      $iter->tree->leftMost(node=>$offsetAtI, my $l = Vq(offset));
-      &$new($l, Cq(zero, 0));
+      $iter->tree->leftMost(node=>$offsetAtI, my $l = V(offset));
+      &$new($l, K(zero, 0));
      });
 
     PopR @save;
@@ -6861,7 +6861,7 @@ each process involved:
 
 Read this file:
 
-  ReadFile(Vq(file, Rs($0)), (my $s = Vq(size)), my $a = Vq(address));          # Read file
+  ReadFile(V(file, Rs($0)), (my $s = V(size)), my $a = V(address));          # Read file
   $a->setReg(rax);                                                              # Address of file in memory
   $s->setReg(rdi);                                                              # Length  of file in memory
   PrintOutMemory;                                                               # Print contents of memory to stdout
@@ -6898,7 +6898,7 @@ iterate through it:
   my $b = CreateByteString;                   # Resizable memory block
   my $t = $b->CreateBlockMultiWayTree;        # Multi way tree in memory block
 
-  Cq(count, $N)->for(sub                      # Add some entries to the tree
+  K(count, $N)->for(sub                      # Add some entries to the tree
    {my ($index, $start, $next, $end) = @_;
     my $k = $index + 1;
     $t->insert($k,      $k + 0x100);
@@ -6909,14 +6909,14 @@ iterate through it:
    {my ($iter, $end) = @_;
     $iter->key ->out('key: ');
     $iter->data->out(' data: ');
-    $iter->tree->depth($iter->node, my $D = Vq(depth));
+    $iter->tree->depth($iter->node, my $D = V(depth));
 
     $t->find($iter->key);
     $t->found->out(' found: '); $t->data->out(' data: '); $D->outNL(' depth: ');
    });
 
-  $t->find(Cq(key, 0xffff));  $t->found->outNL('Found: ');  # Find some entries
-  $t->find(Cq(key, 0xd));     $t->found->outNL('Found: ');
+  $t->find(K(key, 0xffff));  $t->found->outNL('Found: ');  # Find some entries
+  $t->find(K(key, 0xd));     $t->found->outNL('Found: ');
 
   If ($t->found,
   Then
@@ -7235,7 +7235,7 @@ B<Example:>
     Mov rax, rsp;                                                                 # Copy memory, the target is addressed by rax, the length is in rdi, the source is addressed by rsi
     Mov rdi, 16;
     Mov rsi, $s;
-    CopyMemory(Vq(source, rsi), Vq(target, rax), Vq(size, rdi));
+    CopyMemory(V(source, rsi), V(target, rax), V(size, rdi));
     PrintOutMemoryInHex;
 
     my $r = Assemble;
@@ -7268,7 +7268,7 @@ B<Example:>
     Mov rax, rsp;                                                                 # Copy memory, the target is addressed by rax, the length is in rdi, the source is addressed by rsi
     Mov rdi, 16;
     Mov rsi, $s;
-    CopyMemory(Vq(source, rsi), Vq(target, rax), Vq(size, rdi));
+    CopyMemory(V(source, rsi), V(target, rax), V(size, rdi));
     PrintOutMemoryInHex;
 
     my $r = Assemble;
@@ -7301,7 +7301,7 @@ B<Example:>
     Mov rax, rsp;                                                                 # Copy memory, the target is addressed by rax, the length is in rdi, the source is addressed by rsi
     Mov rdi, 16;
     Mov rsi, $s;
-    CopyMemory(Vq(source, rsi), Vq(target, rax), Vq(size, rdi));
+    CopyMemory(V(source, rsi), V(target, rax), V(size, rdi));
     PrintOutMemoryInHex;
 
     my $r = Assemble;
@@ -7334,7 +7334,7 @@ B<Example:>
     Mov rax, rsp;                                                                 # Copy memory, the target is addressed by rax, the length is in rdi, the source is addressed by rsi
     Mov rdi, 16;
     Mov rsi, $s;
-    CopyMemory(Vq(source, rsi), Vq(target, rax), Vq(size, rdi));
+    CopyMemory(V(source, rsi), V(target, rax), V(size, rdi));
     PrintOutMemoryInHex;
 
     my $r = Assemble;
@@ -7367,7 +7367,7 @@ B<Example:>
     Mov rax, rsp;                                                                 # Copy memory, the target is addressed by rax, the length is in rdi, the source is addressed by rsi
     Mov rdi, 16;
     Mov rsi, $s;
-    CopyMemory(Vq(source, rsi), Vq(target, rax), Vq(size, rdi));
+    CopyMemory(V(source, rsi), V(target, rax), V(size, rdi));
     PrintOutMemoryInHex;
 
     my $r = Assemble;
@@ -7400,7 +7400,7 @@ B<Example:>
     Mov rax, rsp;                                                                 # Copy memory, the target is addressed by rax, the length is in rdi, the source is addressed by rsi
     Mov rdi, 16;
     Mov rsi, $s;
-    CopyMemory(Vq(source, rsi), Vq(target, rax), Vq(size, rdi));
+    CopyMemory(V(source, rsi), V(target, rax), V(size, rdi));
     PrintOutMemoryInHex;
 
     my $r = Assemble;
@@ -7433,7 +7433,7 @@ B<Example:>
     Mov rax, rsp;                                                                 # Copy memory, the target is addressed by rax, the length is in rdi, the source is addressed by rsi
     Mov rdi, 16;
     Mov rsi, $s;
-    CopyMemory(Vq(source, rsi), Vq(target, rax), Vq(size, rdi));
+    CopyMemory(V(source, rsi), V(target, rax), V(size, rdi));
     PrintOutMemoryInHex;
 
     my $r = Assemble;
@@ -7466,7 +7466,7 @@ B<Example:>
     Mov rax, rsp;                                                                 # Copy memory, the target is addressed by rax, the length is in rdi, the source is addressed by rsi
     Mov rdi, 16;
     Mov rsi, $s;
-    CopyMemory(Vq(source, rsi), Vq(target, rax), Vq(size, rdi));
+    CopyMemory(V(source, rsi), V(target, rax), V(size, rdi));
     PrintOutMemoryInHex;
 
     my $r = Assemble;
@@ -8664,7 +8664,7 @@ B<Example:>
     KeepFree r15;
     PopEax;  PrintRaxInHex($stdout, 3); PrintOutNL; KeepFree rax;
 
-    my $a = Vq('aaaa');
+    my $a = V('aaaa');
     $a->pop;
     $a->push;
     $a->outNL;
@@ -8699,7 +8699,7 @@ B<Example:>
 
     for (0..7)
      {ClearRegisters "k$_";
-      Cq($_,$_)->setMaskBit("k$_");
+      K($_,$_)->setMaskBit("k$_");
       PrintOutRegisterInHex "k$_";
      }
 
@@ -8787,8 +8787,8 @@ Then body for an If statement
 B<Example:>
 
 
-    my $a = Vq(a, 3); $a->outNL;
-    my $b = Cq(b, 2); $b->outNL;
+    my $a = V(a, 3); $a->outNL;
+    my $b = K(b, 2); $b->outNL;
     my $c = $a +  $b; $c->outNL;
     my $d = $c -  $a; $d->outNL;
     my $e = $d == $b; $e->outNL;
@@ -8836,8 +8836,8 @@ Else body for an If statement
 B<Example:>
 
 
-    my $a = Vq(a, 3); $a->outNL;
-    my $b = Cq(b, 2); $b->outNL;
+    my $a = V(a, 3); $a->outNL;
+    my $b = K(b, 2); $b->outNL;
     my $c = $a +  $b; $c->outNL;
     my $d = $c -  $a; $d->outNL;
     my $e = $d == $b; $e->outNL;
@@ -9999,7 +9999,7 @@ Define a double word variable
   2  $expr      Initializing expression
   3  %options   Options
 
-=head3 Vq($name, $expr, %options)
+=head3 V($name, $expr, %options)
 
 Define a quad variable
 
@@ -10012,9 +10012,9 @@ B<Example:>
 
 
 
-    my $a = Vq(a, 3); $a->outNL;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+    my $a = V(a, 3); $a->outNL;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-    my $b = Cq(b, 2); $b->outNL;
+    my $b = K(b, 2); $b->outNL;
     my $c = $a +  $b; $c->outNL;
     my $d = $c -  $a; $d->outNL;
     my $e = $d == $b; $e->outNL;
@@ -10050,7 +10050,7 @@ B<Example:>
   END
 
 
-=head3 Cq($name, $expr, %options)
+=head3 K($name, $expr, %options)
 
 Define a quad constant
 
@@ -10062,9 +10062,9 @@ Define a quad constant
 B<Example:>
 
 
-    my $a = Vq(a, 3); $a->outNL;
+    my $a = V(a, 3); $a->outNL;
 
-    my $b = Cq(b, 2); $b->outNL;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+    my $b = K(b, 2); $b->outNL;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     my $c = $a +  $b; $c->outNL;
     my $d = $c -  $a; $d->outNL;
@@ -10172,7 +10172,7 @@ B<Example:>
 
 
     Mov r15, 1;
-    my $z = Vq(zf);
+    my $z = V(zf);
     Cmp r15, 1; $z->copyZF;         $z->outNL;
     Cmp r15, 2; $z->copyZF;         $z->outNL;
     Cmp r15, 1; $z->copyZFInverted; $z->outNL;
@@ -10197,7 +10197,7 @@ B<Example:>
 
 
     Mov r15, 1;
-    my $z = Vq(zf);
+    my $z = V(zf);
     Cmp r15, 1; $z->copyZF;         $z->outNL;
     Cmp r15, 2; $z->copyZF;         $z->outNL;
     Cmp r15, 1; $z->copyZFInverted; $z->outNL;
@@ -10395,8 +10395,8 @@ Dump the value of a variable to the specified channel adding an optional title a
 B<Example:>
 
 
-    my $a = Vq(a, 3); $a->outNL;
-    my $b = Cq(b, 2); $b->outNL;
+    my $a = V(a, 3); $a->outNL;
+    my $b = K(b, 2); $b->outNL;
     my $c = $a +  $b; $c->outNL;
     my $d = $c -  $a; $d->outNL;
     my $e = $d == $b; $e->outNL;
@@ -10548,8 +10548,8 @@ Minimum of two variables
 B<Example:>
 
 
-    my $a = Vq("a", 1);
-    my $b = Vq("b", 2);
+    my $a = V("a", 1);
+    my $b = V("b", 2);
     my $c = $a->min($b);
     my $d = $a->max($b);
     $a->outNL;
@@ -10576,8 +10576,8 @@ Maximum of two variables
 B<Example:>
 
 
-    my $a = Vq("a", 1);
-    my $b = Vq("b", 2);
+    my $a = V("a", 1);
+    my $b = V("b", 2);
     my $c = $a->min($b);
     my $d = $a->max($b);
     $a->outNL;
@@ -10621,8 +10621,8 @@ Set the mask register to ones starting at the specified position for the specifi
 B<Example:>
 
 
-    my $start  = Vq("Start",  7);
-    my $length = Vq("Length", 3);
+    my $start  = V("Start",  7);
+    my $length = V("Length", 3);
     $start->setMask($length, k7);
     PrintOutRegisterInHex k7;
 
@@ -10630,9 +10630,9 @@ B<Example:>
       k7: 0000 0000 0000 0380
   END
 
-    my $z = Vq('zero', 0);
-    my $o = Vq('one',  1);
-    my $t = Vq('two',  2);
+    my $z = V('zero', 0);
+    my $o = V('one',  1);
+    my $t = V('two',  2);
     $z->setMask($o,       k7); PrintOutRegisterInHex k7;
     $z->setMask($t,       k6); PrintOutRegisterInHex k6;
     $z->setMask($o+$t,    k5); PrintOutRegisterInHex k5;
@@ -10710,17 +10710,17 @@ B<Example:>
 
 
     my $s = Rb(0..128);
-    my $source = Vq(Source, $s);
+    my $source = V(Source, $s);
 
     if (1)                                                                        # First block
-     {my $offset = Vq(Offset, 7);
-      my $length = Vq(Length, 3);
+     {my $offset = V(Offset, 7);
+      my $length = V(Length, 3);
       $source->setZmm(0, $offset, $length);
      }
 
     if (1)                                                                        # Second block
-     {my $offset = Vq(Offset, 33);
-      my $length = Vq(Length, 12);
+     {my $offset = V(Offset, 33);
+      my $length = V(Length, 12);
       $source->setZmm(0, $offset, $length);
      }
 
@@ -10846,7 +10846,7 @@ B<Example:>
 
 
     my $s = Rb(0..8);
-    my $c = Vq("Content",   "[$s]");
+    my $c = V("Content",   "[$s]");
        $c->putBIntoZmm(0,  4);
        $c->putWIntoZmm(0,  6);
        $c->putDIntoZmm(0, 10);
@@ -10989,7 +10989,7 @@ B<Example:>
 
 
     my $s = Rb(0..8);
-    my $c = Vq("Content",   "[$s]");
+    my $c = V("Content",   "[$s]");
        $c->putBIntoZmm(0,  4);
        $c->putWIntoZmm(0,  6);
        $c->putDIntoZmm(0, 10);
@@ -11105,9 +11105,9 @@ Free the memory addressed by this variable for the specified length
 B<Example:>
 
 
-    my $N = Vq(size, 2048);
+    my $N = V(size, 2048);
     my $q = Rs('a'..'p');
-    AllocateMemory($N, my $address = Vq(address));
+    AllocateMemory($N, my $address = V(address));
 
     Vmovdqu8 xmm0, "[$q]";
     $address->setReg(rax);
@@ -11145,7 +11145,7 @@ Iterate the body limit times.
 B<Example:>
 
 
-    Vq(limit,10)->for(sub
+    V(limit,10)->for(sub
      {my ($i, $start, $next, $end) = @_;
       $i->outNL;
      });
@@ -11233,7 +11233,7 @@ B<Example:>
     PopEax;  PrintRaxInHex($stdout, 3); PrintOutNL; KeepFree rax;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
 
-    my $a = Vq('aaaa');
+    my $a = V('aaaa');
     $a->pop;
     $a->push;
     $a->outNL;
@@ -11683,11 +11683,11 @@ B<Example:>
 
     my $N = 256;
     my $s = Rb 0..$N-1;
-    AllocateMemory(Cq(size, $N), my $a = Vq(address));
-    CopyMemory(Vq(source, $s), Vq(size, $N), target => $a);
+    AllocateMemory(K(size, $N), my $a = V(address));
+    CopyMemory(V(source, $s), V(size, $N), target => $a);
 
-    AllocateMemory(Cq(size, $N), my $b = Vq(address));
-    CopyMemory(source => $a, target => $b, Cq(size, $N));
+    AllocateMemory(K(size, $N), my $b = V(address));
+    CopyMemory(source => $a, target => $b, K(size, $N));
 
     $b->setReg(rax);
     Mov rdi, $N;
@@ -11708,7 +11708,7 @@ Print the memory addressed by rax for a length of rdi on the specified channel
 B<Example:>
 
 
-    ReadFile(Vq(file, Rs($0)), (my $s = Vq(size)), my $a = Vq(address));          # Read file
+    ReadFile(V(file, Rs($0)), (my $s = V(size)), my $a = V(address));          # Read file
     $a->setReg(rax);                                                              # Address of file in memory
     $s->setReg(rdi);                                                              # Length  of file in memory
     PrintOutMemory;                                                               # Print contents of memory to stdout
@@ -11762,10 +11762,10 @@ Allocate the specified amount of memory via mmap and return its address
 B<Example:>
 
 
-    my $N = Vq(size, 2048);
+    my $N = V(size, 2048);
     my $q = Rs('a'..'p');
 
-    AllocateMemory($N, my $address = Vq(address));  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+    AllocateMemory($N, my $address = V(address));  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
 
     Vmovdqu8 xmm0, "[$q]";
@@ -11781,10 +11781,10 @@ B<Example:>
   abcdefghijklmnop
   END
 
-    my $N = Vq(size, 4096);                                                       # Size of the initial allocation which should be one or more pages
+    my $N = V(size, 4096);                                                       # Size of the initial allocation which should be one or more pages
 
 
-    AllocateMemory($N, my $A = Vq(address));  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+    AllocateMemory($N, my $A = V(address));  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
 
     ClearMemory($N, $A);
@@ -11802,14 +11802,14 @@ B<Example:>
     my $N = 256;
     my $s = Rb 0..$N-1;
 
-    AllocateMemory(Cq(size, $N), my $a = Vq(address));  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+    AllocateMemory(K(size, $N), my $a = V(address));  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-    CopyMemory(Vq(source, $s), Vq(size, $N), target => $a);
+    CopyMemory(V(source, $s), V(size, $N), target => $a);
 
 
-    AllocateMemory(Cq(size, $N), my $b = Vq(address));  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+    AllocateMemory(K(size, $N), my $b = V(address));  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-    CopyMemory(source => $a, target => $b, Cq(size, $N));
+    CopyMemory(source => $a, target => $b, K(size, $N));
 
     $b->setReg(rax);
     Mov rdi, $N;
@@ -11830,9 +11830,9 @@ Free memory
 B<Example:>
 
 
-    my $N = Vq(size, 4096);                                                       # Size of the initial allocation which should be one or more pages
+    my $N = V(size, 4096);                                                       # Size of the initial allocation which should be one or more pages
 
-    AllocateMemory($N, my $A = Vq(address));
+    AllocateMemory($N, my $A = V(address));
 
     ClearMemory($N, $A);
 
@@ -11859,9 +11859,9 @@ Clear memory - the address of the memory is in rax, the length in rdi
 B<Example:>
 
 
-    my $N = Vq(size, 4096);                                                       # Size of the initial allocation which should be one or more pages
+    my $N = V(size, 4096);                                                       # Size of the initial allocation which should be one or more pages
 
-    AllocateMemory($N, my $A = Vq(address));
+    AllocateMemory($N, my $A = V(address));
 
 
     ClearMemory($N, $A);  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
@@ -11915,7 +11915,7 @@ B<Example:>
     Mov rdi, 16;
     Mov rsi, $s;
 
-    CopyMemory(Vq(source, rsi), Vq(target, rax), Vq(size, rdi));  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+    CopyMemory(V(source, rsi), V(target, rax), V(size, rdi));  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutMemoryInHex;
 
@@ -11926,14 +11926,14 @@ B<Example:>
 
     my $N = 256;
     my $s = Rb 0..$N-1;
-    AllocateMemory(Cq(size, $N), my $a = Vq(address));
+    AllocateMemory(K(size, $N), my $a = V(address));
 
-    CopyMemory(Vq(source, $s), Vq(size, $N), target => $a);  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+    CopyMemory(V(source, $s), V(size, $N), target => $a);  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
 
-    AllocateMemory(Cq(size, $N), my $b = Vq(address));
+    AllocateMemory(K(size, $N), my $b = V(address));
 
-    CopyMemory(source => $a, target => $b, Cq(size, $N));  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+    CopyMemory(source => $a, target => $b, K(size, $N));  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
 
     $b->setReg(rax);
@@ -12069,7 +12069,7 @@ B<Example:>
 
 
 
-    ReadFile(Vq(file, Rs($0)), (my $s = Vq(size)), my $a = Vq(address));          # Read file  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+    ReadFile(V(file, Rs($0)), (my $s = V(size)), my $a = V(address));          # Read file  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     $a->setReg(rax);                                                              # Address of file in memory
     $s->setReg(rdi);                                                              # Length  of file in memory
@@ -12096,7 +12096,7 @@ B<Example:>
   ls -la
   pwd
   END
-    $s->write         (my $f = Vq('file', Rs("zzz.sh")));                         # Write code to a file
+    $s->write         (my $f = V('file', Rs("zzz.sh")));                         # Write code to a file
 
     executeFileViaBash($f);                                                       # Execute the file  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
@@ -12123,7 +12123,7 @@ B<Example:>
   ls -la
   pwd
   END
-    $s->write         (my $f = Vq('file', Rs("zzz.sh")));                         # Write code to a file
+    $s->write         (my $f = V('file', Rs("zzz.sh")));                         # Write code to a file
     executeFileViaBash($f);                                                       # Execute the file
 
     unlinkFile        ($f);                                                       # Delete the file  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
@@ -12226,10 +12226,10 @@ Convert a string of utf8 to an allocated block of utf32 and return its address a
 B<Example:>
 
 
-    my @p = my ($out, $size, $fail) = (Vq(out), Vq(size), Vq('fail'));
+    my @p = my ($out, $size, $fail) = (V(out), V(size), V('fail'));
 
     my $Chars = Rb(0x24, 0xc2, 0xa2, 0xc9, 0x91, 0xE2, 0x82, 0xAC, 0xF0, 0x90, 0x8D, 0x88);
-    my $chars = Vq(chars, $Chars);
+    my $chars = V(chars, $Chars);
 
     GetNextUtf8CharAsUtf32 in=>$chars, @p;                                        # Dollar               UTF-8 Encoding: 0x24                UTF-32 Encoding: 0x00000024
     $out->out('out1 : ');     $size->outNL(' size : ');
@@ -12250,10 +12250,10 @@ B<Example:>
  𝑎𝑠𝑠𝑖𝑔𝑛 【【𝖻 𝐩𝐥𝐮𝐬 𝖼】】
 AAAAAAAA);                        # A sample sentence to parse
 
-    my $s = Cq(statement, Rs($statement));
-    my $l = Cq(size,  length($statement));
+    my $s = K(statement, Rs($statement));
+    my $l = K(size,  length($statement));
 
-    AllocateMemory($l, my $address = Vq(address));                                # Allocate enough memory for a copy of the string
+    AllocateMemory($l, my $address = V(address));                                # Allocate enough memory for a copy of the string
     CopyMemory(source => $s, target => $address, $l);
 
     GetNextUtf8CharAsUtf32 in=>$address, @p;
@@ -12389,7 +12389,7 @@ B<Example:>
 
 
 
-    StringLength(Vq(string, Rs("abcd")))->outNL;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+    StringLength(V(string, Rs("abcd")))->outNL;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     Assemble(debug => 0, eq => <<END);
   size: 0000 0000 0000 0004
@@ -12486,11 +12486,11 @@ B<Example:>
 
     $a->out;   PrintOutNL;                                                        # Print byte string
     $b->out;   PrintOutNL;                                                        # Print byte string
-    $a->length(my $sa = Vq(size)); $sa->outNL;
-    $b->length(my $sb = Vq(size)); $sb->outNL;
+    $a->length(my $sa = V(size)); $sa->outNL;
+    $b->length(my $sb = V(size)); $sb->outNL;
     $a->clear;
-    $a->length(my $sA = Vq(size)); $sA->outNL;
-    $b->length(my $sB = Vq(size)); $sB->outNL;
+    $a->length(my $sA = V(size)); $sA->outNL;
+    $b->length(my $sB = V(size)); $sB->outNL;
 
     is_deeply Assemble, <<END;                                                    # Assemble and execute
   abababababababab
@@ -12521,12 +12521,12 @@ B<Example:>
     my $a = $b->allocBlock;
     Vmovdqu8 zmm31, "[$format]";
     $b->putBlock($b->bs, $a, 31);
-    my $r = $b->chain($b->bs, Vq(start, 0x18), 4);       $r->outNL("chain1: ");
+    my $r = $b->chain($b->bs, V(start, 0x18), 4);       $r->outNL("chain1: ");
     my $s = $b->chain($b->bs, $r, 4);                    $s->outNL("chain2: ");
     my $t = $b->chain($b->bs, $s, 4);                    $t->outNL("chain3: ");
-    my $A = $b->chain($b->bs, Vq(start, 0x18), 4, 4, 4); $A->outNL("chain4: ");   # Get a long chain
+    my $A = $b->chain($b->bs, V(start, 0x18), 4, 4, 4); $A->outNL("chain4: ");   # Get a long chain
 
-    $b->putChain($b->bs, Vq(start, 0x18), Vq(end, 0xff), 4, 4, 4);                # Put at the end of a long chain
+    $b->putChain($b->bs, V(start, 0x18), V(end, 0xff), 4, 4, 4);                # Put at the end of a long chain
 
     $b->dump;
 
@@ -12552,10 +12552,10 @@ B<Example:>
       $$p{f}->outNL('F2: ');
      } name=> 'aaa', in => [qw(c)], io => [qw(d  e  f)];
 
-    my $c = Cq(c, -1);
-    my $d = Cq(d, -1);
-    my $e = Vq(e,  1);
-    my $f = Vq(f,  2);
+    my $c = K(c, -1);
+    my $d = K(d, -1);
+    my $e = V(e,  1);
+    my $f = V(f,  2);
 
     $sub->call($c, $d, $e, $f);
     $f->outNL('F3: ');
@@ -13094,7 +13094,7 @@ B<Example:>
     my $b = CreateByteString;                                                     # Resizable memory block
     my $t = $b->CreateBlockMultiWayTree;                                          # Multi way tree in memory block
 
-    Cq(count, $N)->for(sub                                                        # Add some entries to the tree
+    K(count, $N)->for(sub                                                        # Add some entries to the tree
      {my ($index, $start, $next, $end) = @_;
       my $k = $index + 1;
       $t->insert($k,      $k + 0x100);
@@ -13105,14 +13105,14 @@ B<Example:>
      {my ($iter, $end) = @_;
       $iter->key ->out('key: ');
       $iter->data->out(' data: ');
-      $iter->tree->depth($iter->node, my $D = Vq(depth));
+      $iter->tree->depth($iter->node, my $D = V(depth));
 
       $t->find($iter->key);
       $t->found->out(' found: '); $t->data->out(' data: '); $D->outNL(' depth: ');
      });
 
-    $t->find(Cq(key, 0xffff));  $t->found->outNL('Found: ');                      # Find some entries
-    $t->find(Cq(key, 0xd));     $t->found->outNL('Found: ');
+    $t->find(K(key, 0xffff));  $t->found->outNL('Found: ');                      # Find some entries
+    $t->find(K(key, 0xd));     $t->found->outNL('Found: ');
     If ($t->found,
     Then
      {$t->data->outNL("Data : ");
@@ -15216,7 +15216,7 @@ if (1) {
 
 if (1) {                                                                        #TNasm::X86::Variable::copyZF #TNasm::X86::Variable::copyZFInverted
   Mov r15, 1;
-  my $z = Vq(zf);
+  my $z = V(zf);
   Cmp r15, 1; $z->copyZF;         $z->outNL;
   Cmp r15, 2; $z->copyZF;         $z->outNL;
   Cmp r15, 1; $z->copyZFInverted; $z->outNL;
@@ -15231,9 +15231,9 @@ END
  }
 
 if (1) {                                                                        #TAllocateMemory #TNasm::X86::Variable::freeMemory
-  my $N = Vq(size, 2048);
+  my $N = V(size, 2048);
   my $q = Rs('a'..'p');
-  AllocateMemory($N, my $address = Vq(address));
+  AllocateMemory($N, my $address = V(address));
 
   Vmovdqu8 xmm0, "[$q]";
   $address->setReg(rax);
@@ -15447,9 +15447,9 @@ END
  }
 
 if (1) {                                                                        #TAllocateMemory #TFreeMemory #TClearMemory
-  my $N = Vq(size, 4096);                                                       # Size of the initial allocation which should be one or more pages
+  my $N = V(size, 4096);                                                       # Size of the initial allocation which should be one or more pages
 
-  AllocateMemory($N, my $A = Vq(address));
+  AllocateMemory($N, my $A = V(address));
 
   ClearMemory($N, $A);
 
@@ -15483,7 +15483,7 @@ if (1) {                                                                        
  }
 
 if (1) {                                                                        #TReadFile #TPrintMemory
-  ReadFile(Vq(file, Rs($0)), (my $s = Vq(size)), my $a = Vq(address));          # Read file
+  ReadFile(V(file, Rs($0)), (my $s = V(size)), my $a = V(address));          # Read file
   $a->setReg(rax);                                                              # Address of file in memory
   $s->setReg(rdi);                                                              # Length  of file in memory
   PrintOutMemory;                                                               # Print contents of memory to stdout
@@ -15564,11 +15564,11 @@ if (1) {                                                                        
 
   $a->out;   PrintOutNL;                                                        # Print byte string
   $b->out;   PrintOutNL;                                                        # Print byte string
-  $a->length(my $sa = Vq(size)); $sa->outNL;
-  $b->length(my $sb = Vq(size)); $sb->outNL;
+  $a->length(my $sa = V(size)); $sa->outNL;
+  $b->length(my $sb = V(size)); $sb->outNL;
   $a->clear;
-  $a->length(my $sA = Vq(size)); $sA->outNL;
-  $b->length(my $sB = Vq(size)); $sB->outNL;
+  $a->length(my $sA = V(size)); $sA->outNL;
+  $b->length(my $sB = V(size)); $sB->outNL;
 
   is_deeply Assemble, <<END;                                                    # Assemble and execute
 abababababababab
@@ -15641,7 +15641,7 @@ END
 
 if (1) {                                                                        # Print this file  #TByteString::read #TByteString::z #TByteString::q
   my $s = CreateByteString;                                                     # Create a string
-  $s->read(Vq(file, Rs($0)));
+  $s->read(V(file, Rs($0)));
   $s->out;
 
   my $r = Assemble;
@@ -15663,7 +15663,7 @@ whoami
 ls -la
 pwd
 END
-  $s->write         (my $f = Vq('file', Rs("zzz.sh")));                         # Write code to a file
+  $s->write         (my $f = V('file', Rs("zzz.sh")));                         # Write code to a file
   executeFileViaBash($f);                                                       # Execute the file
   unlinkFile        ($f);                                                       # Delete the file
 
@@ -15693,9 +15693,9 @@ if (1) {                                                                        
 
 if (1) {                                                                        # Allocate some space in byte string #TByteString::allocate
   my $s = CreateByteString;                                                     # Create a byte string
-  $s->allocate(Vq(size, 0x20), my $o1 = Vq(offset));                            # Allocate space wanted
-  $s->allocate(Vq(size, 0x30), my $o2 = Vq(offset));
-  $s->allocate(Vq(size, 0x10), my $o3 = Vq(offset));
+  $s->allocate(V(size, 0x20), my $o1 = V(offset));                            # Allocate space wanted
+  $s->allocate(V(size, 0x30), my $o2 = V(offset));
+  $s->allocate(V(size, 0x10), my $o3 = V(offset));
   $o1->outNL;
   $o2->outNL;
   $o3->outNL;
@@ -15832,7 +15832,7 @@ if (1) {                                                                        
   Mov rax, rsp;                                                                 # Copy memory, the target is addressed by rax, the length is in rdi, the source is addressed by rsi
   Mov rdi, 16;
   Mov rsi, $s;
-  CopyMemory(Vq(source, rsi), Vq(target, rax), Vq(size, rdi));
+  CopyMemory(V(source, rsi), V(target, rax), V(size, rdi));
   PrintOutMemoryInHex;
 
   my $r = Assemble;
@@ -15845,11 +15845,11 @@ if (1) {                                                                        
 if (1) {                                                                        #TAllocateMemory #TPrintOutMemoryInHexNL #TCopyMemory
   my $N = 256;
   my $s = Rb 0..$N-1;
-  AllocateMemory(Cq(size, $N), my $a = Vq(address));
-  CopyMemory(Vq(source, $s), Vq(size, $N), target => $a);
+  AllocateMemory(K(size, $N), my $a = V(address));
+  CopyMemory(V(source, $s), V(size, $N), target => $a);
 
-  AllocateMemory(Cq(size, $N), my $b = Vq(address));
-  CopyMemory(source => $a, target => $b, Cq(size, $N));
+  AllocateMemory(K(size, $N), my $b = V(address));
+  CopyMemory(source => $a, target => $b, K(size, $N));
 
   $b->setReg(rax);
   Mov rdi, $N;
@@ -15931,7 +15931,7 @@ END
  }
 
 if (1) {                                                                        #TStringLength
-  StringLength(Vq(string, Rs("abcd")))->outNL;
+  StringLength(V(string, Rs("abcd")))->outNL;
   Assemble(debug => 0, eq => <<END);
 size: 0000 0000 0000 0004
 END
@@ -16113,8 +16113,8 @@ if (1)                                                                          
 
 #latest:;
 if (1) {                                                                        #TNasm::X86::Variable::dump  #TNasm::X86::Variable::print #TThen #TElse #TVq #TCq
-  my $a = Vq(a, 3); $a->outNL;
-  my $b = Cq(b, 2); $b->outNL;
+  my $a = V(a, 3); $a->outNL;
+  my $b = K(b, 2); $b->outNL;
   my $c = $a +  $b; $c->outNL;
   my $d = $c -  $a; $d->outNL;
   my $e = $d == $b; $e->outNL;
@@ -16152,7 +16152,7 @@ END
 
 #latest:;
 if (1) {                                                                        #TNasm::X86::Variable::for
-  Vq(limit,10)->for(sub
+  V(limit,10)->for(sub
    {my ($i, $start, $next, $end) = @_;
     $i->outNL;
    });
@@ -16179,8 +16179,8 @@ if (1) {                                                                        
  }
 
 if (1) {                                                                        #TNasm::X86::Variable::min #TNasm::X86::Variable::max
-  my $a = Vq("a", 1);
-  my $b = Vq("b", 2);
+  my $a = V("a", 1);
+  my $b = V("b", 2);
   my $c = $a->min($b);
   my $d = $a->max($b);
   $a->outNL;
@@ -16197,8 +16197,8 @@ END
  }
 
 if (1) {                                                                        #TNasm::X86::Variable::setMask
-  my $start  = Vq("Start",  7);
-  my $length = Vq("Length", 3);
+  my $start  = V("Start",  7);
+  my $length = V("Length", 3);
   $start->setMask($length, k7);
   PrintOutRegisterInHex k7;
 
@@ -16209,17 +16209,17 @@ END
 
 if (1) {                                                                        #TNasm::X86::Variable::setZmm
   my $s = Rb(0..128);
-  my $source = Vq(Source, $s);
+  my $source = V(Source, $s);
 
   if (1)                                                                        # First block
-   {my $offset = Vq(Offset, 7);
-    my $length = Vq(Length, 3);
+   {my $offset = V(Offset, 7);
+    my $length = V(Length, 3);
     $source->setZmm(0, $offset, $length);
    }
 
   if (1)                                                                        # Second block
-   {my $offset = Vq(Offset, 33);
-    my $length = Vq(Length, 12);
+   {my $offset = V(Offset, 33);
+    my $length = V(Length, 12);
     $source->setZmm(0, $offset, $length);
    }
 
@@ -16252,7 +16252,7 @@ END
 
 if (1) {                                                                        #TgetDFromZmm #TNasm::X86::Variable::putDIntoZmm
   my $s = Rb(0..8);
-  my $c = Vq("Content",   "[$s]");
+  my $c = V("Content",   "[$s]");
      $c->putBIntoZmm(0,  4);
      $c->putWIntoZmm(0,  6);
      $c->putDIntoZmm(0, 10);
@@ -16277,9 +16277,9 @@ if (1) {                                                                        
   my $s = Rb(0..255);
   my $B =     CreateByteString;
   my $b = $B->CreateBlockString;
-  $b->append(Vq(source, $s), Vq(size,  3)); $b->dump;
-  $b->append(Vq(source, $s), Vq(size,  4)); $b->dump;
-  $b->append(Vq(source, $s), Vq(size,  5)); $b->dump;
+  $b->append(V(source, $s), V(size,  3)); $b->dump;
+  $b->append(V(source, $s), V(size,  4)); $b->dump;
+  $b->append(V(source, $s), V(size,  5)); $b->dump;
 
   ok Assemble(debug => 0, eq => <<END);
 Block String Dump
@@ -16301,8 +16301,8 @@ if (1) {                                                                        
   my $s = Rb(0..255);
   my $B =     CreateByteString;
   my $b = $B->CreateBlockString;
-  $b->append(Vq(source, $s), Vq(size, 165)); $b->dump;
-  $b->append(Vq(source, $s), Vq(size,   2)); $b->dump;
+  $b->append(V(source, $s), V(size, 165)); $b->dump;
+  $b->append(V(source, $s), V(size,   2)); $b->dump;
 
   ok Assemble(debug => 0, eq => <<END);
 Block String Dump
@@ -16330,11 +16330,11 @@ if (1) {                                                                        
   my $s = Rb(0..255);
   my $B =     CreateByteString;
   my $b = $B->CreateBlockString;
-  $b->append(Vq(source, $s), Vq(size,  56)); $b->dump;
-  $b->append(Vq(source, $s), Vq(size,   4)); $b->dump;
-  $b->append(Vq(source, $s), Vq(size,   5)); $b->dump;
-  $b->append(Vq(source, $s), Vq(size,   0)); $b->dump;
-  $b->append(Vq(source, $s), Vq(size, 256)); $b->dump;
+  $b->append(V(source, $s), V(size,  56)); $b->dump;
+  $b->append(V(source, $s), V(size,   4)); $b->dump;
+  $b->append(V(source, $s), V(size,   5)); $b->dump;
+  $b->append(V(source, $s), V(size,   0)); $b->dump;
+  $b->append(V(source, $s), V(size, 256)); $b->dump;
 
   ok Assemble(debug => 0, eq => <<END);
 Block String Dump
@@ -16383,13 +16383,13 @@ if (1) {
   my $B = CreateByteString;
   my $b = $B->CreateBlockString;
 
-  $b->append(source=>Vq(source, $s), Vq(size, 256));
-  $b->len(my $size = Vq(size));
+  $b->append(source=>V(source, $s), V(size, 256));
+  $b->len(my $size = V(size));
   $size->outNL;
   $b->clear;
 
-  $b->append(Vq(source, $s), size => Vq(size,  16)); $b->dump;
-  $b->len(my $size2 = Vq(size));
+  $b->append(V(source, $s), size => V(size,  16)); $b->dump;
+  $b->len(my $size2 = V(size));
   $size2->outNL;
 
   is_deeply Assemble, <<END;
@@ -16408,7 +16408,7 @@ if (1) {
   my $S = CreateByteString;   my $s = $S->CreateBlockString;
   my $T = CreateByteString;   my $t = $T->CreateBlockString;
 
-  $s->append(source=>Vq(source, $c), Vq(size, 256));
+  $s->append(source=>V(source, $c), V(size, 256));
   $t->concatenate($s);
   $t->dump;
 
@@ -16435,13 +16435,13 @@ if (1) {                                                                        
   my $c = Rb(0..255);
   my $S = CreateByteString;   my $s = $S->CreateBlockString;
 
-  $s->append(source=>Vq(source, $c), Vq(size, 3));
+  $s->append(source=>V(source, $c), V(size, 3));
   $s->dump;
 
-  $s->insertChar(character=>Vq(source, 0x44), position => Vq(size, 2));
+  $s->insertChar(character=>V(source, 0x44), position => V(size, 2));
   $s->dump;
 
-  $s->insertChar(character=>Vq(source, 0x88), position => Vq(size, 2));
+  $s->insertChar(character=>V(source, 0x88), position => V(size, 2));
   $s->dump;
 
   ok Assemble(debug => 0, eq => <<END);
@@ -16466,13 +16466,13 @@ if (1) {                                                                        
   my $c = Rb(0..255);
   my $S = CreateByteString;   my $s = $S->CreateBlockString;
 
-  $s->append(source=>Vq(source, $c), Vq(size, 58));
+  $s->append(source=>V(source, $c), V(size, 58));
   $s->dump;
 
-  $s->insertChar(Vq(character, 0x44), Vq(position, 22));
+  $s->insertChar(V(character, 0x44), V(position, 22));
   $s->dump;
 
-  $s->insertChar(Vq(character, 0x88), Vq(position, 22));
+  $s->insertChar(V(character, 0x88), V(position, 22));
   $s->dump;
 
   ok Assemble(debug => 0, eq => <<END);
@@ -16505,13 +16505,13 @@ if (1) {                                                                        
   my $c = Rb(0..255);
   my $S = CreateByteString;   my $s = $S->CreateBlockString;
 
-  $s->append(source=>Vq(source, $c), Vq(size, 166));
+  $s->append(source=>V(source, $c), V(size, 166));
   $s->dump;
 
-  $s->insertChar(Vq(character, 0x44), Vq(position, 64));
+  $s->insertChar(V(character, 0x44), V(position, 64));
   $s->dump;
 
-  $s->insertChar(Vq(character, 0x88), Vq(position, 64));
+  $s->insertChar(V(character, 0x88), V(position, 64));
   $s->dump;
 
   ok Assemble(debug => 0, eq => <<END);
@@ -16558,9 +16558,9 @@ if (1) {                                                                        
   my $c = Rb(0..255);
   my $S = CreateByteString;   my $s = $S->CreateBlockString;
 
-  $s->append(source=>Vq(source, $c),  Vq(size, 3));      $s->dump;
-  $s->insertChar(Vq(character, 0x44), Vq(position, 64)); $s->dump;
-  $s->len(my $size = Vq(size));                          $size->outNL;
+  $s->append(source=>V(source, $c),  V(size, 3));      $s->dump;
+  $s->insertChar(V(character, 0x44), V(position, 64)); $s->dump;
+  $s->len(my $size = V(size));                          $size->outNL;
 
   ok Assemble(debug => 0, eq => <<END);
 Block String Dump
@@ -16579,9 +16579,9 @@ if (1) {                                                                        
   my $c = Rb(0..255);
   my $S = CreateByteString;   my $s = $S->CreateBlockString;
 
-  $s->append(source=>Vq(source, $c),  Vq(size, 165)); $s->dump;
-  $s->deleteChar(Vq(position, 0x44));                 $s->dump;
-  $s->len(my $size = Vq(size));                       $size->outNL;
+  $s->append(source=>V(source, $c),  V(size, 165)); $s->dump;
+  $s->deleteChar(V(position, 0x44));                 $s->dump;
+  $s->len(my $size = V(size));                       $size->outNL;
 
   ok Assemble(debug => 0, eq => <<END);
 Block String Dump
@@ -16610,8 +16610,8 @@ if (1) {                                                                        
   my $c = Rb(0..255);
   my $S = CreateByteString;   my $s = $S->CreateBlockString;
 
-  $s->append(source=>Vq(source, $c),  Vq(size, 110)); $s->dump;
-  $s->getCharacter(Vq(position, 0x44), my $out = Vq(out)); $out->outNL;
+  $s->append(source=>V(source, $c),  V(size, 110)); $s->dump;
+  $s->getCharacter(V(position, 0x44), my $out = V(out)); $out->outNL;
 
   ok Assemble(debug => 0, eq => <<END);
 Block String Dump
@@ -16627,9 +16627,9 @@ END
 #latest:;
 
 if (1) {                                                                        #TNasm::X86::Variable::setMask
-  my $z = Vq('zero', 0);
-  my $o = Vq('one',  1);
-  my $t = Vq('two',  2);
+  my $z = V('zero', 0);
+  my $o = V('one',  1);
+  my $t = V('two',  2);
   $z->setMask($o,       k7); PrintOutRegisterInHex k7;
   $z->setMask($t,       k6); PrintOutRegisterInHex k6;
   $z->setMask($o+$t,    k5); PrintOutRegisterInHex k5;
@@ -16658,11 +16658,11 @@ if (1) {                                                                        
   my $c = Rb(0..255);
   my $A = CreateByteString;  my $a = $A->CreateBlockArray;
 
-  $a->push(element => Vq($_, $_)) for 1..15;  $A->dump;
-  $a->push(element => Vq($_, $_)) for 0xff;   $A->dump;
-  $a->push(element => Vq($_, $_)) for 17..31; $A->dump;
-  $a->push(element => Vq($_, $_)) for 0xee;   $A->dump;
-  $a->push(element => Vq($_, $_)) for 33..36; $A->dump;
+  $a->push(element => V($_, $_)) for 1..15;  $A->dump;
+  $a->push(element => V($_, $_)) for 0xff;   $A->dump;
+  $a->push(element => V($_, $_)) for 17..31; $A->dump;
+  $a->push(element => V($_, $_)) for 0xee;   $A->dump;
+  $a->push(element => V($_, $_)) for 33..36; $A->dump;
 
   ok Assemble(debug => 0, eq => <<END);
 Byte String
@@ -16707,17 +16707,17 @@ END
 if (1) {                                                                        #TCreateBlockArray  #TBlockArray::push #TBlockArray::pop #TBlockArray::put #TBlockArray::get
   my $c = Rb(0..255);
   my $A = CreateByteString;  my $a = $A->CreateBlockArray;
-  my $l = Vq(limit, 15);
+  my $l = V(limit, 15);
   my $L = $l + 5;
 
   my sub put                                                                    # Put a constant or a variable
    {my ($e) = @_;
-    $a->push(element => (ref($e) ? $e : Vq($e, $e)));
+    $a->push(element => (ref($e) ? $e : V($e, $e)));
    };
 
   my sub get                                                                    # Get a constant or a variable
    {my ($i) = @_;
-    $a->get(index=>(my $v = ref($i) ? $i : Vq('index', $i)), my $e = Vq(element));
+    $a->get(index=>(my $v = ref($i) ? $i : V('index', $i)), my $e = V(element));
     $v->out("index: ", "  "); $e->outNL;
    };
 
@@ -16745,35 +16745,35 @@ if (1) {                                                                        
    });
 
   if (1)
-   {$a->put(my $i = Vq('index',  9), my $e = Vq(element, 0xFFF9));
+   {$a->put(my $i = V('index',  9), my $e = V(element, 0xFFF9));
     get(9);
    }
 
   if (1)
-   {$a->put(my $i = Vq('index', 19), my $e = Vq(element, 0xEEE9));
+   {$a->put(my $i = V('index', 19), my $e = V(element, 0xEEE9));
     get(19);
    }
 
   $a->dump;
   ($l+$L+1)->for(sub
    {my ($i, $start, $next, $end) = @_;
-    $a->pop(my $e = Vq(element));
+    $a->pop(my $e = V(element));
     $e->outNL;
     If (($e == 33)|($e == 32)|($e == 17)|($e == 16)|($e == 15)|($e == 14)|($e == 1)|($e == 0), sub
      {$a->dump;
      });
    });
 
-  Vq(limit, 38)->for(sub                                                        # Push using a loop and reusing the freed space
+  V(limit, 38)->for(sub                                                        # Push using a loop and reusing the freed space
    {my ($index, $start, $next, $end) = @_;
     $a->push(element=>$index*2);
    });
 
   $a->dump;
 
-  Vq(limit, 38)->for(sub                                                        # Push using a loop and reusing the freed space
+  V(limit, 38)->for(sub                                                        # Push using a loop and reusing the freed space
    {my ($index, $start, $next, $end) = @_;
-    $a->pop(my $e = Vq(element));
+    $a->pop(my $e = V(element));
     $e->outNL;
    });
 
@@ -16982,12 +16982,12 @@ if (1) {                                                                        
 
   my sub put
    {my ($e) = @_;
-    $a->push(element => Vq($e, $e));
+    $a->push(element => V($e, $e));
    };
 
   my sub get
    {my ($i) = @_;                                                               # Parameters
-    $a->get(my $v = Vq('index', $i), my $e = Vq(element));
+    $a->get(my $v = V('index', $i), my $e = V(element));
     $v->out; PrintOutString "  "; $e->outNL;
    };
 
@@ -17069,12 +17069,12 @@ if (1) {                                                                        
   my $a = $b->allocBlock;
   Vmovdqu8 zmm31, "[$format]";
   $b->putBlock($b->bs, $a, 31);
-  my $r = $b->chain($b->bs, Vq(start, 0x18), 4);       $r->outNL("chain1: ");
+  my $r = $b->chain($b->bs, V(start, 0x18), 4);       $r->outNL("chain1: ");
   my $s = $b->chain($b->bs, $r, 4);                    $s->outNL("chain2: ");
   my $t = $b->chain($b->bs, $s, 4);                    $t->outNL("chain3: ");
-  my $A = $b->chain($b->bs, Vq(start, 0x18), 4, 4, 4); $A->outNL("chain4: ");   # Get a long chain
+  my $A = $b->chain($b->bs, V(start, 0x18), 4, 4, 4); $A->outNL("chain4: ");   # Get a long chain
 
-  $b->putChain($b->bs, Vq(start, 0x18), Vq(end, 0xff), 4, 4, 4);                # Put at the end of a long chain
+  $b->putChain($b->bs, V(start, 0x18), V(end, 0xff), 4, 4, 4);                # Put at the end of a long chain
 
   $b->dump;
 
@@ -17100,10 +17100,10 @@ if (1) {                                                                        
     $$p{f}->outNL('F2: ');
    } name=> 'aaa', in => [qw(c)], io => [qw(d  e  f)];
 
-  my $c = Cq(c, -1);
-  my $d = Cq(d, -1);
-  my $e = Vq(e,  1);
-  my $f = Vq(f,  2);
+  my $c = K(c, -1);
+  my $d = K(d, -1);
+  my $e = V(e,  1);
+  my $f = V(f,  2);
 
   $sub->call($c, $d, $e, $f);
   $f->outNL('F3: ');
@@ -17157,7 +17157,7 @@ if (1) {                                                                        
   KeepFree r15;
   PopEax;  PrintRaxInHex($stdout, 3); PrintOutNL; KeepFree rax;
 
-  my $a = Vq('aaaa');
+  my $a = V('aaaa');
   $a->pop;
   $a->push;
   $a->outNL;
@@ -17367,7 +17367,7 @@ if (1) {
   my $b = CreateByteString;
   my $t = $b->CreateBlockMultiWayTree;
 
-  Vq(count, 24)->for(sub
+  V(count, 24)->for(sub
    {my ($index, $start, $next, $end) = @_;
     my $k = $index + 1; my $d = $k + 0x100;
     $t->insert($k, $d);
@@ -17378,17 +17378,17 @@ if (1) {
   PrintOutRegisterInHex zmm31, zmm30, zmm29;
 
   KeepFree zmm 26;
-  $t->getKeysDataNode(Vq(offset, 0xd8), 28,27,26);
+  $t->getKeysDataNode(V(offset, 0xd8), 28,27,26);
   PrintOutStringNL "Left";
   PrintOutRegisterInHex zmm28, zmm27, zmm26;
 
   KeepFree zmm 26;
-  $t->getKeysDataNode(Vq(offset, 0x258), 28,27,26);
+  $t->getKeysDataNode(V(offset, 0x258), 28,27,26);
   PrintOutStringNL "Left";
   PrintOutRegisterInHex zmm28, zmm27, zmm26;
 
   KeepFree zmm 26;
-  $t->getKeysDataNode(Vq(offset, 0x198), 28,27,26);
+  $t->getKeysDataNode(V(offset, 0x198), 28,27,26);
   PrintOutStringNL "Left";
   PrintOutRegisterInHex zmm28, zmm27, zmm26;
 
@@ -17419,7 +17419,7 @@ if (1) {                                                                        
   my $b = CreateByteString;                                                     # Resizable memory block
   my $t = $b->CreateBlockMultiWayTree;                                          # Multi way tree in memory block
 
-  Cq(count, $N)->for(sub                                                        # Add some entries to the tree
+  K(count, $N)->for(sub                                                        # Add some entries to the tree
    {my ($index, $start, $next, $end) = @_;
     my $k = $index + 1;
     $t->insert($k,      $k + 0x100);
@@ -17430,14 +17430,14 @@ if (1) {                                                                        
    {my ($iter, $end) = @_;
     $iter->key ->out('key: ');
     $iter->data->out(' data: ');
-    $iter->tree->depth($iter->node, my $D = Vq(depth));
+    $iter->tree->depth($iter->node, my $D = V(depth));
 
     $t->find($iter->key);
     $t->found->out(' found: '); $t->data->out(' data: '); $D->outNL(' depth: ');
    });
 
-  $t->find(Cq(key, 0xffff));  $t->found->outNL('Found: ');                      # Find some entries
-  $t->find(Cq(key, 0xd));     $t->found->outNL('Found: ');
+  $t->find(K(key, 0xffff));  $t->found->outNL('Found: ');                      # Find some entries
+  $t->find(K(key, 0xd));     $t->found->outNL('Found: ');
   If ($t->found,
   Then
    {$t->data->outNL("Data : ");
@@ -17478,7 +17478,7 @@ END
 if (1) {                                                                        #TLoadBitsIntoMaskRegister
   for (0..7)
    {ClearRegisters "k$_";
-    Cq($_,$_)->setMaskBit("k$_");
+    K($_,$_)->setMaskBit("k$_");
     PrintOutRegisterInHex "k$_";
    }
 
@@ -17503,11 +17503,11 @@ END
 if (1) {
   my $b = CreateByteString;
   my $t = $b->CreateBlockMultiWayTree;
-  my $d = Vq(data);
-  my $f = Vq(found);
+  my $d = V(data);
+  my $f = V(found);
 
   my $N = 24;
-  Vq(count, $N)->for(sub
+  V(count, $N)->for(sub
    {my ($index, $start, $next, $end) = @_;
     if (1)
      {my $k = $index *  2 + 1;      my $d = $k + 0x100;
@@ -17524,33 +17524,33 @@ if (1) {
   PrintOutRegisterInHex zmm31, zmm30, zmm29;
 
   KeepFree zmm 26;
-  $t->getKeysDataNode(Vq(offset, 0x258), 28,27,26);
+  $t->getKeysDataNode(V(offset, 0x258), 28,27,26);
   PrintOutStringNL "Left";
   PrintOutRegisterInHex zmm28, zmm27, zmm26;
 
   KeepFree zmm 26;
-  $t->getKeysDataNode(Vq(offset, 0x3d8), 28,27,26);
+  $t->getKeysDataNode(V(offset, 0x3d8), 28,27,26);
   PrintOutStringNL "Left";
   PrintOutRegisterInHex zmm28, zmm27, zmm26;
 
   KeepFree zmm 26;
-  $t->getKeysDataNode(Vq(offset, 0x318), 28,27,26);
+  $t->getKeysDataNode(V(offset, 0x318), 28,27,26);
   PrintOutStringNL "Left";
   PrintOutRegisterInHex zmm28, zmm27, zmm26;
 
   KeepFree zmm 26;
-  $t->getKeysDataNode(Vq(offset, 0xd8), 28,27,26);
+  $t->getKeysDataNode(V(offset, 0xd8), 28,27,26);
   PrintOutStringNL "Left";
   PrintOutRegisterInHex zmm28, zmm27, zmm26;
 
   KeepFree zmm 26;
-  $t->getKeysDataNode(Vq(offset, 0x198), 28,27,26);
+  $t->getKeysDataNode(V(offset, 0x198), 28,27,26);
   PrintOutStringNL "Left";
   PrintOutRegisterInHex zmm28, zmm27, zmm26;
 
 
-  $t->find(Vq(key, 0xffff));  $t->found->outNL('Found: ');
-  $t->find(Vq(key, 0x1b)  );  $t->found->outNL('Found: ');
+  $t->find(V(key, 0xffff));  $t->found->outNL('Found: ');
+  $t->find(V(key, 0x1b)  );  $t->found->outNL('Found: ');
 
   ok Assemble(debug => 0, eq => <<END);
 Root
@@ -17585,10 +17585,10 @@ END
 
 #latest:
 if (1) {                                                                        #TConvertUtf8ToUtf32
-  my @p = my ($out, $size, $fail) = (Vq(out), Vq(size), Vq('fail'));
+  my @p = my ($out, $size, $fail) = (V(out), V(size), V('fail'));
 
   my $Chars = Rb(0x24, 0xc2, 0xa2, 0xc9, 0x91, 0xE2, 0x82, 0xAC, 0xF0, 0x90, 0x8D, 0x88);
-  my $chars = Vq(chars, $Chars);
+  my $chars = V(chars, $Chars);
 
   GetNextUtf8CharAsUtf32 in=>$chars, @p;                                        # Dollar               UTF-8 Encoding: 0x24                UTF-32 Encoding: 0x00000024
   $out->out('out1 : ');     $size->outNL(' size : ');
@@ -17607,10 +17607,10 @@ if (1) {                                                                        
 
   my $statement = qq(𝖺\n 𝑎𝑠𝑠𝑖𝑔𝑛 【【𝖻 𝐩𝐥𝐮𝐬 𝖼】】\nAAAAAAAA);                        # A sample sentence to parse
 
-  my $s = Cq(statement, Rs($statement));
-  my $l = Cq(size,  length($statement));
+  my $s = K(statement, Rs($statement));
+  my $l = K(size,  length($statement));
 
-  AllocateMemory($l, my $address = Vq(address));                                # Allocate enough memory for a copy of the string
+  AllocateMemory($l, my $address = V(address));                                # Allocate enough memory for a copy of the string
   CopyMemory(source => $s, target => $address, $l);
 
   GetNextUtf8CharAsUtf32 in=>$address, @p;
@@ -17696,7 +17696,7 @@ END
 if (1) {
   my $b = CreateByteString;
   my $t = $b->CreateBlockMultiWayTree;
-  my $k = Vq(key,  15);
+  my $k = V(key,  15);
 
   $t->insertTree($k);  $t->data->outNL;
   $t->insertTree($k);  $t->data->outNL;                                         # Retrieve the sub tree rather than creating a new new sub tree
@@ -17711,8 +17711,8 @@ END
 if (1) {                                                                        # Replace a scalar with a tree in the first node
   my $b = CreateByteString;
   my $t = $b->CreateBlockMultiWayTree;
-  my $k = Vq(key,  15);
-  my $d = Vq(data, 14);
+  my $k = V(key,  15);
+  my $d = V(data, 14);
 
   $t->insert($k, $d);  $d->outNL;
   $t->insertTree($k);  $t->data->outNL;                                         # Retrieve the sub tree rather than creating a new new sub tree
@@ -17729,11 +17729,11 @@ END
 if (1) {                                                                        # Replace a scalar with a tree in the first node
   my $b = CreateByteString;
   my $t = $b->CreateBlockMultiWayTree;
-  my $k = Vq(key,  15);
-  my $d = Vq(data, 14);
+  my $k = V(key,  15);
+  my $d = V(data, 14);
 
   for my $i(1..11)                                                              # Create new sub trees
-   {$t->insertTree(Vq(key,  $i));  $t->data->outNL;                             # Retrieve the sub tree rather than creating a new new sub tree
+   {$t->insertTree(V(key,  $i));  $t->data->outNL;                             # Retrieve the sub tree rather than creating a new new sub tree
    }
 
   $b->dump;
@@ -17841,12 +17841,12 @@ END
 if (1) {                                                                        # Replace a scalar with a tree in the first node
   my $b = CreateByteString;
   my $t = $b->CreateBlockMultiWayTree;
-  my $k = Vq(key,  15);
+  my $k = V(key,  15);
 
   for my $i(1..15)                                                              # Overflow the root node to force a split
-   {my $d = Vq(data, 2 * $i);
-    $t->insert    (Vq(key,  $i), $d),   $d->outNL if     $i % 2;
-    $t->insertTree(Vq(key,  $i)), $t->data->outNL unless $i % 2;
+   {my $d = V(data, 2 * $i);
+    $t->insert    (V(key,  $i), $d),   $d->outNL if     $i % 2;
+    $t->insertTree(V(key,  $i)), $t->data->outNL unless $i % 2;
    }
 
   $b->dump(20);
@@ -17935,7 +17935,7 @@ if (1) {                                                                        
      $N % 2 == 1 or confess "Must be odd";
   my $b = CreateByteString;
   my $t = $b->CreateBlockMultiWayTree;
-  my $L = Vq(loop, $N);
+  my $L = V(loop, $N);
   my %I;
 
   for(my $i = 0; $i < ($N-$M); ++$i)                                            # The insertions we intend to make
@@ -18039,12 +18039,12 @@ i: 0000 0000 0000 002E  f: 0000 0000 0000 0000  d: 0000 0000 0000 0000  s: 0000 
 END
  }
 
-latest:
+#latest:
 if (1) {                                                                        # Deep sub tree testing
   my $N = 4;
   my $b = CreateByteString;
   my $T = $b->CreateBlockMultiWayTree;
-  my $L = Cq(loop, $N);
+  my $L = K(loop, $N);
   my $t = $T->Clone;
 
   $L->for(sub
@@ -18061,10 +18061,10 @@ if (1) {                                                                        
     $f->findAndClone($i);
     $i->out('i: '); $f->found->out('  f: '); $f->data->out('  d: '); $f->subTree->outNL('  s: ');
    });
-  $f->find(Cq(key, $N));
+  $f->find(K(key, $N));
   $L->out('N: '); $f->found->out('  f: '); $f->data->out('  d: ');   $f->subTree->outNL('  s: ');
 
-  is_deeply Assemble(debug=>1), <<END;
+  ok Assemble(debug => 0, eq => <<END);
 i: 0000 0000 0000 0000  f: 0000 0000 0000 0001  d: 0000 0000 0000 0098  s: 0000 0000 0000 0001
 i: 0000 0000 0000 0001  f: 0000 0000 0000 0001  d: 0000 0000 0000 0118  s: 0000 0000 0000 0001
 i: 0000 0000 0000 0002  f: 0000 0000 0000 0001  d: 0000 0000 0000 0198  s: 0000 0000 0000 0001
