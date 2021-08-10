@@ -5159,8 +5159,8 @@ sub Nasm::X86::BlockArray::put($@)                                              
 
 #D1 Block Multi Way Tree                                                        # Multi Way Tree constructed as a tree of blocks in a byte string
 
-sub Nasm::X86::BlockMultiWayTree::DescribeBlockMultiWayTree($;$)                # Return a descriptor for a multi way block tree at the specified offset in the specified byte string
- {my ($byteString, $header) = @_;                                               # Byte string descriptor, offset within byte string to header of the tree
+sub Nasm::X86::ByteString::DescribeBlockMultiWayTree($)                         # Return a descriptor for a multi way block tree in the specified byte string
+ {my ($byteString) = @_;                                                        # Byte string descriptor
   my $b = RegisterSize zmm0;                                                    # Size of a block == size of a zmm register
   my $o = RegisterSize eax;                                                     # Size of a double word
 
@@ -5170,20 +5170,20 @@ sub Nasm::X86::BlockMultiWayTree::DescribeBlockMultiWayTree($;$)                
 
   genHash(__PACKAGE__."::BlockMultiWayTree",                                    # Block multi way tree.
     bs           => $byteString,                                                # Byte string definition.
-    first        => ($header // Vq(first)),                                     # Variable addressing offset to first block of keys.
+    data         => Vq(data),                                                   # Variable containing the last data found
+    first        => Vq(first),                                                  # Variable addressing offset to first block of keys.
+    found        => Vq(found),                                                  # Variable indicating whether the last find was successful or not
     leftLength   => $length / 2,                                                # Left split length
     lengthOffset => $b - $o * 2,                                                # Offset of length in keys block.  The length field is a word - see: "MultiWayTree.svg"
     loop         => $b - $o,                                                    # Offset of keys, data, node loop.
     maxKeys      => $length,                                                    # Maximum number of keys.
     minKeys      => int($b / 2) - 1,                                            # Minimum number of keys.
     rightLength  => $length - 1 - $length / 2,                                  # Right split length
+    subTree      => Vq(subTree),                                                # Variable indicating whether the last find found a sub tree
     treeBits     => $b - $o * 2 + 2,                                            # Offset of tree bits in keys block.  The tree bits field is a word, each bit of which tells us whether the corresponding data element is the offset (or not) to a sub tree of this tree .
     treeBitsMask => 0x3fff,                                                     # 14 tree bits
     up           => $b - $o * 2,                                                # Offset of up in data block.
     width        => $o,                                                         # Width of a key or data slot.
-    found        => Vq(found),                                                  # Variable indicating whether the last find was successful or not
-    data         => Vq(data),                                                   # Variable containing the last data found
-    subTree      => Vq(subTree),                                                # Variable indicating whether the last find found a sub tree
    );
  }
 
@@ -5191,7 +5191,7 @@ sub Nasm::X86::ByteString::CreateBlockMultiWayTree($)                           
  {my ($byteString) = @_;                                                        # Byte string description
   @_ == 1 or confess;
 
-  my $s = Nasm::X86::BlockMultiWayTree::DescribeBlockMultiWayTree($byteString); # Return a descriptor for a multi way block tree at the specified offset in the specified byte string
+  my $s = $byteString->DescribeBlockMultiWayTree;                               # Return a descriptor for a multi way block tree at the specified offset in the specified byte string
 
   my $keys = $s->first = $s->allocBlock;                                        # Allocate first keys block
   PushR my @save = (zmm31);
@@ -5201,6 +5201,15 @@ sub Nasm::X86::ByteString::CreateBlockMultiWayTree($)                           
   PopR @save;
 
   $s                                                                            # Description of block array
+ }
+
+sub Nasm::X86::BlockMultiWayTree::Clone($)                                      # Clone the specified tree desciptions
+ {my ($tree) = @_;                                                              # Block multi way tree descriptor
+  @_ == 1 or confess;
+
+  my $t = $tree->bs->DescribeBlockMultiWayTree;                                  # Return a descriptor for a multi way block tree
+  $t->first->copy($tree->first);
+  $t
  }
 
 sub Nasm::X86::BlockMultiWayTree::allocKeysDataNode($$$$@)                      #P Allocate a keys/data/node block and place it in the numbered zmm registers
@@ -5787,6 +5796,16 @@ sub Nasm::X86::BlockMultiWayTree::find($$)                                      
            found => $t->found, subTree => $t->subTree);
  } # find
 
+sub Nasm::X86::BlockMultiWayTree::findAndClone($$)                              # Find a key in the specified tree and clone it is it is a sub tree.
+ {my ($t, $key) = @_;                                                           # Block multi way tree descriptor, key as a dword
+  @_ == 2 or confess;
+  $t->find($key);
+  If ($t->found,
+  Then
+   {$t->first->copy($t->data);                                                  # Copy the data variable to the first variable without checking whether it is valid
+   });
+ }
+
 sub Nasm::X86::BlockMultiWayTree::insertDataOrTree($$$$)                        # Insert either a key, data pair into the tree or create a sub tree at the specified key (if it does not already exist) and return the offset of the first block of the sub tree in the data variable.
  {my ($t, $tnd, $key, $data) = @_;                                              # Block multi way tree descriptor, 0 - data or 1 - tree, key as a dword, data as a dword
   @_ >= 2 or confess;
@@ -5963,10 +5982,17 @@ sub Nasm::X86::BlockMultiWayTree::insert($$$)                                   
   $t->insertDataOrTree(0, $key, $data)                                          # Insert data
  }
 
-sub Nasm::X86::BlockMultiWayTree::insertTree($$)                                # Insert a sub tree into the specified tree tree under the specified key and return a descriptor for it.  If the tree already exists, return a descriptor for it.
+sub Nasm::X86::BlockMultiWayTree::insertTree($$)                                # Insert a sub tree into the specified tree tree under the specified key.
  {my ($t, $key) = @_;                                                           # Block multi way tree descriptor, key as a dword
   @_ == 2 or confess;
-  $t->insertDataOrTree(1, $key, $t->data);
+  $t->insertDataOrTree(1, $key, $t->data)
+ }
+
+sub Nasm::X86::BlockMultiWayTree::insertTreeAndClone($$)                        # Insert a sub tree into the specified tree tree under the specified key and return a descriptor for it.  If the tree already exists, return a descriptor for it.
+ {my ($t, $key) = @_;                                                           # Block multi way tree descriptor, key as a dword
+  @_ == 2 or confess;
+  $t->insertTree($key);
+  $t->first->copy($t->data);                                                    # Copy the data variable to the first variable without checking whether it is valid
  }
 
 sub Nasm::X86::BlockMultiWayTree::getKeysData($$$$)                             # Load the keys and data blocks for a node
@@ -15044,7 +15070,7 @@ Test::More->builder->output("/dev/null") if $localTest;                         
 
 if ($^O =~ m(bsd|linux|cygwin)i)                                                # Supported systems
  {if (confirmHasCommandLineCommand(q(nasm)) and LocateIntelEmulator)            # Network assembler and Intel Software Development emulator
-   {plan tests => 120;
+   {plan tests => 150;
    }
   else
    {plan skip_all => qq(Nasm or Intel 64 emulator not available);
@@ -18013,13 +18039,47 @@ i: 0000 0000 0000 002E  f: 0000 0000 0000 0000  d: 0000 0000 0000 0000  s: 0000 
 END
  }
 
+latest:
+if (1) {                                                                        # Deep sub tree testing
+  my $N = 4;
+  my $b = CreateByteString;
+  my $T = $b->CreateBlockMultiWayTree;
+  my $L = Cq(loop, $N);
+  my $t = $T->Clone;
+
+  $L->for(sub
+   {my ($i, $start, $next, $end) = @_;
+    $t->insertTreeAndClone($i);
+    $t->first->errNL;
+   });
+
+  $t->insert($L, $L*2);
+
+  my $f = $T->Clone;
+  $L->for(sub
+   {my ($i, $start, $next, $end) = @_;
+    $f->findAndClone($i);
+    $i->out('i: '); $f->found->out('  f: '); $f->data->out('  d: '); $f->subTree->outNL('  s: ');
+   });
+  $f->find(Cq(key, $N));
+  $L->out('N: '); $f->found->out('  f: '); $f->data->out('  d: ');   $f->subTree->outNL('  s: ');
+
+  is_deeply Assemble(debug=>1), <<END;
+i: 0000 0000 0000 0000  f: 0000 0000 0000 0001  d: 0000 0000 0000 0098  s: 0000 0000 0000 0001
+i: 0000 0000 0000 0001  f: 0000 0000 0000 0001  d: 0000 0000 0000 0118  s: 0000 0000 0000 0001
+i: 0000 0000 0000 0002  f: 0000 0000 0000 0001  d: 0000 0000 0000 0198  s: 0000 0000 0000 0001
+i: 0000 0000 0000 0003  f: 0000 0000 0000 0001  d: 0000 0000 0000 0218  s: 0000 0000 0000 0001
+N: 0000 0000 0000 0004  f: 0000 0000 0000 0001  d: 0000 0000 0000 0008  s: 0000 0000 0000 0000
+END
+ }
+
 #latest:
 if (0) {
   is_deeply Assemble(debug=>1), <<END;
 END
  }
 
-ok 1 for 8..8;
+ok 1 for 1..30;
 
 unlink $_ for qw(hash print2 sde-log.txt sde-ptr-check.out.txt z.txt);          # Remove incidental files
 
