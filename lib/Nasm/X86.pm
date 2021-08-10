@@ -8384,7 +8384,32 @@ B<Example:>
     ClearZF;
     PrintOutZF;
 
-    ok Assemble =~ m(ZF=1.*ZF=0.*ZF=1.*ZF=1.*ZF=0)s;
+
+    SetZF;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+
+    IfZ  {PrintOutStringNL "Zero"}      sub {PrintOutStringNL "NOT zero"};
+    ClearZF;
+    IfNz {PrintOutStringNL "NOT zero"}  sub {PrintOutStringNL "Zero"};
+
+    Mov r15, 5;
+    Shr r15, 1; IfC  {PrintOutStringNL "Carry"}    sub {PrintOutStringNL "NO carry"};
+    Shr r15, 1; IfC  {PrintOutStringNL "Carry"}    sub {PrintOutStringNL "NO carry"};
+    Shr r15, 1; IfNc {PrintOutStringNL "NO carry"} sub {PrintOutStringNL "Carry"};
+    Shr r15, 1; IfNc {PrintOutStringNL "NO carry"} sub {PrintOutStringNL "Carry"};
+
+    ok Assemble(debug=>0, eq => <<END);
+  ZF=1
+  ZF=0
+  ZF=1
+  ZF=1
+  ZF=0
+  Zero
+  NOT zero
+  Carry
+  NO carry
+  Carry
+  NO carry
+  END
 
 
 =head3 ClearZF()
@@ -8410,7 +8435,32 @@ B<Example:>
 
     PrintOutZF;
 
-    ok Assemble =~ m(ZF=1.*ZF=0.*ZF=1.*ZF=1.*ZF=0)s;
+    SetZF;
+    IfZ  {PrintOutStringNL "Zero"}      sub {PrintOutStringNL "NOT zero"};
+
+    ClearZF;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+
+    IfNz {PrintOutStringNL "NOT zero"}  sub {PrintOutStringNL "Zero"};
+
+    Mov r15, 5;
+    Shr r15, 1; IfC  {PrintOutStringNL "Carry"}    sub {PrintOutStringNL "NO carry"};
+    Shr r15, 1; IfC  {PrintOutStringNL "Carry"}    sub {PrintOutStringNL "NO carry"};
+    Shr r15, 1; IfNc {PrintOutStringNL "NO carry"} sub {PrintOutStringNL "Carry"};
+    Shr r15, 1; IfNc {PrintOutStringNL "NO carry"} sub {PrintOutStringNL "Carry"};
+
+    ok Assemble(debug=>0, eq => <<END);
+  ZF=1
+  ZF=0
+  ZF=1
+  ZF=1
+  ZF=0
+  Zero
+  NOT zero
+  Carry
+  NO carry
+  Carry
+  NO carry
+  END
 
 
 =head2 Tracing
@@ -8861,6 +8911,48 @@ If the zero flag is set then execute the then body else the else body
   1  $then      Then - required
   2  $else      Else - optional
 
+B<Example:>
+
+
+    SetZF;
+    PrintOutZF;
+    ClearZF;
+    PrintOutZF;
+    SetZF;
+    PrintOutZF;
+    SetZF;
+    PrintOutZF;
+    ClearZF;
+    PrintOutZF;
+
+    SetZF;
+
+    IfZ  {PrintOutStringNL "Zero"}      sub {PrintOutStringNL "NOT zero"};  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+
+    ClearZF;
+    IfNz {PrintOutStringNL "NOT zero"}  sub {PrintOutStringNL "Zero"};
+
+    Mov r15, 5;
+    Shr r15, 1; IfC  {PrintOutStringNL "Carry"}    sub {PrintOutStringNL "NO carry"};
+    Shr r15, 1; IfC  {PrintOutStringNL "Carry"}    sub {PrintOutStringNL "NO carry"};
+    Shr r15, 1; IfNc {PrintOutStringNL "NO carry"} sub {PrintOutStringNL "Carry"};
+    Shr r15, 1; IfNc {PrintOutStringNL "NO carry"} sub {PrintOutStringNL "Carry"};
+
+    ok Assemble(debug=>0, eq => <<END);
+  ZF=1
+  ZF=0
+  ZF=1
+  ZF=1
+  ZF=0
+  Zero
+  NOT zero
+  Carry
+  NO carry
+  Carry
+  NO carry
+  END
+
+
 =head2 IfC($then, $else)
 
 If the carry flag is set then execute the then body else the else body
@@ -8869,6 +8961,50 @@ If the carry flag is set then execute the then body else the else body
   1  $then      Then - required
   2  $else      Else - optional
 
+B<Example:>
+
+
+    SetZF;
+    PrintOutZF;
+    ClearZF;
+    PrintOutZF;
+    SetZF;
+    PrintOutZF;
+    SetZF;
+    PrintOutZF;
+    ClearZF;
+    PrintOutZF;
+
+    SetZF;
+    IfZ  {PrintOutStringNL "Zero"}      sub {PrintOutStringNL "NOT zero"};
+    ClearZF;
+    IfNz {PrintOutStringNL "NOT zero"}  sub {PrintOutStringNL "Zero"};
+
+    Mov r15, 5;
+
+    Shr r15, 1; IfC  {PrintOutStringNL "Carry"}    sub {PrintOutStringNL "NO carry"};  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+
+
+    Shr r15, 1; IfC  {PrintOutStringNL "Carry"}    sub {PrintOutStringNL "NO carry"};  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+
+    Shr r15, 1; IfNc {PrintOutStringNL "NO carry"} sub {PrintOutStringNL "Carry"};
+    Shr r15, 1; IfNc {PrintOutStringNL "NO carry"} sub {PrintOutStringNL "Carry"};
+
+    ok Assemble(debug=>0, eq => <<END);
+  ZF=1
+  ZF=0
+  ZF=1
+  ZF=1
+  ZF=0
+  Zero
+  NOT zero
+  Carry
+  NO carry
+  Carry
+  NO carry
+  END
+
+
 =head2 IfNc($then, $else)
 
 If the carry flag is not set then execute the then body else the else body
@@ -8876,6 +9012,50 @@ If the carry flag is not set then execute the then body else the else body
      Parameter  Description
   1  $then      Then - required
   2  $else      Else - optional
+
+B<Example:>
+
+
+    SetZF;
+    PrintOutZF;
+    ClearZF;
+    PrintOutZF;
+    SetZF;
+    PrintOutZF;
+    SetZF;
+    PrintOutZF;
+    ClearZF;
+    PrintOutZF;
+
+    SetZF;
+    IfZ  {PrintOutStringNL "Zero"}      sub {PrintOutStringNL "NOT zero"};
+    ClearZF;
+    IfNz {PrintOutStringNL "NOT zero"}  sub {PrintOutStringNL "Zero"};
+
+    Mov r15, 5;
+    Shr r15, 1; IfC  {PrintOutStringNL "Carry"}    sub {PrintOutStringNL "NO carry"};
+    Shr r15, 1; IfC  {PrintOutStringNL "Carry"}    sub {PrintOutStringNL "NO carry"};
+
+    Shr r15, 1; IfNc {PrintOutStringNL "NO carry"} sub {PrintOutStringNL "Carry"};  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+
+
+    Shr r15, 1; IfNc {PrintOutStringNL "NO carry"} sub {PrintOutStringNL "Carry"};  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+
+
+    ok Assemble(debug=>0, eq => <<END);
+  ZF=1
+  ZF=0
+  ZF=1
+  ZF=1
+  ZF=0
+  Zero
+  NOT zero
+  Carry
+  NO carry
+  Carry
+  NO carry
+  END
+
 
 =head2 IfLt($then, $else)
 
@@ -9179,9 +9359,9 @@ Call a subroutine with a reordering of the registers.
   1  $body       Code to execute with reordered registers
   2  @registers  Registers to reorder
 
-=head2 Comment2(@comment)
+=head2 CommentWithTraceBack(@comment)
 
-Insert a comment into the assembly code
+Insert a comment into the assembly code with a traceback showing how it was generated
 
      Parameter  Description
   1  @comment   Text of comment
@@ -9509,7 +9689,30 @@ B<Example:>
     PrintOutZF;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
 
-    ok Assemble =~ m(ZF=1.*ZF=0.*ZF=1.*ZF=1.*ZF=0)s;
+    SetZF;
+    IfZ  {PrintOutStringNL "Zero"}      sub {PrintOutStringNL "NOT zero"};
+    ClearZF;
+    IfNz {PrintOutStringNL "NOT zero"}  sub {PrintOutStringNL "Zero"};
+
+    Mov r15, 5;
+    Shr r15, 1; IfC  {PrintOutStringNL "Carry"}    sub {PrintOutStringNL "NO carry"};
+    Shr r15, 1; IfC  {PrintOutStringNL "Carry"}    sub {PrintOutStringNL "NO carry"};
+    Shr r15, 1; IfNc {PrintOutStringNL "NO carry"} sub {PrintOutStringNL "Carry"};
+    Shr r15, 1; IfNc {PrintOutStringNL "NO carry"} sub {PrintOutStringNL "Carry"};
+
+    ok Assemble(debug=>0, eq => <<END);
+  ZF=1
+  ZF=0
+  ZF=1
+  ZF=1
+  ZF=0
+  Zero
+  NOT zero
+  Carry
+  NO carry
+  Carry
+  NO carry
+  END
 
 
 =head1 Variables
@@ -11571,14 +11774,14 @@ B<Example:>
   END
 
 
-=head3 MaskMemory(@variables)
+=head3 MaskMemory22(@variables)
 
 Write the specified byte into locations in the target mask that correspond to the locations in the source that contain the specified byte.
 
      Parameter   Description
   1  @variables  Variables
 
-=head3 MaskMemoryInRange4(@variables)
+=head3 MaskMemoryInRange4_22(@variables)
 
 Write the specified byte into locations in the target mask that correspond to the locations in the source that contain 4 bytes in the specified range.
 
@@ -14041,7 +14244,7 @@ Total size in bytes of all files assembled during testing
 
 16 L<Comment|/Comment> - Insert a comment into the assembly code
 
-17 L<Comment2|/Comment2> - Insert a comment into the assembly code
+17 L<CommentWithTraceBack|/CommentWithTraceBack> - Insert a comment into the assembly code with a traceback showing how it was generated
 
 18 L<ConcatenateShortStrings|/ConcatenateShortStrings> - Concatenate the numbered source zmm containing a short string with the short string in the numbered target zmm.
 
@@ -14185,9 +14388,9 @@ Total size in bytes of all files assembled during testing
 
 88 L<Macro|/Macro> - Create a sub with optional parameters name=> the name of the subroutine so it can be reused rather than regenerated, comment=> a comment describing the sub
 
-89 L<MaskMemory|/MaskMemory> - Write the specified byte into locations in the target mask that correspond to the locations in the source that contain the specified byte.
+89 L<MaskMemory22|/MaskMemory22> - Write the specified byte into locations in the target mask that correspond to the locations in the source that contain the specified byte.
 
-90 L<MaskMemoryInRange4|/MaskMemoryInRange4> - Write the specified byte into locations in the target mask that correspond to the locations in the source that contain 4 bytes in the specified range.
+90 L<MaskMemoryInRange4_22|/MaskMemoryInRange4_22> - Write the specified byte into locations in the target mask that correspond to the locations in the source that contain 4 bytes in the specified range.
 
 91 L<Nasm::X86::BlockArray::address|/Nasm::X86::BlockArray::address> - Address of a block string
 
@@ -14829,7 +15032,7 @@ if (1) {                                                                        
   ok Assemble =~ m(Hello World);
  }
 
-if (1) {                                                                        #TPrintOutRaxInHex #TPrintOutNL
+if (1) {                                                                        #TPrintOutRaxInHex #TPrintOutNL #TPrintOutString
   my $q = Rs('abababab');
   Mov(rax, "[$q]");
   PrintOutString "rax: ";
@@ -14907,7 +15110,9 @@ if (1) {                                                                        
   Mov r8,"[$q]";
   PrintOutRegisterInHex r8;
 
-  ok Assemble =~ m(r8: 6867 6665 6463 6261)s;
+  ok Assemble(debug=>0, eq => <<END);
+    r8: 6867 6665 6463 6261
+END
  }
 
 if (1) {
@@ -15431,7 +15636,8 @@ END
 
 # It is one of the happiest characteristics of this glorious country that official utterances are invariably regarded as unanswerable
 
-if (1) {                                                                        #TPrintOutZF #TSetZF #TClearZF
+#latest:;
+if (1) {                                                                        #TPrintOutZF #TSetZF #TClearZF #TIfC #TIfNc #TIfZ #IfNz
   SetZF;
   PrintOutZF;
   ClearZF;
@@ -15443,7 +15649,30 @@ if (1) {                                                                        
   ClearZF;
   PrintOutZF;
 
-  ok Assemble =~ m(ZF=1.*ZF=0.*ZF=1.*ZF=1.*ZF=0)s;
+  SetZF;
+  IfZ  {PrintOutStringNL "Zero"}      sub {PrintOutStringNL "NOT zero"};
+  ClearZF;
+  IfNz {PrintOutStringNL "NOT zero"}  sub {PrintOutStringNL "Zero"};
+
+  Mov r15, 5;
+  Shr r15, 1; IfC  {PrintOutStringNL "Carry"}    sub {PrintOutStringNL "NO carry"};
+  Shr r15, 1; IfC  {PrintOutStringNL "Carry"}    sub {PrintOutStringNL "NO carry"};
+  Shr r15, 1; IfNc {PrintOutStringNL "NO carry"} sub {PrintOutStringNL "Carry"};
+  Shr r15, 1; IfNc {PrintOutStringNL "NO carry"} sub {PrintOutStringNL "Carry"};
+
+  ok Assemble(debug=>0, eq => <<END);
+ZF=1
+ZF=0
+ZF=1
+ZF=1
+ZF=0
+Zero
+NOT zero
+Carry
+NO carry
+Carry
+NO carry
+END
  }
 
 if (1) {                                                                        #TSetLabel #TRegisterSize #TSaveFirstFour #TSaveFirstSeven #TRestoreFirstFour #TRestoreFirstSeven #TRestoreFirstFourExceptRax #TRestoreFirstSevenExceptRax #TRestoreFirstFourExceptRaxAndRdi #TRestoreFirstSevenExceptRaxAndRdi #TReverseBytesInRax
