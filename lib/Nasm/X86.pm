@@ -4,7 +4,7 @@
 # Philip R Brenan at appaapps dot com, Appa Apps Ltd Inc., 2021
 #-------------------------------------------------------------------------------
 # podDocumentation
-# Finished in 17.80s, bytes assembled: 7037414
+# Finished in 17.85s, bytes assembled: 7031920
 package Nasm::X86;
 our $VERSION = "20210812";
 use warnings FATAL => qw(all);
@@ -2137,10 +2137,12 @@ sub putIntoZmm($*$$)                                                            
   PopR "zmm$zmm";                                                               # Reload zmm
  }
 
-sub getBwdqFromMm($$$)                                                          # Get the numbered byte|word|double word|quad word from the numbered zmm register and return it in a variable
- {my ($size, $mm, $offset) = @_;                                                # Size of get, mm register, offset in bytes either as a constant or as a variable
-  @_ == 3 or confess;
+sub getBwdqFromMm($$$;$)                                                        # Get the numbered byte|word|double word|quad word from the numbered zmm register and return it in a variable
+ {my ($size, $mm, $offset, $Transfer) = @_;                                     # Size of get, mm register, offset in bytes either as a constant or as a variable, optional transfer register
+  @_ == 3 or @_ == 4 or confess;
   my $w = RegisterSize $mm;                                                     # Size of mm register
+  !$Transfer or $Transfer =~ m(\Ar\d+\Z) or confess "Need a numbered register"; # Check that we have a numbered register
+  my $transfer = $Transfer // r15;                                              # Register to use to transfer value to variable
 
   my $o;                                                                        # The offset into the mm register
   if (ref($offset))                                                             # The offset is being passed in a variable
@@ -2158,20 +2160,20 @@ sub getBwdqFromMm($$$)                                                          
       and confess "Cannot pass offset: '$offset', in r15, choose another register";
    }
 
-  PushR r15;
+  PushR $transfer unless $Transfer;
   Vmovdqu32 "[rsp-$w]", $mm;                                                    # Write below the stack
 
   if ($size !~ m(q|d))                                                          # Clear the register if necessary
    {ClearRegisters r15; KeepFree r15;
    }
 
-  Mov r15b, "[rsp+$o-$w]" if $size =~ m(b);                                     # Load byte register from offset
-  Mov r15w, "[rsp+$o-$w]" if $size =~ m(w);                                     # Load word register from offset
-  Mov r15d, "[rsp+$o-$w]" if $size =~ m(d);                                     # Load double word register from offset
-  Mov r15,  "[rsp+$o-$w]" if $size =~ m(q);                                     # Load register from offset
+  Mov $transfer."b", "[rsp+$o-$w]" if $size =~ m(b);                            # Load byte register from offset
+  Mov $transfer."w", "[rsp+$o-$w]" if $size =~ m(w);                            # Load word register from offset
+  Mov $transfer."d", "[rsp+$o-$w]" if $size =~ m(d);                            # Load double word register from offset
+  Mov $transfer,     "[rsp+$o-$w]" if $size =~ m(q);                            # Load register from offset
 
-  my $v = V("$size at offset $offset in $mm", r15);                             # Create variable
-  PopR r15;
+  my $v = V("$size at offset $offset in $mm", $transfer);                       # Create variable
+  PopR $transfer unless $Transfer;
   PopR $o if ref($offset);                                                      # The offset is being passed in a variable
 
   $v                                                                            # Return variable
@@ -2207,9 +2209,9 @@ sub getWFromZmm($$)                                                             
   getBwdqFromMm('w', "zmm$zmm", $offset)                                        # Get the numbered byte|word|double word|quad word from the numbered zmm register and return it in a variable
  }
 
-sub getDFromZmm($$)                                                             # Get the double word from the numbered zmm register and return it in a variable
- {my ($zmm, $offset) = @_;                                                      # Numbered zmm, offset in bytes
-  getBwdqFromMm('d', "zmm$zmm", $offset)                                        # Get the numbered byte|word|double word|quad word from the numbered zmm register and return it in a variable
+sub getDFromZmm($$;$)                                                           # Get the double word from the numbered zmm register and return it in a variable
+ {my ($zmm, $offset, $transfer) = @_;                                           # Numbered zmm, offset in bytes, optional transfer register
+  getBwdqFromMm('d', "zmm$zmm", $offset, $transfer)                             # Get the numbered byte|word|double word|quad word from the numbered zmm register and return it in a variable
  }
 
 sub getQFromZmm($$)                                                             # Get the quad word from the numbered zmm register and return it in a variable
@@ -5122,7 +5124,8 @@ sub Nasm::X86::BlockMultiWayTree::splitNode($$$$@)                              
     my $k = $$parameters{key};                                                  # Key we are looking for
     my $n = $$parameters{node};                                                 # Node to split
 
-    PushR my @save = (zmm 22..31);
+    PushR my @save = (r8, zmm 22..31);
+    my $transfer = r8;                                                          # Use this register to transfer data between zmm blocks and variables
     $t->getKeysDataNode($n, $K, $D, $N);                                        # Load root node
 
     If ($t->getLengthInKeys($K) != $t->maxKeys,
@@ -5133,7 +5136,7 @@ sub Nasm::X86::BlockMultiWayTree::splitNode($$$$@)                              
     my $p = $t->getUpFromData($D);                                              # Parent
     If ($p,
     Then                                                                        # Not the root
-     {my $s = getDFromZmm($K, $t->splittingKey);                                # Splitting key
+     {my $s = getDFromZmm $K, $t->splittingKey, $transfer;                      # Splitting key
       If ($k < $s,
       Then                                                                      # Split left node pushing remainder right so that we keep the key we are looking for in the left node
        {Vmovdqu64 zmm28, zmm31;                                                 # Load left node
@@ -5168,8 +5171,8 @@ sub Nasm::X86::BlockMultiWayTree::splitNode($$$$@)                              
      },
     Then
      {$t->splitFullRoot;                                                        # Root
-      my $l = getDFromZmm($N, 0);
-      my $r = getDFromZmm($N, $t->width);
+      my $l = getDFromZmm $N, 0,         $transfer;
+      my $r = getDFromZmm $N, $t->width, $transfer;
       $t->putKeysDataNode($n, $K, $D, $N);                                      # Save root
       $t->putKeysDataNode($l, 28, 27, 26);                                      # Save left
       $t->putKeysDataNode($r, 25, 24, 23);                                      # Save right
@@ -5292,7 +5295,8 @@ sub Nasm::X86::BlockMultiWayTree::splitFullRoot($)                              
     my $success = Label;                                                        # Short circuit if ladders by jumping directly to the end after a successful push
     my $B = $$parameters{bs};
 
-    PushR my @save = (k6, k7, zmm22);
+    PushR my @save = (k6, k7, r8, zmm22);
+    my $transfer = r8;                                                          # Use this register to transfer data between zmm blocks and variables
 
     If ($t->getLengthInKeys($TK) != $t->maxKeys, sub {Jmp $success});           # Only split full blocks
 
@@ -5343,8 +5347,8 @@ sub Nasm::X86::BlockMultiWayTree::splitFullRoot($)                              
       &Vmovdqu32   (zmm $RN.  "{k7}",    $Test);                                # Save right node
      });
 
-    my $k = getDFromZmm $TK, $ll * (my $w = $t->width);                         # Splitting key
-    my $d = getDFromZmm $TD, $ll * $w;                                          # Splitting data
+    my $k = getDFromZmm $TK, $ll * (my $w = $t->width), $transfer;              # Splitting key
+    my $d = getDFromZmm $TD, $ll * $w,                  $transfer;              # Splitting data
 
     LoadConstantIntoMaskRegister(k7, 1);                                        # Position of key, data in root node
     $k->zBroadCastD($Test);                                                     # Broadcast keys
@@ -5397,6 +5401,9 @@ sub Nasm::X86::BlockMultiWayTree::splitFullLeftOrRightNode($$)                  
    {my ($parameters) = @_;                                                      # Parameters
     my $success = Label;                                                        # Short circuit if ladders by jumping directly to the end after a successful push
 
+    PushR my @save = (r8);
+    my $transfer = r8;                                                          # Use this register to transfer data between zmm blocks and variables
+
     If ($t->getLengthInKeys($right ? $RK : $LK) != $t->maxKeys,                 # Only split full blocks
     Then {Jmp $success});
 
@@ -5412,8 +5419,8 @@ sub Nasm::X86::BlockMultiWayTree::splitFullLeftOrRightNode($$)                  
       &Vmovdqu32(zmm $LN."{k7}", $RN);                                          # Copy right nodes to left node
      }
 
-    my $k = getDFromZmm $LK, $ll * (my $w = $t->width);                         # Splitting key
-    my $d = getDFromZmm $LD, $ll * $w;                                          # Splitting data
+    my $k = getDFromZmm $LK, $ll * (my $w = $t->width), $transfer;              # Splitting key
+    my $d = getDFromZmm $LD, $ll * $w,                  $transfer;              # Splitting data
 
     LoadBitsIntoMaskRegister(k6, '', +$rl, -($ll+1));                           # Constant mask from one beyond split point to end of keys
     Kshiftrq k7, k6, $ll+1;                                                     # Constant mask for compressed right keys
@@ -5496,6 +5503,7 @@ sub Nasm::X86::BlockMultiWayTree::splitFullLeftOrRightNode($$)                  
     $t->putLengthInKeys($RK, K(rightLength, $rl));                              # Length of right node
 
     SetLabel $success;                                                          # Insert completed successfully
+    PopR @save;
    } name => "splitFullLeftOrRightNode_$right";
 
   $s->call;
@@ -5527,9 +5535,10 @@ sub Nasm::X86::BlockMultiWayTree::findAndSplit($@)                              
     my $K = $$p{key};                                                           # Key to find
 
     my $tree = $F->clone;                                                       # Start at the first key block
-    PushR my @save = (k6, k7, r14, r15, zmm28, zmm29, zmm30, zmm31);
+    PushR my @save = (k6, k7, r8, r14, r15, zmm28, zmm29, zmm30, zmm31);
     my $zmmKeys = 31; my $zmmData = 30; my $zmmNode = 29; my $zmmTest = 28;
     my $lengthMask = k6; my $testMask = k7;
+    my $transfer = r8;                                                          # Use this register to transfer data between zmm blocks and variables
 
     $K->setReg(r15);                                                            # Load key into test register
     Vpbroadcastd "zmm$zmmTest", r15d;
@@ -5540,7 +5549,7 @@ sub Nasm::X86::BlockMultiWayTree::findAndSplit($@)                              
     ForEver                                                                     # Step down through tree
      {my ($start, $end) = @_;                                                   # Parameters
       $t->getKeysDataNode($tree, $zmmKeys, $zmmData, $zmmNode);                 # Get the keys/data/nodes block
-      my $node = getDFromZmm($zmmNode, 0);                                      # First element of node block, which will be zero if we are on a leaf
+      my $node = getDFromZmm $zmmNode, 0, $transfer;                            # First element of node block, which will be zero if we are on a leaf
 
       my $l = $t->getLengthInKeys($zmmKeys);                                    # Length of the block
       $l->setMaskFirst($lengthMask);                                            # Set the length mask
@@ -5569,20 +5578,20 @@ sub Nasm::X86::BlockMultiWayTree::findAndSplit($@)                              
           $$p{offset} ->copy($tree);                                            # Offset of matching block
           Jmp $success;                                                         # Return
          });
-        $tree->copy(getDFromZmm($zmmNode, "r14*$W"));                           # Corresponding node
+        $tree->copy(getDFromZmm $zmmNode, "r14*$W", $transfer);                 # Corresponding node
         Jmp $start;                                                             # Loop
        };
 
       if (1)                                                                    # Key greater than all keys in block
        {If ($node == 0,
         Then                                                                    # We have reached a leaf
-         {$$p{compare}->copy(K(plusOne, +1));                                  # Key greater than last key
+         {$$p{compare}->copy(K(plusOne, +1));                                   # Key greater than last key
           $$p{index}  ->copy($l-1);                                             # Index of last key which we are greater than
           $$p{offset} ->copy($tree);                                            # Offset of matching block
           Jmp $success
          });
        };
-      $tree->copy(getDFromZmm($zmmNode, $l * $t->width));                       # Greater than all keys so step through last child node
+      $tree->copy(getDFromZmm $zmmNode, $l * $t->width, $transfer);             # Greater than all keys so step through last child node
      };
 
     SetLabel $success;                                                          # Insert completed successfully
@@ -6617,13 +6626,19 @@ END
 
   if (my $N = $options{countComments})                                          # Count the comments so we can see what code to put into sub routines
    {my %c;
-    $c{$_}++ for grep {m/\A\;/} readFile(q(z.asm));
+
+    for my $c(grep {m/\A\;/} readFile(q(z.asm)))
+     {if ($c =~ m(line (\d+)))
+       {$c{$1}++;
+       }
+     }
+
     my @c;
     for my $c(keys %c)                                                          # Remove comments that do not appear often
      {push @c, [$c{$c}, $c] if $c{$c} >= $N;
      }
     my @d = sort {$$b[0] <=> $$a[0]} @c;
-    say STDERR formatTable(\@d);                                                # Print frequently appearing comments
+    say STDERR formatTable(\@d, [qw(Count Line)]);                              # Print frequently appearing comments
    }
 
   return $exec if $k;                                                           # Executable wanted
