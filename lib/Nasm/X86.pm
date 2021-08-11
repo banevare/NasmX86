@@ -4,7 +4,7 @@
 # Philip R Brenan at appaapps dot com, Appa Apps Ltd Inc., 2021
 #-------------------------------------------------------------------------------
 # podDocumentation
-# Finished in 17.46s, bytes assembled: 7067174
+# Finished in 17.80s, bytes assembled: 7037414
 package Nasm::X86;
 our $VERSION = "20210812";
 use warnings FATAL => qw(all);
@@ -2240,6 +2240,7 @@ sub Nasm::X86::Variable::getQFromZmm($$$)                                       
 sub Nasm::X86::Variable::putBwdqIntoMm($$$$)                                    # Place the value of the content variable at the byte|word|double word|quad word in the numbered zmm register
  {my ($content, $size, $mm, $offset) = @_;                                      # Variable with content, size of put, numbered zmm, offset in bytes
   @_ == 4 or confess;
+  my $w = RegisterSize $mm;                                                     # Size of mm register
 
   my $o;                                                                        # The offset into the mm register
   if (ref($offset))                                                             # The offset is being passed in a variable
@@ -2251,15 +2252,20 @@ sub Nasm::X86::Variable::putBwdqIntoMm($$$$)                                    
   else                                                                          # The offset is being passed as a register expression
    {$o = $offset;
     Comment "Put $size at $offset in $mm";
-    $offset =~ m(r15) and confess "Cannot pass offset: '$offset', in r15, choose another register";
+    $offset >= 0 && $offset <= RegisterSize $mm or
+      confess "Out of range" if $offset =~ m(\A\d+\Z);                          # Check the offset if it is a number
+    $offset =~ m(r15) and
+      confess "Cannot pass offset: '$offset', in r15, choose another register";
    }
 
-  PushR my @save=(r15, $mm);   # Rewrite using masked move                      # Push target register
+  PushR my @save = (r15);                                                        # Push target register
   $content->setReg(r15);
-  Mov   "[rsp+$o]", r15b if $size =~ m(b);                                      # Write byte register
-  Mov   "[rsp+$o]", r15w if $size =~ m(w);                                      # Write word register
-  Mov   "[rsp+$o]", r15d if $size =~ m(d);                                      # Write double word register
-  Mov   "[rsp+$o]", r15  if $size =~ m(q);                                      # Write register
+  Vmovdqu32 "[rsp-$w]", $mm;                                                    # Write below the stack
+  Mov   "[rsp+$o-$w]", r15b if $size =~ m(b);                                   # Write byte register
+  Mov   "[rsp+$o-$w]", r15w if $size =~ m(w);                                   # Write word register
+  Mov   "[rsp+$o-$w]", r15d if $size =~ m(d);                                   # Write double word register
+  Mov   "[rsp+$o-$w]", r15  if $size =~ m(q);                                   # Write register
+  Vmovdqu32 $mm, "[rsp-$w]";                                                    # Read below the stack
   PopR @save;
 
   PopR $o if ref($offset);                                                      # The offset is being passed in a variable
