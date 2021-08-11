@@ -1055,14 +1055,18 @@ sub PrintString($@)                                                             
   my $l = length($c);
   my $a = Rs($c);
 
-  SaveFirstFour;
-  Comment "Write to channel  $channel, the string: ".dump($c);
-  Mov rax, 1;
-  Mov rdi, $channel;
-  Mov rsi, $a;
-  Mov rdx, $l;
-  Syscall;
-  RestoreFirstFour();
+  my $s = Subroutine
+   {SaveFirstFour;
+    Comment "Write to channel  $channel, the string: ".dump($c);
+    Mov rax, 1;
+    Mov rdi, $channel;
+    Mov rsi, $a;
+    Mov rdx, $l;
+    Syscall;
+    RestoreFirstFour();
+   } name => "PrintString_${channel}_${c}";
+
+  $s->call;
  }
 
 sub PrintErrString(@)                                                           # Print a constant string to stderr.
@@ -2147,7 +2151,7 @@ sub getBwdqFromMm($$$)                                                          
   PushR r15;
   PushRR $mm;    ##Rewrite using masked move rather than stack                  # Push source register
 
-  if ($size !~ m(q))                                                            # Clear the register if necessary
+  if ($size !~ m(q|d))                                                           # Clear the register if necessary
    {ClearRegisters r15; KeepFree r15;
    }
 
@@ -2158,7 +2162,6 @@ sub getBwdqFromMm($$$)                                                          
   Add rsp, RegisterSize $mm;                                                    # Pop source register
 
   my $v = V("$size at offset $offset in $mm", r15);                             # Create variable
-     $v->getReg(r15);                                                           # Load variable
   PopR r15;
 
   PopR $o if ref($offset);                                                      # The offset is being passed in a variable
@@ -5829,9 +5832,20 @@ sub Nasm::X86::BlockMultiWayTree::insert($$$)                                   
 sub Nasm::X86::BlockMultiWayTree::insertTree($$;$)                              # Insert a sub tree into the specified tree tree under the specified key. If no sub tree is supplied an empty one is provided gratis.
  {my ($t, $key, $subTree) = @_;                                                 # Block multi way tree descriptor, key as a dword
   @_ == 2 or @_ == 3 or confess;
-  !$subTree or ref($subTree) or confess "Sub tree required";
-  my $s = $subTree ? $subTree->first : undef;                                   # Sub tree
-  $t->insertDataOrTree($s ? 2 : 1, $key, $s);                                   # Request a sub tree be created if one has not been supplied
+  if (my $r = ref($subTree))
+   {if ($r =~ m(BlockMultiWayTree))
+     {$t->insertDataOrTree(2, $key, $subTree->first);                           # Insert a sub tree from a tree descriptor
+     }
+    elsif ($r =~ m(Variable))
+     {$t->insertDataOrTree(2, $key, $subTree);                                  # Insert a sub tree from a variable containing an offset to the first node of the tree
+     }
+    else
+     {confess "Reference to a variable or a tree required";
+     }
+   }
+  else                                                                          # Create a sub tree
+   {$t->insertDataOrTree(1, $key);                                              # Request a sub tree be created if one has not been supplied
+   }
  }
 
 sub Nasm::X86::BlockMultiWayTree::insertTreeAndClone($$)                        # Insert a new sub tree into the specified tree tree under the specified key and return a descriptor for it.  If the tree already exists, return a descriptor for it.
@@ -6528,7 +6542,7 @@ END
   $cmd .= qq( && $exec) unless $k;                                              # Execute automatically unless suppressed by user
 
   $assembliesPerformed++;
-  say STDERR qq($assembliesPerformed: $cmd);
+  lll qq($assembliesPerformed: $cmd);
   my $R    = qx($cmd);                                                          # Assemble and perhaps run
 
   if (!$k and $debug > 0 and -e $o3)                                            # Last trace
