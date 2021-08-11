@@ -5,7 +5,7 @@
 #-------------------------------------------------------------------------------
 # podDocumentation
 package Nasm::X86;
-our $VERSION = "20210810";
+our $VERSION = "20210811";
 use warnings FATAL => qw(all);
 use strict;
 use Carp qw(confess cluck);
@@ -1377,6 +1377,78 @@ sub R(*;$)                                                                      
   $r                                                                            # Size of the referenced variable
  }
 
+#D2 Print variables                                                             # Print the values of variables or the memory addressed by them
+
+sub Nasm::X86::Variable::dump($$$;$$)                                           #P Dump the value of a variable to the specified channel adding an optional title and new line if requested
+ {my ($left, $channel, $newLine, $title1, $title2) = @_;                        # Left variable, channel, new line required, optional leading title, optional trailing title
+  @_ >= 3 or confess;
+  if ($left->size == 3)                                                         # General purpose register
+   {PushR my @regs = (rax, rdi);
+    Mov rax, $left->label;                                                      # Address in memory
+    KeepFree rax;
+    if ($left->reference)
+     {Mov rax, "[rax]";
+      KeepFree rax;
+     }
+    Mov rax, "[rax]";
+    confess  dump($channel) unless $channel =~ m(\A1|2\Z);
+    PrintString  ($channel, $title1//$left->name.": ");
+    PrintRaxInHex($channel);
+    PrintString  ($channel, $title2) if defined $title2;
+    PrintNL      ($channel) if $newLine;
+    PopR @regs;
+   }
+  elsif ($left->size == 4)                                                      # xmm
+   {PushR my @regs = (rax, rdi);
+    my $l = $left->label;                                                       # Address in memory
+    my $s = RegisterSize rax;
+    Mov rax, "[$l]";
+    Mov rdi, "[$l+$s]";
+    &PrintErrString($title1//$left->name.": ");
+    &PrintErrRaxInHex();
+    &PrintErrString("  ");
+    KeepFree rax;
+    Mov rax, rdi;
+    &PrintErrRaxInHex();
+    &PrintErrNL();
+    PopR @regs;
+   }
+ }
+
+sub Nasm::X86::Variable::err($;$$)                                              # Dump the value of a variable on stderr
+ {my ($left, $title1, $title2) = @_;                                            # Left variable, optional leading title, optional trailing title
+  $left->dump($stderr, 0, $title1, $title2);
+ }
+
+sub Nasm::X86::Variable::out($;$$)                                              # Dump the value of a variable on stdout
+ {my ($left, $title1, $title2) = @_;                                            # Left variable, optional leading title, optional trailing title
+  $left->dump($stdout, 0, $title1, $title2);
+ }
+
+sub Nasm::X86::Variable::errNL($;$$)                                            # Dump the value of a variable on stderr and append a new line
+ {my ($left, $title1, $title2) = @_;                                            # Left variable, optional leading title, optional trailing title
+  $left->dump($stderr, 1, $title1, $title2);
+ }
+
+sub Nasm::X86::Variable::outNL($;$$)                                            # Dump the value of a variable on stdout and append a new line
+ {my ($left, $title1, $title2) = @_;                                            # Left variable, optional leading title, optional trailing title
+  $left->dump($stdout, 1, $title1, $title2);
+ }
+
+sub Nasm::X86::Variable::debug($)                                               # Dump the value of a variable on stdout with an indication of where the dump came from
+ {my ($left) = @_;                                                              # Left variable
+  PushR my @regs = (rax, rdi);
+  Mov rax, $left->label;                                                        # Address in memory
+  KeepFree rax;
+  Mov rax, "[rax]";
+  &PrintErrString(pad($left->name, 32).": ");
+  &PrintErrRaxInHex();
+  my ($p, $f, $l) = caller(0);                                                  # Position of caller in file
+  &PrintErrString("               at $f line $l");
+  &PrintErrNL();
+  PopR @regs;
+ }
+
 #D2 Operations                                                                  # Variable operations
 
 if (1)                                                                          # Define operator overloading for Variables
@@ -1729,78 +1801,6 @@ sub Nasm::X86::Variable::le($$)                                                 
 sub Nasm::X86::Variable::lt($$)                                                 # Check whether the left hand variable is less than the right hand variable
  {my ($left, $right) = @_;                                                      # Left variable,  right variable
   Nasm::X86::Variable::boolean(\&IfLt, q(lt), $left, $right);
- }
-
-#D2 Print variables                                                             # Print the values of variables or the memory addressed by them
-
-sub Nasm::X86::Variable::dump($$$;$$)                                           # Dump the value of a variable to the specified channel adding an optional title and new line if requested
- {my ($left, $channel, $newLine, $title1, $title2) = @_;                        # Left variable, channel, new line required, optional leading title, optional trailing title
-  @_ >= 3 or confess;
-  if ($left->size == 3)                                                         # General purpose register
-   {PushR my @regs = (rax, rdi);
-    Mov rax, $left->label;                                                      # Address in memory
-    KeepFree rax;
-    if ($left->reference)
-     {Mov rax, "[rax]";
-      KeepFree rax;
-     }
-    Mov rax, "[rax]";
-    confess  dump($channel) unless $channel =~ m(\A1|2\Z);
-    PrintString  ($channel, $title1//$left->name.": ");
-    PrintRaxInHex($channel);
-    PrintString  ($channel, $title2) if defined $title2;
-    PrintNL      ($channel) if $newLine;
-    PopR @regs;
-   }
-  elsif ($left->size == 4)                                                      # xmm
-   {PushR my @regs = (rax, rdi);
-    my $l = $left->label;                                                       # Address in memory
-    my $s = RegisterSize rax;
-    Mov rax, "[$l]";
-    Mov rdi, "[$l+$s]";
-    &PrintErrString($title1//$left->name.": ");
-    &PrintErrRaxInHex();
-    &PrintErrString("  ");
-    KeepFree rax;
-    Mov rax, rdi;
-    &PrintErrRaxInHex();
-    &PrintErrNL();
-    PopR @regs;
-   }
- }
-
-sub Nasm::X86::Variable::err($;$$)                                              # Dump the value of a variable on stderr
- {my ($left, $title1, $title2) = @_;                                            # Left variable, optional leading title, optional trailing title
-  $left->dump($stderr, 0, $title1, $title2);
- }
-
-sub Nasm::X86::Variable::out($;$$)                                              # Dump the value of a variable on stdout
- {my ($left, $title1, $title2) = @_;                                            # Left variable, optional leading title, optional trailing title
-  $left->dump($stdout, 0, $title1, $title2);
- }
-
-sub Nasm::X86::Variable::errNL($;$$)                                            # Dump the value of a variable on stderr and append a new line
- {my ($left, $title1, $title2) = @_;                                            # Left variable, optional leading title, optional trailing title
-  $left->dump($stderr, 1, $title1, $title2);
- }
-
-sub Nasm::X86::Variable::outNL($;$$)                                            # Dump the value of a variable on stdout and append a new line
- {my ($left, $title1, $title2) = @_;                                            # Left variable, optional leading title, optional trailing title
-  $left->dump($stdout, 1, $title1, $title2);
- }
-
-sub Nasm::X86::Variable::debug($)                                               # Dump the value of a variable on stdout with an indication of where the dump came from
- {my ($left) = @_;                                                              # Left variable
-  PushR my @regs = (rax, rdi);
-  Mov rax, $left->label;                                                        # Address in memory
-  KeepFree rax;
-  Mov rax, "[rax]";
-  &PrintErrString(pad($left->name, 32).": ");
-  &PrintErrRaxInHex();
-  my ($p, $f, $l) = caller(0);                                                  # Position of caller in file
-  &PrintErrString("               at $f line $l");
-  &PrintErrNL();
-  PopR @regs;
  }
 
 sub Nasm::X86::Variable::isRef($)                                               # Check whether the specified  variable is a reference to another variable
@@ -6613,7 +6613,7 @@ sub totalBytesAssembled                                                         
 # Export - eeee
 #-------------------------------------------------------------------------------
 
-if (1)                                                                          # Print exports
+if (0)                                                                          # Print exports
  {my @e;
   for my $a(sort keys %Nasm::X86::)
    {next if $a =~ m(BAIL_OUT|BEGIN|DATA|confirmHasCommandLineCommand|currentDirectory|fff|fileMd5Sum|fileSize|findFiles|firstNChars|formatTable|fpe|fpf|genHash|lll|owf|pad|readFile|stringsAreNotEqual|stringMd5Sum|temporaryFile);
