@@ -11,7 +11,7 @@ use warnings FATAL => qw(all);
 use strict;
 use Carp qw(confess cluck);
 use Data::Dump qw(dump);
-use Data::Table::Text qw(confirmHasCommandLineCommand convertUtf32ToUtf8 currentDirectory evalFile fff fileMd5Sum fileSize findFiles firstNChars formatTable fpe fpf genHash lll owf pad readFile stringsAreNotEqual stringMd5Sum temporaryFile);
+use Data::Table::Text qw(dumpFile confirmHasCommandLineCommand convertUtf32ToUtf8 currentDirectory evalFile fff fileMd5Sum fileSize findFiles firstNChars formatTable fpe fpf genHash lll owf pad readFile stringsAreNotEqual stringMd5Sum temporaryFile);
 use Asm::C qw(:all);
 use feature qw(say current_sub);
 
@@ -954,14 +954,20 @@ sub Nasm::X86::Sub::call($%)                                                    
     $p{$n} = $v;
    }
 
-  for my $p(keys $sub->in->%*)                                                  # Load input parameters
-   {confess "Missing in parameter: $p" unless my $v = $p{$p};
-    $sub->variables->{$p}->copy($v);
-   }
+  if ((keys $sub->in->%*) or (keys $sub->io->%*))                               # Transfer input parameters
+   {PushR my $transfer = r15;
 
-  for my $p(keys $sub->io->%*)                                                  # Load io parameters
-   {confess "Missing io parameter: $p" unless my $v = $p{$p};
-    $sub->variables->{$p}->copyAddress($v);
+    for my $p(keys $sub->in->%*)                                                # Load input parameters
+     {confess "Missing in parameter: $p" unless my $v = $p{$p};
+      $sub->variables->{$p}->copy($v, $transfer);
+     }
+
+    for my $p(keys $sub->io->%*)                                                # Load io parameters
+     {confess "Missing io parameter: $p" unless my $v = $p{$p};
+      $sub->variables->{$p}->copyAddress($v, $transfer);
+     }
+
+    PopR $transfer;
    }
 
   my $n = $$sub{name};
@@ -969,9 +975,13 @@ sub Nasm::X86::Sub::call($%)                                                    
   Call $$sub{start};                                                            # Call the sub routine
   Trace;
 
-  for my $p(keys $sub->out->%*)                                                 # Load output parameters
-   {confess qq(Missing output parameter: "$p") unless my $v = $p{$p};
-    $v->copy($sub->variables->{$p});
+  if ((keys $sub->out->%*))                                                     # Transfer output parameters
+   {PushR my $transfer = r15;
+    for my $p(keys $sub->out->%*)                                               # Load output parameters
+     {confess qq(Missing output parameter: "$p") unless my $v = $p{$p};
+      $v->copy($sub->variables->{$p}, $transfer);
+     }
+    PopR $transfer;
    }
  }
 
@@ -1023,7 +1033,6 @@ sub PrintNL($)                                                                  
  {my ($channel) = @_;                                                           # Channel to write on
   @_ == 1 or confess;
   my $a = Rb(10);
-  Comment "Write new line to $channel";
 
   Call Macro
    {SaveFirstFour;
@@ -1155,9 +1164,7 @@ sub PrintRegisterInHex($@)                                                      
   @_ >= 2 or confess;
 
   for my $r(@r)                                                                 # Each register to print
-   {Comment "Print register $r in Hex on channel: $channel";
-
-    Call Macro
+   {Call Macro
      {PrintString($channel,  sprintf("%6s: ", $r));                             # Register name
 
       my sub printReg(@)                                                        # Print the contents of a register
@@ -1294,7 +1301,7 @@ sub Variable($$;$%)                                                             
     RComment qq(Constant name: "$name", size: $size, value $expr);
    }
   else
-   {DComment qq(Variable name: "$name", size: $size);
+   {#DComment qq(Variable name: "$name", size: $size);
    }
 
   my $init = 0;                                                                 # Initializer
@@ -1481,9 +1488,11 @@ sub Nasm::X86::Variable::address($;$)                                           
   "[".$left-> label."$o]"
  }
 
-sub Nasm::X86::Variable::copy($$)                                               # Copy one variable into another
- {my ($left, $right) = @_;                                                      # Left variable, right variable
-  @_ == 2 or confess;
+sub Nasm::X86::Variable::copy($$;$)                                             # Copy one variable into another
+ {my ($left, $right, $Transfer) = @_;                                           # Left variable, right variable, optional transfer register
+  @_ == 2 or @_ == 3 or confess;
+
+  my $transfer = $Transfer // r15;                                              # Transfer register
 
   ref($right) =~ m(Variable) or confess "Variable required";
   my $l = $left ->address;
@@ -1492,29 +1501,56 @@ sub Nasm::X86::Variable::copy($$)                                               
   if ($left->size == 3 and $right->size == 3)
    {my $lr = $left ->reference;
     my $rr = $right->reference;
-    Comment "Copy variable: ".$right->name.' to '.$left->name;
-    PushR my @save = (r15);
-    Mov r15, $r;
+
+    PushR $transfer unless $Transfer;
+    Mov $transfer, $r;
     if ($rr)
-     {KeepFree r15;
-      Mov r15, "[r15]";
+     {Mov $transfer, "[$transfer]";
      }
     if (!$lr)
-     {Mov $l, r15;
+     {Mov $l, $transfer;
      }
     else
      {Comment "Copy ".$right->name.' to '.$left->name;
-      PushR my @save2 = (r14);
-      Mov r14, $l;
-      Mov "[r14]", r15;
-      PopR @save2;
+      my ($ref) = ChooseRegisters(1, $transfer);
+      PushR $ref;
+      Mov $ref, $l;
+      Mov "[$ref]", $transfer;
+      PopR $ref;
      }
-    PopR @save;
+    PopR $transfer unless $Transfer;
     return;
    }
 
   confess "Need more code";
  }
+
+sub Nasm::X86::Variable::copyAddress($$;$)                                      # Copy a reference to a variable
+ {my ($left, $right, $Transfer) = @_;                                           # Left variable, right variable, optional transfer register
+  my $transfer = $Transfer // r15;
+
+  $left->reference  or confess "Left hand side must be a reference";
+  $left->size == 3  or confess "Left hand side must be size 3";
+
+  my $l = $left ->address;
+  my $r = $right->address;
+
+  if ($right->size == 3)
+   {PushR $transfer unless $Transfer;
+    if ($right->reference)                                                      # Right is a reference so we copy its value
+     {Mov $transfer, $r;
+     }
+    else                                                                        # Right is not a reference so we copy its address
+     {Lea $transfer, $r;
+     }
+    Mov $l, $transfer;                                                          # Save value of address in left
+    PopR $transfer unless $Transfer;
+    return;
+   }
+
+  confess "Need more code";
+ }
+
 
 sub Nasm::X86::Variable::copyZF($)                                              # Copy the current state of the zero flag into a variable
  {my ($var) = @_;                                                               # Variable
@@ -1573,33 +1609,6 @@ sub Nasm::X86::Variable::clone($)                                               
 
   confess "Need more code";
  }
-
-sub Nasm::X86::Variable::copyAddress($$)                                        # Copy a reference to a variable
- {my ($left, $right) = @_;                                                      # Left variable, right variable
-
-  $left->reference  or confess "Left hand side must be a reference";
-  $left->size == 3  or confess "Left hand side must be size 3";
-
-  my $l = $left ->address;
-  my $r = $right->address;
-
-  if ($right->size == 3)
-   {Comment "Copy parameter address";
-    PushR my @save = (r15);
-    if ($right->reference)                                                      # Right is a reference so we copy its value
-     {Mov r15, $r;
-     }
-    else                                                                        # Right is not a reference so we copy its address
-     {Lea r15, $r;
-     }
-    Mov $l, r15;                                                                # Save value of address in left
-    PopR @save;
-    return;
-   }
-
-  confess "Need more code";
- }
-
 sub Nasm::X86::Variable::equals($$$)                                            # Equals operator
  {my ($op, $left, $right) = @_;                                                 # Operator, left variable,  right variable
   $op
@@ -2147,7 +2156,7 @@ sub getBwdqFromMm($$$)                                                          
   PushR r15;
   PushRR $mm;    ##Rewrite using masked move rather than stack                  # Push source register
 
-  if ($size !~ m(q|d))                                                           # Clear the register if necessary
+  if ($size !~ m(q|d))                                                          # Clear the register if necessary
    {ClearRegisters r15; KeepFree r15;
    }
 
@@ -6446,24 +6455,24 @@ my $assembliesPerformed = 0;                                                    
 my $totalBytesAssembled = 0;                                                    # Estimate the size of the output programs
 
 sub Assemble(%)                                                                 # Assemble the generated code
- {my (%options) = @_;                                                           # Options
+ {my (%options) = @_;                                                           # Options: debug => 0,1,2 eq => expected output on 1, commentCount => count comments
   Exit 0 unless @text > 4 and $text[-4] =~ m(Exit code:);                       # Exit with code 0 if no other exit has been taken
   my $debug = $options{debug}//0;                                               # 0 - none (minimal output), 1 - normal (debug output and confess of failure), 2 - failures (debug output and no confess on failure) .
 
   my $k = $options{keep};                                                       # Keep the executable
   my $r = join "\n", map {s/\s+\Z//sr}   @rodata;
   my $d = join "\n", map {s/\s+\Z//sr}   @data;
-  my $b = join "\n", map {s/\s+\Z//sr}   @bss;
+  my $B = join "\n", map {s/\s+\Z//sr}   @bss;
   my $t = join "\n", map {s/\s+\Z//sr}   @text;
   my $x = join "\n", map {qq(extern $_)} @extern;
   my $L = join " ",  map {qq(-l$_)}      @link;
-  my $a = <<END;
+  my $A = <<END;
 section .rodata
   $r
 section .data
   $d
 section .bss
-  $b
+  $B
 section .text
 $x
 global _start, main
@@ -6474,7 +6483,7 @@ global _start, main
   $t
 END
 
-  my $c    = owf(q(z.asm), $a);                                                 # Source file
+  my $c    = owf(q(z.asm), $A);                                                 # Source file
   my $e    = $k // q(z);                                                        # Executable file
   my $l    = q(z.txt);                                                          # Assembler listing
   my $o    = q(z.o);                                                            # Object file
@@ -6579,6 +6588,17 @@ END
   unlink $e unless $k;                                                          # Delete executable unless asked to keep it
   $totalBytesAssembled += fileSize $c;                                          # Estimate the size of the output program
   Start;                                                                        # Clear work areas for next assembly
+
+  if (my $N = $options{countComments})                                          # Count the comments so we can see what code to put into sub routines
+   {my %c;
+    $c{$_}++ for grep {m/\A\;/} readFile(q(z.asm));
+    my @c;
+    for my $c(keys %c)                                                          # Remove comments that do not appear often
+     {push @c, [$c{$c}, $c] if $c{$c} >= $N;
+     }
+    my @d = sort {$$b[0] <=> $$a[0]} @c;
+    say STDERR formatTable(\@d);                                                # Print frequently appearing comments
+   }
 
   return $exec if $k;                                                           # Executable wanted
 
