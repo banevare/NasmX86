@@ -5817,7 +5817,7 @@ sub Nasm::X86::BlockMultiWayTree::insertDataOrTree($$$$)                        
    in   => [qw(first key)], io => [qw(bs data)];                                # Data either supplies the data or returns the offset of the sub tree
 
   $s->call($t->address, first => $t->first, key => $key,
-    data => $tnd ? $t->data : $data);
+    data => $tnd == 1 ? $t->data : $data);
  } # insert
 
 sub Nasm::X86::BlockMultiWayTree::insert($$$)                                   # Insert a dword into into the specified tree at the specified key.
@@ -5829,7 +5829,9 @@ sub Nasm::X86::BlockMultiWayTree::insert($$$)                                   
 sub Nasm::X86::BlockMultiWayTree::insertTree($$;$)                              # Insert a sub tree into the specified tree tree under the specified key. If no sub tree is supplied an empty one is provided gratis.
  {my ($t, $key, $subTree) = @_;                                                 # Block multi way tree descriptor, key as a dword
   @_ == 2 or @_ == 3 or confess;
-  $t->insertDataOrTree($subTree ? 2 : 1, $key, $subTree);                       # Request a sub tree be created if one has not been supplied
+  !$subTree or ref($subTree) or confess "Sub tree required";
+  my $s = $subTree ? $subTree->first : undef;                                   # Sub tree
+  $t->insertDataOrTree($s ? 2 : 1, $key, $s);                                   # Request a sub tree be created if one has not been supplied
  }
 
 sub Nasm::X86::BlockMultiWayTree::insertTreeAndClone($$)                        # Insert a new sub tree into the specified tree tree under the specified key and return a descriptor for it.  If the tree already exists, return a descriptor for it.
@@ -6131,7 +6133,7 @@ sub Nasm::X86::BlockMultiWayTree::print($)                                      
  {my ($t) = @_;                                                                 # Block multi way tree
   @_ == 1 or confess;
 
-  PushR my @save = my ($count, $current, $base) = (r14, r15, rbp);
+  PushR my @save = my ($current, $base) = (r15, rbp);
   Mov  rbp, rsp;                                                                # Stack holds the trees still to be printed
   $t->first->setReg($current);
   Push $current;
@@ -6159,7 +6161,6 @@ sub Nasm::X86::BlockMultiWayTree::print($)                                      
        {$t->data->setReg($current);
         Push $current;
        });
-      Inc $count;                                                               # Count number of lines printed
      });
    });
 
@@ -17814,6 +17815,25 @@ END
  }
 
 #latest:
+if (1) {                                                                        #TNasm::X86::BlockMultiWayTree::insertTree
+  my $b = CreateByteString;
+  my $t = $b->CreateBlockMultiWayTree;
+  my $T = $b->CreateBlockMultiWayTree;
+
+  $T->insert    (K(key, 2), K(data, 4));
+  $t->insertTree(K(key, 1), $T);
+
+  $t->print;
+
+  ok Assemble(debug => 0, eq => <<END);
+Tree at:    r15: 0000 0000 0000 0018
+key: 0000 0000 0000 0001 data: 0000 0000 0000 0098 depth: 0000 0000 0000 0001
+Tree at:    r15: 0000 0000 0000 0098
+key: 0000 0000 0000 0002 data: 0000 0000 0000 0004 depth: 0000 0000 0000 0001
+END
+ }
+
+#latest:
 if (1) {                                                                        #TNasm::X86::BlockMultiWayTree::print
   my $L = V(loop, 45);
   my $b = CreateByteString;
@@ -17947,7 +17967,7 @@ if (0) {
 END
  }
 
-ok 1 for 2..42;
+ok 1 for 3..42;
 
 unlink $_ for qw(hash print2 sde-log.txt sde-ptr-check.out.txt z.txt);          # Remove incidental files
 
