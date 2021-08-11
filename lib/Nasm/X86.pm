@@ -4,7 +4,7 @@
 # Philip R Brenan at appaapps dot com, Appa Apps Ltd Inc., 2021
 #-------------------------------------------------------------------------------
 # podDocumentation
-# Finished in 17.85s, bytes assembled: 7031920
+# Finished in 17.68s, bytes assembled: 3786160
 package Nasm::X86;
 our $VERSION = "20210812";
 use warnings FATAL => qw(all);
@@ -3915,18 +3915,22 @@ sub Nasm::X86::ByteString::freeBlock($@)                                        
 sub Nasm::X86::ByteString::getBlock($$$$)                                       # Get the block with the specified offset in the specified block string and return it in the numbered zmm
  {my ($byteString, $bsa, $block, $zmm) = @_;                                    # Byte string descriptor, byte string variable, offset of the block as a variable, number of zmm register to contain block
   @_ == 4 or confess;
-  PushR my @save = (r14, r15);                                                  # Result register
-  defined($bsa) or confess;
-  $bsa->setReg(r15);                                                            # Byte string address
+  defined($bsa)   or confess;
   defined($block) or confess;
+
+  Comment "Get block start";
+  PushR my @save = (r14, r15);                                                  # Result register
   If ($block < $byteString->data->loc,
   Then                                                                          #DEBUG
    {PrintErrStringNL "Attempt to get block below start of byte string";
     Exit(1);
    });
+
+  $bsa  ->setReg(r15);                                                          # Byte string address
   $block->setReg(r14);                                                          # Offset of block in byte string
   Vmovdqu64 "zmm$zmm", "[r15+r14]";                                             # Read from memory
   PopR @save;                                                                   # Restore registers
+  Comment "Get block end";
  }
 
 sub Nasm::X86::ByteString::putBlock($$$$)                                       # Write the numbered zmm to the block at the specified offset in the specified byte string
@@ -5149,7 +5153,7 @@ sub Nasm::X86::BlockMultiWayTree::splitNode($$$$@)                              
         $t->splitFullLeftNode;
         $t->putKeysDataNode($p, $K, $D, $N);                                    # Save parent
         $t->putKeysDataNode($n, 28, 27, 26);                                    # Save left
-        my $r = $t->getLoop    (23);                                            # Offset of right keys
+        my $r = $t->getLoop    (23, $transfer);                                 # Offset of right keys
         $t->putUpIntoData  ($p, 24);                                            # Reparent new block
         $t->putKeysDataNode($r, 25, 24, 23);                                    # Save right back into node we just split
        },
@@ -5163,7 +5167,7 @@ sub Nasm::X86::BlockMultiWayTree::splitNode($$$$@)                              
         $t->getKeysDataNode($p, $K, $D, $N);                                    # Load parent
         $t->splitFullRightNode;
         $t->putKeysDataNode($p, $K, $D, $N);                                    # Save parent
-        my $l = $t->getLoop    (26);                                            # Offset of left keys
+        my $l = $t->getLoop    (26, $transfer);                                 # Offset of left keys
         $t->putUpIntoData  ($p, 27);                                            # Reparent new block
         $t->putKeysDataNode($l, 28, 27, 26);                                    # Save left
         $t->putKeysDataNode($n, 25, 24, 23);                                    # Save right back into node we just split
@@ -5301,18 +5305,18 @@ sub Nasm::X86::BlockMultiWayTree::splitFullRoot($)                              
     If ($t->getLengthInKeys($TK) != $t->maxKeys, sub {Jmp $success});           # Only split full blocks
 
     $t->allocKeysDataNode(  28, 27, 26);                                        # Allocate immediate children of the root
-    my $l = $t->getLoop(            26);
+    my $l = $t->getLoop(            26, $transfer);
     $t->putKeysDataNode($l, 28, 27, 26);
     $t->allocKeysDataNode  (25, 24, 23);
-    my $r = $t->getLoop            (23);
+    my $r = $t->getLoop            (23, $transfer);
     $t->putKeysDataNode($l, 25, 24, 23);
     $t->reParent       ($B, 28, 27, 26);                                        # Reparent grandchildren
     $t->reParent       ($B, 25, 24, 23);
 
-    my $n  = $t->getLoop($TD);                                                  # Offset of node block or zero if there is no node block
-    my $to = $t->getLoop($TN);                                                  # Offset of root block
-    my $lo = $t->getLoop($LN);                                                  # Offset of left block
-    my $ro = $t->getLoop($RN);                                                  # Offset of right block
+    my $n  = $t->getLoop($TD, $transfer);                                       # Offset of node block or zero if there is no node block
+    my $to = $t->getLoop($TN, $transfer);                                       # Offset of root block
+    my $lo = $t->getLoop($LN, $transfer);                                       # Offset of left block
+    my $ro = $t->getLoop($RN, $transfer);                                       # Offset of right block
 
     LoadBitsIntoMaskRegister(k7, "11",-$length);                                # Area to clear preserving loop and up/length
     &Vmovdqu32   (zmm $LK."{k7}{z}",   $LK);                                    # Clear left
@@ -5407,9 +5411,9 @@ sub Nasm::X86::BlockMultiWayTree::splitFullLeftOrRightNode($$)                  
     If ($t->getLengthInKeys($right ? $RK : $LK) != $t->maxKeys,                 # Only split full blocks
     Then {Jmp $success});
 
-    my $n  = $t->getLoop($right ? $RD : $LD);                                   # Offset of node block or zero if there is no node block for the right node
-    my $lo = $t->getLoop($LN);                                                  # Offset of left block
-    my $ro = $t->getLoop($RN);                                                  # Offset of right block
+    my $n  = $t->getLoop($right ? $RD : $LD, $transfer);                        # Offset of node block or zero if there is no node block for the right node
+    my $lo = $t->getLoop($LN, $transfer);                                       # Offset of left block
+    my $ro = $t->getLoop($RN, $transfer);                                       # Offset of right block
 
     if ($right)
      {LoadBitsIntoMaskRegister(k7, "00", +$length);                             # Left mask for keys and data
@@ -5617,11 +5621,11 @@ sub Nasm::X86::BlockMultiWayTree::find($$)                                      
     $$p{data}   ->copy(K(zero, 0));                                             # Data not yet found
     $$p{subTree}->copy(K(zero, 0));                                             # Not yet a sub tree
 
-
     my $tree = $F->clone;                                                       # Start at the first key block
-    PushR my @save = (k6, k7, r14, r15, zmm28, zmm29, zmm30, zmm31);
+    PushR my @save = (k6, k7, r8, r14, r15, zmm28, zmm29, zmm30, zmm31);
     my $zmmKeys = 31; my $zmmData = 30; my $zmmNode = 29; my $zmmTest = 28;
     my $lengthMask = k6; my $testMask = k7;
+    my $transfer = r8;                                                          # Use this register to transfer data between zmm blocks and variables
 
     $K->setReg(r15);                                                            # Load key into test register
     Vpbroadcastd "zmm$zmmTest", r15d;
@@ -5643,14 +5647,14 @@ sub Nasm::X86::BlockMultiWayTree::find($$)                                      
       Then
        {Kmovq r15, $testMask;
         Tzcnt r14, r15;                                                         # Trailing zeros
-        $$p{found}->copy(K(one, 1));                                           # Key found
-        $$p{data} ->copy(getDFromZmm($zmmData, "r14*$W"));                      # Data associated with the key
+        $$p{found}->copy(K(one, 1));                                            # Key found
+        $$p{data} ->copy(getDFromZmm $zmmData, "r14*$W", $transfer);            # Data associated with the key
         $t->isTree(r15, $zmmKeys);                                              # Check whether the data so found is a sub tree
         $$p{subTree}->copyZFInverted;                                           # Copy zero flag which opposes the notion that this element is a sub tree
         Jmp $success;                                                           # Return
        };
 
-      my $n = getDFromZmm($zmmNode, 0);                                         # First child empty implies we are on a leaf
+      my $n = getDFromZmm $zmmNode, 0, $transfer;                               # First child empty implies we are on a leaf
       If ($n == 0,
       Then                                                                      # Zero implies that this is a leaf node
        {Jmp $success;                                                           # Return
@@ -5663,10 +5667,10 @@ sub Nasm::X86::BlockMultiWayTree::find($$)                                      
       Then
        {Kmovq r15, $testMask;
         Tzcnt r14, r15;                                                         # Trailing zeros
-        $tree->copy(getDFromZmm($zmmNode, "r14*$W"));                           # Corresponding node
+        $tree->copy(getDFromZmm $zmmNode, "r14*$W", $transfer);                 # Corresponding node
         Jmp $next;                                                              # Loop
        };
-      $tree->copy(getDFromZmm($zmmNode, $l * $W));                              # Greater than all keys
+      $tree->copy(getDFromZmm $zmmNode, $l * $W, $transfer);                    # Greater than all keys
      });
     PrintErrStringNL "Stuck in find";                                           # We seem to be looping endlessly
     Exit(1);
@@ -5975,10 +5979,10 @@ sub Nasm::X86::BlockMultiWayTree::putUpIntoData($$$)                            
   $offset->putDIntoZmm($zmm, $t->lengthOffset);                                 # Save the up offset into the data block
  }
 
-sub Nasm::X86::BlockMultiWayTree::getLoop($$)                                   #P Return the value of the loop field as a variable
- {my ($t, $zmm) = @_;                                                           # Block multi way tree descriptor, numbered zmm
+sub Nasm::X86::BlockMultiWayTree::getLoop($$;$)                                 #P Return the value of the loop field as a variable
+ {my ($t, $zmm, $transfer) = @_;                                                # Block multi way tree descriptor, numbered zmm, optional transfer register
   @_ >= 1 or confess;
-  getDFromZmm($zmm, $t->loop);                                                  # Get loop field as a variable
+  getDFromZmm($zmm, $t->loop, $transfer);                                       # Get loop field as a variable
  }
 
 sub Nasm::X86::BlockMultiWayTree::putLoop($$$)                                  #P Set the value of the loop field from a variable
@@ -6618,16 +6622,15 @@ END
    {confess "SDE ERROR\n".readFile($o2);
    }
 
-  $totalBytesAssembled += fileSize $c;                                          # Estimate the size of the output programs
+  $totalBytesAssembled += fileSize $e;                                          # Estimate the size of the output program
+
   unlink $o;                                                                    # Delete files
   unlink $e unless $k;                                                          # Delete executable unless asked to keep it
-  $totalBytesAssembled += fileSize $c;                                          # Estimate the size of the output program
-  Start;                                                                        # Clear work areas for next assembly
 
   if (my $N = $options{countComments})                                          # Count the comments so we can see what code to put into sub routines
    {my %c;
 
-    for my $c(grep {m/\A\;/} readFile(q(z.asm)))
+    for my $c(grep {m/\A\;/} split /\n/, $A)
      {if ($c =~ m(line (\d+)))
        {$c{$1}++;
        }
@@ -6641,6 +6644,7 @@ END
     say STDERR formatTable(\@d, [qw(Count Line)]);                              # Print frequently appearing comments
    }
 
+  Start;                                                                        # Clear work areas for next assembly
   return $exec if $k;                                                           # Executable wanted
 
   if (defined(my $e = $options{eq}))                                            # Diff against expected
