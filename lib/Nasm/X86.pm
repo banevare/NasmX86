@@ -4,7 +4,7 @@
 # Philip R Brenan at appaapps dot com, Appa Apps Ltd Inc., 2021
 #-------------------------------------------------------------------------------
 # podDocumentation
-# Finished in 17.68s, bytes assembled: 3786160
+# Finished in 17.46s, bytes assembled: 3669616
 package Nasm::X86;
 our $VERSION = "20210812";
 use warnings FATAL => qw(all);
@@ -1784,9 +1784,46 @@ sub Nasm::X86::Variable::boolean($$$$)                                          
   confess "Need more code";
  }
 
+sub Nasm::X86::Variable::booleanC($$$$)                                         # Combine the left hand variable with the right hand variable via a boolean operator using a Cmove instruction
+ {my ($cmov, $op, $left, $right) = @_;                                          # conditional move instruction name, operator name, Left variable,  right variable
+
+  !ref($right) or ref($right) =~ m(Variable) or confess "Variable expected";
+  my $r = ref($right) ? $right->address : $right;                               # Right can be either a variable reference or a constant
+
+  if ($left->size == 3)
+   {PushR r15;
+    Mov r15, $left ->address;
+    if ($left->reference)                                                       # Dereference left if necessary
+     {Mov r15, "[r15]";
+     }
+    if (ref($right) and $right->reference)                                      # Dereference on right if necessary
+     {PushR r14;
+      Mov r14, $right ->address;
+      Mov r14, "[r14]";
+      Cmp r15, r14;
+     }
+    elsif (ref($right))                                                         # Variable but not a reference on the right
+     {Cmp r15, $right->address;
+     }
+    else                                                                        # Constant on the right
+     {Cmp r15, $right;
+     }
+
+    Mov r15, 1;                                                                 # Place a one below the stack
+    my $w = RegisterSize r15;
+    Mov "[rsp-$w]", r15;
+    Mov r15, 0;                                                                 # Assume the result was false
+    &$cmov(r15, "[rsp-$w]");                                                    # Indicate true result
+    my $v = V(join(' ', '('.$left->name, $op, (ref($right) ? $right->name : '').')'), r15);
+    PopR r15;
+    return $v;
+   }
+  confess "Need more code";
+ }
+
 sub Nasm::X86::Variable::eq($$)                                                 # Check whether the left hand variable is equal to the right hand variable
  {my ($left, $right) = @_;                                                      # Left variable,  right variable
-  Nasm::X86::Variable::boolean(\&IfEq, q(eq), $left, $right);
+  Nasm::X86::Variable::booleanC(\&Cmove, q(eq), $left, $right);
  }
 
 sub Nasm::X86::Variable::ne($$)                                                 # Check whether the left hand variable is not equal to the right hand variable
@@ -1796,22 +1833,22 @@ sub Nasm::X86::Variable::ne($$)                                                 
 
 sub Nasm::X86::Variable::ge($$)                                                 # Check whether the left hand variable is greater than or equal to the right hand variable
  {my ($left, $right) = @_;                                                      # Left variable,  right variable
-  Nasm::X86::Variable::boolean(\&IfGe, q(ge), $left, $right);
+  Nasm::X86::Variable::booleanC(\&Cmovge, q(ge), $left, $right);
  }
 
 sub Nasm::X86::Variable::gt($$)                                                 # Check whether the left hand variable is greater than the right hand variable
  {my ($left, $right) = @_;                                                      # Left variable,  right variable
-  Nasm::X86::Variable::boolean(\&IfGt, q(gt), $left, $right);
+  Nasm::X86::Variable::booleanC(\&Cmovg, q(gt), $left, $right);
  }
 
 sub Nasm::X86::Variable::le($$)                                                 # Check whether the left hand variable is less than or equal to the right hand variable
  {my ($left, $right) = @_;                                                      # Left variable,  right variable
-  Nasm::X86::Variable::boolean(\&IfLe, q(le), $left, $right);
+  Nasm::X86::Variable::booleanC(\&Cmovle, q(le), $left, $right);
  }
 
 sub Nasm::X86::Variable::lt($$)                                                 # Check whether the left hand variable is less than the right hand variable
  {my ($left, $right) = @_;                                                      # Left variable,  right variable
-  Nasm::X86::Variable::boolean(\&IfLt, q(lt), $left, $right);
+  Nasm::X86::Variable::booleanC(\&Cmovl, q(lt), $left, $right);
  }
 
 sub Nasm::X86::Variable::isRef($)                                               # Check whether the specified  variable is a reference to another variable
@@ -15971,8 +16008,8 @@ END
 
 #latest:;
 if (1) {                                                                        #TNasm::X86::Variable::dump  #TNasm::X86::Variable::print #TThen #TElse #TV #TK
-  my $a = V(a, 3); $a->outNL;
-  my $b = K(b, 2); $b->outNL;
+  my $a = V(a, 3);  $a->outNL;
+  my $b = K(b, 2);  $b->outNL;
   my $c = $a +  $b; $c->outNL;
   my $d = $c -  $a; $d->outNL;
   my $e = $d == $b; $e->outNL;
