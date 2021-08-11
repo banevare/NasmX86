@@ -6398,20 +6398,18 @@ sub Start()                                                                     
 
 sub Exit(;$)                                                                    # Exit with the specified return code or zero if no return code supplied.  Assemble() automatically adds a call to Exit(0) if the last operation in the program is not a call to Exit.
  {my ($c) = @_;                                                                 # Return code
-  PushR my @save = (rax, rdi);
-  if (@_ == 0 or $c == 0)
-   {Comment "Exit code: 0";
-    KeepFree  rdi;
-    Mov rdi, 0;
-   }
-  elsif (@_ == 1)
+  $c //= 0;
+  my $s = Subroutine
    {Comment "Exit code: $c";
+    PushR my @save = (rax, rdi);
     KeepFree  rdi;
     Mov rdi, $c;
-   }
-  Mov rax, 60;
-  Syscall;
-  PopR @save;
+    Mov rax, 60;
+    Syscall;
+    PopR @save;
+   } name => "Exit_$c";
+
+  $s->call;
  }
 
 my $LocateIntelEmulator;                                                        # Location of Intel Software Development Emulator
