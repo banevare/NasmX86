@@ -4,6 +4,7 @@
 # Philip R Brenan at appaapps dot com, Appa Apps Ltd Inc., 2021
 #-------------------------------------------------------------------------------
 # podDocumentation
+# Time: 18.3699929714203 bytes assembled: 9045188
 package Nasm::X86;
 our $VERSION = "20210812";
 use warnings FATAL => qw(all);
@@ -706,8 +707,7 @@ sub If($$;$)                                                                    
     __SUB__->(q(Jz), $then, $else);
    }
   elsif (!$else)                                                                # No else
-   {Comment "if then";
-    my $end = Label;
+   {my $end = Label;
     push @text, <<END;
     $jump $end;
 END
@@ -716,8 +716,7 @@ END
     SetLabel $end;
    }
   else                                                                          # With else
-   {Comment "if then else";
-    my $endIf     = Label;
+   {my $endIf     = Label;
     my $startElse = Label;
     push @text, <<END;
     $jump $startElse
@@ -1353,13 +1352,10 @@ sub Variable($$;$%)                                                             
     constant  => $options{constant},                                            # Constant if true
     expr      => $expr,                                                         # Expression that initializes the variable
     label     => $label,                                                        # Address in memory
-    laneSize  => undef,                                                         # Size of the lanes in this variable
+#   laneSize  => undef,                                                         # Size of the lanes in this variable
     name      => $name,                                                         # Name of the variable
     purpose   => undef,                                                         # Purpose of this variable
-#   reference => ref($expr) ? $expr->size : undef,                              # Reference to another variable
     reference => undef,                                                         # Reference to another variable
-    saturate  => undef,                                                         # Computations should saturate rather then wrap if true
-    signed    => undef,                                                         # Elements of x|y|zmm registers are signed if true
     size      => $nSize,                                                        # Size of variable
    );
  }
