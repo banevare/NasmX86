@@ -5,7 +5,7 @@
 #-------------------------------------------------------------------------------
 # podDocumentation
 package Nasm::X86;
-our $VERSION = "20210811";
+our $VERSION = "20210812";
 use warnings FATAL => qw(all);
 use strict;
 use Carp qw(confess cluck);
@@ -3374,7 +3374,7 @@ sub ConvertUtf8ToUtf32(@)                                                       
       $size->setReg(r10);                                                       # Decoded this many bytes
       Add   r14, r10;                                                           # Move up in input string
       Cmp   r14, r15;
-      IfGe {Jmp $end};                                                          # Exhausted input string
+      Jge $end;                                                                 # Exhausted input string
     };
 
     $$p{u32}   ->copy($address);                                                # Address of allocation
@@ -3385,47 +3385,6 @@ sub ConvertUtf8ToUtf32(@)                                                       
 
   $s->call(@parameters);
  } # ConvertUtf8ToUtf32
-
-#sub ClassifyCharacters4(@)                                                      # Classify the utf32 characters in a block of memory of specified length using the classification held in zmm0: zmm0 should be  formatted in double words with each word having the classification in the highest 8 bits and the utf32 character so classified in the lower 21 bits.  The classification bits are copied into the high unused) byte of each utf32 character in the block of memory.
-# {my (@parameters) = @_;                                                        # Parameters
-#  @_ >= 1 or confess;
-#
-#  my $s = Subroutine
-#   {my ($p) = @_;                                                               # Parameters
-#    Comment "Classify characters in utf32 format";
-#    my $finish = Label;
-#
-#    PushR my @save =  (r14, r15, k6, k7, zmm 29..31);
-#
-#    Mov r15, 0x88888888;                                                        # Create a mask for the classification bytes
-#    Kmovq k7, r15;
-#    KeepFree r15;
-#    Kshiftlq k6, k7, 32;                                                        # Move mask into upper half of register
-#    Korq  k7, k6, k7;                                                           # Classification bytes masked by k7
-#
-#    Knotq k7, k7;                                                               # Utf32 characters mask
-#    Vmovdqu8   "zmm31\{k7}{z}", zmm0;                                           # utf32 characters to match
-#
-#    $$p{address}->setReg(r15);                                                  # Address of first utf32 character
-#    $$p{size}->for(sub                                                          # Process each utf32 character in the block of memory
-#     {my ($index, $start, $next, $end) = @_;
-#
-#      Mov r14d, "[r15]";                                                        # Load utf32 character
-#      Add r15, RegisterSize r14d;                                               # Move up to next utf32 character
-#      Vpbroadcastd zmm30, r14d;                                                 # 16 copies of the utf32  character to be processed
-#      Vpcmpud  k7, zmm30, zmm31, 0;                                             # Look for one matching character
-#      Ktestw k7, k7;                                                            # Was there a match
-#      IfZ {Jmp $next};                                                          # No character was matched
-#      Vpcompressd "zmm30\{k7}", zmm0;                                           # Place classification byte at start of xmm
-#      Vpextrb "[r15-1]", xmm30, 3;                                              # Extract classification character
-#     });
-#
-#    SetLabel $finish;
-#    PopR @save;
-#   } in => [qw(address  size )];
-#
-#  $s->call(@parameters);
-# } # ClassifyCharacters4
 
 sub ClassifyRange($@)                                                           #P Implementation of ClassifyInRange and ClassifyWithinRange
  {my ($recordOffsetInRange, @parameters) = @_;                                  # Record offset in classification in high byte if 1 else in classification if 2, parameters
@@ -3459,7 +3418,7 @@ sub ClassifyRange($@)                                                           
       Vpcmpud  k7,       zmm29, zmm30, 5;                                       # Look for start of range
       Vpcmpud "k6\{k7}", zmm29, zmm31, 2;                                       # Look for end of range
       Ktestw k6, k6;                                                            # Was there a match ?
-      IfZ {Jmp $next};                                                          # No character was matched
+      Jz $next;                                                                 # No character was matched
                                                                                 # Process matched character
       if ($recordOffsetInRange == 1)                                            # Record offset in classification range in high byte as used for bracket matching
        {Vpcompressd "zmm29\{k6}", zmm0;                                         # Place classification byte at start of xmm29
@@ -5082,7 +5041,7 @@ sub Nasm::X86::ByteString::CreateBlockMultiWayTree($)                           
   my $keys = $s->first = $s->allocBlock;                                        # Allocate first keys block
   PushR my @save = (zmm31);
   ClearRegisters zmm31;
-  $s->putLoop($s->allocBlock, 31);                                              # Keys loops to data
+  $s->putLoop($s->allocBlock, 31);                                              # Keys loops to data - for the first 7 keys we should store the corresponding data further up in the block rather than creating a new block.
   $byteString->putBlock($s->address, $keys, 31);                                # Write first keys
   PopR @save;
 
@@ -6167,6 +6126,47 @@ sub Nasm::X86::BlockMultiWayTree::expandTreeBitsWithOne($$$)                    
   $t->expandTreeBitsWithZeroOrOne(1, $zmm, $point);                             # Insert a one into the tree bits field in the numbered zmm at the specified point
  }
 
+#D2 Print                                                                       # Print a tree
+
+sub Nasm::X86::BlockMultiWayTree::print($)                                      # Print a tree
+ {my ($t) = @_;                                                                 # Block multi way tree
+  @_ == 1 or confess;
+
+  PushR my @save = my ($count, $current, $base) = (r14, r15, rbp);
+  Mov  rbp, rsp;                                                                # Stack holds the trees still to be printed
+  $t->first->setReg($current);
+  Push $current;
+
+  K(loop,99)->for(sub                                                           # Print each sub tree found
+   {my ($index, $start, $next, $end) = @_;
+
+    Cmp rsp, rbp;                                                               # Check for more stacked entries
+    Jge $end;                                                                   # Stack grows down
+    Pop $current;
+
+    $t->first->getReg($current);                                                # Load Latest tree to iterate from stack
+    PrintOutString "Tree at: ";
+    PrintOutRegisterInHex $current;
+
+    $t->by(sub                                                                  # Iterate through the tree
+     {my ($iter, $end) = @_;
+      $iter->tree->depth($iter->node, my $D = V(depth));
+      $iter->key ->out('key: ');
+      $iter->data->out(' data: ');
+      $D   ->outNL    (' depth: ');
+      $t->find($iter->key);                                                     # Slow way to find out if this is a subtree
+      If ($t->subTree,
+      Then
+       {$t->data->setReg($current);
+        Push $current;
+       });
+      Inc $count;                                                               # Count number of lines printed
+     });
+   });
+
+  PopR @save;
+ }
+
 #D2 Iteration                                                                   # Iterate through a tree non recursively
 
 sub Nasm::X86::BlockMultiWayTree::iterator($)                                   # Iterate through a multi way tree
@@ -6935,7 +6935,7 @@ present. If the test fails we continue rather than calling L<Carp::confess>.
 Generate X86 assembler code using Perl as a macro pre-processor.
 
 
-Version "20210810".
+Version "20210812".
 
 
 The following sections describe the methods in each functional area of this
@@ -9868,6 +9868,53 @@ Define a reference variable
   1  $name      Name of variable
   2  $size      Variable being referenced
 
+=head2 Print variables
+
+Print the values of variables or the memory addressed by them
+
+=head3 Nasm::X86::Variable::err($left, $title1, $title2)
+
+Dump the value of a variable on stderr
+
+     Parameter  Description
+  1  $left      Left variable
+  2  $title1    Optional leading title
+  3  $title2    Optional trailing title
+
+=head3 Nasm::X86::Variable::out($left, $title1, $title2)
+
+Dump the value of a variable on stdout
+
+     Parameter  Description
+  1  $left      Left variable
+  2  $title1    Optional leading title
+  3  $title2    Optional trailing title
+
+=head3 Nasm::X86::Variable::errNL($left, $title1, $title2)
+
+Dump the value of a variable on stderr and append a new line
+
+     Parameter  Description
+  1  $left      Left variable
+  2  $title1    Optional leading title
+  3  $title2    Optional trailing title
+
+=head3 Nasm::X86::Variable::outNL($left, $title1, $title2)
+
+Dump the value of a variable on stdout and append a new line
+
+     Parameter  Description
+  1  $left      Left variable
+  2  $title1    Optional leading title
+  3  $title2    Optional trailing title
+
+=head3 Nasm::X86::Variable::debug($left)
+
+Dump the value of a variable on stdout with an indication of where the dump came from
+
+     Parameter  Description
+  1  $left      Left variable
+
 =head2 Operations
 
 Variable operations
@@ -10103,104 +10150,6 @@ Check whether the left hand variable is less than the right hand variable
      Parameter  Description
   1  $left      Left variable
   2  $right     Right variable
-
-=head2 Print variables
-
-Print the values of variables or the memory addressed by them
-
-=head3 Nasm::X86::Variable::dump($left, $channel, $newLine, $title1, $title2)
-
-Dump the value of a variable to the specified channel adding an optional title and new line if requested
-
-     Parameter  Description
-  1  $left      Left variable
-  2  $channel   Channel
-  3  $newLine   New line required
-  4  $title1    Optional leading title
-  5  $title2    Optional trailing title
-
-B<Example:>
-
-
-    my $a = V(a, 3); $a->outNL;
-    my $b = K(b, 2); $b->outNL;
-    my $c = $a +  $b; $c->outNL;
-    my $d = $c -  $a; $d->outNL;
-    my $e = $d == $b; $e->outNL;
-    my $f = $d != $b; $f->outNL;
-    my $g = $a *  $b; $g->outNL;
-    my $h = $g /  $b; $h->outNL;
-    my $i = $a %  $b; $i->outNL;
-
-    If ($a == 3,
-    Then
-     {PrintOutStringNL "a == 3"
-     },
-    Else
-     {PrintOutStringNL "a != 3"
-     });
-
-    ++$a; $a->outNL;
-    --$a; $a->outNL;
-
-    ok Assemble(debug => 0, eq => <<END);
-  a: 0000 0000 0000 0003
-  b: 0000 0000 0000 0002
-  (a add b): 0000 0000 0000 0005
-  ((a add b) sub a): 0000 0000 0000 0002
-  (((a add b) sub a) eq b): 0000 0000 0000 0001
-  (((a add b) sub a) ne b): 0000 0000 0000 0000
-  (a times b): 0000 0000 0000 0006
-  ((a times b) / b): 0000 0000 0000 0003
-  (a % b): 0000 0000 0000 0001
-  a == 3
-  a: 0000 0000 0000 0004
-  a: 0000 0000 0000 0003
-  END
-
-
-=head3 Nasm::X86::Variable::err($left, $title1, $title2)
-
-Dump the value of a variable on stderr
-
-     Parameter  Description
-  1  $left      Left variable
-  2  $title1    Optional leading title
-  3  $title2    Optional trailing title
-
-=head3 Nasm::X86::Variable::out($left, $title1, $title2)
-
-Dump the value of a variable on stdout
-
-     Parameter  Description
-  1  $left      Left variable
-  2  $title1    Optional leading title
-  3  $title2    Optional trailing title
-
-=head3 Nasm::X86::Variable::errNL($left, $title1, $title2)
-
-Dump the value of a variable on stderr and append a new line
-
-     Parameter  Description
-  1  $left      Left variable
-  2  $title1    Optional leading title
-  3  $title2    Optional trailing title
-
-=head3 Nasm::X86::Variable::outNL($left, $title1, $title2)
-
-Dump the value of a variable on stdout and append a new line
-
-     Parameter  Description
-  1  $left      Left variable
-  2  $title1    Optional leading title
-  3  $title2    Optional trailing title
-
-=head3 Nasm::X86::Variable::debug($left)
-
-Dump the value of a variable on stdout with an indication of where the dump came from
-
-     Parameter  Description
-  1  $left      Left variable
 
 =head3 Nasm::X86::Variable::isRef($variable)
 
@@ -13654,6 +13603,57 @@ Print the instruction pointer in hex
 =head2 PrintOutRflagsInHex()
 
 Print the flags register in hex
+
+
+=head2 Nasm::X86::Variable::dump($left, $channel, $newLine, $title1, $title2)
+
+Dump the value of a variable to the specified channel adding an optional title and new line if requested
+
+     Parameter  Description
+  1  $left      Left variable
+  2  $channel   Channel
+  3  $newLine   New line required
+  4  $title1    Optional leading title
+  5  $title2    Optional trailing title
+
+B<Example:>
+
+
+    my $a = V(a, 3); $a->outNL;
+    my $b = K(b, 2); $b->outNL;
+    my $c = $a +  $b; $c->outNL;
+    my $d = $c -  $a; $d->outNL;
+    my $e = $d == $b; $e->outNL;
+    my $f = $d != $b; $f->outNL;
+    my $g = $a *  $b; $g->outNL;
+    my $h = $g /  $b; $h->outNL;
+    my $i = $a %  $b; $i->outNL;
+
+    If ($a == 3,
+    Then
+     {PrintOutStringNL "a == 3"
+     },
+    Else
+     {PrintOutStringNL "a != 3"
+     });
+
+    ++$a; $a->outNL;
+    --$a; $a->outNL;
+
+    ok Assemble(debug => 0, eq => <<END);
+  a: 0000 0000 0000 0003
+  b: 0000 0000 0000 0002
+  (a add b): 0000 0000 0000 0005
+  ((a add b) sub a): 0000 0000 0000 0002
+  (((a add b) sub a) eq b): 0000 0000 0000 0001
+  (((a add b) sub a) ne b): 0000 0000 0000 0000
+  (a times b): 0000 0000 0000 0006
+  ((a times b) / b): 0000 0000 0000 0003
+  (a % b): 0000 0000 0000 0001
+  a == 3
+  a: 0000 0000 0000 0004
+  a: 0000 0000 0000 0003
+  END
 
 
 =head2 PushRR(@r)
@@ -17705,7 +17705,7 @@ END
  }
 
 #latest:
-if (1) {                                                                        # Extended sub tree testing
+if (1) {                                                                        #
   my $N = 45; my $M = 0;
      $N % 2 == 1 or confess "Must be odd";
   my $b = CreateByteString;
@@ -17815,6 +17815,97 @@ END
  }
 
 #latest:
+if (1) {                                                                        #TNasm::X86::BlockMultiWayTree::print
+  my $L = V(loop, 45);
+  my $b = CreateByteString;
+  my $t = $b->CreateBlockMultiWayTree;
+
+  $L->for(sub
+   {my ($i, $start, $next, $end) = @_;
+    my $l = $L - $i;
+    If ($i % 2 == 0, sub
+     {$t->insert($i, $l);
+      $t->insertTree($l);
+     });
+   });
+
+  $t->print;
+
+  ok Assemble(debug => 0, eq => <<END);
+Tree at:    r15: 0000 0000 0000 0018
+key: 0000 0000 0000 0000 data: 0000 0000 0000 002D depth: 0000 0000 0000 0002
+key: 0000 0000 0000 0001 data: 0000 0000 0000 0ED8 depth: 0000 0000 0000 0002
+key: 0000 0000 0000 0002 data: 0000 0000 0000 002B depth: 0000 0000 0000 0002
+key: 0000 0000 0000 0003 data: 0000 0000 0000 0E58 depth: 0000 0000 0000 0002
+key: 0000 0000 0000 0004 data: 0000 0000 0000 0029 depth: 0000 0000 0000 0002
+key: 0000 0000 0000 0005 data: 0000 0000 0000 0DD8 depth: 0000 0000 0000 0002
+key: 0000 0000 0000 0006 data: 0000 0000 0000 0027 depth: 0000 0000 0000 0002
+key: 0000 0000 0000 0007 data: 0000 0000 0000 0D58 depth: 0000 0000 0000 0001
+key: 0000 0000 0000 0008 data: 0000 0000 0000 0025 depth: 0000 0000 0000 0002
+key: 0000 0000 0000 0009 data: 0000 0000 0000 0CD8 depth: 0000 0000 0000 0002
+key: 0000 0000 0000 000A data: 0000 0000 0000 0023 depth: 0000 0000 0000 0002
+key: 0000 0000 0000 000B data: 0000 0000 0000 0C58 depth: 0000 0000 0000 0002
+key: 0000 0000 0000 000C data: 0000 0000 0000 0021 depth: 0000 0000 0000 0002
+key: 0000 0000 0000 000D data: 0000 0000 0000 0BD8 depth: 0000 0000 0000 0002
+key: 0000 0000 0000 000E data: 0000 0000 0000 001F depth: 0000 0000 0000 0001
+key: 0000 0000 0000 000F data: 0000 0000 0000 0B58 depth: 0000 0000 0000 0002
+key: 0000 0000 0000 0010 data: 0000 0000 0000 001D depth: 0000 0000 0000 0002
+key: 0000 0000 0000 0011 data: 0000 0000 0000 0AD8 depth: 0000 0000 0000 0002
+key: 0000 0000 0000 0012 data: 0000 0000 0000 001B depth: 0000 0000 0000 0002
+key: 0000 0000 0000 0013 data: 0000 0000 0000 0998 depth: 0000 0000 0000 0002
+key: 0000 0000 0000 0014 data: 0000 0000 0000 0019 depth: 0000 0000 0000 0002
+key: 0000 0000 0000 0015 data: 0000 0000 0000 0918 depth: 0000 0000 0000 0002
+key: 0000 0000 0000 0016 data: 0000 0000 0000 0017 depth: 0000 0000 0000 0002
+key: 0000 0000 0000 0017 data: 0000 0000 0000 0898 depth: 0000 0000 0000 0002
+key: 0000 0000 0000 0018 data: 0000 0000 0000 0015 depth: 0000 0000 0000 0001
+key: 0000 0000 0000 0019 data: 0000 0000 0000 0818 depth: 0000 0000 0000 0002
+key: 0000 0000 0000 001A data: 0000 0000 0000 0013 depth: 0000 0000 0000 0002
+key: 0000 0000 0000 001B data: 0000 0000 0000 06D8 depth: 0000 0000 0000 0002
+key: 0000 0000 0000 001C data: 0000 0000 0000 0011 depth: 0000 0000 0000 0002
+key: 0000 0000 0000 001D data: 0000 0000 0000 0658 depth: 0000 0000 0000 0002
+key: 0000 0000 0000 001E data: 0000 0000 0000 000F depth: 0000 0000 0000 0002
+key: 0000 0000 0000 001F data: 0000 0000 0000 05D8 depth: 0000 0000 0000 0002
+key: 0000 0000 0000 0020 data: 0000 0000 0000 000D depth: 0000 0000 0000 0002
+key: 0000 0000 0000 0021 data: 0000 0000 0000 0398 depth: 0000 0000 0000 0001
+key: 0000 0000 0000 0022 data: 0000 0000 0000 000B depth: 0000 0000 0000 0002
+key: 0000 0000 0000 0023 data: 0000 0000 0000 0318 depth: 0000 0000 0000 0002
+key: 0000 0000 0000 0024 data: 0000 0000 0000 0009 depth: 0000 0000 0000 0002
+key: 0000 0000 0000 0025 data: 0000 0000 0000 0298 depth: 0000 0000 0000 0002
+key: 0000 0000 0000 0026 data: 0000 0000 0000 0007 depth: 0000 0000 0000 0002
+key: 0000 0000 0000 0027 data: 0000 0000 0000 0218 depth: 0000 0000 0000 0002
+key: 0000 0000 0000 0028 data: 0000 0000 0000 0005 depth: 0000 0000 0000 0002
+key: 0000 0000 0000 0029 data: 0000 0000 0000 0198 depth: 0000 0000 0000 0002
+key: 0000 0000 0000 002A data: 0000 0000 0000 0003 depth: 0000 0000 0000 0002
+key: 0000 0000 0000 002B data: 0000 0000 0000 0118 depth: 0000 0000 0000 0002
+key: 0000 0000 0000 002C data: 0000 0000 0000 0001 depth: 0000 0000 0000 0002
+key: 0000 0000 0000 002D data: 0000 0000 0000 0098 depth: 0000 0000 0000 0002
+Tree at:    r15: 0000 0000 0000 0098
+Tree at:    r15: 0000 0000 0000 0118
+Tree at:    r15: 0000 0000 0000 0198
+Tree at:    r15: 0000 0000 0000 0218
+Tree at:    r15: 0000 0000 0000 0298
+Tree at:    r15: 0000 0000 0000 0318
+Tree at:    r15: 0000 0000 0000 0398
+Tree at:    r15: 0000 0000 0000 05D8
+Tree at:    r15: 0000 0000 0000 0658
+Tree at:    r15: 0000 0000 0000 06D8
+Tree at:    r15: 0000 0000 0000 0818
+Tree at:    r15: 0000 0000 0000 0898
+Tree at:    r15: 0000 0000 0000 0918
+Tree at:    r15: 0000 0000 0000 0998
+Tree at:    r15: 0000 0000 0000 0AD8
+Tree at:    r15: 0000 0000 0000 0B58
+Tree at:    r15: 0000 0000 0000 0BD8
+Tree at:    r15: 0000 0000 0000 0C58
+Tree at:    r15: 0000 0000 0000 0CD8
+Tree at:    r15: 0000 0000 0000 0D58
+Tree at:    r15: 0000 0000 0000 0DD8
+Tree at:    r15: 0000 0000 0000 0E58
+Tree at:    r15: 0000 0000 0000 0ED8
+END
+ }
+
+#latest:
 if (1) {                                                                        #TNasm::X86::BlockMultiWayTree::insertTreeAndClone #TNasm::X86::BlockMultiWayTree::Clone  #TNasm::X86::BlockMultiWayTree::findAndClone
   my $L = K(loop, 4);
   my $b = CreateByteString;
@@ -17857,7 +17948,7 @@ if (0) {
 END
  }
 
-ok 1 for 1..42;
+ok 1 for 3..42;
 
 unlink $_ for qw(hash print2 sde-log.txt sde-ptr-check.out.txt z.txt);          # Remove incidental files
 
