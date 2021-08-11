@@ -4,7 +4,7 @@
 # Philip R Brenan at appaapps dot com, Appa Apps Ltd Inc., 2021
 #-------------------------------------------------------------------------------
 # podDocumentation
-# Time: 18.3699929714203 bytes assembled: 9045188
+# Finished in 17.46s, bytes assembled: 7067174
 package Nasm::X86;
 our $VERSION = "20210812";
 use warnings FATAL => qw(all);
@@ -1064,14 +1064,15 @@ sub PrintString($@)                                                             
   my $a = Rs($c);
 
   my $s = Subroutine
-   {SaveFirstFour;
-    Comment "Write to channel  $channel, the string: ".dump($c);
+   {Comment "Write start to channel  $channel, the string: ".dump($c);
+    SaveFirstFour;
     Mov rax, 1;
     Mov rdi, $channel;
     Mov rsi, $a;
     Mov rdx, $l;
     Syscall;
     RestoreFirstFour();
+    Comment "Write end to channel  $channel, the string: ".dump($c);
    } name => "PrintString_${channel}_${c}";
 
   $s->call;
@@ -1113,12 +1114,12 @@ sub hexTranslateTable                                                           
 sub PrintRaxInHex($;$)                                                          # Write the content of register rax in hexadecimal in big endian notation to the specified channel
  {my ($channel, $end) = @_;                                                     # Channel, optional end byte
   @_ == 1 or @_ == 2 or confess;
-  Comment "Print Rax In Hex on channel: $channel";
   my $hexTranslateTable = hexTranslateTable;
   $end //= 7;                                                                   # Default end byte
 
   my $sub = Macro
-   {SaveFirstFour rax;                                                          # Rax is a parameter
+   {Comment "Print Rax In Hex on channel: $channel start";
+    SaveFirstFour rax;                                                          # Rax is a parameter
     Mov rdx, rax;                                                               # Content to be printed
     Mov rdi, 2;                                                                 # Length of a byte in hex
     KeepFree rax;
@@ -1135,6 +1136,7 @@ sub PrintRaxInHex($;$)                                                          
       PrintString($channel, ' ') if $i % 2 and $i < 7;
      }
     RestoreFirstFour;
+    Comment "Print Rax In Hex on channel: $channel start";
    } name => "PrintOutRaxInHexOn-$channel-$end";
 
   Call $sub;
@@ -2135,10 +2137,10 @@ sub putIntoZmm($*$$)                                                            
   PopR "zmm$zmm";                                                               # Reload zmm
  }
 
-
 sub getBwdqFromMm($$$)                                                          # Get the numbered byte|word|double word|quad word from the numbered zmm register and return it in a variable
- {my ($size, $mm, $offset) = @_;                                                # Size of get, register, offset in bytes either as a constant or as a variable
+ {my ($size, $mm, $offset) = @_;                                                # Size of get, mm register, offset in bytes either as a constant or as a variable
   @_ == 3 or confess;
+  my $w = RegisterSize $mm;                                                     # Size of mm register
 
   my $o;                                                                        # The offset into the mm register
   if (ref($offset))                                                             # The offset is being passed in a variable
@@ -2150,25 +2152,26 @@ sub getBwdqFromMm($$$)                                                          
   else                                                                          # The offset is being passed as a register expression
    {$o = $offset;
     Comment "Get $size at $offset in $mm";
-    $offset =~ m(r15) and confess "Cannot pass offset: '$offset', in r15, choose another register";
+    $offset >= 0 && $offset <= RegisterSize $mm or
+      confess "Out of range" if $offset =~ m(\A\d+\Z);                          # Check the offset if it is a number
+    $offset =~ m(r15)
+      and confess "Cannot pass offset: '$offset', in r15, choose another register";
    }
 
   PushR r15;
-  PushRR $mm;    ##Rewrite using masked move rather than stack                  # Push source register
+  Vmovdqu32 "[rsp-$w]", $mm;                                                    # Write below the stack
 
   if ($size !~ m(q|d))                                                          # Clear the register if necessary
    {ClearRegisters r15; KeepFree r15;
    }
 
-  Mov r15b, "[rsp+$o]" if $size =~ m(b);                                        # Load byte register from offset
-  Mov r15w, "[rsp+$o]" if $size =~ m(w);                                        # Load word register from offset
-  Mov r15d, "[rsp+$o]" if $size =~ m(d);                                        # Load double word register from offset
-  Mov r15,  "[rsp+$o]" if $size =~ m(q);                                        # Load register from offset
-  Add rsp, RegisterSize $mm;                                                    # Pop source register
+  Mov r15b, "[rsp+$o-$w]" if $size =~ m(b);                                     # Load byte register from offset
+  Mov r15w, "[rsp+$o-$w]" if $size =~ m(w);                                     # Load word register from offset
+  Mov r15d, "[rsp+$o-$w]" if $size =~ m(d);                                     # Load double word register from offset
+  Mov r15,  "[rsp+$o-$w]" if $size =~ m(q);                                     # Load register from offset
 
   my $v = V("$size at offset $offset in $mm", r15);                             # Create variable
   PopR r15;
-
   PopR $o if ref($offset);                                                      # The offset is being passed in a variable
 
   $v                                                                            # Return variable
@@ -3653,7 +3656,7 @@ sub CreateByteString(%)                                                         
    );
  }
 
-sub Nasm::X86::ByteString::chain($$$@)                                          # Return a variable with the end point of a chain of double words in the byte string starting at the specified variable.
+sub Nasm::X86::ByteString::chain($$$@)                                          #P Return a variable with the end point of a chain of double words in the byte string starting at the specified variable.
  {my ($byteString, $bs, $variable, @offsets) = @_;                              # Byte string descriptor, byte string locator, start variable,  offsets chain
   @_ >= 3 or confess;
 
@@ -3669,7 +3672,7 @@ sub Nasm::X86::ByteString::chain($$$@)                                          
   $r
  }
 
-sub Nasm::X86::ByteString::putChain($$$$@)                                      # Write the double word in the specified variable to the double word location at the the specified offset in the specified byte string.
+sub Nasm::X86::ByteString::putChain($$$$@)                                      #P Write the double word in the specified variable to the double word location at the the specified offset in the specified byte string.
  {my ($byteString, $bs,  $start, $value, @offsets) = @_;                        # Byte string descriptor, byte string locator variable, start variable, value to put as a variable,  offsets chain
   @_ >= 5 or confess;
 
@@ -3841,7 +3844,7 @@ sub Nasm::X86::ByteString::allocZmmBlock($@)                                    
      }
     PopR zmm31;
    },
-  Else
+  Else                                                                          # Cannot reuse a free block so use unassigned memory
    {$byteString->allocate(V(size, RegisterSize(zmm0)), @variables);
    });
  }
@@ -3872,13 +3875,14 @@ sub Nasm::X86::ByteString::setFirstFreeBlock($$)                                
  {my ($byteString, $offset) = @_;                                               # Byte string descriptor, first free block offset as a variable
   @_ == 2 or confess;
 
-  Comment "Set first free block";
+  Comment "Set first free block start";
   PushR my @save = (rax, rsi, rdx);
   $byteString->bs->setReg(rax);                                                 # Address underlying byte string
   Lea rdx, $byteString->free->addr;                                             # Address of address of free chain
   $offset->setReg(rsi);                                                         # Offset of block being freed
   Mov "[rdx]", rsi;                                                             # Set head of free chain to point to block just freed
   PopR @save;
+  Comment "Set first free block end";
  }
 
 sub Nasm::X86::ByteString::freeBlock($@)                                        # Free a block in a byte string by placing it on the free chain
@@ -5017,9 +5021,11 @@ sub Nasm::X86::ByteString::DescribeBlockMultiWayTree($)                         
   my $b = RegisterSize zmm0;                                                    # Size of a block == size of a zmm register
   my $o = RegisterSize eax;                                                     # Size of a double word
 
-  my $length      = $b / $o - 2;                                                # Length of block to split
+  my $length = $b / $o - 2;                                                     # Length of block to split
+  my $split  = $length / 2  * $o;                                               # Offset of splitting key
 
   confess "Maximum keys must be 14" unless $b / $o - 2 == 14;                   # Maximum number of keys is expected to be 14
+  confess "Splitting key offset must be 28" unless $split == 28;                # Splitting key offset
 
   genHash(__PACKAGE__."::BlockMultiWayTree",                                    # Block multi way tree.
     bs           => $byteString,                                                # Byte string definition.
@@ -5030,7 +5036,7 @@ sub Nasm::X86::ByteString::DescribeBlockMultiWayTree($)                         
     lengthOffset => $b - $o * 2,                                                # Offset of length in keys block.  The length field is a word - see: "MultiWayTree.svg"
     loop         => $b - $o,                                                    # Offset of keys, data, node loop.
     maxKeys      => $length,                                                    # Maximum number of keys.
-    minKeys      => int($b / 2) - 1,                                            # Minimum number of keys.
+    splittingKey => $split,                                                     # POint at which to split a full block
     rightLength  => $length - 1 - $length / 2,                                  # Right split length
     subTree      => V(subTree),                                                 # Variable indicating whether the last find found a sub tree
     treeBits     => $b - $o * 2 + 2,                                            # Offset of tree bits in keys block.  The tree bits field is a word, each bit of which tells us whether the corresponding data element is the offset (or not) to a sub tree of this tree .
@@ -5044,22 +5050,31 @@ sub Nasm::X86::ByteString::CreateBlockMultiWayTree($)                           
  {my ($byteString) = @_;                                                        # Byte string description
   @_ == 1 or confess;
 
-  my $s = $byteString->DescribeBlockMultiWayTree;                               # Return a descriptor for a multi way block tree at the specified offset in the specified byte string
+  my $t = $byteString->DescribeBlockMultiWayTree;                               # Return a descriptor for a multi way block tree at the specified offset in the specified byte string
 
-  my $keys = $s->first = $s->allocBlock;                                        # Allocate first keys block
-  PushR my @save = (zmm31);
-  ClearRegisters zmm31;
-  $s->putLoop($s->allocBlock, 31);                                              # Keys loops to data - for the first 7 keys we should store the corresponding data further up in the block rather than creating a new block.
-  $byteString->putBlock($s->address, $keys, 31);                                # Write first keys
-  PopR @save;
+  my $s = Subroutine
+   {my ($p) = @_;
+    Comment "Create a block multiway Tree start";
+    my $keys = $t->allocBlock;                                                  # Allocate first keys block
+    $$p{first}->copy($keys);
+    PushR my @save = (zmm31);
+    ClearRegisters zmm31;
+    $t->putLoop($t->allocBlock, 31);                                            # Keys loops to data - for the first 7 keys we should store the corresponding data further up in the block rather than creating a new block.
+    $byteString->putBlock($t->address, $keys, 31);                              # Write first keys
+    PopR @save;
+    Comment "Create a block multiway Tree end";
+   } io => [qw(bs)], out => [qw(first)];
 
-  $s                                                                            # Description of block array
+  $s->call(bs => $t->address, first => $t->first);
+
+  $t                                                                            # Description of block array
  }
 
 sub Nasm::X86::BlockMultiWayTree::Clone($)                                      # Clone the specified tree descriptions
  {my ($tree) = @_;                                                              # Block multi way tree descriptor
   @_ == 1 or confess;
 
+  Comment "Nasm::X86::BlockMultiWayTree::Clone";
   my $t = $tree->bs->DescribeBlockMultiWayTree;                                 # Return a descriptor for a multi way block tree
   $t->first->copy($tree->first);
   $t
@@ -5112,7 +5127,7 @@ sub Nasm::X86::BlockMultiWayTree::splitNode($$$$@)                              
     my $p = $t->getUpFromData($D);                                              # Parent
     If ($p,
     Then                                                                        # Not the root
-     {my $s = getDFromZmm($K, ($t->minKeys + 1) * $t->width);                   # Splitting key
+     {my $s = getDFromZmm($K, $t->splittingKey);                                # Splitting key
       If ($k < $s,
       Then                                                                      # Split left node pushing remainder right so that we keep the key we are looking for in the left node
        {Vmovdqu64 zmm28, zmm31;                                                 # Load left node
@@ -5652,6 +5667,7 @@ sub Nasm::X86::BlockMultiWayTree::find($$)                                      
 sub Nasm::X86::BlockMultiWayTree::findAndClone($$)                              # Find a key in the specified tree and clone it is it is a sub tree.
  {my ($t, $key) = @_;                                                           # Block multi way tree descriptor, key as a dword
   @_ == 2 or confess;
+  Comment "Nasm::X86::BlockMultiWayTree::findAndClone";
   $t->find($key);
   If ($t->found,
   Then
@@ -5856,11 +5872,12 @@ sub Nasm::X86::BlockMultiWayTree::insertTree($$;$)                              
 sub Nasm::X86::BlockMultiWayTree::insertTreeAndClone($$)                        # Insert a new sub tree into the specified tree tree under the specified key and return a descriptor for it.  If the tree already exists, return a descriptor for it.
  {my ($t, $key) = @_;                                                           # Block multi way tree descriptor, key as a dword
   @_ == 2 or confess;
+  Comment "Nasm::X86::BlockMultiWayTree::insertTreeAndClone";
   $t->insertTree($key);
   $t->first->copy($t->data);                                                    # Copy the data variable to the first variable without checking whether it is valid
  }
 
-sub Nasm::X86::BlockMultiWayTree::getKeysData($$$$)                             # Load the keys and data blocks for a node
+sub Nasm::X86::BlockMultiWayTree::getKeysData($$$$)                             #P Load the keys and data blocks for a node
  {my ($t, $offset, $zmmKeys, $zmmData) = @_;                                    # Block multi way tree descriptor, offset as a variable, numbered zmm for keys, numbered data for keys
   @_ == 4 or confess;
   $t->bs->getBlock($t->address, $offset, $zmmKeys);                             # Get the keys block
@@ -5868,7 +5885,7 @@ sub Nasm::X86::BlockMultiWayTree::getKeysData($$$$)                             
   $t->bs->getBlock($t->address, $data, $zmmData);                               # Get the data block
  }
 
-sub Nasm::X86::BlockMultiWayTree::putKeysData($$$$)                             # Save the key and data blocks for a node
+sub Nasm::X86::BlockMultiWayTree::putKeysData($$$$)                             #P Save the key and data blocks for a node
  {my ($t, $offset, $zmmKeys, $zmmData) = @_;                                    # Block multi way tree descriptor, offset as a variable, numbered zmm for keys, numbered data for keys
   @_ == 4 or confess;
   $t->bs->putBlock($t->address, $offset, $zmmKeys);                             # Put the keys block
@@ -5882,13 +5899,13 @@ sub Nasm::X86::BlockMultiWayTree::putKeysData($$$$)                             
   $t->bs->putBlock($t->address, $data, $zmmData);                               # Put the data block
  }
 
-sub Nasm::X86::BlockMultiWayTree::getNode($$$)                                  # Load the child nodes for a node
+sub Nasm::X86::BlockMultiWayTree::getNode($$$)                                  #P Load the child nodes for a node
  {my ($t, $offset, $zmmNode) = @_;                                              # Block multi way tree descriptor, offset of nodes, numbered zmm for keys
   @_ == 3 or confess;
   $t->bs->getBlock($t->address, $offset, $zmmNode);                             # Get the node block
  }
 
-sub Nasm::X86::BlockMultiWayTree::getKeysDataNode($$$$$)                        # Load the keys, data and child nodes for a node
+sub Nasm::X86::BlockMultiWayTree::getKeysDataNode($$$$$)                        #P Load the keys, data and child nodes for a node
  {my ($t, $offset, $zmmKeys, $zmmData, $zmmNode) = @_;                          # Block multi way tree descriptor, offset as a variable, numbered zmm for keys, numbered data for keys, numbered numbered for keys
   @_ == 5 or confess;
   my $b = $t->bs;                                                               # Underlying byte string
@@ -5905,7 +5922,7 @@ sub Nasm::X86::BlockMultiWayTree::getKeysDataNode($$$$$)                        
    });
  }
 
-sub Nasm::X86::BlockMultiWayTree::putKeysDataNode($$$$$)                        # Save the keys, data and child nodes for a node
+sub Nasm::X86::BlockMultiWayTree::putKeysDataNode($$$$$)                        #P Save the keys, data and child nodes for a node
  {my ($t, $offset, $zmmKeys, $zmmData, $zmmNode) = @_;                          # Block multi way tree descriptor, offset as a variable, numbered zmm for keys, numbered data for keys, numbered numbered for keys
   @_ == 5 or confess;
   $t->putKeysData($offset, $zmmKeys, $zmmData);                                 # Put keys and data
@@ -5916,40 +5933,40 @@ sub Nasm::X86::BlockMultiWayTree::putKeysDataNode($$$$$)                        
    });
  }
 
-sub Nasm::X86::BlockMultiWayTree::getLengthInKeys($$)                           # Get the length of the keys block in the numbered zmm and return it as a variable
+sub Nasm::X86::BlockMultiWayTree::getLengthInKeys($$)                           #P Get the length of the keys block in the numbered zmm and return it as a variable
  {my ($t, $zmm) = @_;                                                           # Block multi way tree descriptor, zmm number
   @_ == 2 or confess;
 
   getBFromZmm($zmm, $t->lengthOffset);                                          # The length field as a variable
  }
 
-sub Nasm::X86::BlockMultiWayTree::putLengthInKeys($$$)                          # Get the length of the block in the numbered zmm from the specified variable
+sub Nasm::X86::BlockMultiWayTree::putLengthInKeys($$$)                          #P Get the length of the block in the numbered zmm from the specified variable
  {my ($t, $zmm, $length) = @_;                                                  # Block multi way tree, zmm number, length variable
   @_ == 3 or confess;
   ref($length) or confess dump($length);
   $length->putBIntoZmm($zmm, $t->lengthOffset)                                  # Set the length field
  }
 
-sub Nasm::X86::BlockMultiWayTree::getUpFromData($$)                             # Get the up offset from the data block in the numbered zmm and return it as a variable
+sub Nasm::X86::BlockMultiWayTree::getUpFromData($$)                             #P Get the up offset from the data block in the numbered zmm and return it as a variable
  {my ($t, $zmm) = @_;                                                           # Block multi way tree descriptor, zmm number
   @_ == 2 or confess;
   getDFromZmm($zmm, $t->lengthOffset);                                          # The length field as a variable
  }
 
-sub Nasm::X86::BlockMultiWayTree::putUpIntoData($$$)                            # Put the offset of the parent keys block expressed as a variable into the numbered zmm
+sub Nasm::X86::BlockMultiWayTree::putUpIntoData($$$)                            #P Put the offset of the parent keys block expressed as a variable into the numbered zmm
  {my ($t, $offset, $zmm) = @_;                                                  # Block multi way tree descriptor, variable containing up offset, zmm number
   @_ == 3 or confess;
   defined($offset) or confess;
   $offset->putDIntoZmm($zmm, $t->lengthOffset);                                 # Save the up offset into the data block
  }
 
-sub Nasm::X86::BlockMultiWayTree::getLoop($$)                                   # Return the value of the loop field as a variable
+sub Nasm::X86::BlockMultiWayTree::getLoop($$)                                   #P Return the value of the loop field as a variable
  {my ($t, $zmm) = @_;                                                           # Block multi way tree descriptor, numbered zmm
   @_ >= 1 or confess;
   getDFromZmm($zmm, $t->loop);                                                  # Get loop field as a variable
  }
 
-sub Nasm::X86::BlockMultiWayTree::putLoop($$$)                                  # Set the value of the loop field from a variable
+sub Nasm::X86::BlockMultiWayTree::putLoop($$$)                                  #P Set the value of the loop field from a variable
  {my ($t, $value, $zmm) = @_;                                                   # Block multi way tree descriptor, variable containing offset of next loop entry, numbered zmm
   @_ >= 1 or confess;
   $value->putDIntoZmm($zmm, $t->loop);                                          # Put loop field as a variable
@@ -6008,20 +6025,20 @@ sub Nasm::X86::BlockMultiWayTree::rightMost($@)                                 
   $t->leftOrRightMost(1, @variables)                                            # Return the right most node
  }
 
-sub Nasm::X86::BlockMultiWayTree::nodeFromData($$$)                             # Load the the node block into the numbered zmm corresponding to the data block held in the numbered zmm.
+sub Nasm::X86::BlockMultiWayTree::nodeFromData($$$)                             #P Load the the node block into the numbered zmm corresponding to the data block held in the numbered zmm.
  {my ($t, $data, $node) = @_;                                                   # Block multi way tree descriptor, numbered zmm containing data, numbered zmm to hold node block
   @_ == 3 or confess;
   my $loop = $t->getLoop($data);                                                # Get loop offset from data
   $t->getBlock($t->address, $loop, $node);                                      # Node
  }
 
-sub Nasm::X86::BlockMultiWayTree::address($)                                    # Address of the byte string containing a block multi way tree
+sub Nasm::X86::BlockMultiWayTree::address($)                                    #P Address of the byte string containing a block multi way tree
  {my ($t) = @_;                                                                 # Block multi way tree descriptor
   @_ == 1 or confess;
   $t->bs->bs;
  }
 
-sub Nasm::X86::BlockMultiWayTree::allocBlock($@)                                # Allocate a block to hold a zmm register in the specified byte string and return the offset of the block in a variable
+sub Nasm::X86::BlockMultiWayTree::allocBlock($@)                                #P Allocate a block to hold a zmm register in the specified byte string and return the offset of the block in a variable
  {my ($t, @variables) = @_;                                                     # Block multi way tree descriptor, variables
   @_ == 1 or confess;
   $t->bs->allocBlock                                                            # Allocate a block and return its offset as a variable
@@ -6110,19 +6127,19 @@ sub Nasm::X86::BlockMultiWayTree::clearTree($$$)                                
   $t->setOrClearTree(0, $register, $zmm);
  } # clearTree
 
-sub Nasm::X86::BlockMultiWayTree::getTreeBits($$$)                              # Load the tree bits from the numbered zmm into the specified register.
+sub Nasm::X86::BlockMultiWayTree::getTreeBits($$$)                              #P Load the tree bits from the numbered zmm into the specified register.
  {my ($t, $zmm, $register) = @_;                                                # Tree descriptor, numbered zmm, target register
   loadFromZmm $register, w, $zmm, $t->treeBits;
   And $register, $t->treeBitsMask;
  }
 
-sub Nasm::X86::BlockMultiWayTree::putTreeBits($$$)                              # Put the tree bits in the specified register into the numbered zmm.
+sub Nasm::X86::BlockMultiWayTree::putTreeBits($$$)                              #P Put the tree bits in the specified register into the numbered zmm.
  {my ($t, $zmm, $register) = @_;                                                # Tree descriptor, numbered zmm, target register
   putIntoZmm $register, w, $zmm, $t->treeBits;
   And $register, $t->treeBitsMask;
  }
 
-sub Nasm::X86::BlockMultiWayTree::expandTreeBitsWithZeroOrOne($$$$)             # Insert a zero or one into the tree bits field in the numbered zmm at the specified point
+sub Nasm::X86::BlockMultiWayTree::expandTreeBitsWithZeroOrOne($$$$)             #P Insert a zero or one into the tree bits field in the numbered zmm at the specified point
  {my ($t, $onz, $zmm, $point) = @_;                                             # Tree descriptor, 0 - zero or 1 - one, numbered zmm, register indicating point
   PushR my @save = my ($bits) = ChooseRegisters(1, $point);                     # Tree bits register
   $t->getTreeBits($zmm, $bits);                                                 # Get tree bits
@@ -6136,12 +6153,12 @@ sub Nasm::X86::BlockMultiWayTree::expandTreeBitsWithZeroOrOne($$$$)             
   PopR @save;
  }
 
-sub Nasm::X86::BlockMultiWayTree::expandTreeBitsWithZero($$$)                   # Insert a zero into the tree bits field in the numbered zmm at the specified point
+sub Nasm::X86::BlockMultiWayTree::expandTreeBitsWithZero($$$)                   #P Insert a zero into the tree bits field in the numbered zmm at the specified point
  {my ($t, $zmm, $point) = @_;                                                   # Tree descriptor, numbered zmm, register indicating point
   $t->expandTreeBitsWithZeroOrOne(0, $zmm, $point);                             # Insert a zero into the tree bits field in the numbered zmm at the specified point
  }
 
-sub Nasm::X86::BlockMultiWayTree::expandTreeBitsWithOne($$$)                    # Insert a one into the tree bits field in the numbered zmm at the specified point
+sub Nasm::X86::BlockMultiWayTree::expandTreeBitsWithOne($$$)                    #P Insert a one into the tree bits field in the numbered zmm at the specified point
  {my ($t, $zmm, $point) = @_;                                                   # Tree descriptor, numbered zmm, register indicating point
   $t->expandTreeBitsWithZeroOrOne(1, $zmm, $point);                             # Insert a one into the tree bits field in the numbered zmm at the specified point
  }
@@ -6151,6 +6168,7 @@ sub Nasm::X86::BlockMultiWayTree::expandTreeBitsWithOne($$$)                    
 sub Nasm::X86::BlockMultiWayTree::print($)                                      # Print a tree
  {my ($t) = @_;                                                                 # Block multi way tree
   @_ == 1 or confess;
+  Comment "Nasm::X86::BlockMultiWayTree::print";
 
   PushR my @save = my ($current, $base) = (r15, rbp);
   Mov  rbp, rsp;                                                                # Stack holds the trees still to be printed
@@ -6191,6 +6209,7 @@ sub Nasm::X86::BlockMultiWayTree::print($)                                      
 sub Nasm::X86::BlockMultiWayTree::iterator($)                                   # Iterate through a multi way tree
  {my ($b) = @_;                                                                 # Block multi way tree
   @_ == 1 or confess;
+  Comment "Nasm::X86::BlockMultiWayTree::iterator";
 
   my $node = V(node);                                                           # The current node
   $node->copy($b->first);                                                       # Start at the first node in the tree
@@ -6337,6 +6356,7 @@ sub Nasm::X86::BlockMultiWayTree::Iterator::next($)                             
 sub Nasm::X86::BlockMultiWayTree::by($&)                                        # Call the specified body with each (key, data) from the specified tree in order
  {my ($b, $body) = @_;                                                          # Block Multi Way Tree descriptor, body
   @_ == 2 or confess;
+  Comment "Nasm::X86::BlockMultiWayTree::by";
 
   my $iter = $b->iterator;                                                      # Create an iterator
   my $start = SetLabel Label; my $end = Label;                                  # Start and end of loop
@@ -6451,8 +6471,8 @@ END
   undef                                                                         # Still not found - give up
  }
 
-my $assembliesPerformed = 0;                                                    # Number of assemblies performed
-my $totalBytesAssembled = 0;                                                    # Estimate the size of the output programs
+our $assembliesPerformed = 0;                                                   # Number of assemblies performed
+our $totalBytesAssembled = 0;                                                   # Estimate the size of the output programs
 
 sub Assemble(%)                                                                 # Assemble the generated code
  {my (%options) = @_;                                                           # Options: debug => 0,1,2 eq => expected output on 1, commentCount => count comments
@@ -15388,7 +15408,7 @@ aaAAaabbBBbb
 END
  }
 
-if (1) {                                                                        #TCreateByteString #TByteString::clear #TByteString::out #TByteString::copy #TByteString::nl
+if (1) {                                                                        #TCreateByteString #TByteString::length  #TByteString::clear #TByteString::out #TByteString::copy #TByteString::nl
   my $a = CreateByteString;                                                     # Create a string
   $a->q('ab');
   my $b = CreateByteString;                                                     # Create target byte string
@@ -16053,6 +16073,7 @@ if (1) {                                                                        
 END
  }
 
+#latest:;
 if (1) {                                                                        #TgetDFromZmm #TNasm::X86::Variable::putDIntoZmm
   my $s = Rb(0..8);
   my $c = V("Content",   "[$s]");
@@ -17999,4 +18020,4 @@ ok 1 for 3..42;
 
 unlink $_ for qw(hash print2 sde-log.txt sde-ptr-check.out.txt z.txt);          # Remove incidental files
 
-lll "Finished:", time - $start,  "bytes assembled:",   totalBytesAssembled;
+say STDERR sprintf("Finished in %.2fs, bytes assembled: %d ",  time - $start, totalBytesAssembled);
