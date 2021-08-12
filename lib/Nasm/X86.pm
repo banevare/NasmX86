@@ -954,6 +954,12 @@ sub Nasm::X86::Sub::call($%)                                                    
     $p{$n} = $v;
    }
 
+  if (1)                                                                        # Check for duplicate parameters
+   {my %dup; $dup{$_}++ for map {keys $sub->{$_}->%*} qw(in out io);
+    for my $d(keys %dup) {delete $dup{$d} if $dup{$d} <= 1}                       # Remove singletons
+    keys %dup and confess "Duplicate keys ".dump([keys %dup]);
+   }
+
   if ((keys $sub->in->%*) or (keys $sub->io->%*))                               # Transfer input parameters
    {PushR my $transfer = r15;
 
@@ -1784,7 +1790,7 @@ sub Nasm::X86::Variable::boolean($$$$)                                          
   confess "Need more code";
  }
 
-sub Nasm::X86::Variable::booleanC($$$$)                                         # Combine the left hand variable with the right hand variable via a boolean operator using a Cmove instruction
+sub Nasm::X86::Variable::booleanC($$$$)                                         # Combine the left hand variable with the right hand variable via a boolean operator using a conditional move instruction.
  {my ($cmov, $op, $left, $right) = @_;                                          # conditional move instruction name, operator name, Left variable,  right variable
 
   !ref($right) or ref($right) =~ m(Variable) or confess "Variable expected";
@@ -2447,7 +2453,7 @@ sub Nasm::X86::Variable::for($&)                                                
  {my ($limit, $body) = @_;                                                      # Limit, Body
   @_ == 2 or confess;
   Comment "Variable::For $limit";
-  my $index = V(q(index), 0);                                                  # The index that will be incremented
+  my $index = V(q(index), 0);                                                   # The index that will be incremented
   my $start = Label;
   my $next  = Label;
   my $end   = Label;
@@ -2898,7 +2904,7 @@ sub ClearMemory(@)                                                              
     And rsi, 0x3f;
     Test rsi, rsi;
     IfNz sub                                                                    # Need to align so that the rest of the clear can be done in full zmm blocks
-     {V(align, rsi)->setMaskFirst(k7);                                         # Set mask bits
+     {V(align, rsi)->setMaskFirst(k7);                                          # Set mask bits
       Vmovdqu8 "[rax]{k7}", zmm0;                                               # Masked move to memory
       Add rax, rsi;                                                             # Update point to clear from
       Sub rdi, rsi;                                                             # Reduce clear length
@@ -2938,7 +2944,7 @@ sub MaskMemory22(@)                                                             
     And r10, 0x3f;
     Test r10, r10;
     IfNz sub                                                                    # Need to align so that the rest of the clear can be done in full zmm blocks
-     {V(align, r10)->setMaskFirst(k7);                                         # Set mask bits
+     {V(align, r10)->setMaskFirst(k7);                                          # Set mask bits
       Vmovdqu8 "zmm0\{k7}", "[rax]";                                            # Load first incomplete block of source
       Vpcmpub  "k6{k7}", zmm0, zmm1, 0;                                         # Characters in source that match
       Vmovdqu8 "[rdx]{k6}", zmm2;                                               # Write set byte into mask at match points
@@ -2960,7 +2966,7 @@ sub MaskMemory22(@)                                                             
   $s->call(@variables);
  }
 
-sub MaskMemoryInRange4_22(@)                                                       # Write the specified byte into locations in the target mask that correspond to the locations in the source that contain 4 bytes in the specified range.
+sub MaskMemoryInRange4_22(@)                                                    # Write the specified byte into locations in the target mask that correspond to the locations in the source that contain 4 bytes in the specified range.
  {my (@variables) = @_;                                                         # Variables
   @_ >= 6 or confess;
   Comment "Clear memory";
@@ -3020,7 +3026,7 @@ sub MaskMemoryInRange4_22(@)                                                    
     Test r10, r10;
     IfNz sub                                                                    # Need to align so that the rest of the mask can be done in full zmm blocks
      {my $finished = Label;                                                     # Point where we have finished the initial comparisons
-      V(align, r10)->setMaskFirst(k7);                                         # Set mask bits
+      V(align, r10)->setMaskFirst(k7);                                          # Set mask bits
       Vmovdqu8 "zmm0\{k7}", "[rax]";                                            # Load first incomplete block of source
       check($_, $finished) for 2..5;  last4;                                    # Check a range
       Vmovdqu8 "[rdx]{k7}", zmm1;                                               # Write set byte into mask at match points
@@ -3189,7 +3195,7 @@ sub ReadFile(@)                                                                 
   $s->call(@variables);
  }
 
-sub executeFileViaBash(@)                                                       # Execute the file named in the byte string addressed by rax with bash
+sub executeFileViaBash(@)                                                       # Execute the file named in the arena addressed by rax with bash
  {my (@variables) = @_;                                                         # Variables
   @_ >= 1 or confess;
 
@@ -3414,7 +3420,7 @@ sub ConvertUtf8ToUtf32(@)                                                       
     ForEver sub                                                                 # Loop through input string  converting each utf8 sequence to utf32
      {my ($start, $end) = @_;
       my @p = my ($out, $size, $fail) = (V(out), V(size), V('fail'));
-      GetNextUtf8CharAsUtf32 V(in, r14), @p;                                   # Get next utf 8 character and convert it to utf32
+      GetNextUtf8CharAsUtf32 V(in, r14), @p;                                    # Get next utf 8 character and convert it to utf32
       If ($fail,
       Then
        {PrintErrStringNL "Invalid utf8 character at index:";
@@ -3625,12 +3631,12 @@ sub ConcatenateShortStrings($$)                                                 
   Call $sub;
  }
 
-#D1 Byte Strings                                                                # Operations on Byte Strings
+#D1 Arenas                                                                      # An arena is single extensible block of memory which contains other data structures such as strings, arrays, trees within it.
 
 sub Cstrlen()                                                                   #P Length of the C style string addressed by rax returning the length in r15
  {@_ == 0 or confess;
 
-  my $sub  = Macro                                                              # Create byte string
+  my $sub  = Macro                                                              # Create arena
    {Comment "C strlen";
     PushR my @regs = (rax, rdi, rcx);
     Mov rdi, rax;
@@ -3666,9 +3672,9 @@ sub StringLength(@)                                                             
   $z
  }
 
-sub CreateByteString(%)                                                         # Create an relocatable string of bytes in an arena and returns its address in rax. Optionally add a chain header so that 64 byte blocks of memory can be freed and reused within the byte string.
+sub CreateArena(%)                                                              # Create an relocatable arena and returns its address in rax. Optionally add a chain header so that 64 byte blocks of memory can be freed and reused within the arena.
  {my (%options) = @_;                                                           # free=>1 adds a free chain.
-  Comment "Create byte string";
+  Comment "Create arena";
   my $N = V(size, 4096);                                                        # Initial size of string
 
   my ($string, $size, $used, $free) = All8Structure 3;                          # String base
@@ -3682,30 +3688,30 @@ sub CreateByteString(%)                                                         
 
     $$p{bs}->setReg(rax);
     $N     ->setReg(rdx);
-    Mov rdi, $string->size;                                                     # Size of byte string base structure which is constant
+    Mov rdi, $string->size;                                                     # Size of arena base structure which is constant
     Mov $used->addr, rdi;                                                       # Used space
     Mov $size->addr, rdx;                                                       # Size
 
     RestoreFirstFour;
    } out => [qw(bs)];
 
-  $s->call(my $bs = V(bs));                                                     # Variable that holds the reference to the byte string
+  $s->call(my $bs = V(bs));                                                     # Variable that holds the reference to the arena
 
-  genHash(__PACKAGE__."::ByteString",                                           # Definition of byte string
+  genHash(__PACKAGE__."::Arena",                                                # Definition of arena
     structure => $string,                                                       # Structure details
     size      => $size,                                                         # Size field details
     used      => $used,                                                         # Used field details
     free      => $free,                                                         # Free chain offset
     data      => $data,                                                         # The start of the data
-    bs        => $bs,                                                           # Variable that addresses the byte string
+    bs        => $bs,                                                           # Variable that addresses the arena
    );
  }
 
-sub Nasm::X86::ByteString::chain($$$@)                                          #P Return a variable with the end point of a chain of double words in the byte string starting at the specified variable.
- {my ($byteString, $bs, $variable, @offsets) = @_;                              # Byte string descriptor, byte string locator, start variable,  offsets chain
+sub Nasm::X86::Arena::chain($$$@)                                               #P Return a variable with the end point of a chain of double words in the arena starting at the specified variable.
+ {my ($arena, $bs, $variable, @offsets) = @_;                                   # Arena descriptor, arena locator, start variable,  offsets chain
   @_ >= 3 or confess;
 
-  PushR my @save = (r14, r15);                                                  # 14 is the byte string address, 15 the current offset in the byte string
+  PushR my @save = (r14, r15);                                                  # 14 is the arena address, 15 the current offset in the arena
   $bs->setReg(r14);
   $variable->setReg(r15);
   for my $o(@offsets)                                                           # Each offset
@@ -3717,11 +3723,11 @@ sub Nasm::X86::ByteString::chain($$$@)                                          
   $r
  }
 
-sub Nasm::X86::ByteString::putChain($$$$@)                                      #P Write the double word in the specified variable to the double word location at the the specified offset in the specified byte string.
- {my ($byteString, $bs,  $start, $value, @offsets) = @_;                        # Byte string descriptor, byte string locator variable, start variable, value to put as a variable,  offsets chain
+sub Nasm::X86::Arena::putChain($$$$@)                                           #P Write the double word in the specified variable to the double word location at the the specified offset in the specified arena.
+ {my ($arena, $bs,  $start, $value, @offsets) = @_;                             # Arena descriptor, arena locator variable, start variable, value to put as a variable,  offsets chain
   @_ >= 5 or confess;
 
-  PushR my @save = (r14, r15);                                                  # 14 is the byte string address, 15 the current offset in the byte string
+  PushR my @save = (r14, r15);                                                  # 14 is the arena address, 15 the current offset in the arena
   $bs->setReg(r14);
   $start->setReg(r15);
   for my $i(keys @offsets)                                                      # Each offset
@@ -3740,57 +3746,57 @@ sub Nasm::X86::ByteString::putChain($$$$@)                                      
   PopR @save;
  }
 
-sub Nasm::X86::ByteString::length($@)                                           # Get the length of a byte string
- {my ($byteString, @variables) = @_;                                            # Byte string descriptor, variables
+sub Nasm::X86::Arena::length($@)                                                # Get the length of an arena
+ {my ($arena, @variables) = @_;                                                 # Arena descriptor, variables
   @_ >= 2 or confess;
-  my $size = $byteString->size->addr;
-  my $used = $byteString->used->addr;
+  my $size = $arena->size->addr;
+  my $used = $arena->used->addr;
 
   my $s = Subroutine                                                            # Allocate more space if required
    {my ($p) = @_;                                                               # Parameters
-    Comment "Byte string length";
+    Comment "Arena length";
     SaveFirstFour;
-    $$p{bs}->setReg(rax);                                                       # Address byte string
-    Mov rdx, $byteString->used->addr;                                           # Used
-    Sub rdx, $byteString->structure->size;
+    $$p{bs}->setReg(rax);                                                       # Address arena
+    Mov rdx, $arena->used->addr;                                                # Used
+    Sub rdx, $arena->structure->size;
     $$p{size}->getReg(rdx);
     RestoreFirstFour;
    } in => [qw(bs)], out => [qw(size)];
 
-  $s->call($byteString->bs, @variables);
+  $s->call($arena->bs, @variables);
  }
 
-sub Nasm::X86::ByteString::updateSpace($@)                                      #P Make sure that the byte string addressed by rax has enough space to accommodate content of length rdi
- {my ($byteString, @variables) = @_;                                            # Byte string descriptor, variables
+sub Nasm::X86::Arena::updateSpace($@)                                           #P Make sure that the arena addressed by rax has enough space to accommodate content of length rdi
+ {my ($arena, @variables) = @_;                                                 # Arena descriptor, variables
 
   @_ >= 3 or confess;
-  my $size = $byteString->size->addr;
-  my $used = $byteString->used->addr;
+  my $size = $arena->size->addr;
+  my $used = $arena->used->addr;
 
   my $s = Subroutine
    {my ($p) = @_;                                                               # Parameters
-    Comment "Allocate more space for a byte string";
+    Comment "Allocate more space for an arena";
     SaveFirstFour;
-    $$p{bs}->setReg(rax);                                                       # Address byte string
+    $$p{bs}->setReg(rax);                                                       # Address arena
     my $oldSize = V(oldSize, $size);                                            # Size
     my $oldUsed = V(oldUsed, $used);                                            # Used
     my $minSize = $oldUsed + $$p{size};                                         # Minimum size of new string
     KeepFree rax;
     If ($minSize > $oldSize,
     Then                                                                        # More space needed
-     {Mov rax, 4096;                                                            # Minimum byte string size
+     {Mov rax, 4096;                                                            # Minimum arena size
       $minSize->setReg(rdx);
       ForEver
        {my ($start, $end) = @_;
-        Shl rax, 1;                                                             # New byte string size - double the size of the old byte string
+        Shl rax, 1;                                                             # New arena size - double the size of the old arena
         Cmp rax, rdx;                                                           # Big enough?
         Jge $end;                                                               # Big enough!
        };
-      my $newSize = V(size, rax);                                               # Save new byte string size
-      AllocateMemory(size => $newSize, my $address = V(address));               # Create new byte string
-      CopyMemory(target  => $address, source => $$p{bs}, size => $oldUsed);     # Copy old byte string into new byte string
-      FreeMemory(address => $$p{bs},  size   => $oldSize);                      # Free previous memory previously occupied byte string
-      $$p{bs}->copy($address);                                                  # Save new byte string address
+      my $newSize = V(size, rax);                                               # Save new arena size
+      AllocateMemory(size => $newSize, my $address = V(address));               # Create new arena
+      CopyMemory(target  => $address, source => $$p{bs}, size => $oldUsed);     # Copy old arena into new arena
+      FreeMemory(address => $$p{bs},  size   => $oldSize);                      # Free previous memory previously occupied arena
+      $$p{bs}->copy($address);                                                  # Save new arena address
      });
 
     RestoreFirstFour;
@@ -3799,88 +3805,88 @@ sub Nasm::X86::ByteString::updateSpace($@)                                      
   $s->call(@variables);
  } # updateSpace
 
-sub Nasm::X86::ByteString::makeReadOnly($)                                      # Make a byte string read only
- {my ($byteString) = @_;                                                        # Byte string descriptor
+sub Nasm::X86::Arena::makeReadOnly($)                                           # Make an arena read only
+ {my ($arena) = @_;                                                             # Arena descriptor
   @_ == 1 or confess;
 
   my $s = Subroutine
    {my ($p) = @_;                                                               # Parameters
-    Comment "Make a byte string readable";
+    Comment "Make an arena readable";
     SaveFirstFour;
     $$p{bs}->setReg(rax);
-    Mov rdi, rax;                                                               # Address of byte string
-    Mov rsi, $byteString->size->addr;                                           # Size of byte string
+    Mov rdi, rax;                                                               # Address of arena
+    Mov rsi, $arena->size->addr;                                                # Size of arena
     KeepFree rax;
 
     Mov rdx, 1;                                                                 # Read only access
     Mov rax, 10;
     Syscall;
-    RestoreFirstFour;                                                           # Return the possibly expanded byte string
+    RestoreFirstFour;                                                           # Return the possibly expanded arena
    } in => [qw(bs)];
 
-  $s->call(bs => $byteString->bs);
+  $s->call(bs => $arena->bs);
  }
 
-sub Nasm::X86::ByteString::makeWriteable($)                                     # Make a byte string writable
- {my ($byteString) = @_;                                                        # Byte string descriptor
+sub Nasm::X86::Arena::makeWriteable($)                                          # Make an arena writable
+ {my ($arena) = @_;                                                             # Arena descriptor
   @_ == 1 or confess;
 
   my $s = Subroutine
    {my ($p) = @_;                                                               # Parameters
-    Comment "Make a byte string writable";
+    Comment "Make an arena writable";
     SaveFirstFour;
     $$p{bs}->setReg(rax);
-    Mov rdi, rax;                                                               # Address of byte string
-    Mov rsi, $byteString->size->addr;                                           # Size of byte string
+    Mov rdi, rax;                                                               # Address of arena
+    Mov rsi, $arena->size->addr;                                                # Size of arena
     KeepFree rax;
     Mov rdx, 3;                                                                 # Read only access
     Mov rax, 10;
     Syscall;
-    RestoreFirstFour;                                                           # Return the possibly expanded byte string
+    RestoreFirstFour;                                                           # Return the possibly expanded arena
    } in => [qw(bs)];
 
-  $s->call(bs => $byteString->bs);
+  $s->call(bs => $arena->bs);
  }
 
-sub Nasm::X86::ByteString::allocate($@)                                         # Allocate the amount of space indicated in rdi in the byte string addressed by rax and return the offset of the allocation in the arena in rdi
- {my ($byteString, @variables) = @_;                                            # Byte string descriptor, variables
+sub Nasm::X86::Arena::allocate($@)                                              # Allocate the amount of space indicated in rdi in the arena addressed by rax and return the offset of the allocation in the arena in rdi
+ {my ($arena, @variables) = @_;                                                 # Arena descriptor, variables
   @_ >= 3 or confess;
 
   my $s = Subroutine
    {my ($p) = @_;                                                               # Parameters
-    Comment "Allocate space in a byte string";
+    Comment "Allocate space in an arena";
     SaveFirstFour;
 
-    $byteString->updateSpace($$p{bs}, $$p{size});                               # Update space if needed
+    $arena->updateSpace($$p{bs}, $$p{size});                                    # Update space if needed
     $$p{bs}  ->setReg(rax);
-    Mov rsi, $byteString->used->addr;                                           # Currently used
+    Mov rsi, $arena->used->addr;                                                # Currently used
     $$p{offset}->getReg(rsi);
     $$p{size}  ->setReg(rdi);
     Add rsi, rdi;
-    Mov $byteString->used->addr, rsi;                                           # Currently used
+    Mov $arena->used->addr, rsi;                                                # Currently used
     KeepFree rax, rdi, rsi;
 
     RestoreFirstFour;
    } in => [qw(size)], io => [qw(bs)], out => [qw(offset)];
 
-  $s->call($byteString->bs, @variables);
+  $s->call($arena->bs, @variables);
  }
 
-sub Nasm::X86::ByteString::blockSize($)                                         #P Size of a block
- {my ($byteString) = @_;                                                        # Byte string
+sub Nasm::X86::Arena::blockSize($)                                              #P Size of a block
+ {my ($arena) = @_;                                                             # Arena
   RegisterSize(zmm0)
  }
 
-sub Nasm::X86::ByteString::allocZmmBlock($@)                                    # Allocate a block to hold a zmm register in the specified byte string and return the offset of the block in a variable
- {my ($byteString, @variables) = @_;                                            # Byte string, variables
+sub Nasm::X86::Arena::allocZmmBlock($@)                                         # Allocate a block to hold a zmm register in the specified arena and return the offset of the block in a variable
+ {my ($arena, @variables) = @_;                                                 # Arena, variables
   @_ >= 2 or confess;
-  my $ffb = $byteString->firstFreeBlock;                                        # Check for a free block
+  my $ffb = $arena->firstFreeBlock;                                             # Check for a free block
   If ($ffb > 0,
   Then                                                                          # Free block available
    {PushR zmm31;
-    $byteString->getBlock($byteString->bs, $ffb, 31);                           # Load the first block on the free chain
-    my $second = getDFromZmm(31, 60);                                           # The location of the next pointer is forced upon us by block string which got there first.
-    $byteString->setFirstFreeBlock($second);                                    # Set the first free block field to point to the second block
+    $arena->getBlock($arena->bs, $ffb, 31);                                     # Load the first block on the free chain
+    my $second = getDFromZmm(31, 60);                                           # The location of the next pointer is forced upon us by string which got there first.
+    $arena->setFirstFreeBlock($second);                                         # Set the first free block field to point to the second block
     for my $v(@variables)
      {if (ref($v) and $v->name eq "offset")
        {$v->copy($ffb);
@@ -3890,115 +3896,115 @@ sub Nasm::X86::ByteString::allocZmmBlock($@)                                    
     PopR zmm31;
    },
   Else                                                                          # Cannot reuse a free block so use unassigned memory
-   {$byteString->allocate(V(size, RegisterSize(zmm0)), @variables);
+   {$arena->allocate(V(size, RegisterSize(zmm0)), @variables);
    });
  }
 
-sub Nasm::X86::ByteString::allocBlock($)                                        # Allocate a block to hold a zmm register in the specified byte string and return the offset of the block in a variable
- {my ($byteString) = @_;                                                        # Byte string
+sub Nasm::X86::Arena::allocBlock($)                                             # Allocate a block to hold a zmm register in the specified arena and return the offset of the block in a variable
+ {my ($arena) = @_;                                                             # Arena
   @_ == 1 or confess;
-  $byteString->allocZmmBlock                                                    # Allocate a zmm block
-   ($byteString->bs, V(size, RegisterSize(zmm0)), my $o = V(offset));
+  $arena->allocZmmBlock                                                         # Allocate a zmm block
+   ($arena->bs, V(size, RegisterSize(zmm0)), my $o = V(offset));
   $o                                                                            # Offset as a variable
  }
 
-sub Nasm::X86::ByteString::firstFreeBlock($)                                    #P Create and load a variable with the first free block on the free block chain or zero if no such block in the given byte string
- {my ($byteString) = @_;                                                        # Byte string address as a variable
+sub Nasm::X86::Arena::firstFreeBlock($)                                         #P Create and load a variable with the first free block on the free block chain or zero if no such block in the given arena
+ {my ($arena) = @_;                                                             # Arena address as a variable
   @_ == 1 or confess;
 
-  Comment "Get first free block in a byte string";
+  Comment "Get first free block in an arena";
   PushR rax;
-  $byteString->bs->setReg(rax);                                                 #P Address underlying byte string
+  $arena->bs->setReg(rax);                                                      #P Address underlying arena
   KeepFree rax;
-  Mov rax, $byteString->free->addr;                                             # Content of free chain pointer
+  Mov rax, $arena->free->addr;                                                  # Content of free chain pointer
   my $v = V('free', rax);                                                       # Remainder of the free chain
   PopR rax;
   $v
  }
 
-sub Nasm::X86::ByteString::setFirstFreeBlock($$)                                #P Set the first free block field from a variable
- {my ($byteString, $offset) = @_;                                               # Byte string descriptor, first free block offset as a variable
+sub Nasm::X86::Arena::setFirstFreeBlock($$)                                     #P Set the first free block field from a variable
+ {my ($arena, $offset) = @_;                                                    # Arena descriptor, first free block offset as a variable
   @_ == 2 or confess;
 
   Comment "Set first free block start";
   PushR my @save = (rax, rsi, rdx);
-  $byteString->bs->setReg(rax);                                                 # Address underlying byte string
-  Lea rdx, $byteString->free->addr;                                             # Address of address of free chain
+  $arena->bs->setReg(rax);                                                      # Address underlying arena
+  Lea rdx, $arena->free->addr;                                                  # Address of address of free chain
   $offset->setReg(rsi);                                                         # Offset of block being freed
   Mov "[rdx]", rsi;                                                             # Set head of free chain to point to block just freed
   PopR @save;
   Comment "Set first free block end";
  }
 
-sub Nasm::X86::ByteString::freeBlock($@)                                        #P Free a block in a byte string by placing it on the free chain
- {my ($byteString, @variables) = @_;                                            # Byte string descriptor, variables
+sub Nasm::X86::Arena::freeBlock($@)                                             #P Free a block in an arena by placing it on the free chain
+ {my ($arena, @variables) = @_;                                                 # Arena descriptor, variables
   @_ >= 2 or confess;
 
   my $s = Subroutine
    {my ($p) = @_;                                                               # Parameters
-    Comment "Free a block in a byte string";
+    Comment "Free a block in an arena";
     PushR zmm31;
-    my $rfc = $byteString->firstFreeBlock;                                      # Get first free block
+    my $rfc = $arena->firstFreeBlock;                                           # Get first free block
     ClearRegisters zmm31;                                                       # Second block
-    $rfc->putDIntoZmm(31, 60);                                                  # The position of the next pointer was dictated by block strings.
-    $byteString->putBlock($$p{bs}, $$p{offset}, 31);                            # Link the freed block to the rest of the free chain
-    $byteString->setFirstFreeBlock($$p{offset});                                # Set free chain field to point to latest free chain element
+    $rfc->putDIntoZmm(31, 60);                                                  # The position of the next pointer was dictated by strings.
+    $arena->putBlock($$p{bs}, $$p{offset}, 31);                                 # Link the freed block to the rest of the free chain
+    $arena->setFirstFreeBlock($$p{offset});                                     # Set free chain field to point to latest free chain element
     PopR zmm31;
    } in => [qw(offset)], io => [qw(bs)];
 
-  $s->call($byteString->bs, @variables);
+  $s->call($arena->bs, @variables);
  }
 
-sub Nasm::X86::ByteString::getBlock($$$$)                                       #P Get the block with the specified offset in the specified block string and return it in the numbered zmm
- {my ($byteString, $bsa, $block, $zmm) = @_;                                    # Byte string descriptor, byte string variable, offset of the block as a variable, number of zmm register to contain block
+sub Nasm::X86::Arena::getBlock($$$$)                                            #P Get the block with the specified offset in the specified string and return it in the numbered zmm
+ {my ($arena, $bsa, $block, $zmm) = @_;                                         # Arena descriptor, arena variable, offset of the block as a variable, number of zmm register to contain block
   @_ == 4 or confess;
   defined($bsa)   or confess;
   defined($block) or confess;
 
   Comment "Get block start";
   PushR my @save = (r14, r15);                                                  # Result register
-  If ($block < $byteString->data->loc,
+  If ($block < $arena->data->loc,
   Then                                                                          #DEBUG
-   {PrintErrStringNL "Attempt to get block below start of byte string";
+   {PrintErrStringNL "Attempt to get block below start of arena";
     Exit(1);
    });
 
-  $bsa  ->setReg(r15);                                                          # Byte string address
-  $block->setReg(r14);                                                          # Offset of block in byte string
+  $bsa  ->setReg(r15);                                                          # Arena address
+  $block->setReg(r14);                                                          # Offset of block in arena
   Vmovdqu64 "zmm$zmm", "[r15+r14]";                                             # Read from memory
   PopR @save;                                                                   # Restore registers
   Comment "Get block end";
  }
 
-sub Nasm::X86::ByteString::putBlock($$$$)                                       #P Write the numbered zmm to the block at the specified offset in the specified byte string
- {my ($byteString, $bsa, $block, $zmm) = @_;                                    # Byte string descriptor, byte string variable, block in byte string, content variable
+sub Nasm::X86::Arena::putBlock($$$$)                                            #P Write the numbered zmm to the block at the specified offset in the specified arena
+ {my ($arena, $bsa, $block, $zmm) = @_;                                         # Arena descriptor, arena variable, block in arena, content variable
   @_ >= 4 or confess;
   PushR my @save = (r14, r15);                                                  # Work registers
-  defined($bsa) or confess "Byte string not set";
-  $bsa->setReg(r15);                                                            # Byte string address
+  defined($bsa) or confess "Arena not set";
+  $bsa->setReg(r15);                                                            # Arena address
   defined($block) or confess;
-  If ($block < $byteString->data->loc,
+  If ($block < $arena->data->loc,
   Then                                                                          #DEBUG
-   {PrintErrStringNL "Attempt to put block below start of byte string";
+   {PrintErrStringNL "Attempt to put block below start of arena";
     Exit(1);
    });
-  $block->setReg(r14);                                                          # Offset of block in byte string
+  $block->setReg(r14);                                                          # Offset of block in arena
   Vmovdqu64 "[r15+r14]", "zmm$zmm";                                             # Write to memory
   PopR @save;                                                                   # Restore registers
  }
 
-sub Nasm::X86::ByteString::m($@)                                                # Append the content with length rdi addressed by rsi to the byte string addressed by rax
- {my ($byteString, @variables) = @_;                                            # Byte string descriptor, variables
+sub Nasm::X86::Arena::m($@)                                                     # Append the content with length rdi addressed by rsi to the arena addressed by rax
+ {my ($arena, @variables) = @_;                                                 # Arena descriptor, variables
   @_ >= 4 or confess;
-  my $used = $byteString->used->addr;
+  my $used = $arena->used->addr;
 
   my $s = Subroutine
    {my ($p) = @_;                                                               # Parameters
-    Comment "Append memory to a byte string";
+    Comment "Append memory to an arena";
     SaveFirstFour;
     $$p{bs}->setReg(rax);
     my $oldUsed = V("used", $used);
-    $byteString->updateSpace($$p{bs}, $$p{size});                               # Update space if needed
+    $arena->updateSpace($$p{bs}, $$p{size});                                    # Update space if needed
 
     my $target  = $oldUsed + $$p{bs};
     KeepFree rax;
@@ -4017,89 +4023,89 @@ sub Nasm::X86::ByteString::m($@)                                                
   $s->call(@variables);
  }
 
-sub Nasm::X86::ByteString::q($$)                                                # Append a constant string to the byte string
- {my ($byteString, $string) = @_;                                               # Byte string descriptor, string
+sub Nasm::X86::Arena::q($$)                                                     # Append a constant string to the arena
+ {my ($arena, $string) = @_;                                                    # Arena descriptor, string
   @_ == 2 or confess;
 
   my $s = Rs($string);
 
-  my $bs = $byteString->bs;                                                     # Move data
+  my $bs = $arena->bs;                                                          # Move data
   my $ad = V(address, $s);
   my $sz = V(size, length($string));
-  $byteString->m($bs, $ad, $sz);
+  $arena->m($bs, $ad, $sz);
  }
 
-sub Nasm::X86::ByteString::ql($$)                                               # Append a quoted string containing new line characters to the byte string addressed by rax
- {my ($byteString, $const) = @_;                                                # Byte string, constant
+sub Nasm::X86::Arena::ql($$)                                                    # Append a quoted string containing new line characters to the arena addressed by rax
+ {my ($arena, $const) = @_;                                                     # Arena, constant
   @_ == 2 or confess;
   for my $l(split /\s*\n/, $const)
-   {$byteString->q($l);
-    $byteString->nl;
+   {$arena->q($l);
+    $arena->nl;
    }
  }
 
-sub Nasm::X86::ByteString::char($$)                                             # Append a character expressed as a decimal number to the byte string addressed by rax
- {my ($byteString, $char) = @_;                                                 # Byte string descriptor, number of character to be appended
+sub Nasm::X86::Arena::char($$)                                                  # Append a character expressed as a decimal number to the arena addressed by rax
+ {my ($arena, $char) = @_;                                                      # Arena descriptor, number of character to be appended
   @_ == 2 or confess;
   my $s = Rb(ord($char));
-  $byteString->m($byteString->bs, V(address, $s), V(size, 1));                  # Move data
+  $arena->m($arena->bs, V(address, $s), V(size, 1));                            # Move data
  }
 
-sub Nasm::X86::ByteString::nl($)                                                # Append a new line to the byte string addressed by rax
- {my ($byteString) = @_;                                                        # Byte string descriptor
+sub Nasm::X86::Arena::nl($)                                                     # Append a new line to the arena addressed by rax
+ {my ($arena) = @_;                                                             # Arena descriptor
   @_ == 1 or confess;
-  $byteString->char("\n");
+  $arena->char("\n");
  }
 
-sub Nasm::X86::ByteString::z($)                                                 # Append a trailing zero to the byte string addressed by rax
- {my ($byteString) = @_;                                                        # Byte string descriptor
+sub Nasm::X86::Arena::z($)                                                      # Append a trailing zero to the arena addressed by rax
+ {my ($arena) = @_;                                                             # Arena descriptor
   @_ == 1 or confess;
-  $byteString->char("\0");
+  $arena->char("\0");
  }
 
-sub Nasm::X86::ByteString::append($@)                                           # Append one byte string to another
- {my ($byteString, @variables) = @_;                                            # Byte string descriptor, variables
+sub Nasm::X86::Arena::append($@)                                                # Append one arena to another
+ {my ($arena, @variables) = @_;                                                 # Arena descriptor, variables
   @_ >= 3 or confess;
 
   my $s = Subroutine
    {my ($p) = @_;                                                               # Parameters
-    Comment "Concatenate byte strings";
+    Comment "Concatenate arenas";
     SaveFirstFour;
     $$p{source}->setReg(rax);
-    Mov rdi, $byteString->used->addr;
-    Sub rdi, $byteString->structure->size;
-    Lea rsi, $byteString->data->addr;
-    $byteString->m(bs=>$$p{target}, V(address, rsi), V(size, rdi));
+    Mov rdi, $arena->used->addr;
+    Sub rdi, $arena->structure->size;
+    Lea rsi, $arena->data->addr;
+    $arena->m(bs=>$$p{target}, V(address, rsi), V(size, rdi));
     RestoreFirstFour;
    } in => [qw(target source)];
 
-  $s->call(target=>$byteString->bs, @variables);
+  $s->call(target=>$arena->bs, @variables);
  }
 
-sub Nasm::X86::ByteString::clear($)                                             # Clear the byte string addressed by rax
- {my ($byteString) = @_;                                                        # Byte string descriptor
+sub Nasm::X86::Arena::clear($)                                                  # Clear the arena addressed by rax
+ {my ($arena) = @_;                                                             # Arena descriptor
   @_ == 1 or confess;
 
   my $s = Subroutine
    {my ($p) = @_;                                                               # Parameters
-    Comment "Clear byte string";
+    Comment "Clear arena";
     PushR my @save = (rax, rdi);
     $$p{bs}->setReg(rax);
-    Mov rdi, $byteString->structure->size;
-    Mov $byteString->used->addr, rdi;
+    Mov rdi, $arena->structure->size;
+    Mov $arena->used->addr, rdi;
     PopR     @save;
    } in => [qw(bs)];
 
-  $s->call(bs => $byteString->bs);
+  $s->call(bs => $arena->bs);
  }
 
-sub Nasm::X86::ByteString::write($@)                                            # Write the content in a byte string addressed by rax to a temporary file and replace the byte string content with the name of the  temporary file
- {my ($byteString, @variables) = @_;                                            # Byte string descriptor, variables
+sub Nasm::X86::Arena::write($@)                                                 # Write the content in an arena addressed by rax to a temporary file and replace the arena content with the name of the  temporary file
+ {my ($arena, @variables) = @_;                                                 # Arena descriptor, variables
   @_ >= 2 or confess;
 
   my $s = Subroutine
    {my ($p) = @_;                                                               # Parameters
-    Comment "Write a byte string to a file";
+    Comment "Write an arena to a file";
     SaveFirstFour;
 
     $$p{file}->setReg(rax);
@@ -4108,9 +4114,9 @@ sub Nasm::X86::ByteString::write($@)                                            
     KeepFree rax;
 
     $$p{bs}->setReg(rax);                                                       # Write file
-    Lea rsi, $byteString->data->addr;
-    Mov rdx, $byteString->used->addr;
-    Sub rdx, $byteString->structure->size;
+    Lea rsi, $arena->data->addr;
+    Mov rdx, $arena->used->addr;
+    Sub rdx, $arena->structure->size;
     KeepFree rax;
 
     Mov rax, 1;                                                                 # Write content to file
@@ -4123,65 +4129,65 @@ sub Nasm::X86::ByteString::write($@)                                            
     RestoreFirstFour;
    }  in => [qw(file)], io => [qw(bs)];
 
-  $s->call(bs => $byteString->bs, @variables);
+  $s->call(bs => $arena->bs, @variables);
  }
 
-sub Nasm::X86::ByteString::read($@)                                             # Read the named file (terminated with a zero byte) and place it into the named byte string.
- {my ($byteString, @variables) = @_;                                            # Byte string descriptor, variables
+sub Nasm::X86::Arena::read($@)                                                  # Read the named file (terminated with a zero byte) and place it into the named arena.
+ {my ($arena, @variables) = @_;                                                 # Arena descriptor, variables
   @_ >= 2 or confess;
 
   my $s = Subroutine
    {my ($p) = @_;                                                               # Parameters
-    Comment "Read a byte string";
+    Comment "Read an arena";
     ReadFile($$p{file}, (my $size = V(size)), my $address = V(address));
-    $byteString->m($$p{bs}, $size, $address);                                   # Move data into byte string
+    $arena->m($$p{bs}, $size, $address);                                        # Move data into arena
     FreeMemory($size, $address);                                                # Free memory allocated by read
    } io => [qw(bs)], in => [qw(file)];
 
-  $s->call(bs => $byteString->bs, @variables);
+  $s->call(bs => $arena->bs, @variables);
  }
 
-sub Nasm::X86::ByteString::out($)                                               # Print the specified byte string addressed by rax on sysout
- {my ($byteString) = @_;                                                        # Byte string descriptor
+sub Nasm::X86::Arena::out($)                                                    # Print the specified arena addressed by rax on sysout
+ {my ($arena) = @_;                                                             # Arena descriptor
   @_ == 1 or confess;
 
   my $s = Subroutine
    {my ($p) = @_;                                                               # Parameters
-    Comment "Write a byte string";
+    Comment "Write an arena";
     SaveFirstFour;
     $$p{bs}->setReg(rax);
-    Mov rdi, $byteString->used->addr;                                           # Length to print
-    Sub rdi, $byteString->structure->size;                                      # Length to print
-    Lea rax, $byteString->data->addr;                                           # Address of data field
+    Mov rdi, $arena->used->addr;                                                # Length to print
+    Sub rdi, $arena->structure->size;                                           # Length to print
+    Lea rax, $arena->data->addr;                                                # Address of data field
     PrintOutMemory;
     RestoreFirstFour;
    } in => [qw(bs)];
 
-  $s->call($byteString->bs);
+  $s->call($arena->bs);
  }
 
-sub Nasm::X86::ByteString::dump($;$)                                            # Dump details of a byte string
- {my ($byteString, $depth) = @_;                                                # Byte string descriptor, optional amount of memory to dump  as the number of 64 byte blocks
+sub Nasm::X86::Arena::dump($;$)                                                 # Dump details of an arena
+ {my ($arena, $depth) = @_;                                                     # Arena descriptor, optional amount of memory to dump  as the number of 64 byte blocks
   @_ == 1 or @_ == 2  or confess;
   $depth //= 4;                                                                 # Default depth
 
-  PushR my @save = (rax, r15);                                                  # Get address of byte string
-  $byteString->bs->setReg(rax);
+  PushR my @save = (rax, r15);                                                  # Get address of arena
+  $arena->bs->setReg(rax);
 
   Call Macro                                                                    # Bash string
-   {Comment "Print details of a byte string";
+   {Comment "Print details of an arena";
     SaveFirstFour;
-    PrintOutStringNL("Byte String");
+    PrintOutStringNL("Arena");
 
     PushR rax;                                                                  # Print size
-    Mov rax, $byteString->size->addr;
+    Mov rax, $arena->size->addr;
     PrintOutString("  Size: ");
     PrintOutRaxInHex;
     PrintOutNL;
     PopR rax;
 
     PushR rax;                                                                  # Print used
-    Mov rax, $byteString->used->addr;
+    Mov rax, $arena->used->addr;
     PrintOutString("  Used: ");
     PrintOutRaxInHex;
     PrintOutNL;
@@ -4196,28 +4202,28 @@ sub Nasm::X86::ByteString::dump($;$)                                            
      }
 
     RestoreFirstFour;
-   } name => "Nasm::X86::ByteString::dump$depth";
+   } name => "Nasm::X86::Arena::dump$depth";
 
   PopR @save;
  }
 
-#D1 Block Strings                                                               # Strings made from zmm sized blocks of text
+#D1 String                                                                      # Strings made from zmm sized blocks of text
 
-sub Nasm::X86::ByteString::CreateBlockString($)                                 # Create a string from a doubly link linked list of 64 byte blocks linked via 4 byte offsets in the byte string addressed by rax and return its descriptor
- {my ($byteString) = @_;                                                        # Byte string description
+sub Nasm::X86::Arena::CreateString($)                                           # Create a string from a doubly link linked list of 64 byte blocks linked via 4 byte offsets in the arena addressed by rax and return its descriptor
+ {my ($arena) = @_;                                                             # Arena description
   @_ == 1 or confess;
   my $b = RegisterSize zmm0;                                                    # Size of a block == size of a zmm register
   my $o = RegisterSize eax;                                                     # Size of a double word
 
-  Comment "Allocate a new block string in a byte string";
+  Comment "Allocate a new string in an arena";
 
-  my $s = genHash(__PACKAGE__."::BlockString",                                  # Block string definition
-    bs      => $byteString,                                                     # Bytes string definition
+  my $s = genHash(__PACKAGE__."::String",                                       # String definition
+    bs      => $arena,                                                          # Bytes string definition
     links   => $b - 2 * $o,                                                     # Location of links in bytes in zmm
     next    => $b - 1 * $o,                                                     # Location of next offset in block in bytes
     prev    => $b - 2 * $o,                                                     # Location of prev offset in block in bytes
     length  => $b - 2 * $o - 1,                                                 # Maximum length in a block
-    first   => V('first'),                                                      # Variable addressing first block in block string
+    first   => V('first'),                                                      # Variable addressing first block in string
    );
 
   my $first = $s->allocBlock;                                                   # Allocate first block
@@ -4227,36 +4233,36 @@ sub Nasm::X86::ByteString::CreateBlockString($)                                 
    {my $nn = $s->next;
     my $pp = $s->prev;
     PushR my @save = (r14, r15);
-    $byteString->bs->setReg(r15);
+    $arena->bs->setReg(r15);
     $first         ->setReg(r14);
     Mov "[r15+r14+$nn]", r14d;
     Mov "[r15+r14+$pp]", r14d;
     PopR @save;
    }
-  $s                                                                            # Description of block string
+  $s                                                                            # Description of string
  }
 
-sub Nasm::X86::BlockString::address($)                                          #P Address of a block string
- {my ($blockString) = @_;                                                       # Block string descriptor
+sub Nasm::X86::String::address($)                                               #P Address of a string
+ {my ($String) = @_;                                                            # String descriptor
   @_ == 1 or confess;
-  $blockString->bs->bs;
+  $String->bs->bs;
  }
 
-sub Nasm::X86::BlockString::allocBlock($)                                       #P Allocate a block to hold a zmm register in the specified byte string and return the offset of the block in a variable
- {my ($blockString) = @_;                                                       # Block string descriptor
+sub Nasm::X86::String::allocBlock($)                                            #P Allocate a block to hold a zmm register in the specified arena and return the offset of the block in a variable
+ {my ($String) = @_;                                                            # String descriptor
   @_ == 1 or confess;
 
-  $blockString->bs->allocBlock;                                                 # Allocate block and return its offset as a variable
+  $String->bs->allocBlock;                                                      # Allocate block and return its offset as a variable
  }
 
-sub Nasm::X86::BlockString::getBlockLength($$)                                  #P Get the block length of the numbered zmm and return it in a variable
- {my ($blockString, $zmm) = @_;                                                 # Block string descriptor, number of zmm register
+sub Nasm::X86::String::getBlockLength($$)                                       #P Get the block length of the numbered zmm and return it in a variable
+ {my ($String, $zmm) = @_;                                                      # String descriptor, number of zmm register
   @_ == 2 or confess;
   getBFromZmm $zmm, 0;                                                          # Block length
  }
 
-sub Nasm::X86::BlockString::setBlockLengthInZmm($$$)                            #P Set the block length of the numbered zmm to the specified length
- {my ($blockString, $length, $zmm) = @_;                                        # Block string descriptor, length as a variable, number of zmm register
+sub Nasm::X86::String::setBlockLengthInZmm($$$)                                 #P Set the block length of the numbered zmm to the specified length
+ {my ($String, $length, $zmm) = @_;                                             # String descriptor, length as a variable, number of zmm register
   @_ == 3 or confess;
   PushR my @save = (r15);                                                       # Save work register
   $length->setReg(r15);                                                         # New length
@@ -4264,24 +4270,24 @@ sub Nasm::X86::BlockString::setBlockLengthInZmm($$$)                            
   PopR @save;                                                                   # Length of block is a byte
  }
 
-sub Nasm::X86::BlockString::getBlock($$$$)                                      #P Get the block with the specified offset in the specified block string and return it in the numbered zmm
- {my ($blockString, $bsa, $block, $zmm) = @_;                                   # Block string descriptor, byte string variable, offset of the block as a variable, number of zmm register to contain block
+sub Nasm::X86::String::getBlock($$$$)                                           #P Get the block with the specified offset in the specified string and return it in the numbered zmm
+ {my ($String, $bsa, $block, $zmm) = @_;                                        # String descriptor, arena variable, offset of the block as a variable, number of zmm register to contain block
   @_ >= 4 or confess;
-  $blockString->bs->getBlock($bsa, $block, $zmm);
+  $String->bs->getBlock($bsa, $block, $zmm);
  }
 
-sub Nasm::X86::BlockString::putBlock($$$$)                                      #P Write the numbered zmm to the block at the specified offset in the specified byte string
- {my ($blockString, $bsa, $block, $zmm) = @_;                                   # Block string descriptor, byte string variable, block in byte string, content variable
+sub Nasm::X86::String::putBlock($$$$)                                           #P Write the numbered zmm to the block at the specified offset in the specified arena
+ {my ($String, $bsa, $block, $zmm) = @_;                                        # String descriptor, arena variable, block in arena, content variable
   @_ >= 4 or confess;
-  $blockString->bs->putBlock($bsa, $block, $zmm);
+  $String->bs->putBlock($bsa, $block, $zmm);
  }
 
-sub Nasm::X86::BlockString::getNextAndPrevBlockOffsetFromZmm($$)                #P Get the offsets of the next and previous blocks as variables from the specified zmm
- {my ($blockString, $zmm) = @_;                                                 # Block string descriptor, zmm containing block
+sub Nasm::X86::String::getNextAndPrevBlockOffsetFromZmm($$)                     #P Get the offsets of the next and previous blocks as variables from the specified zmm
+ {my ($String, $zmm) = @_;                                                      # String descriptor, zmm containing block
   @_ == 2 or confess;
-  my $l = $blockString->links;                                                  # Location of links
+  my $l = $String->links;                                                       # Location of links
   PushR my @regs = (r14, r15);                                                  # Work registers
-  my $L = getQFromZmm($zmm, $blockString->links);                               # Links in one register
+  my $L = getQFromZmm($zmm, $String->links);                                    # Links in one register
   $L->setReg(r15);                                                              # Links
   Mov r14d, r15d;                                                               # Next
   Shr r15, RegisterSize(r14d) * 8;                                              # Prev
@@ -4290,8 +4296,8 @@ sub Nasm::X86::BlockString::getNextAndPrevBlockOffsetFromZmm($$)                
   @r;                                                                           # Return (next, prev)
  }
 
-sub Nasm::X86::BlockString::putNextandPrevBlockOffsetIntoZmm($$$$)              #P Save next and prev offsets into a zmm representing a block
- {my ($blockString, $zmm, $next, $prev) = @_;                                   # Block string descriptor, zmm containing block, next offset as a variable, prev offset as a variable
+sub Nasm::X86::String::putNextandPrevBlockOffsetIntoZmm($$$$)                   #P Save next and prev offsets into a zmm representing a block
+ {my ($String, $zmm, $next, $prev) = @_;                                        # String descriptor, zmm containing block, next offset as a variable, prev offset as a variable
   @_ == 4 or confess;
   if ($next and $prev)                                                          # Set both previous and next
    {PushR my @regs = (r14, r15);                                                # Work registers
@@ -4300,47 +4306,47 @@ sub Nasm::X86::BlockString::putNextandPrevBlockOffsetIntoZmm($$$$)              
     Shl r14, RegisterSize(r14d) * 8;                                            # Prev high
     Or r15, r14;                                                                # Links in one register
     my $l = V("Links", r15);                                                    # Links as variable
-    $l->putQIntoZmm($zmm, $blockString->links);                                 # Load links into zmm
+    $l->putQIntoZmm($zmm, $String->links);                                      # Load links into zmm
     PopR @regs;                                                                 # Free work registers
    }
   elsif ($next)                                                                 # Set just next
    {PushR my @regs = (r15);                                                     # Work registers
     $next->setReg(r15);                                                         # Next offset
     my $l = V("Links", r15);                                                    # Links as variable
-    $l->putDIntoZmm($zmm, $blockString->next);                                  # Load links into zmm
+    $l->putDIntoZmm($zmm, $String->next);                                       # Load links into zmm
     PopR @regs;                                                                 # Free work registers
    }
   elsif ($prev)                                                                 # Set just prev
    {PushR my @regs = (r15);                                                     # Work registers
     $prev->setReg(r15);                                                         # Next offset
     my $l = V("Links", r15);                                                    # Links as variable
-    $l->putDIntoZmm($zmm, $blockString->prev);                                  # Load links into zmm
+    $l->putDIntoZmm($zmm, $String->prev);                                       # Load links into zmm
     PopR @regs;                                                                 # Free work registers
    }
  }
 
-sub Nasm::X86::BlockString::dump($)                                             # Dump a block string to sysout
- {my ($blockString) = @_;                                                       # Block string descriptor
+sub Nasm::X86::String::dump($)                                                  # Dump a string to sysout
+ {my ($String) = @_;                                                            # String descriptor
   @_ == 1 or confess;
 
   my $s = Subroutine
    {my ($p) = @_;                                                               # Parameters
-    Comment "Dump a block in a block string";
+    Comment "Dump a block in a string";
     PushR my @save = (zmm31);
     my $block  = $$p{first};                                                    # The first block
-                 $blockString->getBlock($$p{bs}, $block, 31);                   # The first block in zmm31
-    my $length = $blockString->getBlockLength(31);                              # Length of block
-    PrintOutStringNL "Block String Dump";
+                 $String->getBlock($$p{bs}, $block, 31);                        # The first block in zmm31
+    my $length = $String->getBlockLength(31);                                   # Length of block
+    PrintOutStringNL "string Dump";
     $block ->out("Offset: ");
     PrintOutString "   ";
     $length->outNL("Length: "); PrintOutRegisterInHex zmm31;                    # Print block
 
     ForEver                                                                     # Each block in string
      {my ($start, $end) = @_;                                                   #
-      my ($next, $prev) = $blockString->getNextAndPrevBlockOffsetFromZmm(31);   # Get links from current block
-      If ($next == $block, sub{Jmp $end});                                      # Next block is the first block so we have printed the block string
-      $blockString->getBlock($$p{bs}, $next, 31);                               # Next block in zmm
-      my $length = $blockString->getBlockLength(31);                            # Length of block
+      my ($next, $prev) = $String->getNextAndPrevBlockOffsetFromZmm(31);        # Get links from current block
+      If ($next == $block, sub{Jmp $end});                                      # Next block is the first block so we have printed the string
+      $String->getBlock($$p{bs}, $next, 31);                                    # Next block in zmm
+      my $length = $String->getBlockLength(31);                                 # Length of block
       $next  ->out("Offset: ");                                                 # Print block
       PrintOutString "   ";
       $length->outNL("Length: "); PrintOutRegisterInHex zmm31;
@@ -4350,46 +4356,46 @@ sub Nasm::X86::BlockString::dump($)                                             
     PopR @save;
    } in => [qw(first)], io => [qw(bs)];
 
-  $s->call($blockString->address, $blockString->first);
+  $s->call($String->address, $String->first);
  }
 
-sub Nasm::X86::BlockString::len($$)                                             # Find the length of a block string
- {my ($blockString, $size) = @_;                                                # Block string descriptor, size variable
+sub Nasm::X86::String::len($$)                                                  # Find the length of a string
+ {my ($String, $size) = @_;                                                     # String descriptor, size variable
   @_ == 2 or confess;
 
   my $s = Subroutine
    {my ($p) = @_;                                                               # Parameters
-    Comment "Length of a block string";
+    Comment "Length of a string";
     PushR my @save = (zmm31);
     my $block  = $$p{first};                                                    # The first block
-                 $blockString->getBlock($$p{bs}, $block, 31);                   # The first block in zmm31
-    my $length = $blockString->getBlockLength(31);                              # Length of block
+                 $String->getBlock($$p{bs}, $block, 31);                        # The first block in zmm31
+    my $length = $String->getBlockLength(31);                                   # Length of block
 
     ForEver                                                                     # Each block in string
      {my ($start, $end) = @_;                                                   #
-      my ($next, $prev) = $blockString->getNextAndPrevBlockOffsetFromZmm(31);   # Get links from current block
-      If ($next == $block, sub{Jmp $end});                                      # Next block is the first block so we have printed the block string
-      $blockString->getBlock($$p{bs}, $next, 31);                               # Next block in zmm
-      $length += $blockString->getBlockLength(31);                              # Add length of block
+      my ($next, $prev) = $String->getNextAndPrevBlockOffsetFromZmm(31);        # Get links from current block
+      If ($next == $block, sub{Jmp $end});                                      # Next block is the first block so we have printed the string
+      $String->getBlock($$p{bs}, $next, 31);                                    # Next block in zmm
+      $length += $String->getBlockLength(31);                                   # Add length of block
      };
     $$p{size}->copy($length);
     PopR @save;
    } in => [qw(first)], io => [qw(bs)], out => [qw(size)];
 
-  $s->call($blockString->address, $blockString->first, $size);
+  $s->call($String->address, $String->first, $size);
  }
 
-sub Nasm::X86::BlockString::concatenate($$)                                     # Concatenate two block strings by appending a copy of the source to the target block string.
- {my ($target, $source) = @_;                                                   # Target block string, source block string
+sub Nasm::X86::String::concatenate($$)                                          # Concatenate two strings by appending a copy of the source to the target string.
+ {my ($target, $source) = @_;                                                   # Target string, source string
   @_ == 2 or confess;
 
   my $s = Subroutine
    {my ($p) = @_;                                                               # Parameters
-    Comment "Concatenate block strings";
+    Comment "Concatenate strings";
     PushR my @save = (zmm29, zmm30, zmm31);
-    my $sb = $$p{sBs};                                                          # The byte string underlying the source
+    my $sb = $$p{sBs};                                                          # The arena underlying the source
     my $sf = $$p{sFirst};                                                       # The first block in the source
-    my $tb = $$p{tBs};                                                          # The byte string underlying the target
+    my $tb = $$p{tBs};                                                          # The arena underlying the target
     my $tf = $$p{tFirst};                                                       # The first block in the target
     $source->getBlock($sb, $sf, 31);                                            # The first source block
     $target->getBlock($tb, $tf, 30);                                            # The first target block
@@ -4430,22 +4436,22 @@ sub Nasm::X86::BlockString::concatenate($$)                                     
            tBs => $target->address, tFirst => $target->first);
  }
 
-sub Nasm::X86::BlockString::insertChar($@)                                      # Insert a character into a block string
- {my ($blockString, @variables) = @_;                                           # Block string, variables
+sub Nasm::X86::String::insertChar($@)                                           # Insert a character into a string
+ {my ($String, @variables) = @_;                                                # String, variables
   @_ >= 3 or confess;
 
   my $s = Subroutine
    {my ($p) = @_;                                                               # Parameters
-    Comment "Insert character into a block string";
+    Comment "Insert character into a string";
     PushR my @save = (k7, r14, r15, zmm30, zmm31);
-    my $B = $$p{bs};                                                            # The byte string underlying the block string
-    my $F = $$p{first};                                                         # The first block in block string
+    my $B = $$p{bs};                                                            # The arena underlying the string
+    my $F = $$p{first};                                                         # The first block in string
     my $c = $$p{character};                                                     # The character to insert
-    my $P = $$p{position};                                                      # The position in the block string at which we want to insert the character
-    $blockString->getBlock($B, $F, 31);                                         # The first source block
+    my $P = $$p{position};                                                      # The position in the string at which we want to insert the character
+    $String->getBlock($B, $F, 31);                                              # The first source block
     my $C = V('Current character position', 0);                                 # Current character position
-    my $L = $blockString->getBlockLength(31);                                   # Length of last block
-    my $M   = V('Block length', $blockString->length);                          # Maximum length of a block
+    my $L = $String->getBlockLength(31);                                        # Length of last block
+    my $M   = V('Block length', $String->length);                               # Maximum length of a block
     my $One = V('One', 1);                                                      # Literal one
     my $current = $F;                                                           # Current position in scan of block chain
 
@@ -4464,72 +4470,72 @@ sub Nasm::X86::BlockString::insertChar($@)                                      
         Then                                                                    # Current block has space
          {($P+1)->setMask($C + $L - $P + 1, k7);                                # Set mask for reload
           Vmovdqu8 "zmm31{k7}", "[rsp-1]";                                      # Reload
-          $blockString->setBlockLengthInZmm($L + 1, 31);                        # Length of block
+          $String->setBlockLengthInZmm($L + 1, 31);                             # Length of block
          },
         Else                                                                    # In the current block but no space so split the block
          {$One->setMask($C + $L - $P + 2, k7);                                  # Set mask for reload
           Vmovdqu8 "zmm30{k7}", "[rsp+r14-1]";                                  # Reload
-          $blockString->setBlockLengthInZmm($O,          31);                   # New shorter length of original block
-          $blockString->setBlockLengthInZmm($L - $O + 1, 30);                   # Set length of  remainder plus inserted char in the new block
+          $String->setBlockLengthInZmm($O,          31);                        # New shorter length of original block
+          $String->setBlockLengthInZmm($L - $O + 1, 30);                        # Set length of  remainder plus inserted char in the new block
 
-          my $new = $blockString->allocBlock;                                   # Allocate new block
-          my ($next, $prev)=$blockString->getNextAndPrevBlockOffsetFromZmm(31); # Linkage from last block
+          my $new = $String->allocBlock;                                        # Allocate new block
+          my ($next, $prev)=$String->getNextAndPrevBlockOffsetFromZmm(31);      # Linkage from last block
 
           If ($next == $prev,
           Then                                                                  # The existing string has one block, add new as the second block
-           {$blockString->putNextandPrevBlockOffsetIntoZmm(31, $new,  $new);
-            $blockString->putNextandPrevBlockOffsetIntoZmm(30, $next, $prev);
+           {$String->putNextandPrevBlockOffsetIntoZmm(31, $new,  $new);
+            $String->putNextandPrevBlockOffsetIntoZmm(30, $next, $prev);
            },
           Else                                                                  # The existing string has two or more blocks
-           {$blockString->putNextandPrevBlockOffsetIntoZmm(31, $new,  $prev);   # From last block
-            $blockString->putNextandPrevBlockOffsetIntoZmm(30, $next, $current);# From new block
+           {$String->putNextandPrevBlockOffsetIntoZmm(31, $new,  $prev);        # From last block
+            $String->putNextandPrevBlockOffsetIntoZmm(30, $next, $current);     # From new block
            });
 
-          $blockString->putBlock($B, $new, 30);                                 # Save the modified block
+          $String->putBlock($B, $new, 30);                                      # Save the modified block
          });
 
-        $blockString->putBlock($B, $current, 31);                               # Save the modified block
+        $String->putBlock($B, $current, 31);                                    # Save the modified block
         PopRR zmm31;                                                            # Restore stack
         KeepFree r14, r15;
         Jmp $end;                                                               # Character successfully inserted
        });
 
-      my ($next, $prev) = $blockString->getNextAndPrevBlockOffsetFromZmm(31);   # Get links from current source block
+      my ($next, $prev) = $String->getNextAndPrevBlockOffsetFromZmm(31);        # Get links from current source block
       If ($next == $F,
       Then                                                                      # Last source block
        {$c->setReg(r15);                                                        # Character to insert
         Push r15;
-        $blockString->append($B, $F, V(size, 1), V(source, rsp));               # Append character if we go beyond limit
+        $String->append($B, $F, V(size, 1), V(source, rsp));                    # Append character if we go beyond limit
         Pop  r15;
         Jmp $end;
        });
 
       $current->copy($next);
-      $blockString->getBlock($B, $current, 31);                                 # Next block
-      $L = $blockString->getBlockLength(31);                                    # Length of block
+      $String->getBlock($B, $current, 31);                                      # Next block
+      $L = $String->getBlockLength(31);                                         # Length of block
       $C += $L;                                                                 # Current character position at the start of this block
      };
 
     PopR @save;
    } in => [qw(first character position)], io => [qw(bs)];
 
-  $s->call($blockString->address, first => $blockString->first, @variables)
+  $s->call($String->address, first => $String->first, @variables)
  }
 
-sub Nasm::X86::BlockString::deleteChar($@)                                      # Delete a character in a block string
- {my ($blockString, @variables) = @_;                                           # Block string, variables
+sub Nasm::X86::String::deleteChar($@)                                           # Delete a character in a string
+ {my ($String, @variables) = @_;                                                # String, variables
   @_ >= 2 or confess;
 
   my $s = Subroutine
    {my ($p) = @_;                                                               # Parameters
-    Comment "Delete a character in a block string";
+    Comment "Delete a character in a string";
     PushR my @save = (k7, zmm31);
-    my $B = $$p{bs};                                                            # The byte string underlying the block string
-    my $F = $$p{first};                                                         # The first block in block string
-    my $P = $$p{position};                                                      # The position in the block string at which we want to insert the character
-    $blockString->getBlock($B, $F, 31);                                         # The first source block
+    my $B = $$p{bs};                                                            # The arena underlying the string
+    my $F = $$p{first};                                                         # The first block in string
+    my $P = $$p{position};                                                      # The position in the string at which we want to insert the character
+    $String->getBlock($B, $F, 31);                                              # The first source block
     my $C = V('Current character position', 0);                                 # Current character position
-    my $L = $blockString->getBlockLength(31);                                   # Length of last block
+    my $L = $String->getBlockLength(31);                                        # Length of last block
     my $current = $F;                                                           # Current position in scan of block chain
 
     ForEver                                                                     # Each block in source string
@@ -4541,39 +4547,39 @@ sub Nasm::X86::BlockString::deleteChar($@)                                      
         PushRR zmm31;                                                           # Stack block
         ($O+1)->setMask($L - $O, k7);                                           # Set mask for reload
         Vmovdqu8 "zmm31{k7}", "[rsp+1]";                                        # Reload
-        $blockString->setBlockLengthInZmm($L-1, 31);                            # Length of block
-        $blockString->putBlock($B, $current, 31);                               # Save the modified block
+        $String->setBlockLengthInZmm($L-1, 31);                                 # Length of block
+        $String->putBlock($B, $current, 31);                                    # Save the modified block
         PopRR zmm31;                                                            # Stack block
         Jmp $end;                                                               # Character successfully inserted
        });
 
-      my ($next, $prev) = $blockString->getNextAndPrevBlockOffsetFromZmm(31);   # Get links from current source block
-      $blockString->getBlock($B, $next, 31);                                    # Next block
+      my ($next, $prev) = $String->getNextAndPrevBlockOffsetFromZmm(31);        # Get links from current source block
+      $String->getBlock($B, $next, 31);                                         # Next block
       $current->copy($next);
-      $L = $blockString->getBlockLength(31);                                    # Length of block
+      $L = $String->getBlockLength(31);                                         # Length of block
       $C += $L;                                                                 # Current character position at the start of this block
      };
 
     PopR @save;
    } in => [qw(first  position )], io => [qw(bs)];
 
-  $s->call($blockString->address, first => $blockString->first, @variables)
+  $s->call($String->address, first => $String->first, @variables)
  }
 
-sub Nasm::X86::BlockString::getCharacter($@)                                    # Get a character from a block string
- {my ($blockString, @variables) = @_;                                           # Block string, variables
+sub Nasm::X86::String::getCharacter($@)                                         # Get a character from a string
+ {my ($String, @variables) = @_;                                                # String, variables
   @_ >= 3 or confess;
 
   my $s = Subroutine
    {my ($p) = @_;                                                               # Parameters
-    Comment "Get a character from a block string";
+    Comment "Get a character from a string";
     PushR my @save = (r15, zmm31);
-    my $B = $$p{bs};                                                            # The byte string underlying the block string
-    my $F = $$p{first};                                                         # The first block in block string
-    my $P = $$p{position};                                                      # The position in the block string at which we want to insert the character
-    $blockString->getBlock($B, $F, 31);                                         # The first source block
+    my $B = $$p{bs};                                                            # The arena underlying the string
+    my $F = $$p{first};                                                         # The first block in string
+    my $P = $$p{position};                                                      # The position in the string at which we want to insert the character
+    $String->getBlock($B, $F, 31);                                              # The first source block
     my $C = V('Current character position', 0);                                 # Current character position
-    my $L = $blockString->getBlockLength(31);                                   # Length of last block
+    my $L = $String->getBlockLength(31);                                        # Length of last block
 
     ForEver                                                                     # Each block in source string
      {my ($start, $end) = @_;                                                   # Start and end labels
@@ -4590,20 +4596,20 @@ sub Nasm::X86::BlockString::getCharacter($@)                                    
         Jmp $end;                                                               # Character successfully inserted
        });
 
-      my ($next, $prev) = $blockString->getNextAndPrevBlockOffsetFromZmm(31);   # Get links from current source block
-      $blockString->getBlock($B, $next, 31);                                    # Next block
-      $L = $blockString->getBlockLength(31);                                    # Length of block
+      my ($next, $prev) = $String->getNextAndPrevBlockOffsetFromZmm(31);        # Get links from current source block
+      $String->getBlock($B, $next, 31);                                         # Next block
+      $L = $String->getBlockLength(31);                                         # Length of block
       $C += $L;                                                                 # Current character position at the start of this block
      };
 
     PopR @save;
    } in => [qw(first  position )], io => [qw(bs)], out => [qw(out)];
 
-  $s->call($blockString->address, first => $blockString->first, @variables)
+  $s->call($String->address, first => $String->first, @variables)
  }
 
-sub Nasm::X86::BlockString::append($@)                                          # Append the specified content in memory to the specified block string
- {my ($blockString, @variables) = @_;                                           # Block string descriptor, variables
+sub Nasm::X86::String::append($@)                                               # Append the specified content in memory to the specified string
+ {my ($String, @variables) = @_;                                                # String descriptor, variables
   @_ >= 3 or confess;
 
   my $s = Subroutine
@@ -4611,57 +4617,57 @@ sub Nasm::X86::BlockString::append($@)                                          
     my $success = Label;                                                        # Append completed successfully
     my $Z       = V(zero, 0);                                                   # Zero
     my $O       = V(one,  1);                                                   # One
-    my $L       = V(size, $blockString->length);                                # Length of a full block
-    my $B       = $$p{bs};                                                      # Underlying block string
+    my $L       = V(size, $String->length);                                     # Length of a full block
+    my $B       = $$p{bs};                                                      # Underlying string
     my $source  = $$p{source};                                                  # Address of content to be appended
     my $size    = $$p{size};                                                    # Size of content
-    my $first   = $$p{first};                                                   # First (preallocated) block in block string
+    my $first   = $$p{first};                                                   # First (preallocated) block in string
 
     PushR my @save = (zmm29, zmm30, zmm31);
     ForEver                                                                     # Append content until source exhausted
      {my ($start, $end) = @_;                                                   # Parameters
-      $blockString->getBlock($B, $first, 29);                                   # Get the first block
-      my ($second, $last) = $blockString->getNextAndPrevBlockOffsetFromZmm(29); # Get the offsets of the second and last blocks
-      $blockString->getBlock($B, $last,  31);                                   # Get the last block
-      my $lengthLast      = $blockString->getBlockLength(31);                   # Length of last block
+      $String->getBlock($B, $first, 29);                                        # Get the first block
+      my ($second, $last) = $String->getNextAndPrevBlockOffsetFromZmm(29);      # Get the offsets of the second and last blocks
+      $String->getBlock($B, $last,  31);                                        # Get the last block
+      my $lengthLast      = $String->getBlockLength(31);                        # Length of last block
       my $spaceLast       = $L - $lengthLast;                                   # Space in last block
       my $toCopy          = $spaceLast->min($size);                             # Amount of data required to fill first block
       my $startPos        = $O + $lengthLast;                                   # Start position in zmm
       $source->setZmm(31, $startPos, $toCopy);                                  # Append bytes
-      $blockString->setBlockLengthInZmm($lengthLast + $toCopy, 31);             # Set the length
-      $blockString->putBlock($B, $last, 31);                                    # Put the block
+      $String->setBlockLengthInZmm($lengthLast + $toCopy, 31);                  # Set the length
+      $String->putBlock($B, $last, 31);                                         # Put the block
       If ($size <= $spaceLast, sub {Jmp $end});                                 # We are finished because the last block had enough space
 
       $source += $toCopy;                                                       # Remaining source
       $size   -= $toCopy;                                                       # Remaining source length
 
-      my $new = $blockString->allocBlock;                                       # Allocate new block
-      $blockString->getBlock  ($B, $new, 30);                                   # Load the new block
-      my ($next, $prev) = $blockString->getNextAndPrevBlockOffsetFromZmm(31);   # Linkage from last block
+      my $new = $String->allocBlock;                                            # Allocate new block
+      $String->getBlock  ($B, $new, 30);                                        # Load the new block
+      my ($next, $prev) = $String->getNextAndPrevBlockOffsetFromZmm(31);        # Linkage from last block
 
       If ($first == $last,
       Then                                                                      # The existing string has one block, add new as the second block
-        {$blockString->putNextandPrevBlockOffsetIntoZmm(31, $new,  $new);
-         $blockString->putNextandPrevBlockOffsetIntoZmm(30, $last, $last);
+        {$String->putNextandPrevBlockOffsetIntoZmm(31, $new,  $new);
+         $String->putNextandPrevBlockOffsetIntoZmm(30, $last, $last);
         },
       Else                                                                      # The existing string has two or more blocks
-       {$blockString->putNextandPrevBlockOffsetIntoZmm(31, $new,    $prev);     # From last block
-        $blockString->putNextandPrevBlockOffsetIntoZmm(30, $next,   $last);     # From new block
-        $blockString->putNextandPrevBlockOffsetIntoZmm(29, undef,   $new);      # From first block
-        $blockString->putBlock($B, $first, 29);                                 # Put the modified last block
+       {$String->putNextandPrevBlockOffsetIntoZmm(31, $new,    $prev);          # From last block
+        $String->putNextandPrevBlockOffsetIntoZmm(30, $next,   $last);          # From new block
+        $String->putNextandPrevBlockOffsetIntoZmm(29, undef,   $new);           # From first block
+        $String->putBlock($B, $first, 29);                                      # Put the modified last block
         });
 
-      $blockString->putBlock($B, $last, 31);                                    # Put the modified last block
-      $blockString->putBlock($B, $new,  30);                                    # Put the modified new block
+      $String->putBlock($B, $last, 31);                                         # Put the modified last block
+      $String->putBlock($B, $new,  30);                                         # Put the modified new block
      };
     PopR @save;
    }  in => [qw(first source size)], io => [qw(bs)];
 
-  $s->call($blockString->address, $blockString->first, @variables);
+  $s->call($String->address, $String->first, @variables);
  }
 
-sub Nasm::X86::BlockString::clear($)                                            # Clear the block by freeing all but the first block
- {my ($blockString) = @_;                                                       # Block string descriptor
+sub Nasm::X86::String::clear($)                                                 # Clear the block by freeing all but the first block
+ {my ($String) = @_;                                                            # String descriptor
   @_ == 1 or confess;
 
   my $s = Subroutine
@@ -4670,33 +4676,33 @@ sub Nasm::X86::BlockString::clear($)                                            
     PushR my @save = (rax, r14, r15, zmm29, zmm30, zmm31);
 
     my $first = $$p{first};                                                     # First block
-    $blockString->getBlock($$p{bs}, $$p{first}, 29);                            # Get the first block
-    my ($second, $last) = $blockString->getNextAndPrevBlockOffsetFromZmm(29);   # Get the offsets of the second and last blocks
+    $String->getBlock($$p{bs}, $$p{first}, 29);                                 # Get the first block
+    my ($second, $last) = $String->getNextAndPrevBlockOffsetFromZmm(29);        # Get the offsets of the second and last blocks
     ClearRegisters zmm29;                                                       # Clear first block
-    $blockString->putNextandPrevBlockOffsetIntoZmm(29, $first, $first);         # Initialize block chain
-    $blockString->putBlock($$p{bs}, $first, 29);                                # Put the first block
+    $String->putNextandPrevBlockOffsetIntoZmm(29, $first, $first);              # Initialize block chain
+    $String->putBlock($$p{bs}, $first, 29);                                     # Put the first block
 
     If ($last != $first,
     Then                                                                        # Two or more blocks on the chain
-     {$$p{bs}->setReg(rax);                                                     # Address underlying byte string
-      Lea r14, $blockString->bs->free->addr;                                    # Address of address of free chain
+     {$$p{bs}->setReg(rax);                                                     # Address underlying arena
+      Lea r14, $String->bs->free->addr;                                         # Address of address of free chain
       Mov r15, "[r14]";                                                         # Address of free chain
       my $rfc = V('next', r15);                                                 # Remainder of the free chain
 
       If ($second == $last,
       Then                                                                      # Two blocks on the chain
        {ClearRegisters zmm30;                                                   # Second block
-        $blockString->putNextandPrevBlockOffsetIntoZmm(30, $rfc, undef);        # Put second block on head of the list
-        $blockString->putBlock($$p{bs}, $second, 30);                           # Put the second block
+        $String->putNextandPrevBlockOffsetIntoZmm(30, $rfc, undef);             # Put second block on head of the list
+        $String->putBlock($$p{bs}, $second, 30);                                # Put the second block
        },
       Else                                                                      # Three or more blocks on the chain
        {my $z = V(zero, 0);                                                     # A variable with zero in it
-        $blockString->getBlock($$p{bs}, $second, 30);                           # Get the second block
-        $blockString->getBlock($$p{bs}, $last,   31);                           # Get the last block
-        $blockString->putNextandPrevBlockOffsetIntoZmm(30, undef, $z);          # Reset prev pointer in second block
-        $blockString->putNextandPrevBlockOffsetIntoZmm(31, $rfc, undef);        # Reset next pointer in last block to remainder of free chain
-        $blockString->putBlock($$p{bs}, $second, 30);                           # Put the second block
-        $blockString->putBlock($$p{bs}, $last, 31);                             # Put the last block
+        $String->getBlock($$p{bs}, $second, 30);                                # Get the second block
+        $String->getBlock($$p{bs}, $last,   31);                                # Get the last block
+        $String->putNextandPrevBlockOffsetIntoZmm(30, undef, $z);               # Reset prev pointer in second block
+        $String->putNextandPrevBlockOffsetIntoZmm(31, $rfc, undef);             # Reset next pointer in last block to remainder of free chain
+        $String->putBlock($$p{bs}, $second, 30);                                # Put the second block
+        $String->putBlock($$p{bs}, $last, 31);                                  # Put the last block
        }),
 
       KeepFree        r15;                                                      # Put the second block at the top of the free chain
@@ -4707,24 +4713,24 @@ sub Nasm::X86::BlockString::clear($)                                            
     PopR @save;
    }  in => [qw(first )], io => [qw(bs)];
 
-  $s->call($blockString->address, $blockString->first);
+  $s->call($String->address, $String->first);
  }
 
-#D1 Block Array                                                                 # Array constructed as a tree of blocks in a byte string
+#D1 Array                                                                       # Array constructed as a set of blocks in an arena
 
-sub Nasm::X86::ByteString::CreateBlockArray($)                                  # Create a block array in a byte string
- {my ($byteString) = @_;                                                        # Byte string description
+sub Nasm::X86::Arena::CreateArray($)                                            # Create a array in an arena
+ {my ($arena) = @_;                                                             # Arena description
   @_ == 1 or confess;
   my $b = RegisterSize zmm0;                                                    # Size of a block == size of a zmm register
   my $o = RegisterSize eax;                                                     # Size of a double word
 
-  Comment "Allocate a new block array in a byte string";
+  Comment "Allocate a new array in an arena";
 
   my $p = 0;                                                                    # Position in block
-  my $s = genHash(__PACKAGE__."::BlockArray",                                   # Block string definition
-    bs     => $byteString,                                                      # Bytes string definition
+  my $s = genHash(__PACKAGE__."::Array",                                        # String definition
+    bs     => $arena,                                                           # Bytes string definition
     width  => $o,                                                               # Width of each element
-    first  => V('first'),                                                       # Variable addressing first block in block string
+    first  => V('first'),                                                       # Variable addressing first block in string
     slots1 => $b / $o - 1,                                                      # Number of slots in first block
     slots2 => $b / $o,                                                          # Number of slots in second and subsequent blocks
    );
@@ -4732,41 +4738,41 @@ sub Nasm::X86::ByteString::CreateBlockArray($)                                  
 
   my $first = $s->allocBlock;                                                   # Allocate first block
   $s->first->copy($first);                                                      # Save first block
-  $s                                                                            # Description of block array
+  $s                                                                            # Description of array
  }
 
-sub Nasm::X86::BlockArray::address($)                                           #P Address of a block string
- {my ($blockArray) = @_;                                                        # Block array descriptor
+sub Nasm::X86::Array::address($)                                                #P Address of a string
+ {my ($Array) = @_;                                                             # Array descriptor
   @_ == 1 or confess;
-  $blockArray->bs->bs;
+  $Array->bs->bs;
  }
 
-sub Nasm::X86::BlockArray::allocBlock($)                                        #P Allocate a block to hold a zmm register in the specified byte string and return the offset of the block in a variable
- {my ($blockArray) = @_;                                                        # Block array descriptor
+sub Nasm::X86::Array::allocBlock($)                                             #P Allocate a block to hold a zmm register in the specified arena and return the offset of the block in a variable
+ {my ($Array) = @_;                                                             # Array descriptor
   @_ == 1 or confess;
 
-  $blockArray->bs->allocBlock;
+  $Array->bs->allocBlock;
  }
 
-sub Nasm::X86::BlockArray::dump($@)                                             # Dump a block array
- {my ($blockArray, @variables) = @_;                                            # Block array descriptor, variables
+sub Nasm::X86::Array::dump($@)                                                  # Dump a array
+ {my ($Array, @variables) = @_;                                                 # Array descriptor, variables
   @_ >= 1 or confess;
-  my $b = $blockArray->bs;                                                      # Underlying byte string
+  my $b = $Array->bs;                                                           # Underlying arena
   my $W = RegisterSize zmm0;                                                    # The size of a block
-  my $w = $blockArray->width;                                                   # The size of an entry in a block
-  my $n = $blockArray->slots1;                                                  # The number of slots per block
-  my $N = $blockArray->slots2;                                                  # The number of slots per block
+  my $w = $Array->width;                                                        # The size of an entry in a block
+  my $n = $Array->slots1;                                                       # The number of slots per block
+  my $N = $Array->slots2;                                                       # The number of slots per block
 
   my $s = Subroutine
    {my ($p) = @_;                                                               # Parameters
 
-    my $B = $$p{bs};                                                            # Byte string
+    my $B = $$p{bs};                                                            # Arena
     my $F = $$p{first};                                                         # First block
 
     PushR my @save = (zmm30, zmm31);
     $b->getBlock($B, $F, 31);                                                   # Get the first block
     my $size = getDFromZmm(31, 0);                                              # Size of array
-    PrintOutStringNL("Block Array");
+    PrintOutStringNL("array");
     $size->out("Size: ", "  ");
     PrintOutRegisterInHex zmm31;
 
@@ -4794,23 +4800,23 @@ sub Nasm::X86::BlockArray::dump($@)                                             
     PopR @save;
    }  in => [qw(first)], io => [qw(bs)];
 
-  $s->call($blockArray->address, $blockArray->first, @variables);
+  $s->call($Array->address, $Array->first, @variables);
  }
 
-sub Nasm::X86::BlockArray::push($@)                                             # Push an element onto the array
- {my ($blockArray, @variables) = @_;                                            # Block array descriptor, variables
+sub Nasm::X86::Array::push($@)                                                  # Push an element onto the array
+ {my ($Array, @variables) = @_;                                                 # Array descriptor, variables
   @_ >= 2 or confess;
-  my $b = $blockArray->bs;                                                      # Underlying byte string
+  my $b = $Array->bs;                                                           # Underlying arena
   my $W = RegisterSize zmm0;                                                    # The size of a block
-  my $w = $blockArray->width;                                                   # The size of an entry in a block
-  my $n = $blockArray->slots1;                                                  # The number of slots per block
-  my $N = $blockArray->slots2;                                                  # The number of slots per block
+  my $w = $Array->width;                                                        # The size of an entry in a block
+  my $n = $Array->slots1;                                                       # The number of slots per block
+  my $N = $Array->slots2;                                                       # The number of slots per block
 
   my $s = Subroutine
    {my ($p) = @_;                                                               # Parameters
     my $success = Label;                                                        # Short circuit if ladders by jumping directly to the end after a successful push
 
-    my $B = $$p{bs};                                                            # Byte string
+    my $B = $$p{bs};                                                            # Arena
     my $F = $$p{first};                                                         # First block
     my $E = $$p{element};                                                       # The element to be inserted
 
@@ -4875,23 +4881,23 @@ sub Nasm::X86::BlockArray::push($@)                                             
     PopR @save;
    }  in => [qw(first  element)], io => [qw(bs)];
 
-  $s->call($blockArray->address, $blockArray->first, @variables);
+  $s->call($Array->address, $Array->first, @variables);
  }
 
-sub Nasm::X86::BlockArray::pop($@)                                              # Pop an element from an array
- {my ($blockArray, @variables) = @_;                                            # Block array descriptor, variables
+sub Nasm::X86::Array::pop($@)                                                   # Pop an element from an array
+ {my ($Array, @variables) = @_;                                                 # Array descriptor, variables
   @_ >= 2 or confess;
-  my $b = $blockArray->bs;                                                      # Underlying byte string
+  my $b = $Array->bs;                                                           # Underlying arena
   my $W = RegisterSize zmm0;                                                    # The size of a block
-  my $w = $blockArray->width;                                                   # The size of an entry in a block
-  my $n = $blockArray->slots1;                                                  # The number of slots per block
-  my $N = $blockArray->slots2;                                                  # The number of slots per block
+  my $w = $Array->width;                                                        # The size of an entry in a block
+  my $n = $Array->slots1;                                                       # The number of slots per block
+  my $N = $Array->slots2;                                                       # The number of slots per block
 
   my $s = Subroutine
    {my ($p) = @_;                                                               # Parameters
     my $success = Label;                                                        # Short circuit if ladders by jumping directly to the end after a successful push
 
-    my $B = $$p{bs};                                                            # Byte string
+    my $B = $$p{bs};                                                            # Arena
     my $F = $$p{first};                                                         # First block
     my $E = $$p{element};                                                       # The element being popped
 
@@ -4959,23 +4965,23 @@ sub Nasm::X86::BlockArray::pop($@)                                              
     PopR @save;
    }  in => [qw(first)], io => [qw(bs)], out => [qw(element )];
 
-  $s->call($blockArray->address, $blockArray->first, @variables);
+  $s->call($Array->address, $Array->first, @variables);
  }
 
-sub Nasm::X86::BlockArray::get($@)                                              # Get an element from the array
- {my ($blockArray, @variables) = @_;                                            # Block array descriptor, variables
+sub Nasm::X86::Array::get($@)                                                   # Get an element from the array
+ {my ($Array, @variables) = @_;                                                 # Array descriptor, variables
   @_ >= 3 or confess;
-  my $b = $blockArray->bs;                                                      # Underlying byte string
+  my $b = $Array->bs;                                                           # Underlying arena
   my $W = RegisterSize zmm0;                                                    # The size of a block
-  my $w = $blockArray->width;                                                   # The size of an entry in a block
-  my $n = $blockArray->slots1;                                                  # The number of slots in the first block
-  my $N = $blockArray->slots2;                                                  # The number of slots in the secondary blocks
+  my $w = $Array->width;                                                        # The size of an entry in a block
+  my $n = $Array->slots1;                                                       # The number of slots in the first block
+  my $N = $Array->slots2;                                                       # The number of slots in the secondary blocks
 
   my $s = Subroutine
    {my ($p) = @_;                                                               # Parameters
     my $success = Label;                                                        # Short circuit if ladders by jumping directly to the end after a successful push
 
-    my $B = $$p{bs};                                                            # Byte string
+    my $B = $$p{bs};                                                            # Arena
     my $F = $$p{first};                                                         # First block
     my $E = $$p{element};                                                       # The element to be returned
     my $I = $$p{index};                                                         # Index of the element to be returned
@@ -5009,23 +5015,23 @@ sub Nasm::X86::BlockArray::get($@)                                              
     PopR @save;
    }  in => [qw(first index)], io => [qw(bs)], out => [qw(element )];
 
-  $s->call($blockArray->address, $blockArray->first, @variables);
+  $s->call($Array->address, $Array->first, @variables);
  }
 
-sub Nasm::X86::BlockArray::put($@)                                              # Put an element into an array as long as it is with in its limits established by pushing.
- {my ($blockArray, @variables) = @_;                                            # Block array descriptor, variables
+sub Nasm::X86::Array::put($@)                                                   # Put an element into an array as long as it is with in its limits established by pushing.
+ {my ($Array, @variables) = @_;                                                 # Array descriptor, variables
   @_ >= 3 or confess;
-  my $b = $blockArray->bs;                                                      # Underlying byte string
+  my $b = $Array->bs;                                                           # Underlying arena
   my $W = RegisterSize zmm0;                                                    # The size of a block
-  my $w = $blockArray->width;                                                   # The size of an entry in a block
-  my $n = $blockArray->slots1;                                                  # The number of slots in the first block
-  my $N = $blockArray->slots2;                                                  # The number of slots in the secondary blocks
+  my $w = $Array->width;                                                        # The size of an entry in a block
+  my $n = $Array->slots1;                                                       # The number of slots in the first block
+  my $N = $Array->slots2;                                                       # The number of slots in the secondary blocks
 
   my $s = Subroutine
    {my ($p) = @_;                                                               # Parameters
     my $success = Label;                                                        # Short circuit if ladders by jumping directly to the end after a successful push
 
-    my $B = $$p{bs};                                                            # Byte string
+    my $B = $$p{bs};                                                            # Arena
     my $F = $$p{first};                                                         # First block
     my $E = $$p{element};                                                       # The element to be added
     my $I = $$p{index};                                                         # Index of the element to be inserted
@@ -5060,13 +5066,13 @@ sub Nasm::X86::BlockArray::put($@)                                              
     PopR @save;
    }  in => [qw(first index element )], io => [qw(bs)];
 
-  $s->call($blockArray->address, $blockArray->first, @variables);
+  $s->call($Array->address, $Array->first, @variables);
  }
 
-#D1 Block Multi Way Tree                                                        # Multi Way Tree constructed as a tree of blocks in a byte string
+#D1 Tree                                                                        # Tree constructed as sets of blocks in an arena.
 
-sub Nasm::X86::ByteString::DescribeBlockMultiWayTree($)                         # Return a descriptor for a multi way block tree in the specified byte string
- {my ($byteString) = @_;                                                        # Byte string descriptor
+sub Nasm::X86::Arena::DescribeTree($)                                           # Return a descriptor for a tree in the specified arena
+ {my ($arena) = @_;                                                             # Arena descriptor
   my $b = RegisterSize zmm0;                                                    # Size of a block == size of a zmm register
   my $o = RegisterSize eax;                                                     # Size of a double word
 
@@ -5076,8 +5082,8 @@ sub Nasm::X86::ByteString::DescribeBlockMultiWayTree($)                         
   confess "Maximum keys must be 14" unless $b / $o - 2 == 14;                   # Maximum number of keys is expected to be 14
   confess "Splitting key offset must be 28" unless $split == 28;                # Splitting key offset
 
-  genHash(__PACKAGE__."::BlockMultiWayTree",                                    # Block multi way tree.
-    bs           => $byteString,                                                # Byte string definition.
+  genHash(__PACKAGE__."::Tree",                                                 # tree.
+    bs           => $arena,                                                     # Arena definition.
     data         => V(data),                                                    # Variable containing the last data found
     first        => V(first),                                                   # Variable addressing offset to first block of keys.
     found        => V(found),                                                   # Variable indicating whether the last find was successful or not
@@ -5095,11 +5101,11 @@ sub Nasm::X86::ByteString::DescribeBlockMultiWayTree($)                         
    );
  }
 
-sub Nasm::X86::ByteString::CreateBlockMultiWayTree($)                           # Create a block multi way tree in a byte string
- {my ($byteString) = @_;                                                        # Byte string description
+sub Nasm::X86::Arena::CreateTree($)                                             # Create a tree in an arena.
+ {my ($arena) = @_;                                                             # Arena description
   @_ == 1 or confess;
 
-  my $t = $byteString->DescribeBlockMultiWayTree;                               # Return a descriptor for a multi way block tree at the specified offset in the specified byte string
+  my $t = $arena->DescribeTree;                                                 # Return a descriptor for a tree at the specified offset in the specified arena
 
   my $s = Subroutine
    {my ($p) = @_;
@@ -5109,34 +5115,34 @@ sub Nasm::X86::ByteString::CreateBlockMultiWayTree($)                           
     PushR my @save = (zmm31);
     ClearRegisters zmm31;
     $t->putLoop($t->allocBlock, 31);                                            # Keys loops to data - for the first 7 keys we should store the corresponding data further up in the block rather than creating a new block.
-    $byteString->putBlock($t->address, $keys, 31);                              # Write first keys
+    $arena->putBlock($t->address, $keys, 31);                                   # Write first keys
     PopR @save;
     Comment "Create a block multiway Tree end";
    } io => [qw(bs)], out => [qw(first)];
 
   $s->call(bs => $t->address, first => $t->first);
 
-  $t                                                                            # Description of block array
+  $t                                                                            # Description of array
  }
 
-sub Nasm::X86::BlockMultiWayTree::Clone($)                                      # Clone the specified tree descriptions
- {my ($tree) = @_;                                                              # Block multi way tree descriptor
+sub Nasm::X86::Tree::Clone($)                                                   # Clone the specified tree descriptions
+ {my ($tree) = @_;                                                              # Tree descriptor
   @_ == 1 or confess;
 
-  Comment "Nasm::X86::BlockMultiWayTree::Clone";
-  my $t = $tree->bs->DescribeBlockMultiWayTree;                                 # Return a descriptor for a multi way block tree
+  Comment "Nasm::X86::Tree::Clone";
+  my $t = $tree->bs->DescribeTree;                                              # Return a descriptor for a tree
   $t->first->copy($tree->first);
   $t
  }
 
-sub Nasm::X86::BlockMultiWayTree::allocKeysDataNode($$$$@)                      #P Allocate a keys/data/node block and place it in the numbered zmm registers
- {my ($t, $K, $D, $N, @variables) = @_;                                         # Block multi way tree descriptor, numbered zmm for keys, numbered zmm for data, numbered zmm for children, variables
+sub Nasm::X86::Tree::allocKeysDataNode($$$$@)                                   #P Allocate a keys/data/node block and place it in the numbered zmm registers
+ {my ($t, $K, $D, $N, @variables) = @_;                                         # Tree descriptor, numbered zmm for keys, numbered zmm for data, numbered zmm for children, variables
   @_ >= 4 or confess;
 
   my $s = Subroutine
    {my ($parameters) = @_;                                                      # Parameters
 
-    my $B = $$parameters{bs};                                                   # Byte string
+    my $B = $$parameters{bs};                                                   # Arena
     $t->bs->allocZmmBlock($B, my $k = V(offset));                               # Keys
     $t->bs->allocZmmBlock($B, my $d = V(offset));                               # Data
     $t->bs->allocZmmBlock($B, my $n = V(offset));                               # Children
@@ -5145,14 +5151,14 @@ sub Nasm::X86::BlockMultiWayTree::allocKeysDataNode($$$$@)                      
     $t->putLoop($n, $D);                                                        # Set the link from data to node
     $t->putLoop($k, $N);                                                        # Set the link from node  to key
    }
-  name=>qq(Nasm::X86::BlockMultiWayTree::allocKeysDataNode::${K}::${D}::${N}),  # Create a subroutine for each combination of registers encountered
+  name=>qq(Nasm::X86::Tree::allocKeysDataNode::${K}::${D}::${N}),               # Create a subroutine for each combination of registers encountered
   io => [qw(bs)];
 
   $s->call($t->address, @variables);
  } # allocKeysDataNode
 
-sub Nasm::X86::BlockMultiWayTree::splitNode($$$$@)                              #P Split a node given its offset in a byte string retaining the key being inserted in the node split while putting the remainder to the left or right.
- {my ($t, $bs, $node, $key, @variables) = @_;                                   # Block multi way tree descriptor, backing byte string, offset of node, key, variables
+sub Nasm::X86::Tree::splitNode($$$$@)                                           #P Split a node given its offset in an arena retaining the key being inserted in the node split while putting the remainder to the left or right.
+ {my ($t, $bs, $node, $key, @variables) = @_;                                   # Tree descriptor, backing arena, offset of node, key, variables
   @_ >= 4 or confess;
 
   my $K = 31; my $D = 30; my $N = 29;                                           # Key, data, node blocks
@@ -5161,7 +5167,7 @@ sub Nasm::X86::BlockMultiWayTree::splitNode($$$$@)                              
    {my ($parameters) = @_;                                                      # Parameters
     my $success = Label;                                                        # Short circuit if ladders by jumping directly to the end after a successful push
 
-    my $b = $$parameters{bs};                                                   # Byte string
+    my $b = $$parameters{bs};                                                   # Arena
     my $k = $$parameters{key};                                                  # Key we are looking for
     my $n = $$parameters{node};                                                 # Node to split
 
@@ -5226,15 +5232,15 @@ sub Nasm::X86::BlockMultiWayTree::splitNode($$$$@)                              
   $s->call(bs=>$bs, node=>$node, key=>$key, @variables);
  } # splitNode
 
-sub Nasm::X86::BlockMultiWayTree::reParent($$$$$@)                              #P Reparent the children of a node held in registers. The children are in the backing byte string not registers.
- {my ($t, $bs, $PK, $PD, $PN, @variables) = @_;                                 # Block multi way tree descriptor, backing byte string, numbered zmm key node, numbered zmm data node, numbered zmm child node, variables
+sub Nasm::X86::Tree::reParent($$$$$@)                                           #P Reparent the children of a node held in registers. The children are in the backing arena not registers.
+ {my ($t, $bs, $PK, $PD, $PN, @variables) = @_;                                 # Tree descriptor, backing arena, numbered zmm key node, numbered zmm data node, numbered zmm child node, variables
   @_ >= 5 or confess;
-  my $b = $t->bs;                                                               # Underlying byte string
+  my $b = $t->bs;                                                               # Underlying arena
 
   my $s = Subroutine
    {my ($parameters) = @_;                                                      # Parameters
 
-    my $B = $$parameters{bs};                                                   # Byte string
+    my $B = $$parameters{bs};                                                   # Arena
     my $L = $t->getLengthInKeys($PK) + 1;                                       # Number of children
     my $p = $t->getUpFromData ($PD);                                            # Parent node offset as a variable
 
@@ -5260,8 +5266,8 @@ sub Nasm::X86::BlockMultiWayTree::reParent($$$$$@)                              
   $s->call($t->address, @variables);
  } # reParent
 
-sub Nasm::X86::BlockMultiWayTree::transferTreeBitsFromParent($$$$)              #P Transfer tree bits when splitting a full node
- {my ($b, $parent, $left, $right) = @_;                                         # Block multi way tree descriptor, numbered parent zmm, numbered left zmm, numbered right zmm
+sub Nasm::X86::Tree::transferTreeBitsFromParent($$$$)                           #P Transfer tree bits when splitting a full node.
+ {my ($b, $parent, $left, $right) = @_;                                         # Tree descriptor, numbered parent zmm, numbered left zmm, numbered right zmm
 
   PushR my @save = my ($whole, $half)  = (r15, r14);
   $b->getTreeBits($parent, $whole);                                             # Transfer Tree bits
@@ -5285,8 +5291,8 @@ sub Nasm::X86::BlockMultiWayTree::transferTreeBitsFromParent($$$$)              
   PopR @save;
  }
 
-sub Nasm::X86::BlockMultiWayTree::transferTreeBitsFromLeftOrRight($$$$$$)       #P Transfer tree bits when splitting a full left or right node
- {my ($b, $rnl, $point, $parent, $left, $right) = @_;                           # Block multi way tree descriptor, 0 - left 1 - right, register indicating point of left in parent, numbered parent zmm, numbered left zmm, numbered right zmm
+sub Nasm::X86::Tree::transferTreeBitsFromLeftOrRight($$$$$$)                    #P Transfer tree bits when splitting a full left or right node.
+ {my ($b, $rnl, $point, $parent, $left, $right) = @_;                           # Tree descriptor, 0 - left 1 - right, register indicating point of left in parent, numbered parent zmm, numbered left zmm, numbered right zmm
 
   PushR my @save = my ($whole, $half, $bits) = ChooseRegisters(3, $point);
   $b->getTreeBits($rnl ? $right : $left, $whole);                               # Tree bits
@@ -5308,18 +5314,18 @@ sub Nasm::X86::BlockMultiWayTree::transferTreeBitsFromLeftOrRight($$$$$$)       
   PopR @save;
  }
 
-sub Nasm::X86::BlockMultiWayTree::transferTreeBitsFromLeft($$$$$)               #P Transfer tree bits when splitting a full left node
- {my ($b, $point, $parent, $left, $right) = @_;                                 # Block multi way tree descriptor, register indicating point of left in parent, numbered parent zmm, numbered left zmm, numbered right zmm
+sub Nasm::X86::Tree::transferTreeBitsFromLeft($$$$$)                            #P Transfer tree bits when splitting a full left node
+ {my ($b, $point, $parent, $left, $right) = @_;                                 # Tree descriptor, register indicating point of left in parent, numbered parent zmm, numbered left zmm, numbered right zmm
   $b->transferTreeBitsFromLeftOrRight(0, $point, $parent, $left, $right);
  }
 
-sub Nasm::X86::BlockMultiWayTree::transferTreeBitsFromRight($$$$$)              #P Transfer tree bits when splitting a full right node
- {my ($b, $point, $parent, $left, $right) = @_;                                 # Block multi way tree descriptor, register indicating point of right in parent, numbered parent zmm, numbered left zmm, numbered right zmm
+sub Nasm::X86::Tree::transferTreeBitsFromRight($$$$$)                           #P Transfer tree bits when splitting a full right node
+ {my ($b, $point, $parent, $left, $right) = @_;                                 # Tree descriptor, register indicating point of right in parent, numbered parent zmm, numbered left zmm, numbered right zmm
   $b->transferTreeBitsFromLeftOrRight(1, $point, $parent, $left, $right);
  }
 
-sub Nasm::X86::BlockMultiWayTree::splitFullRoot($)                              #P Split a full root block held in 31..29 and place the left block in 28..26 and the right block in 25..23. The left and right blocks should have their loop offsets set so they can be inserted into the root.
- {my ($t) = @_;                                                                 # Block multi way tree descriptor
+sub Nasm::X86::Tree::splitFullRoot($)                                           #P Split a full root block held in 31..29 and place the left block in 28..26 and the right block in 25..23. The left and right blocks should have their loop offsets set so they can be inserted into the root.
+ {my ($t) = @_;                                                                 # Tree descriptor
   @_ == 1 or confess;
 
   my $length = $t->maxKeys;                                                     # Length of block to split
@@ -5425,8 +5431,8 @@ sub Nasm::X86::BlockMultiWayTree::splitFullRoot($)                              
   $s->call (bs => $t->address);
  } # splitFullRoot
 
-sub Nasm::X86::BlockMultiWayTree::splitFullLeftOrRightNode($$)                  #P Split a full a full left node (held in 28..26) or a full right node (held in 25..23) whose parent is in 31..29.
- {my ($t, $right) = @_;                                                         # Block multi way tree descriptor,  0 left or 1 right
+sub Nasm::X86::Tree::splitFullLeftOrRightNode($$)                               #P Split a full a full left node (held in 28..26) or a full right node (held in 25..23) whose parent is in 31..29.
+ {my ($t, $right) = @_;                                                         # Tree descriptor,  0 left or 1 right
   @_ == 2 or confess;
 
   my $length = $t->maxKeys;                                                     # Length of block to split
@@ -5550,20 +5556,20 @@ sub Nasm::X86::BlockMultiWayTree::splitFullLeftOrRightNode($$)                  
   $s->call;
  } # splitFullLeftOrRightNode
 
-sub Nasm::X86::BlockMultiWayTree::splitFullLeftNode($)                          #P Split a full left node block held in 28..26 whose parent is in 31..29 and place the new right block in 25..23. The parent is assumed to be not full. The loop and length fields are assumed to be authoritative and hence are preserved.
- {my ($t) = @_;                                                                 # Block multi way tree descriptor
+sub Nasm::X86::Tree::splitFullLeftNode($)                                       #P Split a full left node block held in 28..26 whose parent is in 31..29 and place the new right block in 25..23. The parent is assumed to be not full. The loop and length fields are assumed to be authoritative and hence are preserved.
+ {my ($t) = @_;                                                                 # Tree descriptor
   @_ == 1 or confess;
   $t->splitFullLeftOrRightNode(0);
  }
 
-sub Nasm::X86::BlockMultiWayTree::splitFullRightNode($)                         #P Split a full right node block held in 25..23 whose parent is in 31..29 and place the new left block in 28..26.  The loop and length fields are assumed to be authoritative and hence are preserved.
- {my ($t) = @_;                                                                 # Block multi way tree descriptor
+sub Nasm::X86::Tree::splitFullRightNode($)                                      #P Split a full right node block held in 25..23 whose parent is in 31..29 and place the new left block in 28..26.  The loop and length fields are assumed to be authoritative and hence are preserved.
+ {my ($t) = @_;                                                                 # Tree descriptor
   @_ == 1 or confess;
   $t->splitFullLeftOrRightNode(1);
  }
 
-sub Nasm::X86::BlockMultiWayTree::findAndSplit($@)                              #P Find a key in a tree which is known to contain at least one key splitting full nodes along the path to the key.
- {my ($t, @variables) = @_;                                                     # Block multi way tree descriptor, variables
+sub Nasm::X86::Tree::findAndSplit($@)                                           #P Find a key in a tree which is known to contain at least one key splitting full nodes along the path to the key.
+ {my ($t, @variables) = @_;                                                     # Tree descriptor, variables
   @_ >= 3 or confess;
   my $W = $t->width;                                                            # Width of keys and data
 
@@ -5571,7 +5577,7 @@ sub Nasm::X86::BlockMultiWayTree::findAndSplit($@)                              
    {my ($p) = @_;                                                               # Parameters
     my $success = Label;                                                        # Short circuit if ladders by jumping directly to the end after a successful push
 
-    my $B = $$p{bs};                                                            # Byte string
+    my $B = $$p{bs};                                                            # Arena
     my $F = $$p{first};                                                         # First keys block
     my $K = $$p{key};                                                           # Key to find
 
@@ -5642,8 +5648,8 @@ sub Nasm::X86::BlockMultiWayTree::findAndSplit($@)                              
   $s->call($t->address, first => $t->first, @variables);
  } # findAndSplit
 
-sub Nasm::X86::BlockMultiWayTree::find($$)                                      # Find a key in a tree and test whether the found data is a sub tree.  The results are held in the variables "found", "data", "subTree" addressed by the tree descriptor.
- {my ($t, $key) = @_;                                                           # Block multi way tree descriptor, key field to search for
+sub Nasm::X86::Tree::find($$)                                                   # Find a key in a tree and test whether the found data is a sub tree.  The results are held in the variables "found", "data", "subTree" addressed by the tree descriptor.
+ {my ($t, $key) = @_;                                                           # Tree descriptor, key field to search for
   @_ == 2 or confess;
   my $W = $t->width;                                                            # Width of keys and data
 
@@ -5720,10 +5726,10 @@ sub Nasm::X86::BlockMultiWayTree::find($$)                                      
            found => $t->found, subTree => $t->subTree);
  } # find
 
-sub Nasm::X86::BlockMultiWayTree::findAndClone($$)                              # Find a key in the specified tree and clone it is it is a sub tree.
- {my ($t, $key) = @_;                                                           # Block multi way tree descriptor, key as a dword
+sub Nasm::X86::Tree::findAndClone($$)                                           # Find a key in the specified tree and clone it is it is a sub tree.
+ {my ($t, $key) = @_;                                                           # Tree descriptor, key as a dword
   @_ == 2 or confess;
-  Comment "Nasm::X86::BlockMultiWayTree::findAndClone";
+  Comment "Nasm::X86::Tree::findAndClone";
   $t->find($key);
   If ($t->found,
   Then
@@ -5731,17 +5737,17 @@ sub Nasm::X86::BlockMultiWayTree::findAndClone($$)                              
    });
  }
 
-sub Nasm::X86::BlockMultiWayTree::insertDataOrTree($$$$)                        # Insert either a key, data pair into the tree or create a sub tree at the specified key (if it does not already exist) and return the offset of the first block of the sub tree in the data variable.
- {my ($t, $tnd, $key, $data) = @_;                                              # Block multi way tree descriptor, 0 - data or 1 - tree, key as a dword, data as a dword
+sub Nasm::X86::Tree::insertDataOrTree($$$$)                                     # Insert either a key, data pair into the tree or create a sub tree at the specified key (if it does not already exist) and return the offset of the first block of the sub tree in the data variable.
+ {my ($t, $tnd, $key, $data) = @_;                                              # Tree descriptor, 0 - data or 1 - tree, key as a dword, data as a dword
   @_ >= 2 or confess;
-  my $b = $t->bs;                                                               # Underlying byte string
+  my $b = $t->bs;                                                               # Underlying arena
   my $W = RegisterSize zmm0;                                                    # The size of a block
 
   my $s = Subroutine
    {my ($p) = @_;                                                               # Parameters
     my $success = Label;                                                        # Short circuit if ladders by jumping directly to the end after a successful push
 
-    my $B = $$p{bs};                                                            # Byte string
+    my $B = $$p{bs};                                                            # Arena
     my $F = $$p{first};                                                         # First keys block
     my $K = $$p{key};                                                           # Key  to be inserted
     my $D = $$p{data};                                                          # Data to be inserted
@@ -5756,12 +5762,12 @@ sub Nasm::X86::BlockMultiWayTree::insertDataOrTree($$$$)                        
      {$K->putDIntoZmm    (31, 0);                                               # Write key
       $t->putLengthInKeys(31, K(one, 1));                                       # Set the length of the block
       if ($tnd)                                                                 # Create and mark key as addressing a sub tree
-       {$D->copy($t->bs->CreateBlockMultiWayTree->first) if $tnd == 1;          # Create sub tree in the same byte string as parent tree if requested
+       {$D->copy($t->bs->CreateTree->first) if $tnd == 1;                       # Create sub tree in the same arena as parent tree if requested
         Mov r15, 1;                                                             # Indicate first position
         $t->setTree(r15,  31);                                                  # Mark this key as addressing a sub tree from the existing tree
        }
       $D->putDIntoZmm    (30, 0);                                               # Write data
-      $t->putKeysData($F, 31, 30);                                              # Write the data block back into the underlying byte string
+      $t->putKeysData($F, 31, 30);                                              # Write the data block back into the underlying arena
       Jmp $success;                                                             # Insert completed successfully
      });
 
@@ -5788,11 +5794,11 @@ sub Nasm::X86::BlockMultiWayTree::insertDataOrTree($$$$)                        
           Else                                                                  # The existing element is not a tree so we mark it as such using the single bit in r15/k6
            {$t->setTree(r15, 31);
            };
-          $D->copy($t->bs->CreateBlockMultiWayTree->first) if $tnd == 1;        # Create tree and copy offset of first  block
+          $D->copy($t->bs->CreateTree->first) if $tnd == 1;                     # Create tree and copy offset of first  block
          }
         $D->setReg(r14);                                                        # Key to search for
         Vpbroadcastd "zmm30{k6}", r14d;                                         # Load data
-        $t->putKeysData($F, 31, 30);                                            # Write the data block back into the underlying byte string
+        $t->putKeysData($F, 31, 30);                                            # Write the data block back into the underlying arena
         KeepFree r14;
         Jmp $success;                                                           # Insert completed successfully
        };
@@ -5804,7 +5810,7 @@ sub Nasm::X86::BlockMultiWayTree::insertDataOrTree($$$$)                        
         Kandnw   k6, k7, k6;                                                    # Remove back fill to leave a single bit at the next empty field
        },
       sub
-       {Kandw    k5, k6, k7;                                                    # Tested at: # Insert key for BlockMultiWayTree but we could simplify by using a mask for the valid area
+       {Kandw    k5, k6, k7;                                                    # Tested at: # Insert key for Tree but we could simplify by using a mask for the valid area
         Kandnw   k4, k5, k7;
         Kshiftlw k5, k5, 1;
         Korw     k5, k4, k5;                                                    # Broadcast mask
@@ -5816,7 +5822,7 @@ sub Nasm::X86::BlockMultiWayTree::insertDataOrTree($$$$)                        
       Vpbroadcastd "zmm31{k6}", r15d;                                           # Load key
 
       if ($tnd)                                                                 # Insert new sub tree
-       {$D->copy($t->bs->CreateBlockMultiWayTree->first) if $tnd == 1;          # Create tree and copy offset of first block
+       {$D->copy($t->bs->CreateTree->first) if $tnd == 1;                       # Create tree and copy offset of first block
        }
       if (1)                                                                    # Expand tree bits to match
        {Kmovq $point, k6;                                                       # Position of key just found
@@ -5835,7 +5841,7 @@ sub Nasm::X86::BlockMultiWayTree::insertDataOrTree($$$$)                        
         $t->putLoop($F, 29);                                                    # Set the link from node to key
        };
 
-      $t->putKeysDataNode($F, 31, 30, 29);                                      # Write the data block back into the underlying byte string
+      $t->putKeysDataNode($F, 31, 30, 29);                                      # Write the data block back into the underlying arena
       $t->splitNode($B, $F, $K);                                                # Split if the leaf has got too big
       Jmp $success;                                                             # Insert completed successfully
      });
@@ -5877,7 +5883,7 @@ sub Nasm::X86::BlockMultiWayTree::insertDataOrTree($$$$)                        
 
       $t->expandTreeBitsWithZeroOrOne($tnd, 31, $point);                        # Mark inserted key as referring to a tree or not
 
-      $D->copy($t->bs->CreateBlockMultiWayTree->first) if $tnd == 1;            # Create tree and place its offset into data field
+      $D->copy($t->bs->CreateTree->first) if $tnd == 1;                         # Create tree and place its offset into data field
 
       ClearRegisters k7;
       $index->setMaskBit(k7);                                                   # Set bit at insertion point
@@ -5893,24 +5899,24 @@ sub Nasm::X86::BlockMultiWayTree::insertDataOrTree($$$$)                        
     SetLabel $success;                                                          # Insert completed successfully
     PopR @save;
    }
-   name => "Nasm::X86::BlockMultiWayTree::insertDataOrTree_$tnd",
+   name => "Nasm::X86::Tree::insertDataOrTree_$tnd",
    in   => [qw(first key)], io => [qw(bs data)];                                # Data either supplies the data or returns the offset of the sub tree
 
   $s->call($t->address, first => $t->first, key => $key,
     data => $tnd == 1 ? $t->data : $data);
  } # insert
 
-sub Nasm::X86::BlockMultiWayTree::insert($$$)                                   # Insert a dword into into the specified tree at the specified key.
- {my ($t, $key, $data) = @_;                                                    # Block multi way tree descriptor, key as a dword, data as a dword
+sub Nasm::X86::Tree::insert($$$)                                                # Insert a dword into into the specified tree at the specified key.
+ {my ($t, $key, $data) = @_;                                                    # Tree descriptor, key as a dword, data as a dword
   @_ == 3 or confess;
   $t->insertDataOrTree(0, $key, $data)                                          # Insert data
  }
 
-sub Nasm::X86::BlockMultiWayTree::insertTree($$;$)                              # Insert a sub tree into the specified tree tree under the specified key. If no sub tree is supplied an empty one is provided gratis.
- {my ($t, $key, $subTree) = @_;                                                 # Block multi way tree descriptor, key as a dword, sub tree to insert else an empty one will be added
+sub Nasm::X86::Tree::insertTree($$;$)                                           # Insert a sub tree into the specified tree tree under the specified key. If no sub tree is supplied an empty one is provided gratis.
+ {my ($t, $key, $subTree) = @_;                                                 # Tree descriptor, key as a dword, sub tree to insert else an empty one will be added
   @_ == 2 or @_ == 3 or confess;
   if (my $r = ref($subTree))
-   {if ($r =~ m(BlockMultiWayTree))
+   {if ($r =~ m(Tree))
      {$t->insertDataOrTree(2, $key, $subTree->first);                           # Insert a sub tree from a tree descriptor
      }
     elsif ($r =~ m(Variable))
@@ -5925,24 +5931,24 @@ sub Nasm::X86::BlockMultiWayTree::insertTree($$;$)                              
    }
  }
 
-sub Nasm::X86::BlockMultiWayTree::insertTreeAndClone($$)                        # Insert a new sub tree into the specified tree tree under the specified key and return a descriptor for it.  If the tree already exists, return a descriptor for it.
- {my ($t, $key) = @_;                                                           # Block multi way tree descriptor, key as a dword
+sub Nasm::X86::Tree::insertTreeAndClone($$)                                     # Insert a new sub tree into the specified tree tree under the specified key and return a descriptor for it.  If the tree already exists, return a descriptor for it.
+ {my ($t, $key) = @_;                                                           # Tree descriptor, key as a dword
   @_ == 2 or confess;
-  Comment "Nasm::X86::BlockMultiWayTree::insertTreeAndClone";
+  Comment "Nasm::X86::Tree::insertTreeAndClone";
   $t->insertTree($key);
   $t->first->copy($t->data);                                                    # Copy the data variable to the first variable without checking whether it is valid
  }
 
-sub Nasm::X86::BlockMultiWayTree::getKeysData($$$$)                             #P Load the keys and data blocks for a node
- {my ($t, $offset, $zmmKeys, $zmmData) = @_;                                    # Block multi way tree descriptor, offset as a variable, numbered zmm for keys, numbered data for keys
+sub Nasm::X86::Tree::getKeysData($$$$)                                          #P Load the keys and data blocks for a node
+ {my ($t, $offset, $zmmKeys, $zmmData) = @_;                                    # Tree descriptor, offset as a variable, numbered zmm for keys, numbered data for keys
   @_ == 4 or confess;
   $t->bs->getBlock($t->address, $offset, $zmmKeys);                             # Get the keys block
   my $data = $t->getLoop($zmmKeys);                                             # Get the offset of the corresponding data block
   $t->bs->getBlock($t->address, $data, $zmmData);                               # Get the data block
  }
 
-sub Nasm::X86::BlockMultiWayTree::putKeysData($$$$)                             #P Save the key and data blocks for a node
- {my ($t, $offset, $zmmKeys, $zmmData) = @_;                                    # Block multi way tree descriptor, offset as a variable, numbered zmm for keys, numbered data for keys
+sub Nasm::X86::Tree::putKeysData($$$$)                                          #P Save the key and data blocks for a node
+ {my ($t, $offset, $zmmKeys, $zmmData) = @_;                                    # Tree descriptor, offset as a variable, numbered zmm for keys, numbered data for keys
   @_ == 4 or confess;
   $t->bs->putBlock($t->address, $offset, $zmmKeys);                             # Put the keys block
   my $data = $t->getLoop($zmmKeys);                                             # Get the offset of the corresponding data block
@@ -5955,16 +5961,16 @@ sub Nasm::X86::BlockMultiWayTree::putKeysData($$$$)                             
   $t->bs->putBlock($t->address, $data, $zmmData);                               # Put the data block
  }
 
-sub Nasm::X86::BlockMultiWayTree::getNode($$$)                                  #P Load the child nodes for a node
- {my ($t, $offset, $zmmNode) = @_;                                              # Block multi way tree descriptor, offset of nodes, numbered zmm for keys
+sub Nasm::X86::Tree::getNode($$$)                                               #P Load the child nodes for a node
+ {my ($t, $offset, $zmmNode) = @_;                                              # Tree descriptor, offset of nodes, numbered zmm for keys
   @_ == 3 or confess;
   $t->bs->getBlock($t->address, $offset, $zmmNode);                             # Get the node block
  }
 
-sub Nasm::X86::BlockMultiWayTree::getKeysDataNode($$$$$)                        #P Load the keys, data and child nodes for a node
- {my ($t, $offset, $zmmKeys, $zmmData, $zmmNode) = @_;                          # Block multi way tree descriptor, offset as a variable, numbered zmm for keys, numbered data for keys, numbered numbered for keys
+sub Nasm::X86::Tree::getKeysDataNode($$$$$)                                     #P Load the keys, data and child nodes for a node
+ {my ($t, $offset, $zmmKeys, $zmmData, $zmmNode) = @_;                          # Tree descriptor, offset as a variable, numbered zmm for keys, numbered data for keys, numbered numbered for keys
   @_ == 5 or confess;
-  my $b = $t->bs;                                                               # Underlying byte string
+  my $b = $t->bs;                                                               # Underlying arena
   $b->getBlock($b->bs, $offset, $zmmKeys);                                      # Get the keys block
   my $data = $t->getLoop($zmmKeys);                                             # Get the offset of the corresponding data block
   $b->getBlock($b->bs, $data, $zmmData);                                        # Get the data block
@@ -5978,8 +5984,8 @@ sub Nasm::X86::BlockMultiWayTree::getKeysDataNode($$$$$)                        
    });
  }
 
-sub Nasm::X86::BlockMultiWayTree::putKeysDataNode($$$$$)                        #P Save the keys, data and child nodes for a node
- {my ($t, $offset, $zmmKeys, $zmmData, $zmmNode) = @_;                          # Block multi way tree descriptor, offset as a variable, numbered zmm for keys, numbered data for keys, numbered numbered for keys
+sub Nasm::X86::Tree::putKeysDataNode($$$$$)                                     #P Save the keys, data and child nodes for a node
+ {my ($t, $offset, $zmmKeys, $zmmData, $zmmNode) = @_;                          # Tree descriptor, offset as a variable, numbered zmm for keys, numbered data for keys, numbered numbered for keys
   @_ == 5 or confess;
   $t->putKeysData($offset, $zmmKeys, $zmmData);                                 # Put keys and data
   my $node = $t->getLoop($zmmData);                                             # Get the offset of the corresponding node block
@@ -5989,50 +5995,50 @@ sub Nasm::X86::BlockMultiWayTree::putKeysDataNode($$$$$)                        
    });
  }
 
-sub Nasm::X86::BlockMultiWayTree::getLengthInKeys($$)                           #P Get the length of the keys block in the numbered zmm and return it as a variable
- {my ($t, $zmm) = @_;                                                           # Block multi way tree descriptor, zmm number
+sub Nasm::X86::Tree::getLengthInKeys($$)                                        #P Get the length of the keys block in the numbered zmm and return it as a variable
+ {my ($t, $zmm) = @_;                                                           # Tree descriptor, zmm number
   @_ == 2 or confess;
 
   getBFromZmm($zmm, $t->lengthOffset);                                          # The length field as a variable
  }
 
-sub Nasm::X86::BlockMultiWayTree::putLengthInKeys($$$)                          #P Get the length of the block in the numbered zmm from the specified variable
- {my ($t, $zmm, $length) = @_;                                                  # Block multi way tree, zmm number, length variable
+sub Nasm::X86::Tree::putLengthInKeys($$$)                                       #P Get the length of the block in the numbered zmm from the specified variable
+ {my ($t, $zmm, $length) = @_;                                                  # tree, zmm number, length variable
   @_ == 3 or confess;
   ref($length) or confess dump($length);
   $length->putBIntoZmm($zmm, $t->lengthOffset)                                  # Set the length field
  }
 
-sub Nasm::X86::BlockMultiWayTree::getUpFromData($$)                             #P Get the up offset from the data block in the numbered zmm and return it as a variable
- {my ($t, $zmm) = @_;                                                           # Block multi way tree descriptor, zmm number
+sub Nasm::X86::Tree::getUpFromData($$)                                          #P Get the up offset from the data block in the numbered zmm and return it as a variable
+ {my ($t, $zmm) = @_;                                                           # Tree descriptor, zmm number
   @_ == 2 or confess;
   getDFromZmm($zmm, $t->lengthOffset);                                          # The length field as a variable
  }
 
-sub Nasm::X86::BlockMultiWayTree::putUpIntoData($$$)                            #P Put the offset of the parent keys block expressed as a variable into the numbered zmm
- {my ($t, $offset, $zmm) = @_;                                                  # Block multi way tree descriptor, variable containing up offset, zmm number
+sub Nasm::X86::Tree::putUpIntoData($$$)                                         #P Put the offset of the parent keys block expressed as a variable into the numbered zmm
+ {my ($t, $offset, $zmm) = @_;                                                  # Tree descriptor, variable containing up offset, zmm number
   @_ == 3 or confess;
   defined($offset) or confess;
   $offset->putDIntoZmm($zmm, $t->lengthOffset);                                 # Save the up offset into the data block
  }
 
-sub Nasm::X86::BlockMultiWayTree::getLoop($$;$)                                 #P Return the value of the loop field as a variable
- {my ($t, $zmm, $transfer) = @_;                                                # Block multi way tree descriptor, numbered zmm, optional transfer register
+sub Nasm::X86::Tree::getLoop($$;$)                                              #P Return the value of the loop field as a variable
+ {my ($t, $zmm, $transfer) = @_;                                                # Tree descriptor, numbered zmm, optional transfer register
   @_ >= 1 or confess;
   getDFromZmm($zmm, $t->loop, $transfer);                                       # Get loop field as a variable
  }
 
-sub Nasm::X86::BlockMultiWayTree::putLoop($$$)                                  #P Set the value of the loop field from a variable
- {my ($t, $value, $zmm) = @_;                                                   # Block multi way tree descriptor, variable containing offset of next loop entry, numbered zmm
+sub Nasm::X86::Tree::putLoop($$$)                                               #P Set the value of the loop field from a variable
+ {my ($t, $value, $zmm) = @_;                                                   # Tree descriptor, variable containing offset of next loop entry, numbered zmm
   @_ >= 1 or confess;
   $value->putDIntoZmm($zmm, $t->loop);                                          # Put loop field as a variable
  }
 
-sub Nasm::X86::BlockMultiWayTree::leftOrRightMost($$@)                          # Return the left most or right most node
- {my ($t, $dir, @variables) = @_;                                               # Block multi way tree descriptor, direction: left = 0 or right = 1, variables
+sub Nasm::X86::Tree::leftOrRightMost($$@)                                       # Return the left most or right most node
+ {my ($t, $dir, @variables) = @_;                                               # Tree descriptor, direction: left = 0 or right = 1, variables
   @_ >= 1 or confess;
   my $success = Label;                                                          # Short circuit if ladders by jumping directly to the end after a successful push
-  my $b = $t->bs;                                                               # Underlying byte string
+  my $b = $t->bs;                                                               # Underlying arena
 
   my $s = Subroutine
    {my ($p) = @_;                                                               # Parameters
@@ -6064,44 +6070,44 @@ sub Nasm::X86::BlockMultiWayTree::leftOrRightMost($$@)                          
 
     SetLabel $success;                                                          # Insert completed successfully
     PopR @save;
-   } name => $dir == 0 ? "Nasm::X86::BlockMultiWayTree::leftMost"
-                       : "Nasm::X86::BlockMultiWayTree::rightMost",
+   } name => $dir == 0 ? "Nasm::X86::Tree::leftMost"
+                       : "Nasm::X86::Tree::rightMost",
      in => [qw(node )], out => [qw(offset )];
 
   $s->call(@variables);
  }
 
-sub Nasm::X86::BlockMultiWayTree::leftMost($@)                                  # Return the left most node
- {my ($t, @variables) = @_;                                                     # Block multi way tree descriptor, variables
+sub Nasm::X86::Tree::leftMost($@)                                               # Return the left most node
+ {my ($t, @variables) = @_;                                                     # Tree descriptor, variables
   $t->leftOrRightMost(0, @variables)                                            # Return the left most node
  }
 
-sub Nasm::X86::BlockMultiWayTree::rightMost($@)                                 # Return the right most node
- {my ($t,  @variables) = @_;                                                    # Block multi way tree descriptor, variables
+sub Nasm::X86::Tree::rightMost($@)                                              # Return the right most node
+ {my ($t,  @variables) = @_;                                                    # Tree descriptor, variables
   $t->leftOrRightMost(1, @variables)                                            # Return the right most node
  }
 
-sub Nasm::X86::BlockMultiWayTree::nodeFromData($$$)                             #P Load the the node block into the numbered zmm corresponding to the data block held in the numbered zmm.
- {my ($t, $data, $node) = @_;                                                   # Block multi way tree descriptor, numbered zmm containing data, numbered zmm to hold node block
+sub Nasm::X86::Tree::nodeFromData($$$)                                          #P Load the the node block into the numbered zmm corresponding to the data block held in the numbered zmm.
+ {my ($t, $data, $node) = @_;                                                   # Tree descriptor, numbered zmm containing data, numbered zmm to hold node block
   @_ == 3 or confess;
   my $loop = $t->getLoop($data);                                                # Get loop offset from data
   $t->getBlock($t->address, $loop, $node);                                      # Node
  }
 
-sub Nasm::X86::BlockMultiWayTree::address($)                                    #P Address of the byte string containing a block multi way tree
- {my ($t) = @_;                                                                 # Block multi way tree descriptor
+sub Nasm::X86::Tree::address($)                                                 #P Address of the arena containing a tree
+ {my ($t) = @_;                                                                 # Tree descriptor
   @_ == 1 or confess;
   $t->bs->bs;
  }
 
-sub Nasm::X86::BlockMultiWayTree::allocBlock($@)                                #P Allocate a block to hold a zmm register in the specified byte string and return the offset of the block in a variable
- {my ($t, @variables) = @_;                                                     # Block multi way tree descriptor, variables
+sub Nasm::X86::Tree::allocBlock($@)                                             #P Allocate a block to hold a zmm register in the specified arena and return the offset of the block in a variable
+ {my ($t, @variables) = @_;                                                     # Tree descriptor, variables
   @_ == 1 or confess;
   $t->bs->allocBlock                                                            # Allocate a block and return its offset as a variable
  }
 
-sub Nasm::X86::BlockMultiWayTree::depth($@)                                     # Return the depth of a node within a tree.
- {my ($t, @variables) = @_;                                                     # Block multi way tree descriptor, variables
+sub Nasm::X86::Tree::depth($@)                                                  # Return the depth of a node within a tree.
+ {my ($t, @variables) = @_;                                                     # Tree descriptor, variables
   @_ >= 2 or confess;
 
   my $s = Subroutine
@@ -6136,8 +6142,8 @@ sub Nasm::X86::BlockMultiWayTree::depth($@)                                     
 
 #D2 Sub trees                                                                   # Construct trees of trees.
 
-sub Nasm::X86::BlockMultiWayTree::isTree($$$)                                   #P Set the Zero Flag to oppose the tree bit in the numbered zmm register holding the keys of a node to indicate whether the data element indicated by the specified register is an offset to a sub tree in the containing byte string or not.
-{my ($t, $register, $zmm) = @_;                                                 # Block multi way tree descriptor, word register holding a bit shifted into the position to test, numbered zmm register holding the keys for a node in the tree
+sub Nasm::X86::Tree::isTree($$$)                                                #P Set the Zero Flag to oppose the tree bit in the numbered zmm register holding the keys of a node to indicate whether the data element indicated by the specified register is an offset to a sub tree in the containing arena or not.
+{my ($t, $register, $zmm) = @_;                                                 # Tree descriptor, word register holding a bit shifted into the position to test, numbered zmm register holding the keys for a node in the tree
   @_ == 3 or confess;
 
   my $b = RegisterSize zmm0;                                                    # Size of a block == size of a zmm register
@@ -6150,8 +6156,8 @@ sub Nasm::X86::BlockMultiWayTree::isTree($$$)                                   
   PopR $register;
  } # isTree
 
-sub Nasm::X86::BlockMultiWayTree::setOrClearTree($$$$)                          #P Set or clear the tree bit in the numbered zmm register holding the keys of a node to indicate that the data element indicated by the specified register is an offset to a sub tree in the containing byte string.
- {my ($t, $set, $register, $zmm) = @_;                                          # Block multi way tree descriptor, set if true else clear, register holding a single one in the lowest 14 bits at the insertion point, numbered zmm register holding the keys for a node in the tree
+sub Nasm::X86::Tree::setOrClearTree($$$$)                                       #P Set or clear the tree bit in the numbered zmm register holding the keys of a node to indicate that the data element indicated by the specified register is an offset to a sub tree in the containing arena.
+ {my ($t, $set, $register, $zmm) = @_;                                          # Tree descriptor, set if true else clear, register holding a single one in the lowest 14 bits at the insertion point, numbered zmm register holding the keys for a node in the tree
   @_ == 4 or confess;
   $register =~ m(\Ar) or                                                        # Check register type
     confess "General purpose register required, not $register";
@@ -6171,31 +6177,31 @@ sub Nasm::X86::BlockMultiWayTree::setOrClearTree($$$$)                          
   PopR @save;
  } # setOrClearTree
 
-sub Nasm::X86::BlockMultiWayTree::setTree($$$)                                  #P Set the tree bit in the numbered zmm register holding the keys of a node to indicate that the data element indexed by the specified register is an offset to a sub tree in the containing byte string.
-{my ($t, $register, $zmm) = @_;                                                 # Block multi way tree descriptor, register holding data element index 0..13, numbered zmm register holding the keys for a node in the tree
+sub Nasm::X86::Tree::setTree($$$)                                               #P Set the tree bit in the numbered zmm register holding the keys of a node to indicate that the data element indexed by the specified register is an offset to a sub tree in the containing arena.
+{my ($t, $register, $zmm) = @_;                                                 # Tree descriptor, register holding data element index 0..13, numbered zmm register holding the keys for a node in the tree
   @_ == 3 or confess;
   $t->setOrClearTree(1, $register, $zmm);
  } # setTree
 
-sub Nasm::X86::BlockMultiWayTree::clearTree($$$)                                #P Clear the tree bit in the numbered zmm register holding the keys of a node to indicate that the data element indexed by the specified register is an offset to a sub tree in the containing byte string.
-{my ($t, $register, $zmm) = @_;                                                 # Block multi way tree descriptor, register holding data element index 0..13, numbered zmm register holding the keys for a node in the tree
+sub Nasm::X86::Tree::clearTree($$$)                                             #P Clear the tree bit in the numbered zmm register holding the keys of a node to indicate that the data element indexed by the specified register is an offset to a sub tree in the containing arena.
+{my ($t, $register, $zmm) = @_;                                                 # Tree descriptor, register holding data element index 0..13, numbered zmm register holding the keys for a node in the tree
   @_ == 3 or confess;
   $t->setOrClearTree(0, $register, $zmm);
  } # clearTree
 
-sub Nasm::X86::BlockMultiWayTree::getTreeBits($$$)                              #P Load the tree bits from the numbered zmm into the specified register.
+sub Nasm::X86::Tree::getTreeBits($$$)                                           #P Load the tree bits from the numbered zmm into the specified register.
  {my ($t, $zmm, $register) = @_;                                                # Tree descriptor, numbered zmm, target register
   loadFromZmm $register, w, $zmm, $t->treeBits;
   And $register, $t->treeBitsMask;
  }
 
-sub Nasm::X86::BlockMultiWayTree::putTreeBits($$$)                              #P Put the tree bits in the specified register into the numbered zmm.
+sub Nasm::X86::Tree::putTreeBits($$$)                                           #P Put the tree bits in the specified register into the numbered zmm.
  {my ($t, $zmm, $register) = @_;                                                # Tree descriptor, numbered zmm, target register
   putIntoZmm $register, w, $zmm, $t->treeBits;
   And $register, $t->treeBitsMask;
  }
 
-sub Nasm::X86::BlockMultiWayTree::expandTreeBitsWithZeroOrOne($$$$)             #P Insert a zero or one into the tree bits field in the numbered zmm at the specified point
+sub Nasm::X86::Tree::expandTreeBitsWithZeroOrOne($$$$)                          #P Insert a zero or one into the tree bits field in the numbered zmm at the specified point
  {my ($t, $onz, $zmm, $point) = @_;                                             # Tree descriptor, 0 - zero or 1 - one, numbered zmm, register indicating point
   PushR my @save = my ($bits) = ChooseRegisters(1, $point);                     # Tree bits register
   $t->getTreeBits($zmm, $bits);                                                 # Get tree bits
@@ -6209,22 +6215,22 @@ sub Nasm::X86::BlockMultiWayTree::expandTreeBitsWithZeroOrOne($$$$)             
   PopR @save;
  }
 
-sub Nasm::X86::BlockMultiWayTree::expandTreeBitsWithZero($$$)                   #P Insert a zero into the tree bits field in the numbered zmm at the specified point
+sub Nasm::X86::Tree::expandTreeBitsWithZero($$$)                                #P Insert a zero into the tree bits field in the numbered zmm at the specified point
  {my ($t, $zmm, $point) = @_;                                                   # Tree descriptor, numbered zmm, register indicating point
   $t->expandTreeBitsWithZeroOrOne(0, $zmm, $point);                             # Insert a zero into the tree bits field in the numbered zmm at the specified point
  }
 
-sub Nasm::X86::BlockMultiWayTree::expandTreeBitsWithOne($$$)                    #P Insert a one into the tree bits field in the numbered zmm at the specified point
+sub Nasm::X86::Tree::expandTreeBitsWithOne($$$)                                 #P Insert a one into the tree bits field in the numbered zmm at the specified point
  {my ($t, $zmm, $point) = @_;                                                   # Tree descriptor, numbered zmm, register indicating point
   $t->expandTreeBitsWithZeroOrOne(1, $zmm, $point);                             # Insert a one into the tree bits field in the numbered zmm at the specified point
  }
 
 #D2 Print                                                                       # Print a tree
 
-sub Nasm::X86::BlockMultiWayTree::print($)                                      # Print a tree
- {my ($t) = @_;                                                                 # Block multi way tree
+sub Nasm::X86::Tree::print($)                                                   # Print a tree
+ {my ($t) = @_;                                                                 # tree
   @_ == 1 or confess;
-  Comment "Nasm::X86::BlockMultiWayTree::print";
+  Comment "Nasm::X86::Tree::print";
 
   PushR my @save = my ($current, $base) = (r15, rbp);
   Mov  rbp, rsp;                                                                # Stack holds the trees still to be printed
@@ -6262,15 +6268,15 @@ sub Nasm::X86::BlockMultiWayTree::print($)                                      
 
 #D2 Iteration                                                                   # Iterate through a tree non recursively
 
-sub Nasm::X86::BlockMultiWayTree::iterator($)                                   # Iterate through a multi way tree
- {my ($b) = @_;                                                                 # Block multi way tree
+sub Nasm::X86::Tree::iterator($)                                                # Iterate through a multi way tree
+ {my ($b) = @_;                                                                 # tree
   @_ == 1 or confess;
-  Comment "Nasm::X86::BlockMultiWayTree::iterator";
+  Comment "Nasm::X86::Tree::iterator";
 
   my $node = V(node);                                                           # The current node
   $node->copy($b->first);                                                       # Start at the first node in the tree
 
-  my $i = genHash(__PACKAGE__.'::BlockMultiWayTree::Iterator',                  # Iterator
+  my $i = genHash(__PACKAGE__.'::Tree::Iterator',                               # Iterator
     tree  => $b,                                                                # Tree we are iterating over
     node  => $node,                                                             # Current node within tree
     pos   => V('pos'),                                                          # Current position within node
@@ -6286,7 +6292,7 @@ sub Nasm::X86::BlockMultiWayTree::iterator($)                                   
   $i->next;                                                                     # First element if any
  }
 
-sub Nasm::X86::BlockMultiWayTree::Iterator::next($)                             # Next element in the tree
+sub Nasm::X86::Tree::Iterator::next($)                                          # Next element in the tree
  {my ($iter) = @_;                                                              # Iterator
   @_ == 1 or confess;
 
@@ -6409,10 +6415,10 @@ sub Nasm::X86::BlockMultiWayTree::Iterator::next($)                             
   $iter                                                                         # Return the iterator
  }
 
-sub Nasm::X86::BlockMultiWayTree::by($&)                                        # Call the specified body with each (key, data) from the specified tree in order
- {my ($b, $body) = @_;                                                          # Block Multi Way Tree descriptor, body
+sub Nasm::X86::Tree::by($&)                                                     # Call the specified body with each (key, data) from the specified tree in order
+ {my ($b, $body) = @_;                                                          # Tree descriptor, body
   @_ == 2 or confess;
-  Comment "Nasm::X86::BlockMultiWayTree::by";
+  Comment "Nasm::X86::Tree::by";
 
   my $iter = $b->iterator;                                                      # Create an iterator
   my $start = SetLabel Label; my $end = Label;                                  # Start and end of loop
@@ -6530,7 +6536,7 @@ END
 our $assembliesPerformed = 0;                                                   # Number of assemblies performed
 our $totalBytesAssembled = 0;                                                   # Estimate the size of the output programs
 
-sub Assemble(%)                                                                 # Assemble the generated code. # Options: debug => 0,1,2 eq => expected output on 1, commentCount => count comments
+sub Assemble(%)                                                                 # Assemble the generated code.
  {my (%options) = @_;                                                           # Options
   Exit 0 unless @text > 4 and $text[-4] =~ m(Exit code:);                       # Exit with code 0 if no other exit has been taken
   my $debug = $options{debug}//0;                                               # 0 - none (minimal output), 1 - normal (debug output and confess of failure), 2 - failures (debug output and no confess on failure) .
@@ -6742,7 +6748,7 @@ use vars qw(@ISA @EXPORT @EXPORT_OK %EXPORT_TAGS);
 
 @ISA          = qw(Exporter);
 @EXPORT       = qw();
-@EXPORT_OK    = qw(Add All8Structure AllocateAll8OnStack AllocateMemory And Andn Assemble Block Bswap Bt Btc Btr Bts Bzhi Call CallC ChooseRegisters ClassifyInRange ClassifyRange ClassifyWithInRange ClassifyWithInRangeAndSaveOffset ClearMemory ClearRegisters ClearZF CloseFile Cmova Cmovae Cmovb Cmovbe Cmovc Cmove Cmovg Cmovge Cmovl Cmovle Cmovna Cmovnae Cmovnb Cmp Comment CommentWithTraceBack ConcatenateShortStrings ConvertUtf8ToUtf32 CopyMemory CreateByteString Cstrlen DComment Db Dbwdq Dd Dec Dq Ds Dw Else Exit Extern For ForEver ForIn Fork FreeMemory GetLengthOfShortString GetNextUtf8CharAsUtf32 GetPPid GetPid GetPidInHex GetUid Hash ISA Idiv If IfC IfEq IfGe IfGt IfLe IfLt IfNc IfNe IfNz IfZ Imul Inc InsertOneIntoRegisterAtPoint InsertZeroIntoRegisterAtPoint Isa Ja Jae Jb Jbe Jc Jcxz Je Jecxz Jg Jge Jl Jle Jmp Jna Jnae Jnb Jnbe Jnc Jne Jng Jnge Jnl Jnle Jno Jnp Jns Jnz Jo Jp Jpe Jpo Jrcxz Js Jz K Kaddb Kaddd Kaddq Kaddw Kandb Kandd Kandnb Kandnd Kandnq Kandnw Kandq Kandw Keep KeepFree KeepPop KeepPush KeepReturn KeepSet Kmovb Kmovd Kmovq Kmovw Knotb Knotd Knotq Knotw Korb Kord Korq Kortestb Kortestd Kortestq Kortestw Korw Kshiftlb Kshiftld Kshiftlq Kshiftlw Kshiftrb Kshiftrd Kshiftrq Kshiftrw Ktestb Ktestd Ktestq Ktestw Kunpckb Kunpckd Kunpckq Kunpckw Kxnorb Kxnord Kxnorq Kxnorw Kxorb Kxord Kxorq Kxorw Label Lahf Lea Link LoadBitsIntoMaskRegister LoadConstantIntoMaskRegister LoadShortStringFromMemoryToZmm LoadZmm LocalData LocateIntelEmulator Loop Lzcnt Macro MaskMemory22 MaskMemoryInRange4_22 Mov Movdqa Mulpd Neg Not OpenRead OpenWrite Or PeekR Pextrb Pextrd Pextrq Pextrw Pi32 Pi64 Pinsrb Pinsrd Pinsrq Pinsrw Pop PopEax PopR PopRR Popcnt Popfq PrintErrMemory PrintErrMemoryInHex PrintErrMemoryInHexNL PrintErrMemoryNL PrintErrNL PrintErrRaxInHex PrintErrRegisterInHex PrintErrString PrintErrStringNL PrintErrZF PrintMemory PrintMemoryInHex PrintNL PrintOutMemory PrintOutMemoryInHex PrintOutMemoryInHexNL PrintOutMemoryNL PrintOutNL PrintOutRaxInHex PrintOutRaxInReverseInHex PrintOutRegisterInHex PrintOutRegistersInHex PrintOutRflagsInHex PrintOutRipInHex PrintOutString PrintOutStringNL PrintOutZF PrintRaxInHex PrintRegisterInHex PrintString PrintUtf32 Pslldq Psrldq Push PushR PushRR Pushfq R RComment Rb Rbwdq Rd Rdtsc ReadFile ReadTimeStampCounter RegisterSize ReorderSyscallRegisters RestoreFirstFour RestoreFirstFourExceptRax RestoreFirstFourExceptRaxAndRdi RestoreFirstSeven RestoreFirstSevenExceptRax RestoreFirstSevenExceptRaxAndRdi Ret Rq Rs Rutf8 Rw SaveFirstFour SaveFirstSeven SetLabel SetLengthOfShortString SetMaskRegister SetZF Seta Setae Setb Setbe Setc Sete Setg Setge Setl Setle Setna Setnae Setnb Setnbe Setnc Setne Setng Setnge Setnl Setno Setnp Setns Setnz Seto Setp Setpe Setpo Sets Setz Shl Shr Start StatSize StringLength Structure Sub Subroutine Syscall TODO Test Then Trace Tzcnt UnReorderSyscallRegisters V VERSION Vaddd Vaddpd Variable Vcvtudq2pd Vcvtudq2ps Vcvtuqq2pd Vdpps Vgetmantps Vmovd Vmovdqa32 Vmovdqa64 Vmovdqu Vmovdqu32 Vmovdqu64 Vmovdqu8 Vmovq Vmulpd Vpbroadcastb Vpbroadcastd Vpbroadcastq Vpbroadcastw Vpcmpeqb Vpcmpeqd Vpcmpeqq Vpcmpeqw Vpcmpub Vpcmpud Vpcmpuq Vpcmpuw Vpcompressd Vpcompressq Vpexpandd Vpexpandq Vpextrb Vpextrd Vpextrq Vpextrw Vpinsrb Vpinsrd Vpinsrq Vpinsrw Vpmullb Vpmulld Vpmullq Vpmullw Vprolq Vpsubb Vpsubd Vpsubq Vpsubw Vpxorq Vsqrtpd Vz WaitPid Xchg Xor ah al ax bh bl bp bpl bx ch cl cs cx dh di dil dl ds dx eax ebp ebx ecx edi edx es esi esp fs gs k0 k1 k2 k3 k4 k5 k6 k7 mm0 mm1 mm2 mm3 mm4 mm5 mm6 mm7 r10 r10b r10d r10l r10w r11 r11b r11d r11l r11w r12 r12b r12d r12l r12w r13 r13b r13d r13l r13w r14 r14b r14d r14l r14w r15 r15b r15d r15l r15w r8 r8b r8d r8l r8w r9 r9b r9d r9l r9w rax rbp rbx rcx rdi rdx rflags rip rsi rsp si sil sp spl ss st0 st1 st2 st3 st4 st5 st6 st7 xmm0 xmm1 xmm10 xmm11 xmm12 xmm13 xmm14 xmm15 xmm16 xmm17 xmm18 xmm19 xmm2 xmm20 xmm21 xmm22 xmm23 xmm24 xmm25 xmm26 xmm27 xmm28 xmm29 xmm3 xmm30 xmm31 xmm4 xmm5 xmm6 xmm7 xmm8 xmm9 ymm0 ymm1 ymm10 ymm11 ymm12 ymm13 ymm14 ymm15 ymm16 ymm17 ymm18 ymm19 ymm2 ymm20 ymm21 ymm22 ymm23 ymm24 ymm25 ymm26 ymm27 ymm28 ymm29 ymm3 ymm30 ymm31 ymm4 ymm5 ymm6 ymm7 ymm8 ymm9 zmm0 zmm1 zmm10 zmm11 zmm12 zmm13 zmm14 zmm15 zmm16 zmm17 zmm18 zmm19 zmm2 zmm20 zmm21 zmm22 zmm23 zmm24 zmm25 zmm26 zmm27 zmm28 zmm29 zmm3 zmm30 zmm31 zmm4 zmm5 zmm6 zmm7 zmm8 zmm9);
+@EXPORT_OK    = qw(Add All8Structure AllocateAll8OnStack AllocateMemory And Andn Assemble Block Bswap Bt Btc Btr Bts Bzhi Call CallC ChooseRegisters ClassifyInRange ClassifyRange ClassifyWithInRange ClassifyWithInRangeAndSaveOffset ClearMemory ClearRegisters ClearZF CloseFile Cmova Cmovae Cmovb Cmovbe Cmovc Cmove Cmovg Cmovge Cmovl Cmovle Cmovna Cmovnae Cmovnb Cmp Comment CommentWithTraceBack ConcatenateShortStrings ConvertUtf8ToUtf32 CopyMemory CreateArena Cstrlen DComment Db Dbwdq Dd Dec Dq Ds Dw Else Exit Extern For ForEver ForIn Fork FreeMemory GetLengthOfShortString GetNextUtf8CharAsUtf32 GetPPid GetPid GetPidInHex GetUid Hash ISA Idiv If IfC IfEq IfGe IfGt IfLe IfLt IfNc IfNe IfNz IfZ Imul Inc InsertOneIntoRegisterAtPoint InsertZeroIntoRegisterAtPoint Isa Ja Jae Jb Jbe Jc Jcxz Je Jecxz Jg Jge Jl Jle Jmp Jna Jnae Jnb Jnbe Jnc Jne Jng Jnge Jnl Jnle Jno Jnp Jns Jnz Jo Jp Jpe Jpo Jrcxz Js Jz K Kaddb Kaddd Kaddq Kaddw Kandb Kandd Kandnb Kandnd Kandnq Kandnw Kandq Kandw Keep KeepFree KeepPop KeepPush KeepReturn KeepSet Kmovb Kmovd Kmovq Kmovw Knotb Knotd Knotq Knotw Korb Kord Korq Kortestb Kortestd Kortestq Kortestw Korw Kshiftlb Kshiftld Kshiftlq Kshiftlw Kshiftrb Kshiftrd Kshiftrq Kshiftrw Ktestb Ktestd Ktestq Ktestw Kunpckb Kunpckd Kunpckq Kunpckw Kxnorb Kxnord Kxnorq Kxnorw Kxorb Kxord Kxorq Kxorw Label Lahf Lea Link LoadBitsIntoMaskRegister LoadConstantIntoMaskRegister LoadShortStringFromMemoryToZmm LoadZmm LocalData LocateIntelEmulator Loop Lzcnt Macro MaskMemory22 MaskMemoryInRange4_22 Mov Movdqa Mulpd Neg Not OpenRead OpenWrite Or PeekR Pextrb Pextrd Pextrq Pextrw Pi32 Pi64 Pinsrb Pinsrd Pinsrq Pinsrw Pop PopEax PopR PopRR Popcnt Popfq PrintErrMemory PrintErrMemoryInHex PrintErrMemoryInHexNL PrintErrMemoryNL PrintErrNL PrintErrRaxInHex PrintErrRegisterInHex PrintErrString PrintErrStringNL PrintErrZF PrintMemory PrintMemoryInHex PrintNL PrintOutMemory PrintOutMemoryInHex PrintOutMemoryInHexNL PrintOutMemoryNL PrintOutNL PrintOutRaxInHex PrintOutRaxInReverseInHex PrintOutRegisterInHex PrintOutRegistersInHex PrintOutRflagsInHex PrintOutRipInHex PrintOutString PrintOutStringNL PrintOutZF PrintRaxInHex PrintRegisterInHex PrintString PrintUtf32 Pslldq Psrldq Push PushR PushRR Pushfq R RComment Rb Rbwdq Rd Rdtsc ReadFile ReadTimeStampCounter RegisterSize ReorderSyscallRegisters RestoreFirstFour RestoreFirstFourExceptRax RestoreFirstFourExceptRaxAndRdi RestoreFirstSeven RestoreFirstSevenExceptRax RestoreFirstSevenExceptRaxAndRdi Ret Rq Rs Rutf8 Rw SaveFirstFour SaveFirstSeven SetLabel SetLengthOfShortString SetMaskRegister SetZF Seta Setae Setb Setbe Setc Sete Setg Setge Setl Setle Setna Setnae Setnb Setnbe Setnc Setne Setng Setnge Setnl Setno Setnp Setns Setnz Seto Setp Setpe Setpo Sets Setz Shl Shr Start StatSize StringLength Structure Sub Subroutine Syscall TODO Test Then Trace Tzcnt UnReorderSyscallRegisters V VERSION Vaddd Vaddpd Variable Vcvtudq2pd Vcvtudq2ps Vcvtuqq2pd Vdpps Vgetmantps Vmovd Vmovdqa32 Vmovdqa64 Vmovdqu Vmovdqu32 Vmovdqu64 Vmovdqu8 Vmovq Vmulpd Vpbroadcastb Vpbroadcastd Vpbroadcastq Vpbroadcastw Vpcmpeqb Vpcmpeqd Vpcmpeqq Vpcmpeqw Vpcmpub Vpcmpud Vpcmpuq Vpcmpuw Vpcompressd Vpcompressq Vpexpandd Vpexpandq Vpextrb Vpextrd Vpextrq Vpextrw Vpinsrb Vpinsrd Vpinsrq Vpinsrw Vpmullb Vpmulld Vpmullq Vpmullw Vprolq Vpsubb Vpsubd Vpsubq Vpsubw Vpxorq Vsqrtpd Vz WaitPid Xchg Xor ah al ax bh bl bp bpl bx ch cl cs cx dh di dil dl ds dx eax ebp ebx ecx edi edx es esi esp fs gs k0 k1 k2 k3 k4 k5 k6 k7 mm0 mm1 mm2 mm3 mm4 mm5 mm6 mm7 r10 r10b r10d r10l r10w r11 r11b r11d r11l r11w r12 r12b r12d r12l r12w r13 r13b r13d r13l r13w r14 r14b r14d r14l r14w r15 r15b r15d r15l r15w r8 r8b r8d r8l r8w r9 r9b r9d r9l r9w rax rbp rbx rcx rdi rdx rflags rip rsi rsp si sil sp spl ss st0 st1 st2 st3 st4 st5 st6 st7 xmm0 xmm1 xmm10 xmm11 xmm12 xmm13 xmm14 xmm15 xmm16 xmm17 xmm18 xmm19 xmm2 xmm20 xmm21 xmm22 xmm23 xmm24 xmm25 xmm26 xmm27 xmm28 xmm29 xmm3 xmm30 xmm31 xmm4 xmm5 xmm6 xmm7 xmm8 xmm9 ymm0 ymm1 ymm10 ymm11 ymm12 ymm13 ymm14 ymm15 ymm16 ymm17 ymm18 ymm19 ymm2 ymm20 ymm21 ymm22 ymm23 ymm24 ymm25 ymm26 ymm27 ymm28 ymm29 ymm3 ymm30 ymm31 ymm4 ymm5 ymm6 ymm7 ymm8 ymm9 zmm0 zmm1 zmm10 zmm11 zmm12 zmm13 zmm14 zmm15 zmm16 zmm17 zmm18 zmm19 zmm2 zmm20 zmm21 zmm22 zmm23 zmm24 zmm25 zmm26 zmm27 zmm28 zmm29 zmm3 zmm30 zmm31 zmm4 zmm5 zmm6 zmm7 zmm8 zmm9);
 %EXPORT_TAGS  = (all => [@EXPORT, @EXPORT_OK]);
 
 # podDocumentation
@@ -6800,11 +6806,11 @@ END
 
 =head3 Dynamic string held in an arena
 
-Create a dynamic byte string, add some content to it, write the byte string to
+Create a dynamic arena, add some content to it, write the arena to
 stdout:
 
-  my $a = CreateByteString;                                                     # Create a string
-  my $b = CreateByteString;                                                     # Create a string
+  my $a = CreateArena;                                                     # Create a string
+  my $b = CreateArena;                                                     # Create a string
   $a->q('aa');
   $b->q('bb');
   $a->q('AA');
@@ -6890,8 +6896,8 @@ Create a multiway tree as in L<Tree::Multi> using B<Avx512> instructions and
 iterate through it:
 
   my $N = 12;
-  my $b = CreateByteString;                   # Resizable memory block
-  my $t = $b->CreateBlockMultiWayTree;        # Multi way tree in memory block
+  my $b = CreateArena;                   # Resizable memory block
+  my $t = $b->CreateTree;        # Multi way tree in memory block
 
   K(count, $N)->for(sub                      # Add some entries to the tree
    {my ($index, $start, $next, $end) = @_;
@@ -7080,7 +7086,7 @@ B<Example:>
     PrintOutRegisterInHex rax, rdi;
     RestoreFirstFour;
     PrintOutRegisterInHex rax, rdi;
-  
+
     SaveFirstFour;
     Mov rax, 2;
     Mov rdi, 2;
@@ -7092,7 +7098,7 @@ B<Example:>
     PrintOutRegisterInHex rax, rdi;
     RestoreFirstFourExceptRax;
     PrintOutRegisterInHex rax, rdi;
-  
+
     SaveFirstFour;
     Mov rax, 2;
     Mov rdi, 2;
@@ -7104,16 +7110,16 @@ B<Example:>
     PrintOutRegisterInHex rax, rdi;
     RestoreFirstFourExceptRaxAndRdi;
     PrintOutRegisterInHex rax, rdi;
-  
+
     Bswap rax;
     PrintOutRegisterInHex rax;
-  
+
     my $l = Label;
     Jmp $l;
-  
+
     SetLabel $l;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-  
+
     is_deeply Assemble, <<END;
      rax: 0000 0000 0000 0003
      rdi: 0000 0000 0000 0004
@@ -7135,9 +7141,9 @@ B<Example:>
      rdi: 0000 0000 0000 0004
      rax: 0300 0000 0000 0000
   END
-  
+
     ok 8 == RegisterSize rax;
-  
+
 
 =head2 Ds(@d)
 
@@ -7150,7 +7156,7 @@ B<Example:>
 
 
     my $q = Rs('a'..'z');
-  
+
     Mov rax, Ds('0'x64);                                                          # Output area  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     Vmovdqu32(xmm0, "[$q]");                                                      # Load
@@ -7158,9 +7164,9 @@ B<Example:>
     Vmovdqu32("[rax]", xmm0);                                                     # Save
     Mov rdi, 16;
     PrintOutMemory;
-  
+
     ok Assemble =~ m(efghabcdmnopijkl)s;
-  
+
 
 =head2 Rs(@d)
 
@@ -7174,16 +7180,16 @@ B<Example:>
 
     Comment "Print a string from memory";
     my $s = "Hello World";
-  
+
     Mov rax, Rs($s);  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     Mov rdi, length $s;
     PrintOutMemory;
     Exit(0);
-  
+
     ok Assemble =~ m(Hello World);
-  
-  
+
+
     my $q = Rs('abababab');  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     Mov(rax, 1);
@@ -7193,11 +7199,11 @@ B<Example:>
     Mov(r8,  5);
     Lea r9,  "[rax+rbx]";
     PrintOutRegistersInHex;
-  
+
     my $r = Assemble;
     ok $r =~ m( r8: 0000 0000 0000 0005.* r9: 0000 0000 0000 0003.*rax: 0000 0000 0000 0001)s;
     ok $r =~ m(rbx: 0000 0000 0000 0002.*rcx: 0000 0000 0000 0003.*rdx: 0000 0000 0000 0004)s;
-  
+
 
 =head2 Rutf8(@d)
 
@@ -7217,27 +7223,27 @@ B<Example:>
 
 
     my $s = Rb 0; Rb 1; Rw 2; Rd 3;  Rq 4;
-  
+
     my $t = Db 0; Db 1; Dw 2; Dd 3;  Dq 4;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-  
+
     Vmovdqu8 xmm0, "[$s]";
     Vmovdqu8 xmm1, "[$t]";
     PrintOutRegisterInHex xmm0;
     PrintOutRegisterInHex xmm1;
     Sub rsp, 16;
-  
+
     Mov rax, rsp;                                                                 # Copy memory, the target is addressed by rax, the length is in rdi, the source is addressed by rsi
     Mov rdi, 16;
     Mov rsi, $s;
     CopyMemory(V(source, rsi), V(target, rax), V(size, rdi));
     PrintOutMemoryInHex;
-  
+
     my $r = Assemble;
     ok $r =~ m(xmm0: 0000 0000 0000 0004   0000 0003 0002 0100);
     ok $r =~ m(xmm1: 0000 0000 0000 0004   0000 0003 0002 0100);
     ok $r =~ m(0001 0200 0300 00000400 0000 0000 0000);
-  
+
 
 =head2 Dw(@words)
 
@@ -7250,27 +7256,27 @@ B<Example:>
 
 
     my $s = Rb 0; Rb 1; Rw 2; Rd 3;  Rq 4;
-  
+
     my $t = Db 0; Db 1; Dw 2; Dd 3;  Dq 4;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-  
+
     Vmovdqu8 xmm0, "[$s]";
     Vmovdqu8 xmm1, "[$t]";
     PrintOutRegisterInHex xmm0;
     PrintOutRegisterInHex xmm1;
     Sub rsp, 16;
-  
+
     Mov rax, rsp;                                                                 # Copy memory, the target is addressed by rax, the length is in rdi, the source is addressed by rsi
     Mov rdi, 16;
     Mov rsi, $s;
     CopyMemory(V(source, rsi), V(target, rax), V(size, rdi));
     PrintOutMemoryInHex;
-  
+
     my $r = Assemble;
     ok $r =~ m(xmm0: 0000 0000 0000 0004   0000 0003 0002 0100);
     ok $r =~ m(xmm1: 0000 0000 0000 0004   0000 0003 0002 0100);
     ok $r =~ m(0001 0200 0300 00000400 0000 0000 0000);
-  
+
 
 =head2 Dd(@dwords)
 
@@ -7283,27 +7289,27 @@ B<Example:>
 
 
     my $s = Rb 0; Rb 1; Rw 2; Rd 3;  Rq 4;
-  
+
     my $t = Db 0; Db 1; Dw 2; Dd 3;  Dq 4;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-  
+
     Vmovdqu8 xmm0, "[$s]";
     Vmovdqu8 xmm1, "[$t]";
     PrintOutRegisterInHex xmm0;
     PrintOutRegisterInHex xmm1;
     Sub rsp, 16;
-  
+
     Mov rax, rsp;                                                                 # Copy memory, the target is addressed by rax, the length is in rdi, the source is addressed by rsi
     Mov rdi, 16;
     Mov rsi, $s;
     CopyMemory(V(source, rsi), V(target, rax), V(size, rdi));
     PrintOutMemoryInHex;
-  
+
     my $r = Assemble;
     ok $r =~ m(xmm0: 0000 0000 0000 0004   0000 0003 0002 0100);
     ok $r =~ m(xmm1: 0000 0000 0000 0004   0000 0003 0002 0100);
     ok $r =~ m(0001 0200 0300 00000400 0000 0000 0000);
-  
+
 
 =head2 Dq(@qwords)
 
@@ -7316,27 +7322,27 @@ B<Example:>
 
 
     my $s = Rb 0; Rb 1; Rw 2; Rd 3;  Rq 4;
-  
+
     my $t = Db 0; Db 1; Dw 2; Dd 3;  Dq 4;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-  
+
     Vmovdqu8 xmm0, "[$s]";
     Vmovdqu8 xmm1, "[$t]";
     PrintOutRegisterInHex xmm0;
     PrintOutRegisterInHex xmm1;
     Sub rsp, 16;
-  
+
     Mov rax, rsp;                                                                 # Copy memory, the target is addressed by rax, the length is in rdi, the source is addressed by rsi
     Mov rdi, 16;
     Mov rsi, $s;
     CopyMemory(V(source, rsi), V(target, rax), V(size, rdi));
     PrintOutMemoryInHex;
-  
+
     my $r = Assemble;
     ok $r =~ m(xmm0: 0000 0000 0000 0004   0000 0003 0002 0100);
     ok $r =~ m(xmm1: 0000 0000 0000 0004   0000 0003 0002 0100);
     ok $r =~ m(0001 0200 0300 00000400 0000 0000 0000);
-  
+
 
 =head2 Rb(@bytes)
 
@@ -7348,28 +7354,28 @@ Layout bytes in the data segment and return their label
 B<Example:>
 
 
-  
+
     my $s = Rb 0; Rb 1; Rw 2; Rd 3;  Rq 4;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     my $t = Db 0; Db 1; Dw 2; Dd 3;  Dq 4;
-  
+
     Vmovdqu8 xmm0, "[$s]";
     Vmovdqu8 xmm1, "[$t]";
     PrintOutRegisterInHex xmm0;
     PrintOutRegisterInHex xmm1;
     Sub rsp, 16;
-  
+
     Mov rax, rsp;                                                                 # Copy memory, the target is addressed by rax, the length is in rdi, the source is addressed by rsi
     Mov rdi, 16;
     Mov rsi, $s;
     CopyMemory(V(source, rsi), V(target, rax), V(size, rdi));
     PrintOutMemoryInHex;
-  
+
     my $r = Assemble;
     ok $r =~ m(xmm0: 0000 0000 0000 0004   0000 0003 0002 0100);
     ok $r =~ m(xmm1: 0000 0000 0000 0004   0000 0003 0002 0100);
     ok $r =~ m(0001 0200 0300 00000400 0000 0000 0000);
-  
+
 
 =head2 Rw(@words)
 
@@ -7381,28 +7387,28 @@ Layout words in the data segment and return their label
 B<Example:>
 
 
-  
+
     my $s = Rb 0; Rb 1; Rw 2; Rd 3;  Rq 4;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     my $t = Db 0; Db 1; Dw 2; Dd 3;  Dq 4;
-  
+
     Vmovdqu8 xmm0, "[$s]";
     Vmovdqu8 xmm1, "[$t]";
     PrintOutRegisterInHex xmm0;
     PrintOutRegisterInHex xmm1;
     Sub rsp, 16;
-  
+
     Mov rax, rsp;                                                                 # Copy memory, the target is addressed by rax, the length is in rdi, the source is addressed by rsi
     Mov rdi, 16;
     Mov rsi, $s;
     CopyMemory(V(source, rsi), V(target, rax), V(size, rdi));
     PrintOutMemoryInHex;
-  
+
     my $r = Assemble;
     ok $r =~ m(xmm0: 0000 0000 0000 0004   0000 0003 0002 0100);
     ok $r =~ m(xmm1: 0000 0000 0000 0004   0000 0003 0002 0100);
     ok $r =~ m(0001 0200 0300 00000400 0000 0000 0000);
-  
+
 
 =head2 Rd(@dwords)
 
@@ -7414,28 +7420,28 @@ Layout double words in the data segment and return their label
 B<Example:>
 
 
-  
+
     my $s = Rb 0; Rb 1; Rw 2; Rd 3;  Rq 4;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     my $t = Db 0; Db 1; Dw 2; Dd 3;  Dq 4;
-  
+
     Vmovdqu8 xmm0, "[$s]";
     Vmovdqu8 xmm1, "[$t]";
     PrintOutRegisterInHex xmm0;
     PrintOutRegisterInHex xmm1;
     Sub rsp, 16;
-  
+
     Mov rax, rsp;                                                                 # Copy memory, the target is addressed by rax, the length is in rdi, the source is addressed by rsi
     Mov rdi, 16;
     Mov rsi, $s;
     CopyMemory(V(source, rsi), V(target, rax), V(size, rdi));
     PrintOutMemoryInHex;
-  
+
     my $r = Assemble;
     ok $r =~ m(xmm0: 0000 0000 0000 0004   0000 0003 0002 0100);
     ok $r =~ m(xmm1: 0000 0000 0000 0004   0000 0003 0002 0100);
     ok $r =~ m(0001 0200 0300 00000400 0000 0000 0000);
-  
+
 
 =head2 Rq(@qwords)
 
@@ -7447,28 +7453,28 @@ Layout quad words in the data segment and return their label
 B<Example:>
 
 
-  
+
     my $s = Rb 0; Rb 1; Rw 2; Rd 3;  Rq 4;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     my $t = Db 0; Db 1; Dw 2; Dd 3;  Dq 4;
-  
+
     Vmovdqu8 xmm0, "[$s]";
     Vmovdqu8 xmm1, "[$t]";
     PrintOutRegisterInHex xmm0;
     PrintOutRegisterInHex xmm1;
     Sub rsp, 16;
-  
+
     Mov rax, rsp;                                                                 # Copy memory, the target is addressed by rax, the length is in rdi, the source is addressed by rsi
     Mov rdi, 16;
     Mov rsi, $s;
     CopyMemory(V(source, rsi), V(target, rax), V(size, rdi));
     PrintOutMemoryInHex;
-  
+
     my $r = Assemble;
     ok $r =~ m(xmm0: 0000 0000 0000 0004   0000 0003 0002 0100);
     ok $r =~ m(xmm1: 0000 0000 0000 0004   0000 0003 0002 0100);
     ok $r =~ m(0001 0200 0300 00000400 0000 0000 0000);
-  
+
 
 =head1 Registers
 
@@ -7499,14 +7505,14 @@ B<Example:>
 
 
     LoadZmm 0, 0..63;
-  
+
     PrintOutRegisterInHex zmm 0;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-  
+
     is_deeply Assemble, <<END;
     zmm0: 3F3E 3D3C 3B3A 3938   3736 3534 3332 3130   2F2E 2D2C 2B2A 2928   2726 2524 2322 2120   1F1E 1D1C 1B1A 1918   1716 1514 1312 1110   0F0E 0D0C 0B0A 0908   0706 0504 0302 0100
   END
-  
+
 
 =head2 ChooseRegisters($number, @registers)
 
@@ -7531,7 +7537,7 @@ B<Example:>
     Mov r14, 0xFFDC;                                                              # Insert a zero into the register at that position shifting the bits above that position up left one to make space for the new zero.
     Mov r13, 0xF03F;
     PrintOutRegisterInHex         r14, r15;
-  
+
     InsertZeroIntoRegisterAtPoint r15, r14;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutRegisterInHex r14;
@@ -7546,7 +7552,7 @@ B<Example:>
      r14: 0000 0000 0001 FFDC
      r13: 0000 0000 0001 E13F
   END
-  
+
 
 =head2 InsertOneIntoRegisterAtPoint($point, $in)
 
@@ -7567,7 +7573,7 @@ B<Example:>
     PrintOutRegisterInHex r14;
     Or r14, r15;                                                                  # Replace the inserted zero with a one
     PrintOutRegisterInHex r14;
-  
+
     InsertOneIntoRegisterAtPoint r15, r13;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutRegisterInHex r13;
@@ -7578,7 +7584,7 @@ B<Example:>
      r14: 0000 0000 0001 FFDC
      r13: 0000 0000 0001 E13F
   END
-  
+
 
 =head2 LoadZmm($zmm, @bytes)
 
@@ -7591,15 +7597,15 @@ Load a numbered zmm with the specified bytes
 B<Example:>
 
 
-  
+
     LoadZmm 0, 0..63;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutRegisterInHex zmm 0;
-  
+
     is_deeply Assemble, <<END;
     zmm0: 3F3E 3D3C 3B3A 3938   3736 3534 3332 3130   2F2E 2D2C 2B2A 2928   2726 2524 2322 2120   1F1E 1D1C 1B1A 1918   1716 1514 1312 1110   0F0E 0D0C 0B0A 0908   0706 0504 0302 0100
   END
-  
+
 
 =head2 Save and Restore
 
@@ -7617,7 +7623,7 @@ B<Example:>
 
     Mov rax, 1;
     Mov rdi, 1;
-  
+
     SaveFirstFour;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     Mov rax, 2;
@@ -7630,8 +7636,8 @@ B<Example:>
     PrintOutRegisterInHex rax, rdi;
     RestoreFirstFour;
     PrintOutRegisterInHex rax, rdi;
-  
-  
+
+
     SaveFirstFour;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     Mov rax, 2;
@@ -7644,8 +7650,8 @@ B<Example:>
     PrintOutRegisterInHex rax, rdi;
     RestoreFirstFourExceptRax;
     PrintOutRegisterInHex rax, rdi;
-  
-  
+
+
     SaveFirstFour;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     Mov rax, 2;
@@ -7658,14 +7664,14 @@ B<Example:>
     PrintOutRegisterInHex rax, rdi;
     RestoreFirstFourExceptRaxAndRdi;
     PrintOutRegisterInHex rax, rdi;
-  
+
     Bswap rax;
     PrintOutRegisterInHex rax;
-  
+
     my $l = Label;
     Jmp $l;
     SetLabel $l;
-  
+
     is_deeply Assemble, <<END;
      rax: 0000 0000 0000 0003
      rdi: 0000 0000 0000 0004
@@ -7687,9 +7693,9 @@ B<Example:>
      rdi: 0000 0000 0000 0004
      rax: 0300 0000 0000 0000
   END
-  
+
     ok 8 == RegisterSize rax;
-  
+
 
 =head3 RestoreFirstFour()
 
@@ -7710,11 +7716,11 @@ B<Example:>
     PrintOutRegisterInHex rax, rdi;
     RestoreFirstSeven;
     PrintOutRegisterInHex rax, rdi;
-  
+
     RestoreFirstFour;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutRegisterInHex rax, rdi;
-  
+
     SaveFirstFour;
     Mov rax, 2;
     Mov rdi, 2;
@@ -7726,7 +7732,7 @@ B<Example:>
     PrintOutRegisterInHex rax, rdi;
     RestoreFirstFourExceptRax;
     PrintOutRegisterInHex rax, rdi;
-  
+
     SaveFirstFour;
     Mov rax, 2;
     Mov rdi, 2;
@@ -7738,14 +7744,14 @@ B<Example:>
     PrintOutRegisterInHex rax, rdi;
     RestoreFirstFourExceptRaxAndRdi;
     PrintOutRegisterInHex rax, rdi;
-  
+
     Bswap rax;
     PrintOutRegisterInHex rax;
-  
+
     my $l = Label;
     Jmp $l;
     SetLabel $l;
-  
+
     is_deeply Assemble, <<END;
      rax: 0000 0000 0000 0003
      rdi: 0000 0000 0000 0004
@@ -7767,9 +7773,9 @@ B<Example:>
      rdi: 0000 0000 0000 0004
      rax: 0300 0000 0000 0000
   END
-  
+
     ok 8 == RegisterSize rax;
-  
+
 
 =head3 RestoreFirstFourExceptRax()
 
@@ -7792,7 +7798,7 @@ B<Example:>
     PrintOutRegisterInHex rax, rdi;
     RestoreFirstFour;
     PrintOutRegisterInHex rax, rdi;
-  
+
     SaveFirstFour;
     Mov rax, 2;
     Mov rdi, 2;
@@ -7802,11 +7808,11 @@ B<Example:>
     PrintOutRegisterInHex rax, rdi;
     RestoreFirstSevenExceptRax;
     PrintOutRegisterInHex rax, rdi;
-  
+
     RestoreFirstFourExceptRax;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutRegisterInHex rax, rdi;
-  
+
     SaveFirstFour;
     Mov rax, 2;
     Mov rdi, 2;
@@ -7818,14 +7824,14 @@ B<Example:>
     PrintOutRegisterInHex rax, rdi;
     RestoreFirstFourExceptRaxAndRdi;
     PrintOutRegisterInHex rax, rdi;
-  
+
     Bswap rax;
     PrintOutRegisterInHex rax;
-  
+
     my $l = Label;
     Jmp $l;
     SetLabel $l;
-  
+
     is_deeply Assemble, <<END;
      rax: 0000 0000 0000 0003
      rdi: 0000 0000 0000 0004
@@ -7847,9 +7853,9 @@ B<Example:>
      rdi: 0000 0000 0000 0004
      rax: 0300 0000 0000 0000
   END
-  
+
     ok 8 == RegisterSize rax;
-  
+
 
 =head3 RestoreFirstFourExceptRaxAndRdi()
 
@@ -7872,7 +7878,7 @@ B<Example:>
     PrintOutRegisterInHex rax, rdi;
     RestoreFirstFour;
     PrintOutRegisterInHex rax, rdi;
-  
+
     SaveFirstFour;
     Mov rax, 2;
     Mov rdi, 2;
@@ -7884,7 +7890,7 @@ B<Example:>
     PrintOutRegisterInHex rax, rdi;
     RestoreFirstFourExceptRax;
     PrintOutRegisterInHex rax, rdi;
-  
+
     SaveFirstFour;
     Mov rax, 2;
     Mov rdi, 2;
@@ -7894,18 +7900,18 @@ B<Example:>
     PrintOutRegisterInHex rax, rdi;
     RestoreFirstSevenExceptRaxAndRdi;
     PrintOutRegisterInHex rax, rdi;
-  
+
     RestoreFirstFourExceptRaxAndRdi;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutRegisterInHex rax, rdi;
-  
+
     Bswap rax;
     PrintOutRegisterInHex rax;
-  
+
     my $l = Label;
     Jmp $l;
     SetLabel $l;
-  
+
     is_deeply Assemble, <<END;
      rax: 0000 0000 0000 0003
      rdi: 0000 0000 0000 0004
@@ -7927,9 +7933,9 @@ B<Example:>
      rdi: 0000 0000 0000 0004
      rax: 0300 0000 0000 0000
   END
-  
+
     ok 8 == RegisterSize rax;
-  
+
 
 =head3 SaveFirstSeven()
 
@@ -7944,7 +7950,7 @@ B<Example:>
     SaveFirstFour;
     Mov rax, 2;
     Mov rdi, 2;
-  
+
     SaveFirstSeven;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     Mov rax, 3;
@@ -7954,11 +7960,11 @@ B<Example:>
     PrintOutRegisterInHex rax, rdi;
     RestoreFirstFour;
     PrintOutRegisterInHex rax, rdi;
-  
+
     SaveFirstFour;
     Mov rax, 2;
     Mov rdi, 2;
-  
+
     SaveFirstSeven;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     Mov rax, 3;
@@ -7968,11 +7974,11 @@ B<Example:>
     PrintOutRegisterInHex rax, rdi;
     RestoreFirstFourExceptRax;
     PrintOutRegisterInHex rax, rdi;
-  
+
     SaveFirstFour;
     Mov rax, 2;
     Mov rdi, 2;
-  
+
     SaveFirstSeven;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     Mov rax, 3;
@@ -7982,14 +7988,14 @@ B<Example:>
     PrintOutRegisterInHex rax, rdi;
     RestoreFirstFourExceptRaxAndRdi;
     PrintOutRegisterInHex rax, rdi;
-  
+
     Bswap rax;
     PrintOutRegisterInHex rax;
-  
+
     my $l = Label;
     Jmp $l;
     SetLabel $l;
-  
+
     is_deeply Assemble, <<END;
      rax: 0000 0000 0000 0003
      rdi: 0000 0000 0000 0004
@@ -8011,9 +8017,9 @@ B<Example:>
      rdi: 0000 0000 0000 0004
      rax: 0300 0000 0000 0000
   END
-  
+
     ok 8 == RegisterSize rax;
-  
+
 
 =head3 RestoreFirstSeven()
 
@@ -8032,13 +8038,13 @@ B<Example:>
     Mov rax, 3;
     Mov rdi, 4;
     PrintOutRegisterInHex rax, rdi;
-  
+
     RestoreFirstSeven;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutRegisterInHex rax, rdi;
     RestoreFirstFour;
     PrintOutRegisterInHex rax, rdi;
-  
+
     SaveFirstFour;
     Mov rax, 2;
     Mov rdi, 2;
@@ -8050,7 +8056,7 @@ B<Example:>
     PrintOutRegisterInHex rax, rdi;
     RestoreFirstFourExceptRax;
     PrintOutRegisterInHex rax, rdi;
-  
+
     SaveFirstFour;
     Mov rax, 2;
     Mov rdi, 2;
@@ -8062,14 +8068,14 @@ B<Example:>
     PrintOutRegisterInHex rax, rdi;
     RestoreFirstFourExceptRaxAndRdi;
     PrintOutRegisterInHex rax, rdi;
-  
+
     Bswap rax;
     PrintOutRegisterInHex rax;
-  
+
     my $l = Label;
     Jmp $l;
     SetLabel $l;
-  
+
     is_deeply Assemble, <<END;
      rax: 0000 0000 0000 0003
      rdi: 0000 0000 0000 0004
@@ -8091,9 +8097,9 @@ B<Example:>
      rdi: 0000 0000 0000 0004
      rax: 0300 0000 0000 0000
   END
-  
+
     ok 8 == RegisterSize rax;
-  
+
 
 =head3 RestoreFirstSevenExceptRax()
 
@@ -8116,7 +8122,7 @@ B<Example:>
     PrintOutRegisterInHex rax, rdi;
     RestoreFirstFour;
     PrintOutRegisterInHex rax, rdi;
-  
+
     SaveFirstFour;
     Mov rax, 2;
     Mov rdi, 2;
@@ -8124,13 +8130,13 @@ B<Example:>
     Mov rax, 3;
     Mov rdi, 4;
     PrintOutRegisterInHex rax, rdi;
-  
+
     RestoreFirstSevenExceptRax;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutRegisterInHex rax, rdi;
     RestoreFirstFourExceptRax;
     PrintOutRegisterInHex rax, rdi;
-  
+
     SaveFirstFour;
     Mov rax, 2;
     Mov rdi, 2;
@@ -8142,14 +8148,14 @@ B<Example:>
     PrintOutRegisterInHex rax, rdi;
     RestoreFirstFourExceptRaxAndRdi;
     PrintOutRegisterInHex rax, rdi;
-  
+
     Bswap rax;
     PrintOutRegisterInHex rax;
-  
+
     my $l = Label;
     Jmp $l;
     SetLabel $l;
-  
+
     is_deeply Assemble, <<END;
      rax: 0000 0000 0000 0003
      rdi: 0000 0000 0000 0004
@@ -8171,9 +8177,9 @@ B<Example:>
      rdi: 0000 0000 0000 0004
      rax: 0300 0000 0000 0000
   END
-  
+
     ok 8 == RegisterSize rax;
-  
+
 
 =head3 RestoreFirstSevenExceptRaxAndRdi()
 
@@ -8196,7 +8202,7 @@ B<Example:>
     PrintOutRegisterInHex rax, rdi;
     RestoreFirstFour;
     PrintOutRegisterInHex rax, rdi;
-  
+
     SaveFirstFour;
     Mov rax, 2;
     Mov rdi, 2;
@@ -8208,7 +8214,7 @@ B<Example:>
     PrintOutRegisterInHex rax, rdi;
     RestoreFirstFourExceptRax;
     PrintOutRegisterInHex rax, rdi;
-  
+
     SaveFirstFour;
     Mov rax, 2;
     Mov rdi, 2;
@@ -8216,20 +8222,20 @@ B<Example:>
     Mov rax, 3;
     Mov rdi, 4;
     PrintOutRegisterInHex rax, rdi;
-  
+
     RestoreFirstSevenExceptRaxAndRdi;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutRegisterInHex rax, rdi;
     RestoreFirstFourExceptRaxAndRdi;
     PrintOutRegisterInHex rax, rdi;
-  
+
     Bswap rax;
     PrintOutRegisterInHex rax;
-  
+
     my $l = Label;
     Jmp $l;
     SetLabel $l;
-  
+
     is_deeply Assemble, <<END;
      rax: 0000 0000 0000 0003
      rdi: 0000 0000 0000 0004
@@ -8251,9 +8257,9 @@ B<Example:>
      rdi: 0000 0000 0000 0004
      rax: 0300 0000 0000 0000
   END
-  
+
     ok 8 == RegisterSize rax;
-  
+
 
 =head3 ReorderSyscallRegisters(@registers)
 
@@ -8267,19 +8273,19 @@ B<Example:>
 
     Mov rax, 1;  Mov rdi, 2;  Mov rsi,  3;  Mov rdx,  4;
     Mov r8,  8;  Mov r9,  9;  Mov r10, 10;  Mov r11, 11;
-  
-  
+
+
     ReorderSyscallRegisters   r8,r9;                                              # Reorder the registers for syscall  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutRegisterInHex rax;
     PrintOutRegisterInHex rdi;
-  
+
     UnReorderSyscallRegisters r8,r9;                                              # Unreorder the registers to recover their original values
     PrintOutRegisterInHex rax;
     PrintOutRegisterInHex rdi;
-  
+
     ok Assemble =~ m(rax:.*08.*rdi:.*9.*rax:.*1.*rdi:.*2.*)s;
-  
+
 
 =head3 UnReorderSyscallRegisters(@registers)
 
@@ -8293,19 +8299,19 @@ B<Example:>
 
     Mov rax, 1;  Mov rdi, 2;  Mov rsi,  3;  Mov rdx,  4;
     Mov r8,  8;  Mov r9,  9;  Mov r10, 10;  Mov r11, 11;
-  
+
     ReorderSyscallRegisters   r8,r9;                                              # Reorder the registers for syscall
     PrintOutRegisterInHex rax;
     PrintOutRegisterInHex rdi;
-  
-  
+
+
     UnReorderSyscallRegisters r8,r9;                                              # Unreorder the registers to recover their original values  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutRegisterInHex rax;
     PrintOutRegisterInHex rdi;
-  
+
     ok Assemble =~ m(rax:.*08.*rdi:.*9.*rax:.*1.*rdi:.*2.*)s;
-  
+
 
 =head3 RegisterSize($r)
 
@@ -8330,7 +8336,7 @@ B<Example:>
     PrintOutRegisterInHex rax, rdi;
     RestoreFirstFour;
     PrintOutRegisterInHex rax, rdi;
-  
+
     SaveFirstFour;
     Mov rax, 2;
     Mov rdi, 2;
@@ -8342,7 +8348,7 @@ B<Example:>
     PrintOutRegisterInHex rax, rdi;
     RestoreFirstFourExceptRax;
     PrintOutRegisterInHex rax, rdi;
-  
+
     SaveFirstFour;
     Mov rax, 2;
     Mov rdi, 2;
@@ -8354,14 +8360,14 @@ B<Example:>
     PrintOutRegisterInHex rax, rdi;
     RestoreFirstFourExceptRaxAndRdi;
     PrintOutRegisterInHex rax, rdi;
-  
+
     Bswap rax;
     PrintOutRegisterInHex rax;
-  
+
     my $l = Label;
     Jmp $l;
     SetLabel $l;
-  
+
     is_deeply Assemble, <<END;
      rax: 0000 0000 0000 0003
      rdi: 0000 0000 0000 0004
@@ -8383,11 +8389,11 @@ B<Example:>
      rdi: 0000 0000 0000 0004
      rax: 0300 0000 0000 0000
   END
-  
-  
+
+
     ok 8 == RegisterSize rax;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-  
+
 
 =head3 ClearRegisters(@registers)
 
@@ -8406,16 +8412,16 @@ B<Example:>
     Kaddb k0,  k0, k0;
     Kmovq rax, k0;
     PushR k0;
-  
+
     ClearRegisters k0;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     Kmovq k1, k0;
     PopR  k0;
     PrintOutRegisterInHex k0;
     PrintOutRegisterInHex k1;
-  
+
     ok Assemble =~ m(k0: 0000 0000 0000 0008.*k1: 0000 0000 0000 0000)s;
-  
+
 
 =head3 SetMaskRegister($mask, $start, $length)
 
@@ -8431,31 +8437,31 @@ B<Example:>
 
     Mov rax, 8;
     Mov rsi, -1;
-  
+
     Inc rsi; SetMaskRegister(k0, rax, rsi); PrintOutRegisterInHex k0;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-  
+
     Inc rsi; SetMaskRegister(k1, rax, rsi); PrintOutRegisterInHex k1;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-  
+
     Inc rsi; SetMaskRegister(k2, rax, rsi); PrintOutRegisterInHex k2;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-  
+
     Inc rsi; SetMaskRegister(k3, rax, rsi); PrintOutRegisterInHex k3;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-  
+
     Inc rsi; SetMaskRegister(k4, rax, rsi); PrintOutRegisterInHex k4;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-  
+
     Inc rsi; SetMaskRegister(k5, rax, rsi); PrintOutRegisterInHex k5;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-  
+
     Inc rsi; SetMaskRegister(k6, rax, rsi); PrintOutRegisterInHex k6;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-  
+
     Inc rsi; SetMaskRegister(k7, rax, rsi); PrintOutRegisterInHex k7;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-  
+
     is_deeply Assemble, <<END;
       k0: 0000 0000 0000 0000
       k1: 0000 0000 0000 0100
@@ -8466,7 +8472,7 @@ B<Example:>
       k6: 0000 0000 0000 3F00
       k7: 0000 0000 0000 7F00
   END
-  
+
 
 =head3 SetZF()
 
@@ -8476,36 +8482,36 @@ Set the zero flag
 B<Example:>
 
 
-  
+
     SetZF;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutZF;
     ClearZF;
     PrintOutZF;
-  
+
     SetZF;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutZF;
-  
+
     SetZF;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutZF;
     ClearZF;
     PrintOutZF;
-  
-  
+
+
     SetZF;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     IfZ  Then {PrintOutStringNL "Zero"},     Else {PrintOutStringNL "NOT zero"};
     ClearZF;
     IfNz Then {PrintOutStringNL "NOT zero"}, Else {PrintOutStringNL "Zero"};
-  
+
     Mov r15, 5;
     Shr r15, 1; IfC  Then {PrintOutStringNL "Carry"}   , Else {PrintOutStringNL "NO carry"};
     Shr r15, 1; IfC  Then {PrintOutStringNL "Carry"}   , Else {PrintOutStringNL "NO carry"};
     Shr r15, 1; IfNc Then {PrintOutStringNL "NO carry"}, Else {PrintOutStringNL "Carry"};
     Shr r15, 1; IfNc Then {PrintOutStringNL "NO carry"}, Else {PrintOutStringNL "Carry"};
-  
+
     ok Assemble(debug=>0, eq => <<END);
   ZF=1
   ZF=0
@@ -8519,7 +8525,7 @@ B<Example:>
   Carry
   NO carry
   END
-  
+
 
 =head3 ClearZF()
 
@@ -8531,7 +8537,7 @@ B<Example:>
 
     SetZF;
     PrintOutZF;
-  
+
     ClearZF;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutZF;
@@ -8539,24 +8545,24 @@ B<Example:>
     PrintOutZF;
     SetZF;
     PrintOutZF;
-  
+
     ClearZF;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutZF;
-  
+
     SetZF;
     IfZ  Then {PrintOutStringNL "Zero"},     Else {PrintOutStringNL "NOT zero"};
-  
+
     ClearZF;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     IfNz Then {PrintOutStringNL "NOT zero"}, Else {PrintOutStringNL "Zero"};
-  
+
     Mov r15, 5;
     Shr r15, 1; IfC  Then {PrintOutStringNL "Carry"}   , Else {PrintOutStringNL "NO carry"};
     Shr r15, 1; IfC  Then {PrintOutStringNL "Carry"}   , Else {PrintOutStringNL "NO carry"};
     Shr r15, 1; IfNc Then {PrintOutStringNL "NO carry"}, Else {PrintOutStringNL "Carry"};
     Shr r15, 1; IfNc Then {PrintOutStringNL "NO carry"}, Else {PrintOutStringNL "Carry"};
-  
+
     ok Assemble(debug=>0, eq => <<END);
   ZF=1
   ZF=0
@@ -8570,7 +8576,7 @@ B<Example:>
   Carry
   NO carry
   END
-  
+
 
 =head2 Tracing
 
@@ -8648,20 +8654,20 @@ B<Example:>
     Ktestq k0, k0;
     IfZ Then {PrintOutStringNL "0 & 0 == 0"};
     PrintOutZF;
-  
-  
+
+
     LoadConstantIntoMaskRegister k1, 1;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     Ktestq k1, k1;
     IfNz Then {PrintOutStringNL "1 & 1 != 0"};
     PrintOutZF;
-  
-  
+
+
     LoadConstantIntoMaskRegister k2, eval "0b".(('1'x4).('0'x4))x2;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-  
+
     PrintOutRegisterInHex k0, k1, k2;
-  
+
     Mov  r15, 0x89abcdef;
     Mov  r14, 0x01234567;
     Shl  r14, 32;
@@ -8670,14 +8676,14 @@ B<Example:>
     Push r15;
     KeepFree r15;
     PopEax;  PrintRaxInHex($stdout, 3); PrintOutNL; KeepFree rax;
-  
+
     my $a = V('aaaa');
     $a->pop;
     $a->push;
     $a->outNL;
-  
+
     PopEax;  PrintRaxInHex($stdout, 3); PrintOutNL; KeepFree rax;
-  
+
     ok Assemble(debug => 0, eq => <<END);
   0 & 0 == 0
   ZF=1
@@ -8690,7 +8696,7 @@ B<Example:>
   aaaa: 89AB CDEF 0123 4567
   0123 4567
   END
-  
+
 
 =head3 LoadBitsIntoMaskRegister($mask, $prefix, @values)
 
@@ -8709,13 +8715,13 @@ B<Example:>
       K($_,$_)->setMaskBit("k$_");
       PrintOutRegisterInHex "k$_";
      }
-  
+
     ClearRegisters k7;
-  
+
     LoadBitsIntoMaskRegister(k7, '1010', -4, +4, -2, +2, -1, +1, -1, +1);  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutRegisterInHex "k7";
-  
+
     ok Assemble(debug => 0, eq => <<END);
       k0: 0000 0000 0000 0001
       k1: 0000 0000 0000 0002
@@ -8727,7 +8733,7 @@ B<Example:>
       k7: 0000 0000 0000 0080
       k7: 0000 0000 000A 0F35
   END
-  
+
 
 =head1 Structured Programming
 
@@ -8747,13 +8753,13 @@ B<Example:>
 
     my $cmp = sub
      {my ($a, $b) = @_;
-  
+
       for my $op(qw(eq ne lt le gt ge))
        {Mov rax, $a;
         Cmp rax, $b;
         KeepFree rax;
         my $Op = ucfirst $op;
-  
+
         eval qq(If$Op Then {PrintOutStringNL("$a $op $b")}, Else {PrintOutStringNL("$a NOT $op $b")});  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
         $@ and confess $@;
@@ -8782,7 +8788,7 @@ B<Example:>
   3 gt 2
   3 ge 2
   END
-  
+
 
 =head2 Then($body)
 
@@ -8803,9 +8809,9 @@ B<Example:>
     my $g = $a *  $b; $g->outNL;
     my $h = $g /  $b; $h->outNL;
     my $i = $a %  $b; $i->outNL;
-  
+
     If ($a == 3,
-  
+
     Then  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
      {PrintOutStringNL "a == 3"
@@ -8813,10 +8819,10 @@ B<Example:>
     Else
      {PrintOutStringNL "a != 3"
      });
-  
+
     ++$a; $a->outNL;
     --$a; $a->outNL;
-  
+
     ok Assemble(debug => 0, eq => <<END);
   a: 0000 0000 0000 0003
   b: 0000 0000 0000 0002
@@ -8831,7 +8837,7 @@ B<Example:>
   a: 0000 0000 0000 0004
   a: 0000 0000 0000 0003
   END
-  
+
 
 =head2 Else($body)
 
@@ -8852,20 +8858,20 @@ B<Example:>
     my $g = $a *  $b; $g->outNL;
     my $h = $g /  $b; $h->outNL;
     my $i = $a %  $b; $i->outNL;
-  
+
     If ($a == 3,
     Then
      {PrintOutStringNL "a == 3"
      },
-  
+
     Else  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
      {PrintOutStringNL "a != 3"
      });
-  
+
     ++$a; $a->outNL;
     --$a; $a->outNL;
-  
+
     ok Assemble(debug => 0, eq => <<END);
   a: 0000 0000 0000 0003
   b: 0000 0000 0000 0002
@@ -8880,7 +8886,7 @@ B<Example:>
   a: 0000 0000 0000 0004
   a: 0000 0000 0000 0003
   END
-  
+
 
 =head2 IfEq($then, $else)
 
@@ -8895,7 +8901,7 @@ B<Example:>
 
     my $cmp = sub
      {my ($a, $b) = @_;
-  
+
       for my $op(qw(eq ne lt le gt ge))
        {Mov rax, $a;
         Cmp rax, $b;
@@ -8928,7 +8934,7 @@ B<Example:>
   3 gt 2
   3 ge 2
   END
-  
+
 
 =head2 IfNe($then, $else)
 
@@ -8943,7 +8949,7 @@ B<Example:>
 
     my $cmp = sub
      {my ($a, $b) = @_;
-  
+
       for my $op(qw(eq ne lt le gt ge))
        {Mov rax, $a;
         Cmp rax, $b;
@@ -8976,7 +8982,7 @@ B<Example:>
   3 gt 2
   3 ge 2
   END
-  
+
 
 =head2 IfNz($then, $else)
 
@@ -8991,7 +8997,7 @@ B<Example:>
 
     Mov rax, 0;
     Test rax,rax;
-  
+
     IfNz  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     Then
@@ -9003,7 +9009,7 @@ B<Example:>
     KeepFree rax;
     Mov rax, 1;
     Test rax,rax;
-  
+
     IfNz  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     Then
@@ -9012,9 +9018,9 @@ B<Example:>
     Else
      {PrintOutRegisterInHex rdx;
      };
-  
+
     ok Assemble =~ m(rbx.*rcx)s;
-  
+
 
 =head2 IfZ($then, $else)
 
@@ -9037,20 +9043,20 @@ B<Example:>
     PrintOutZF;
     ClearZF;
     PrintOutZF;
-  
+
     SetZF;
-  
+
     IfZ  Then {PrintOutStringNL "Zero"},     Else {PrintOutStringNL "NOT zero"};  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     ClearZF;
     IfNz Then {PrintOutStringNL "NOT zero"}, Else {PrintOutStringNL "Zero"};
-  
+
     Mov r15, 5;
     Shr r15, 1; IfC  Then {PrintOutStringNL "Carry"}   , Else {PrintOutStringNL "NO carry"};
     Shr r15, 1; IfC  Then {PrintOutStringNL "Carry"}   , Else {PrintOutStringNL "NO carry"};
     Shr r15, 1; IfNc Then {PrintOutStringNL "NO carry"}, Else {PrintOutStringNL "Carry"};
     Shr r15, 1; IfNc Then {PrintOutStringNL "NO carry"}, Else {PrintOutStringNL "Carry"};
-  
+
     ok Assemble(debug=>0, eq => <<END);
   ZF=1
   ZF=0
@@ -9064,7 +9070,7 @@ B<Example:>
   Carry
   NO carry
   END
-  
+
 
 =head2 IfC($then, $else)
 
@@ -9087,22 +9093,22 @@ B<Example:>
     PrintOutZF;
     ClearZF;
     PrintOutZF;
-  
+
     SetZF;
     IfZ  Then {PrintOutStringNL "Zero"},     Else {PrintOutStringNL "NOT zero"};
     ClearZF;
     IfNz Then {PrintOutStringNL "NOT zero"}, Else {PrintOutStringNL "Zero"};
-  
+
     Mov r15, 5;
-  
+
     Shr r15, 1; IfC  Then {PrintOutStringNL "Carry"}   , Else {PrintOutStringNL "NO carry"};  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-  
+
     Shr r15, 1; IfC  Then {PrintOutStringNL "Carry"}   , Else {PrintOutStringNL "NO carry"};  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     Shr r15, 1; IfNc Then {PrintOutStringNL "NO carry"}, Else {PrintOutStringNL "Carry"};
     Shr r15, 1; IfNc Then {PrintOutStringNL "NO carry"}, Else {PrintOutStringNL "Carry"};
-  
+
     ok Assemble(debug=>0, eq => <<END);
   ZF=1
   ZF=0
@@ -9116,7 +9122,7 @@ B<Example:>
   Carry
   NO carry
   END
-  
+
 
 =head2 IfNc($then, $else)
 
@@ -9139,22 +9145,22 @@ B<Example:>
     PrintOutZF;
     ClearZF;
     PrintOutZF;
-  
+
     SetZF;
     IfZ  Then {PrintOutStringNL "Zero"},     Else {PrintOutStringNL "NOT zero"};
     ClearZF;
     IfNz Then {PrintOutStringNL "NOT zero"}, Else {PrintOutStringNL "Zero"};
-  
+
     Mov r15, 5;
     Shr r15, 1; IfC  Then {PrintOutStringNL "Carry"}   , Else {PrintOutStringNL "NO carry"};
     Shr r15, 1; IfC  Then {PrintOutStringNL "Carry"}   , Else {PrintOutStringNL "NO carry"};
-  
+
     Shr r15, 1; IfNc Then {PrintOutStringNL "NO carry"}, Else {PrintOutStringNL "Carry"};  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-  
+
     Shr r15, 1; IfNc Then {PrintOutStringNL "NO carry"}, Else {PrintOutStringNL "Carry"};  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-  
+
     ok Assemble(debug=>0, eq => <<END);
   ZF=1
   ZF=0
@@ -9168,7 +9174,7 @@ B<Example:>
   Carry
   NO carry
   END
-  
+
 
 =head2 IfLt($then, $else)
 
@@ -9183,7 +9189,7 @@ B<Example:>
 
     my $cmp = sub
      {my ($a, $b) = @_;
-  
+
       for my $op(qw(eq ne lt le gt ge))
        {Mov rax, $a;
         Cmp rax, $b;
@@ -9216,7 +9222,7 @@ B<Example:>
   3 gt 2
   3 ge 2
   END
-  
+
 
 =head2 IfLe($then, $else)
 
@@ -9231,7 +9237,7 @@ B<Example:>
 
     my $cmp = sub
      {my ($a, $b) = @_;
-  
+
       for my $op(qw(eq ne lt le gt ge))
        {Mov rax, $a;
         Cmp rax, $b;
@@ -9264,7 +9270,7 @@ B<Example:>
   3 gt 2
   3 ge 2
   END
-  
+
 
 =head2 IfGt($then, $else)
 
@@ -9279,7 +9285,7 @@ B<Example:>
 
     my $cmp = sub
      {my ($a, $b) = @_;
-  
+
       for my $op(qw(eq ne lt le gt ge))
        {Mov rax, $a;
         Cmp rax, $b;
@@ -9312,7 +9318,7 @@ B<Example:>
   3 gt 2
   3 ge 2
   END
-  
+
 
 =head2 IfGe($then, $else)
 
@@ -9327,7 +9333,7 @@ B<Example:>
 
     my $cmp = sub
      {my ($a, $b) = @_;
-  
+
       for my $op(qw(eq ne lt le gt ge))
        {Mov rax, $a;
         Cmp rax, $b;
@@ -9360,7 +9366,7 @@ B<Example:>
   3 gt 2
   3 ge 2
   END
-  
+
 
 =head2 Block($body)
 
@@ -9373,7 +9379,7 @@ B<Example:>
 
 
     Mov rax, 0;
-  
+
     Block  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
      {my ($start, $end) = @_;
@@ -9384,14 +9390,14 @@ B<Example:>
       PrintOutRegisterInHex rax
       Jmp $start;
      };
-  
+
     ok Assemble(debug => 0, eq => <<END);
      rax: 0000 0000 0000 0000
      rax: 0000 0000 0000 0001
      rax: 0000 0000 0000 0002
      rax: 0000 0000 0000 0003
   END
-  
+
 
 =head2 For($body, $register, $limit, $increment)
 
@@ -9406,7 +9412,7 @@ For - iterate the body as long as register is less than limit incrementing by in
 B<Example:>
 
 
-  
+
     For  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
      {my ($start, $end, $next) = @_;
@@ -9414,13 +9420,13 @@ B<Example:>
       Jge $end;
       PrintOutRegisterInHex rax;
      } rax, 16, 1;
-  
+
     ok Assemble(debug => 0, eq => <<END);
      rax: 0000 0000 0000 0000
      rax: 0000 0000 0000 0001
      rax: 0000 0000 0000 0002
   END
-  
+
 
 =head2 ForIn($full, $last, $register, $limit, $increment)
 
@@ -9489,7 +9495,7 @@ Insert a comment into the assembly code
 B<Example:>
 
 
-  
+
     Comment "Print a string from memory";  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     my $s = "Hello World";
@@ -9497,9 +9503,9 @@ B<Example:>
     Mov rdi, length $s;
     PrintOutMemory;
     Exit(0);
-  
+
     ok Assemble =~ m(Hello World);
-  
+
 
 =head2 DComment(@comment)
 
@@ -9543,18 +9549,18 @@ B<Example:>
     Mov(rax, "[$q]");
     PrintOutString "rax: ";
     PrintOutRaxInHex;
-  
+
     PrintOutNL;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     Xor rax, rax;
     PrintOutString "rax: ";
     PrintOutRaxInHex;
-  
+
     PrintOutNL;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-  
+
     ok Assemble =~ m(rax: 6261 6261 6261 6261.*rax: 0000 0000 0000 0000)s;
-  
+
 
 =head2 PrintString($channel, @string)
 
@@ -9583,20 +9589,20 @@ B<Example:>
 
     my $q = Rs('abababab');
     Mov(rax, "[$q]");
-  
+
     PrintOutString "rax: ";  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutRaxInHex;
     PrintOutNL;
     Xor rax, rax;
-  
+
     PrintOutString "rax: ";  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutRaxInHex;
     PrintOutNL;
-  
+
     ok Assemble =~ m(rax: 6261 6261 6261 6261.*rax: 0000 0000 0000 0000)s;
-  
+
 
 =head2 PrintErrStringNL(@string)
 
@@ -9611,16 +9617,16 @@ B<Example:>
     PrintOutStringNL "Hello World";
     PrintOutStringNL "Hello
 World";
-  
+
     PrintErrStringNL "Hello World";  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-  
+
     ok Assemble(debug => 0, eq => <<END);
   Hello World
   Hello
   World
   END
-  
+
 
 =head2 PrintOutStringNL(@string)
 
@@ -9632,21 +9638,21 @@ Print a constant string followed by a new line to stdout
 B<Example:>
 
 
-  
+
     PrintOutStringNL "Hello World";  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-  
+
     PrintOutStringNL "Hello
 World";  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintErrStringNL "Hello World";
-  
+
     ok Assemble(debug => 0, eq => <<END);
   Hello World
   Hello
   World
   END
-  
+
 
 =head2 PrintRaxInHex($channel, $end)
 
@@ -9672,19 +9678,19 @@ B<Example:>
     my $q = Rs('abababab');
     Mov(rax, "[$q]");
     PrintOutString "rax: ";
-  
+
     PrintOutRaxInHex;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutNL;
     Xor rax, rax;
     PrintOutString "rax: ";
-  
+
     PrintOutRaxInHex;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutNL;
-  
+
     ok Assemble =~ m(rax: 6261 6261 6261 6261.*rax: 0000 0000 0000 0000)s;
-  
+
 
 =head2 PrintOutRaxInReverseInHex()
 
@@ -9698,22 +9704,22 @@ B<Example:>
     Shl rax, 32;
     Or  rax, 0x07654321;
     PushR rax;
-  
+
     PrintOutRaxInHex;
     PrintOutNL;
-  
+
     PrintOutRaxInReverseInHex;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutNL;
     KeepFree rax;
-  
+
     Mov rax, rsp;
     Mov rdi, 8;
     PrintOutMemoryInHex;
     PrintOutNL;
     PopR rax;
     KeepFree rax, rdi;
-  
+
     Mov rax, 4096;
     PushR rax;
     Mov rax, rsp;
@@ -9721,14 +9727,14 @@ B<Example:>
     PrintOutMemoryInHex;
     PrintOutNL;
     PopR rax;
-  
+
     is_deeply Assemble, <<END;
   0765 4321 0765 4321
   2143 6507 2143 6507
   2143 6507 2143 6507
   0010 0000 0000 0000
   END
-  
+
 
 =head2 PrintRegisterInHex($channel, @r)
 
@@ -9757,14 +9763,14 @@ B<Example:>
 
     my $q = Rs(('a'..'p')x4);
     Mov r8,"[$q]";
-  
+
     PrintOutRegisterInHex r8;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-  
+
     ok Assemble(debug=>0, eq => <<END);
       r8: 6867 6665 6463 6261
   END
-  
+
 
 =head2 PrintOutRegistersInHex()
 
@@ -9781,14 +9787,14 @@ B<Example:>
     Mov(rdx, 4);
     Mov(r8,  5);
     Lea r9,  "[rax+rbx]";
-  
+
     PrintOutRegistersInHex;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-  
+
     my $r = Assemble;
     ok $r =~ m( r8: 0000 0000 0000 0005.* r9: 0000 0000 0000 0003.*rax: 0000 0000 0000 0001)s;
     ok $r =~ m(rbx: 0000 0000 0000 0002.*rcx: 0000 0000 0000 0003.*rdx: 0000 0000 0000 0004)s;
-  
+
 
 =head2 PrintErrZF()
 
@@ -9804,37 +9810,37 @@ B<Example:>
 
 
     SetZF;
-  
+
     PrintOutZF;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     ClearZF;
-  
+
     PrintOutZF;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     SetZF;
-  
+
     PrintOutZF;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     SetZF;
-  
+
     PrintOutZF;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     ClearZF;
-  
+
     PrintOutZF;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-  
+
     SetZF;
     IfZ  Then {PrintOutStringNL "Zero"},     Else {PrintOutStringNL "NOT zero"};
     ClearZF;
     IfNz Then {PrintOutStringNL "NOT zero"}, Else {PrintOutStringNL "Zero"};
-  
+
     Mov r15, 5;
     Shr r15, 1; IfC  Then {PrintOutStringNL "Carry"}   , Else {PrintOutStringNL "NO carry"};
     Shr r15, 1; IfC  Then {PrintOutStringNL "Carry"}   , Else {PrintOutStringNL "NO carry"};
     Shr r15, 1; IfNc Then {PrintOutStringNL "NO carry"}, Else {PrintOutStringNL "Carry"};
     Shr r15, 1; IfNc Then {PrintOutStringNL "NO carry"}, Else {PrintOutStringNL "Carry"};
-  
+
     ok Assemble(debug=>0, eq => <<END);
   ZF=1
   ZF=0
@@ -9848,7 +9854,7 @@ B<Example:>
   Carry
   NO carry
   END
-  
+
 
 =head1 Variables
 
@@ -9880,7 +9886,7 @@ Define a quad variable
 B<Example:>
 
 
-  
+
     my $a = V(a, 3);  $a->outNL;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     my $b = K(b, 2);  $b->outNL;
@@ -9891,7 +9897,7 @@ B<Example:>
     my $g = $a *  $b; $g->outNL;
     my $h = $g /  $b; $h->outNL;
     my $i = $a %  $b; $i->outNL;
-  
+
     If ($a == 3,
     Then
      {PrintOutStringNL "a == 3"
@@ -9899,10 +9905,10 @@ B<Example:>
     Else
      {PrintOutStringNL "a != 3"
      });
-  
+
     ++$a; $a->outNL;
     --$a; $a->outNL;
-  
+
     ok Assemble(debug => 0, eq => <<END);
   a: 0000 0000 0000 0003
   b: 0000 0000 0000 0002
@@ -9917,7 +9923,7 @@ B<Example:>
   a: 0000 0000 0000 0004
   a: 0000 0000 0000 0003
   END
-  
+
 
 =head3 K($name, $expr, %options)
 
@@ -9932,7 +9938,7 @@ B<Example:>
 
 
     my $a = V(a, 3);  $a->outNL;
-  
+
     my $b = K(b, 2);  $b->outNL;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     my $c = $a +  $b; $c->outNL;
@@ -9942,7 +9948,7 @@ B<Example:>
     my $g = $a *  $b; $g->outNL;
     my $h = $g /  $b; $h->outNL;
     my $i = $a %  $b; $i->outNL;
-  
+
     If ($a == 3,
     Then
      {PrintOutStringNL "a == 3"
@@ -9950,10 +9956,10 @@ B<Example:>
     Else
      {PrintOutStringNL "a != 3"
      });
-  
+
     ++$a; $a->outNL;
     --$a; $a->outNL;
-  
+
     ok Assemble(debug => 0, eq => <<END);
   a: 0000 0000 0000 0003
   b: 0000 0000 0000 0002
@@ -9968,7 +9974,7 @@ B<Example:>
   a: 0000 0000 0000 0004
   a: 0000 0000 0000 0003
   END
-  
+
 
 =head3 R($name, $size)
 
@@ -10071,14 +10077,14 @@ B<Example:>
     Cmp r15, 2; $z->copyZF;         $z->outNL;
     Cmp r15, 1; $z->copyZFInverted; $z->outNL;
     Cmp r15, 2; $z->copyZFInverted; $z->outNL;
-  
+
     is_deeply Assemble(debug=>0), <<END;
   zf: 0000 0000 0000 0001
   zf: 0000 0000 0000 0000
   zf: 0000 0000 0000 0000
   zf: 0000 0000 0000 0001
   END
-  
+
 
 =head3 Nasm::X86::Variable::copyZFInverted($var)
 
@@ -10096,14 +10102,14 @@ B<Example:>
     Cmp r15, 2; $z->copyZF;         $z->outNL;
     Cmp r15, 1; $z->copyZFInverted; $z->outNL;
     Cmp r15, 2; $z->copyZFInverted; $z->outNL;
-  
+
     is_deeply Assemble(debug=>0), <<END;
   zf: 0000 0000 0000 0001
   zf: 0000 0000 0000 0000
   zf: 0000 0000 0000 0000
   zf: 0000 0000 0000 0001
   END
-  
+
 
 =head3 Nasm::X86::Variable::clone($var)
 
@@ -10217,7 +10223,7 @@ Combine the left hand variable with the right hand variable via a boolean operat
 
 =head3 Nasm::X86::Variable::booleanC($cmov, $op, $left, $right)
 
-Combine the left hand variable with the right hand variable via a boolean operator using a Cmove instruction
+Combine the left hand variable with the right hand variable via a boolean operator using a conditional move instruction.
 
      Parameter  Description
   1  $cmov      Conditional move instruction name
@@ -10354,14 +10360,14 @@ B<Example:>
     $b->outNL;
     $c->outNL;
     $d->outNL;
-  
+
     is_deeply Assemble,<<END;
   a: 0000 0000 0000 0001
   b: 0000 0000 0000 0002
   Minimum(a, b): 0000 0000 0000 0001
   Maximum(a, b): 0000 0000 0000 0002
   END
-  
+
 
 =head3 Nasm::X86::Variable::max($left, $right)
 
@@ -10382,14 +10388,14 @@ B<Example:>
     $b->outNL;
     $c->outNL;
     $d->outNL;
-  
+
     is_deeply Assemble,<<END;
   a: 0000 0000 0000 0001
   b: 0000 0000 0000 0002
   Minimum(a, b): 0000 0000 0000 0001
   Maximum(a, b): 0000 0000 0000 0002
   END
-  
+
 
 =head3 Nasm::X86::Variable::and($left, $right)
 
@@ -10423,11 +10429,11 @@ B<Example:>
     my $length = V("Length", 3);
     $start->setMask($length, k7);
     PrintOutRegisterInHex k7;
-  
+
     is_deeply Assemble, <<END;
       k7: 0000 0000 0000 0380
   END
-  
+
     my $z = V('zero', 0);
     my $o = V('one',  1);
     my $t = V('two',  2);
@@ -10437,11 +10443,11 @@ B<Example:>
     $o->setMask($o,       k4); PrintOutRegisterInHex k4;
     $o->setMask($t,       k3); PrintOutRegisterInHex k3;
     $o->setMask($o+$t,    k2); PrintOutRegisterInHex k2;
-  
+
     $t->setMask($o,       k1); PrintOutRegisterInHex k1;
     $t->setMask($t,       k0); PrintOutRegisterInHex k0;
-  
-  
+
+
     ok Assemble(debug => 0, eq => <<END);
       k7: 0000 0000 0000 0001
       k6: 0000 0000 0000 0003
@@ -10452,7 +10458,7 @@ B<Example:>
       k1: 0000 0000 0000 0004
       k0: 0000 0000 0000 000C
   END
-  
+
 
 =head3 Nasm::X86::Variable::setMaskFirst($length, $mask)
 
@@ -10509,25 +10515,25 @@ B<Example:>
 
     my $s = Rb(0..128);
     my $source = V(Source, $s);
-  
+
     if (1)                                                                        # First block
      {my $offset = V(Offset, 7);
       my $length = V(Length, 3);
       $source->setZmm(0, $offset, $length);
      }
-  
+
     if (1)                                                                        # Second block
      {my $offset = V(Offset, 33);
       my $length = V(Length, 12);
       $source->setZmm(0, $offset, $length);
      }
-  
+
     PrintOutRegisterInHex zmm0;
-  
+
     is_deeply Assemble, <<END;
     zmm0: 0000 0000 0000 0000   0000 0000 0000 0000   0000 000B 0A09 0807   0605 0403 0201 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0201   0000 0000 0000 0000
   END
-  
+
 
 =head3 Nasm::X86::Variable::loadZmm($source, $zmm)
 
@@ -10636,11 +10642,11 @@ B<Example:>
     PrintOutRegisterInHex zmm0;
     getBFromZmm(0, 12)->outNL;
     getWFromZmm(0, 12)->outNL;
-  
+
     getDFromZmm(0, 12)->outNL;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     getQFromZmm(0, 12)->outNL;
-  
+
     is_deeply Assemble, <<END;
     zmm0: 0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0706 0504 0302 0100   0000 0302 0100 0000   0100 0000 0000 0000
   b at offset 12 in zmm0: 0000 0000 0000 0002
@@ -10648,7 +10654,7 @@ B<Example:>
   d at offset 12 in zmm0: 0000 0000 0000 0302
   q at offset 12 in zmm0: 0302 0100 0000 0302
   END
-  
+
 
 =head3 getQFromZmm($zmm, $offset)
 
@@ -10781,7 +10787,7 @@ B<Example:>
     getWFromZmm(0, 12)->outNL;
     getDFromZmm(0, 12)->outNL;
     getQFromZmm(0, 12)->outNL;
-  
+
     is_deeply Assemble, <<END;
     zmm0: 0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0706 0504 0302 0100   0000 0302 0100 0000   0100 0000 0000 0000
   b at offset 12 in zmm0: 0000 0000 0000 0002
@@ -10789,7 +10795,7 @@ B<Example:>
   d at offset 12 in zmm0: 0000 0000 0000 0302
   q at offset 12 in zmm0: 0302 0100 0000 0302
   END
-  
+
 
 =head3 Nasm::X86::Variable::putQIntoZmm($content, $zmm, $offset)
 
@@ -10890,20 +10896,20 @@ B<Example:>
     my $N = V(size, 2048);
     my $q = Rs('a'..'p');
     AllocateMemory($N, my $address = V(address));
-  
+
     Vmovdqu8 xmm0, "[$q]";
     $address->setReg(rax);
     Vmovdqu8 "[rax]", xmm0;
     Mov rdi, 16;
     PrintOutMemory;
     PrintOutNL;
-  
+
     FreeMemory(address => $address, size=> $N);
-  
+
     ok Assemble(eq => <<END);
   abcdefghijklmnop
   END
-  
+
 
 =head3 Nasm::X86::Variable::allocateMemory($size)
 
@@ -10931,7 +10937,7 @@ B<Example:>
      {my ($i, $start, $next, $end) = @_;
       $i->outNL;
      });
-  
+
     is_deeply Assemble, <<END;
   index: 0000 0000 0000 0000
   index: 0000 0000 0000 0001
@@ -10944,7 +10950,7 @@ B<Example:>
   index: 0000 0000 0000 0008
   index: 0000 0000 0000 0009
   END
-  
+
 
 =head1 Stack
 
@@ -10968,17 +10974,17 @@ B<Example:>
     Mov rbx, 0x22222222;
     PushR my @save = (rax, rbx);
     Mov rax, 0x33333333;
-  
+
     PopR @save;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutRegisterInHex rax;
     PrintOutRegisterInHex rbx;
-  
+
     is_deeply Assemble,<<END;
      rax: 0000 0000 1111 1111
      rbx: 0000 0000 2222 2222
   END
-  
+
 
 =head3 PopEax()
 
@@ -10994,16 +11000,16 @@ B<Example:>
     Ktestq k0, k0;
     IfZ Then {PrintOutStringNL "0 & 0 == 0"};
     PrintOutZF;
-  
+
     LoadConstantIntoMaskRegister k1, 1;
     Ktestq k1, k1;
     IfNz Then {PrintOutStringNL "1 & 1 != 0"};
     PrintOutZF;
-  
+
     LoadConstantIntoMaskRegister k2, eval "0b".(('1'x4).('0'x4))x2;
-  
+
     PrintOutRegisterInHex k0, k1, k2;
-  
+
     Mov  r15, 0x89abcdef;
     Mov  r14, 0x01234567;
     Shl  r14, 32;
@@ -11011,19 +11017,19 @@ B<Example:>
     Push r15;
     Push r15;
     KeepFree r15;
-  
+
     PopEax;  PrintRaxInHex($stdout, 3); PrintOutNL; KeepFree rax;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-  
+
     my $a = V('aaaa');
     $a->pop;
     $a->push;
     $a->outNL;
-  
-  
+
+
     PopEax;  PrintRaxInHex($stdout, 3); PrintOutNL; KeepFree rax;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-  
+
     ok Assemble(debug => 0, eq => <<END);
   0 & 0 == 0
   ZF=1
@@ -11036,7 +11042,7 @@ B<Example:>
   aaaa: 89AB CDEF 0123 4567
   0123 4567
   END
-  
+
 
 =head3 PeekR($r)
 
@@ -11152,10 +11158,10 @@ Fork
 B<Example:>
 
 
-  
+
     Fork;                                                                         # Fork  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-  
+
     Test rax,rax;
     IfNz                                                                          # Parent
     Then
@@ -11173,23 +11179,23 @@ B<Example:>
       Mov r10,rax;
       PrintOutRegisterInHex r8, r9, r10;
      };
-  
+
     my $r = Assemble;
-  
+
   #    r8: 0000 0000 0000 0000   #1 Return from fork as seen by child
   #    r9: 0000 0000 0003 0C63   #2 Pid of child
   #   r10: 0000 0000 0003 0C60   #3 Pid of parent from child
   #   rax: 0000 0000 0003 0C63   #4 Return from fork as seen by parent
   #   rbx: 0000 0000 0003 0C63   #5 Wait for child pid result
   #   rcx: 0000 0000 0003 0C60   #6 Pid of parent
-  
+
     if ($r =~ m(r8:( 0000){4}.*r9:(.*)\s{5,}r10:(.*)\s{5,}rax:(.*)\s{5,}rbx:(.*)\s{5,}rcx:(.*)\s{2,})s)
      {ok $2 eq $4;
       ok $2 eq $5;
       ok $3 eq $6;
       ok $2 gt $6;
      }
-  
+
 
 =head3 GetPid()
 
@@ -11200,13 +11206,13 @@ B<Example:>
 
 
     Fork;                                                                         # Fork
-  
+
     Test rax,rax;
     IfNz                                                                          # Parent
     Then
      {Mov rbx, rax;
       WaitPid;
-  
+
       GetPid;                                                                     # Pid of parent as seen in parent  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
       Mov rcx,rax;
@@ -11214,7 +11220,7 @@ B<Example:>
      },
     Else                                                                          # Child
      {Mov r8,rax;
-  
+
       GetPid;                                                                     # Child pid as seen in child  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
       Mov r9,rax;
@@ -11222,23 +11228,23 @@ B<Example:>
       Mov r10,rax;
       PrintOutRegisterInHex r8, r9, r10;
      };
-  
+
     my $r = Assemble;
-  
+
   #    r8: 0000 0000 0000 0000   #1 Return from fork as seen by child
   #    r9: 0000 0000 0003 0C63   #2 Pid of child
   #   r10: 0000 0000 0003 0C60   #3 Pid of parent from child
   #   rax: 0000 0000 0003 0C63   #4 Return from fork as seen by parent
   #   rbx: 0000 0000 0003 0C63   #5 Wait for child pid result
   #   rcx: 0000 0000 0003 0C60   #6 Pid of parent
-  
+
     if ($r =~ m(r8:( 0000){4}.*r9:(.*)\s{5,}r10:(.*)\s{5,}rax:(.*)\s{5,}rbx:(.*)\s{5,}rcx:(.*)\s{2,})s)
      {ok $2 eq $4;
       ok $2 eq $5;
       ok $3 eq $6;
       ok $2 gt $6;
      }
-  
+
 
 =head3 GetPidInHex()
 
@@ -11248,13 +11254,13 @@ Get process identifier in hex as 8 zero terminated bytes in rax
 B<Example:>
 
 
-  
+
     GetPidInHex;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutRegisterInHex rax;
-  
+
     ok Assemble =~ m(rax: 00);
-  
+
 
 =head3 GetPPid()
 
@@ -11265,7 +11271,7 @@ B<Example:>
 
 
     Fork;                                                                         # Fork
-  
+
     Test rax,rax;
     IfNz                                                                          # Parent
     Then
@@ -11279,29 +11285,29 @@ B<Example:>
      {Mov r8,rax;
       GetPid;                                                                     # Child pid as seen in child
       Mov r9,rax;
-  
+
       GetPPid;                                                                    # Parent pid as seen in child  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
       Mov r10,rax;
       PrintOutRegisterInHex r8, r9, r10;
      };
-  
+
     my $r = Assemble;
-  
+
   #    r8: 0000 0000 0000 0000   #1 Return from fork as seen by child
   #    r9: 0000 0000 0003 0C63   #2 Pid of child
   #   r10: 0000 0000 0003 0C60   #3 Pid of parent from child
   #   rax: 0000 0000 0003 0C63   #4 Return from fork as seen by parent
   #   rbx: 0000 0000 0003 0C63   #5 Wait for child pid result
   #   rcx: 0000 0000 0003 0C60   #6 Pid of parent
-  
+
     if ($r =~ m(r8:( 0000){4}.*r9:(.*)\s{5,}r10:(.*)\s{5,}rax:(.*)\s{5,}rbx:(.*)\s{5,}rcx:(.*)\s{2,})s)
      {ok $2 eq $4;
       ok $2 eq $5;
       ok $3 eq $6;
       ok $2 gt $6;
      }
-  
+
 
 =head3 GetUid()
 
@@ -11311,14 +11317,14 @@ Get userid of current process
 B<Example:>
 
 
-  
+
     GetUid;                                                                       # Userid  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutRegisterInHex rax;
-  
+
     my $r = Assemble;
     ok $r =~ m(rax:( 0000){3});
-  
+
 
 =head3 WaitPid()
 
@@ -11329,12 +11335,12 @@ B<Example:>
 
 
     Fork;                                                                         # Fork
-  
+
     Test rax,rax;
     IfNz                                                                          # Parent
     Then
      {Mov rbx, rax;
-  
+
       WaitPid;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
       GetPid;                                                                     # Pid of parent as seen in parent
@@ -11349,23 +11355,23 @@ B<Example:>
       Mov r10,rax;
       PrintOutRegisterInHex r8, r9, r10;
      };
-  
+
     my $r = Assemble;
-  
+
   #    r8: 0000 0000 0000 0000   #1 Return from fork as seen by child
   #    r9: 0000 0000 0003 0C63   #2 Pid of child
   #   r10: 0000 0000 0003 0C60   #3 Pid of parent from child
   #   rax: 0000 0000 0003 0C63   #4 Return from fork as seen by parent
   #   rbx: 0000 0000 0003 0C63   #5 Wait for child pid result
   #   rcx: 0000 0000 0003 0C60   #6 Pid of parent
-  
+
     if ($r =~ m(r8:( 0000){4}.*r9:(.*)\s{5,}r10:(.*)\s{5,}rax:(.*)\s{5,}rbx:(.*)\s{5,}rcx:(.*)\s{2,})s)
      {ok $2 eq $4;
       ok $2 eq $5;
       ok $3 eq $6;
       ok $2 gt $6;
      }
-  
+
 
 =head3 ReadTimeStampCounter()
 
@@ -11376,17 +11382,17 @@ B<Example:>
 
 
     for(1..10)
-  
+
      {ReadTimeStampCounter;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
       PrintOutRegisterInHex rax;
      }
-  
+
     my @s = split /
 /, Assemble;
     my @S = sort @s;
     is_deeply \@s, \@S;
-  
+
 
 =head2 Memory
 
@@ -11416,39 +11422,39 @@ B<Example:>
     Shl rax, 32;
     Or  rax, 0x07654321;
     PushR rax;
-  
+
     PrintOutRaxInHex;
     PrintOutNL;
     PrintOutRaxInReverseInHex;
     PrintOutNL;
     KeepFree rax;
-  
+
     Mov rax, rsp;
     Mov rdi, 8;
-  
+
     PrintOutMemoryInHex;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutNL;
     PopR rax;
     KeepFree rax, rdi;
-  
+
     Mov rax, 4096;
     PushR rax;
     Mov rax, rsp;
     Mov rdi, 8;
-  
+
     PrintOutMemoryInHex;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutNL;
     PopR rax;
-  
+
     is_deeply Assemble, <<END;
   0765 4321 0765 4321
   2143 6507 2143 6507
   2143 6507 2143 6507
   0010 0000 0000 0000
   END
-  
+
 
 =head3 PrintErrMemoryInHexNL()
 
@@ -11467,20 +11473,20 @@ B<Example:>
     my $s = Rb 0..$N-1;
     AllocateMemory(K(size, $N), my $a = V(address));
     CopyMemory(V(source, $s), V(size, $N), target => $a);
-  
+
     AllocateMemory(K(size, $N), my $b = V(address));
     CopyMemory(source => $a, target => $b, K(size, $N));
-  
+
     $b->setReg(rax);
     Mov rdi, $N;
-  
+
     PrintOutMemoryInHexNL;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-  
+
     ok Assemble(debug=>0, eq => <<END);
   0001 0203 0405 06070809 0A0B 0C0D 0E0F1011 1213 1415 16171819 1A1B 1C1D 1E1F2021 2223 2425 26272829 2A2B 2C2D 2E2F3031 3233 3435 36373839 3A3B 3C3D 3E3F4041 4243 4445 46474849 4A4B 4C4D 4E4F5051 5253 5455 56575859 5A5B 5C5D 5E5F6061 6263 6465 66676869 6A6B 6C6D 6E6F7071 7273 7475 76777879 7A7B 7C7D 7E7F8081 8283 8485 86878889 8A8B 8C8D 8E8F9091 9293 9495 96979899 9A9B 9C9D 9E9FA0A1 A2A3 A4A5 A6A7A8A9 AAAB ACAD AEAFB0B1 B2B3 B4B5 B6B7B8B9 BABB BCBD BEBFC0C1 C2C3 C4C5 C6C7C8C9 CACB CCCD CECFD0D1 D2D3 D4D5 D6D7D8D9 DADB DCDD DEDFE0E1 E2E3 E4E5 E6E7E8E9 EAEB ECED EEEFF0F1 F2F3 F4F5 F6F7F8F9 FAFB FCFD FEFF
   END
-  
+
 
 =head3 PrintMemory()
 
@@ -11494,10 +11500,10 @@ B<Example:>
     $a->setReg(rax);                                                              # Address of file in memory
     $s->setReg(rdi);                                                              # Length  of file in memory
     PrintOutMemory;                                                               # Print contents of memory to stdout
-  
+
     my $r = Assemble;                                                             # Assemble and execute
     ok stringMd5Sum($r) eq fileMd5Sum($0);                                        # Output contains this file
-  
+
 
 =head3 PrintErrMemory()
 
@@ -11516,13 +11522,13 @@ B<Example:>
     my $s = "Hello World";
     Mov rax, Rs($s);
     Mov rdi, length $s;
-  
+
     PrintOutMemory;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     Exit(0);
-  
+
     ok Assemble =~ m(Hello World);
-  
+
 
 =head3 PrintErrMemoryNL()
 
@@ -11546,61 +11552,61 @@ B<Example:>
 
     my $N = V(size, 2048);
     my $q = Rs('a'..'p');
-  
+
     AllocateMemory($N, my $address = V(address));  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-  
+
     Vmovdqu8 xmm0, "[$q]";
     $address->setReg(rax);
     Vmovdqu8 "[rax]", xmm0;
     Mov rdi, 16;
     PrintOutMemory;
     PrintOutNL;
-  
+
     FreeMemory(address => $address, size=> $N);
-  
+
     ok Assemble(eq => <<END);
   abcdefghijklmnop
   END
-  
+
     my $N = V(size, 4096);                                                        # Size of the initial allocation which should be one or more pages
-  
-  
+
+
     AllocateMemory($N, my $A = V(address));  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-  
+
     ClearMemory($N, $A);
-  
+
     $A->setReg(rax);
     $N->setReg(rdi);
     PrintOutMemoryInHexNL;
-  
+
     FreeMemory($N, $A);
-  
+
     ok Assemble(eq => <<END);
   0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
   END
-  
+
     my $N = 256;
     my $s = Rb 0..$N-1;
-  
+
     AllocateMemory(K(size, $N), my $a = V(address));  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     CopyMemory(V(source, $s), V(size, $N), target => $a);
-  
-  
+
+
     AllocateMemory(K(size, $N), my $b = V(address));  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     CopyMemory(source => $a, target => $b, K(size, $N));
-  
+
     $b->setReg(rax);
     Mov rdi, $N;
     PrintOutMemoryInHexNL;
-  
+
     ok Assemble(debug=>0, eq => <<END);
   0001 0203 0405 06070809 0A0B 0C0D 0E0F1011 1213 1415 16171819 1A1B 1C1D 1E1F2021 2223 2425 26272829 2A2B 2C2D 2E2F3031 3233 3435 36373839 3A3B 3C3D 3E3F4041 4243 4445 46474849 4A4B 4C4D 4E4F5051 5253 5455 56575859 5A5B 5C5D 5E5F6061 6263 6465 66676869 6A6B 6C6D 6E6F7071 7273 7475 76777879 7A7B 7C7D 7E7F8081 8283 8485 86878889 8A8B 8C8D 8E8F9091 9293 9495 96979899 9A9B 9C9D 9E9FA0A1 A2A3 A4A5 A6A7A8A9 AAAB ACAD AEAFB0B1 B2B3 B4B5 B6B7B8B9 BABB BCBD BEBFC0C1 C2C3 C4C5 C6C7C8C9 CACB CCCD CECFD0D1 D2D3 D4D5 D6D7D8D9 DADB DCDD DEDFE0E1 E2E3 E4E5 E6E7E8E9 EAEB ECED EEEFF0F1 F2F3 F4F5 F6F7F8F9 FAFB FCFD FEFF
   END
-  
+
 
 =head3 FreeMemory(@variables)
 
@@ -11613,23 +11619,23 @@ B<Example:>
 
 
     my $N = V(size, 4096);                                                        # Size of the initial allocation which should be one or more pages
-  
+
     AllocateMemory($N, my $A = V(address));
-  
+
     ClearMemory($N, $A);
-  
+
     $A->setReg(rax);
     $N->setReg(rdi);
     PrintOutMemoryInHexNL;
-  
-  
+
+
     FreeMemory($N, $A);  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-  
+
     ok Assemble(eq => <<END);
   0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
   END
-  
+
 
 =head3 ClearMemory(@variables)
 
@@ -11642,23 +11648,23 @@ B<Example:>
 
 
     my $N = V(size, 4096);                                                        # Size of the initial allocation which should be one or more pages
-  
+
     AllocateMemory($N, my $A = V(address));
-  
-  
+
+
     ClearMemory($N, $A);  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-  
+
     $A->setReg(rax);
     $N->setReg(rdi);
     PrintOutMemoryInHexNL;
-  
+
     FreeMemory($N, $A);
-  
+
     ok Assemble(eq => <<END);
   0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
   END
-  
+
 
 =head3 MaskMemory22(@variables)
 
@@ -11686,46 +11692,46 @@ B<Example:>
 
     my $s = Rb 0; Rb 1; Rw 2; Rd 3;  Rq 4;
     my $t = Db 0; Db 1; Dw 2; Dd 3;  Dq 4;
-  
+
     Vmovdqu8 xmm0, "[$s]";
     Vmovdqu8 xmm1, "[$t]";
     PrintOutRegisterInHex xmm0;
     PrintOutRegisterInHex xmm1;
     Sub rsp, 16;
-  
+
     Mov rax, rsp;                                                                 # Copy memory, the target is addressed by rax, the length is in rdi, the source is addressed by rsi
     Mov rdi, 16;
     Mov rsi, $s;
-  
+
     CopyMemory(V(source, rsi), V(target, rax), V(size, rdi));  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutMemoryInHex;
-  
+
     my $r = Assemble;
     ok $r =~ m(xmm0: 0000 0000 0000 0004   0000 0003 0002 0100);
     ok $r =~ m(xmm1: 0000 0000 0000 0004   0000 0003 0002 0100);
     ok $r =~ m(0001 0200 0300 00000400 0000 0000 0000);
-  
+
     my $N = 256;
     my $s = Rb 0..$N-1;
     AllocateMemory(K(size, $N), my $a = V(address));
-  
+
     CopyMemory(V(source, $s), V(size, $N), target => $a);  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-  
+
     AllocateMemory(K(size, $N), my $b = V(address));
-  
+
     CopyMemory(source => $a, target => $b, K(size, $N));  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-  
+
     $b->setReg(rax);
     Mov rdi, $N;
     PrintOutMemoryInHexNL;
-  
+
     ok Assemble(debug=>0, eq => <<END);
   0001 0203 0405 06070809 0A0B 0C0D 0E0F1011 1213 1415 16171819 1A1B 1C1D 1E1F2021 2223 2425 26272829 2A2B 2C2D 2E2F3031 3233 3435 36373839 3A3B 3C3D 3E3F4041 4243 4445 46474849 4A4B 4C4D 4E4F5051 5253 5455 56575859 5A5B 5C5D 5E5F6061 6263 6465 66676869 6A6B 6C6D 6E6F7071 7273 7475 76777879 7A7B 7C7D 7E7F8081 8283 8485 86878889 8A8B 8C8D 8E8F9091 9293 9495 96979899 9A9B 9C9D 9E9FA0A1 A2A3 A4A5 A6A7A8A9 AAAB ACAD AEAFB0B1 B2B3 B4B5 B6B7B8B9 BABB BCBD BEBFC0C1 C2C3 C4C5 C6C7C8C9 CACB CCCD CECFD0D1 D2D3 D4D5 D6D7D8D9 DADB DCDD DEDFE0E1 E2E3 E4E5 E6E7E8E9 EAEB ECED EEEFF0F1 F2F3 F4F5 F6F7F8F9 FAFB FCFD FEFF
   END
-  
+
 
 =head2 Files
 
@@ -11740,25 +11746,25 @@ B<Example:>
 
 
     Mov rax, Rs($0);                                                              # File to read
-  
+
     OpenRead;                                                                     # Open file  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutRegisterInHex rax;
     CloseFile;                                                                    # Close file
     PrintOutRegisterInHex rax;
     KeepFree rax, rdi;
-  
+
     Mov rax, Rs(my $f = "zzzTemporaryFile.txt");                                  # File to write
     OpenWrite;                                                                    # Open file
     CloseFile;                                                                    # Close file
-  
+
     is_deeply Assemble, <<END;                                                    # Channel  is now used for tracing
      rax: 0000 0000 0000 0004
      rax: 0000 0000 0000 0000
   END
     ok -e $f;                                                                     # Created file
     unlink $f;
-  
+
 
 =head3 OpenWrite()
 
@@ -11774,20 +11780,20 @@ B<Example:>
     CloseFile;                                                                    # Close file
     PrintOutRegisterInHex rax;
     KeepFree rax, rdi;
-  
+
     Mov rax, Rs(my $f = "zzzTemporaryFile.txt");                                  # File to write
-  
+
     OpenWrite;                                                                    # Open file  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     CloseFile;                                                                    # Close file
-  
+
     is_deeply Assemble, <<END;                                                    # Channel  is now used for tracing
      rax: 0000 0000 0000 0004
      rax: 0000 0000 0000 0000
   END
     ok -e $f;                                                                     # Created file
     unlink $f;
-  
+
 
 =head3 CloseFile()
 
@@ -11800,25 +11806,25 @@ B<Example:>
     Mov rax, Rs($0);                                                              # File to read
     OpenRead;                                                                     # Open file
     PrintOutRegisterInHex rax;
-  
+
     CloseFile;                                                                    # Close file  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutRegisterInHex rax;
     KeepFree rax, rdi;
-  
+
     Mov rax, Rs(my $f = "zzzTemporaryFile.txt");                                  # File to write
     OpenWrite;                                                                    # Open file
-  
+
     CloseFile;                                                                    # Close file  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-  
+
     is_deeply Assemble, <<END;                                                    # Channel  is now used for tracing
      rax: 0000 0000 0000 0004
      rax: 0000 0000 0000 0000
   END
     ok -e $f;                                                                     # Created file
     unlink $f;
-  
+
 
 =head3 StatSize()
 
@@ -11829,16 +11835,16 @@ B<Example:>
 
 
     Mov rax, Rs($0);                                                              # File to stat
-  
+
     StatSize;                                                                     # Stat the file  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     PrintOutRegisterInHex rax;
-  
+
     my $r = Assemble =~ s( ) ()gsr;
     if ($r =~ m(rax:([0-9a-f]{16}))is)                                            # Compare file size obtained with that from fileSize()
      {is_deeply $1, sprintf("%016X", fileSize($0));
      }
-  
+
 
 =head3 ReadFile(@variables)
 
@@ -11850,20 +11856,20 @@ Read a file whose name is addressed by rax into memory.  The address of the mapp
 B<Example:>
 
 
-  
+
     ReadFile(V(file, Rs($0)), (my $s = V(size)), my $a = V(address));             # Read file  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     $a->setReg(rax);                                                              # Address of file in memory
     $s->setReg(rdi);                                                              # Length  of file in memory
     PrintOutMemory;                                                               # Print contents of memory to stdout
-  
+
     my $r = Assemble;                                                             # Assemble and execute
     ok stringMd5Sum($r) eq fileMd5Sum($0);                                        # Output contains this file
-  
+
 
 =head3 executeFileViaBash(@variables)
 
-Execute the file named in the byte string addressed by rax with bash
+Execute the file named in the arena addressed by rax with bash
 
      Parameter   Description
   1  @variables  Variables
@@ -11871,7 +11877,7 @@ Execute the file named in the byte string addressed by rax with bash
 B<Example:>
 
 
-    my $s = CreateByteString;                                                     # Create a string
+    my $s = CreateArena;                                                          # Create a string
     $s->ql(<<END);                                                                # Write code to execute
   #!/usr/bin/bash
   whoami
@@ -11879,14 +11885,14 @@ B<Example:>
   pwd
   END
     $s->write         (my $f = V('file', Rs("zzz.sh")));                          # Write code to a file
-  
+
     executeFileViaBash($f);                                                       # Execute the file  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     unlinkFile        ($f);                                                       # Delete the file
-  
+
     my $u = qx(whoami); chomp($u);
     ok Assemble(emulator=>0) =~ m($u);                                            # The Intel Software Development Emulator is way too slow on these operations.
-  
+
 
 =head3 unlinkFile(@variables)
 
@@ -11898,7 +11904,7 @@ Unlink the named file
 B<Example:>
 
 
-    my $s = CreateByteString;                                                     # Create a string
+    my $s = CreateArena;                                                          # Create a string
     $s->ql(<<END);                                                                # Write code to execute
   #!/usr/bin/bash
   whoami
@@ -11907,13 +11913,13 @@ B<Example:>
   END
     $s->write         (my $f = V('file', Rs("zzz.sh")));                          # Write code to a file
     executeFileViaBash($f);                                                       # Execute the file
-  
+
     unlinkFile        ($f);                                                       # Delete the file  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-  
+
     my $u = qx(whoami); chomp($u);
     ok Assemble(emulator=>0) =~ m($u);                                            # The Intel Software Development Emulator is way too slow on these operations.
-  
+
 
 =head1 Hash functions
 
@@ -11930,22 +11936,22 @@ B<Example:>
     Mov rax, "[rbp+24]";
     Cstrlen;                                                                      # Length of string to hash
     Mov rdi, r15;
-  
+
     Hash();                                                                       # Hash string  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-  
+
     PrintOutRegisterInHex r15;
-  
+
     my $e = Assemble keep=>'hash';                                                # Assemble to the specified file name
     ok qx($e "")  =~ m(r15: 0000 3F80 0000 3F80);                                 # Test well known hashes
     ok qx($e "a") =~ m(r15: 0000 3F80 C000 45B2);
-  
-  
+
+
     if (0)                                                                        # Hash various strings  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
      {my %r; my %f; my $count = 0;
       my $N = RegisterSize zmm0;
-  
+
       if (1)                                                                      # Fixed blocks
        {for my $l(qw(a ab abc abcd), 'a a', 'a  a')
          {for my $i(1..$N)
@@ -11962,7 +11968,7 @@ B<Example:>
            }
          }
        }
-  
+
       if (1)                                                                      # Variable blocks
        {for my $l(qw(a ab abc abcd), '', 'a a', 'a  a')
          {for my $i(1..$N)
@@ -11980,12 +11986,12 @@ B<Example:>
       for my $r(keys %r)
        {delete $r{$r} if $r{$r}->@* < 2;
        }
-  
+
       say STDERR dump(\%r);
       say STDERR "Keys hashed: ", $count;
       confess "Duplicates : ",  scalar keys(%r);
      }
-  
+
 
 =head1 Unicode
 
@@ -12009,52 +12015,52 @@ B<Example:>
 
 
     my @p = my ($out, $size, $fail) = (V(out), V(size), V('fail'));
-  
+
     my $Chars = Rb(0x24, 0xc2, 0xa2, 0xc9, 0x91, 0xE2, 0x82, 0xAC, 0xF0, 0x90, 0x8D, 0x88);
     my $chars = V(chars, $Chars);
-  
+
     GetNextUtf8CharAsUtf32 in=>$chars, @p;                                        # Dollar               UTF-8 Encoding: 0x24                UTF-32 Encoding: 0x00000024
     $out->out('out1 : ');     $size->outNL(' size : ');
-  
+
     GetNextUtf8CharAsUtf32 in=>$chars+1, @p;                                      # Cents                UTF-8 Encoding: 0xC2 0xA2           UTF-32 Encoding: 0x000000a2
     $out->out('out2 : ');     $size->outNL(' size : ');
-  
+
     GetNextUtf8CharAsUtf32 in=>$chars+3, @p;                                      # Alpha                UTF-8 Encoding: 0xC9 0x91           UTF-32 Encoding: 0x00000251
     $out->out('out3 : ');     $size->outNL(' size : ');
-  
+
     GetNextUtf8CharAsUtf32 in=>$chars+5, @p;                                      # Euro                 UTF-8 Encoding: 0xE2 0x82 0xAC      UTF-32 Encoding: 0x000020AC
     $out->out('out4 : ');     $size->outNL(' size : ');
-  
+
     GetNextUtf8CharAsUtf32 in=>$chars+8, @p;                                      # Gothic Letter Hwair  UTF-8 Encoding  0xF0 0x90 0x8D 0x88 UTF-32 Encoding: 0x00010348
     $out->out('out5 : ');     $size->outNL(' size : ');
-  
+
     my $statement = qq(𝖺
  𝑎𝑠𝑠𝑖𝑔𝑛 【【𝖻 𝐩𝐥𝐮𝐬 𝖼】】
 AAAAAAAA);                        # A sample sentence to parse
-  
+
     my $s = K(statement, Rs($statement));
     my $l = K(size,  length($statement));
-  
+
     AllocateMemory($l, my $address = V(address));                                 # Allocate enough memory for a copy of the string
     CopyMemory(source => $s, target => $address, $l);
-  
+
     GetNextUtf8CharAsUtf32 in=>$address, @p;
     $out->out('outA : ');     $size->outNL(' size : ');
-  
+
     GetNextUtf8CharAsUtf32 in=>$address+4, @p;
     $out->out('outB : ');     $size->outNL(' size : ');
-  
+
     GetNextUtf8CharAsUtf32 in=>$address+5, @p;
     $out->out('outC : ');     $size->outNL(' size : ');
-  
+
     GetNextUtf8CharAsUtf32 in=>$address+30, @p;
     $out->out('outD : ');     $size->outNL(' size : ');
-  
+
     GetNextUtf8CharAsUtf32 in=>$address+35, @p;
     $out->out('outE : ');     $size->outNL(' size : ');
-  
+
     $address->printOutMemoryInHexNL($l);
-  
+
     ok Assemble(debug => 0, eq => <<END);
   out1 : 0000 0000 0000 0024 size : 0000 0000 0000 0001
   out2 : 0000 0000 0000 00A2 size : 0000 0000 0000 0002
@@ -12068,7 +12074,7 @@ AAAAAAAA);                        # A sample sentence to parse
   outE : 0000 0000 0000 0010 size : 0000 0000 0000 0002
   F09D 96BA 0A20 F09D918E F09D 91A0 F09D91A0 F09D 9196 F09D9194 F09D 919B 20E38090 E380 90F0 9D96BB20 F09D 90A9 F09D90A5 F09D 90AE F09D90AC 20F0 9D96 BCE38091 E380 910A 4141
   END
-  
+
 
 =head2 ClassifyInRange(@parameters)
 
@@ -12108,21 +12114,21 @@ B<Example:>
 
     my $s = Rb(3, 0x01, 0x02, 0x03);
     my $t = Rb(7, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a);
-  
-  
+
+
     LoadShortStringFromMemoryToZmm 0, $s;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-  
+
     LoadShortStringFromMemoryToZmm 1, $t;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     ConcatenateShortStrings(0, 1);
     PrintOutRegisterInHex xmm0;
     PrintOutRegisterInHex xmm1;
-  
+
     my $r = Assemble;
     ok $r =~ m(xmm0: 0000 0000 000A 0908   0706 0504 0302 010A);
     ok $r =~ m(xmm1: 0000 0000 0000 0000   0A09 0807 0605 0407);
-  
+
 
 =head2 GetLengthOfShortString($reg, $zmm)
 
@@ -12148,9 +12154,9 @@ Concatenate the numbered source zmm containing a short string with the short str
   1  $left      Target zmm
   2  $right     Source zmm
 
-=head1 Byte Strings
+=head1 Arenas
 
-Operations on Byte Strings
+An arena is single extensible block of memory which contains other data structures such as strings, arrays, trees within it.
 
 =head2 StringLength(@parameters)
 
@@ -12162,17 +12168,17 @@ Length of a zero terminated string
 B<Example:>
 
 
-  
+
     StringLength(V(string, Rs("abcd")))->outNL;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     Assemble(debug => 0, eq => <<END);
   size: 0000 0000 0000 0004
   END
-  
 
-=head2 CreateByteString(%options)
 
-Create an relocatable string of bytes in an arena and returns its address in rax. Optionally add a chain header so that 64 byte blocks of memory can be freed and reused within the byte string.
+=head2 CreateArena(%options)
+
+Create an relocatable arena and returns its address in rax. Optionally add a chain header so that 64 byte blocks of memory can be freed and reused within the arena.
 
      Parameter  Description
   1  %options   Free=>1 adds a free chain.
@@ -12180,8 +12186,8 @@ Create an relocatable string of bytes in an arena and returns its address in rax
 B<Example:>
 
 
-  
-    my $a = CreateByteString;                                                     # Create a string  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+
+    my $a = CreateArena;                                                     # Create a string  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     $a->q('aa');
     $a->out;
@@ -12189,12 +12195,12 @@ B<Example:>
     is_deeply Assemble, <<END;                                                    # Assemble and execute
   aa
   END
-  
-  
-    my $a = CreateByteString;                                                     # Create a string  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-  
-    my $b = CreateByteString;                                                     # Create a string  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+
+    my $a = CreateArena;                                                     # Create a string  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+
+
+    my $b = CreateArena;                                                     # Create a string  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     $a->q('aa');
     $b->q('bb');
@@ -12206,12 +12212,12 @@ B<Example:>
   aa
   bb
   END
-  
-  
-    my $a = CreateByteString;                                                     # Create a string  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-  
-    my $b = CreateByteString;                                                     # Create a string  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+
+    my $a = CreateArena;                                                     # Create a string  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+
+
+    my $b = CreateArena;                                                     # Create a string  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     $a->q('aa');
     $a->q('AA');
@@ -12220,12 +12226,12 @@ B<Example:>
     is_deeply Assemble, <<END;                                                    # Assemble and execute
   aaAA
   END
-  
-  
-    my $a = CreateByteString;                                                     # Create a string  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-  
-    my $b = CreateByteString;                                                     # Create a string  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+
+    my $a = CreateArena;                                                     # Create a string  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+
+
+    my $b = CreateArena;                                                     # Create a string  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     $a->q('aa');
     $b->q('bb');
@@ -12239,13 +12245,13 @@ B<Example:>
     is_deeply Assemble, <<END;                                                    # Assemble and execute
   aaAAaabbBBbb
   END
-  
-  
-    my $a = CreateByteString;                                                     # Create a string  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+
+
+    my $a = CreateArena;                                                     # Create a string  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     $a->q('ab');
-  
-    my $b = CreateByteString;                                                     # Create target byte string  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+
+    my $b = CreateArena;                                                     # Create target arena  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     $b->append(source=>$a->bs);
     $b->append(source=>$a->bs);
@@ -12256,16 +12262,16 @@ B<Example:>
     $b->append(source=>$a->bs);
     $b->append(source=>$a->bs);
     $b->append(source=>$a->bs);
-  
-  
-    $a->out;   PrintOutNL;                                                        # Print byte string
-    $b->out;   PrintOutNL;                                                        # Print byte string
+
+
+    $a->out;   PrintOutNL;                                                        # Print arena
+    $b->out;   PrintOutNL;                                                        # Print arena
     $a->length(my $sa = V(size)); $sa->outNL;
     $b->length(my $sb = V(size)); $sb->outNL;
     $a->clear;
     $a->length(my $sA = V(size)); $sA->outNL;
     $b->length(my $sB = V(size)); $sB->outNL;
-  
+
     is_deeply Assemble, <<END;                                                    # Assemble and execute
   abababababababab
   ababababababababababababababababababababababababababababababababababababab
@@ -12274,92 +12280,92 @@ B<Example:>
   size: 0000 0000 0000 0000
   size: 0000 0000 0000 004A
   END
-  
 
-=head2 Nasm::X86::ByteString::length($byteString, @variables)
 
-Get the length of a byte string
+=head2 Nasm::X86::Arena::length($arena, @variables)
 
-     Parameter    Description
-  1  $byteString  Byte string descriptor
-  2  @variables   Variables
+Get the length of an arena
 
-=head2 Nasm::X86::ByteString::makeReadOnly($byteString)
+     Parameter   Description
+  1  $arena      Arena descriptor
+  2  @variables  Variables
 
-Make a byte string read only
+=head2 Nasm::X86::Arena::makeReadOnly($arena)
 
-     Parameter    Description
-  1  $byteString  Byte string descriptor
+Make an arena read only
 
-=head2 Nasm::X86::ByteString::makeWriteable($byteString)
+     Parameter  Description
+  1  $arena     Arena descriptor
 
-Make a byte string writable
+=head2 Nasm::X86::Arena::makeWriteable($arena)
 
-     Parameter    Description
-  1  $byteString  Byte string descriptor
+Make an arena writable
 
-=head2 Nasm::X86::ByteString::allocate($byteString, @variables)
+     Parameter  Description
+  1  $arena     Arena descriptor
 
-Allocate the amount of space indicated in rdi in the byte string addressed by rax and return the offset of the allocation in the arena in rdi
+=head2 Nasm::X86::Arena::allocate($arena, @variables)
 
-     Parameter    Description
-  1  $byteString  Byte string descriptor
-  2  @variables   Variables
+Allocate the amount of space indicated in rdi in the arena addressed by rax and return the offset of the allocation in the arena in rdi
 
-=head2 Nasm::X86::ByteString::allocZmmBlock($byteString, @variables)
+     Parameter   Description
+  1  $arena      Arena descriptor
+  2  @variables  Variables
 
-Allocate a block to hold a zmm register in the specified byte string and return the offset of the block in a variable
+=head2 Nasm::X86::Arena::allocZmmBlock($arena, @variables)
 
-     Parameter    Description
-  1  $byteString  Byte string
-  2  @variables   Variables
+Allocate a block to hold a zmm register in the specified arena and return the offset of the block in a variable
 
-=head2 Nasm::X86::ByteString::allocBlock($byteString)
+     Parameter   Description
+  1  $arena      Arena
+  2  @variables  Variables
 
-Allocate a block to hold a zmm register in the specified byte string and return the offset of the block in a variable
+=head2 Nasm::X86::Arena::allocBlock($arena)
 
-     Parameter    Description
-  1  $byteString  Byte string
+Allocate a block to hold a zmm register in the specified arena and return the offset of the block in a variable
+
+     Parameter  Description
+  1  $arena     Arena
 
 B<Example:>
 
 
-    my $a = CreateByteString; $a->dump;
+    my $a = CreateArena; $a->dump;
     my $b1 = $a->allocBlock;  $a->dump;
     my $b2 = $a->allocBlock;  $a->dump;
     $a->freeBlock($b2);       $a->dump;
     $a->freeBlock($b1);       $a->dump;
-  
+
     ok Assemble(debug => 0, eq => <<END);
-  Byte String
+  Arena
     Size: 0000 0000 0000 1000
     Used: 0000 0000 0000 0018
   0000: 0010 0000 0000 00001800 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
   0040: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
   0080: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
   00C0: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
-  Byte String
+  Arena
     Size: 0000 0000 0000 1000
     Used: 0000 0000 0000 0058
   0000: 0010 0000 0000 00005800 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
   0040: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
   0080: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
   00C0: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
-  Byte String
+  Arena
     Size: 0000 0000 0000 1000
     Used: 0000 0000 0000 0098
   0000: 0010 0000 0000 00009800 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
   0040: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
   0080: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
   00C0: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
-  Byte String
+  Arena
     Size: 0000 0000 0000 1000
     Used: 0000 0000 0000 0098
   0000: 0010 0000 0000 00009800 0000 0000 00005800 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
   0040: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
   0080: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
   00C0: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
-  Byte String
+  Arena
     Size: 0000 0000 0000 1000
     Used: 0000 0000 0000 0098
   0000: 0010 0000 0000 00009800 0000 0000 00001800 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
@@ -12367,273 +12373,273 @@ B<Example:>
   0080: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
   00C0: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
   END
-  
 
-=head2 Nasm::X86::ByteString::m($byteString, @variables)
 
-Append the content with length rdi addressed by rsi to the byte string addressed by rax
+=head2 Nasm::X86::Arena::m($arena, @variables)
 
-     Parameter    Description
-  1  $byteString  Byte string descriptor
-  2  @variables   Variables
+Append the content with length rdi addressed by rsi to the arena addressed by rax
 
-=head2 Nasm::X86::ByteString::q($byteString, $string)
+     Parameter   Description
+  1  $arena      Arena descriptor
+  2  @variables  Variables
 
-Append a constant string to the byte string
+=head2 Nasm::X86::Arena::q($arena, $string)
 
-     Parameter    Description
-  1  $byteString  Byte string descriptor
-  2  $string      String
+Append a constant string to the arena
 
-=head2 Nasm::X86::ByteString::ql($byteString, $const)
+     Parameter  Description
+  1  $arena     Arena descriptor
+  2  $string    String
 
-Append a quoted string containing new line characters to the byte string addressed by rax
+=head2 Nasm::X86::Arena::ql($arena, $const)
 
-     Parameter    Description
-  1  $byteString  Byte string
-  2  $const       Constant
+Append a quoted string containing new line characters to the arena addressed by rax
 
-=head2 Nasm::X86::ByteString::char($byteString, $char)
+     Parameter  Description
+  1  $arena     Arena
+  2  $const     Constant
 
-Append a character expressed as a decimal number to the byte string addressed by rax
+=head2 Nasm::X86::Arena::char($arena, $char)
 
-     Parameter    Description
-  1  $byteString  Byte string descriptor
-  2  $char        Number of character to be appended
+Append a character expressed as a decimal number to the arena addressed by rax
 
-=head2 Nasm::X86::ByteString::nl($byteString)
+     Parameter  Description
+  1  $arena     Arena descriptor
+  2  $char      Number of character to be appended
 
-Append a new line to the byte string addressed by rax
+=head2 Nasm::X86::Arena::nl($arena)
 
-     Parameter    Description
-  1  $byteString  Byte string descriptor
+Append a new line to the arena addressed by rax
 
-=head2 Nasm::X86::ByteString::z($byteString)
+     Parameter  Description
+  1  $arena     Arena descriptor
 
-Append a trailing zero to the byte string addressed by rax
+=head2 Nasm::X86::Arena::z($arena)
 
-     Parameter    Description
-  1  $byteString  Byte string descriptor
+Append a trailing zero to the arena addressed by rax
 
-=head2 Nasm::X86::ByteString::append($byteString, @variables)
+     Parameter  Description
+  1  $arena     Arena descriptor
 
-Append one byte string to another
+=head2 Nasm::X86::Arena::append($arena, @variables)
 
-     Parameter    Description
-  1  $byteString  Byte string descriptor
-  2  @variables   Variables
+Append one arena to another
 
-=head2 Nasm::X86::ByteString::clear($byteString)
+     Parameter   Description
+  1  $arena      Arena descriptor
+  2  @variables  Variables
 
-Clear the byte string addressed by rax
+=head2 Nasm::X86::Arena::clear($arena)
 
-     Parameter    Description
-  1  $byteString  Byte string descriptor
+Clear the arena addressed by rax
 
-=head2 Nasm::X86::ByteString::write($byteString, @variables)
+     Parameter  Description
+  1  $arena     Arena descriptor
 
-Write the content in a byte string addressed by rax to a temporary file and replace the byte string content with the name of the  temporary file
+=head2 Nasm::X86::Arena::write($arena, @variables)
 
-     Parameter    Description
-  1  $byteString  Byte string descriptor
-  2  @variables   Variables
+Write the content in an arena addressed by rax to a temporary file and replace the arena content with the name of the  temporary file
 
-=head2 Nasm::X86::ByteString::read($byteString, @variables)
+     Parameter   Description
+  1  $arena      Arena descriptor
+  2  @variables  Variables
 
-Read the named file (terminated with a zero byte) and place it into the named byte string.
+=head2 Nasm::X86::Arena::read($arena, @variables)
 
-     Parameter    Description
-  1  $byteString  Byte string descriptor
-  2  @variables   Variables
+Read the named file (terminated with a zero byte) and place it into the named arena.
 
-=head2 Nasm::X86::ByteString::out($byteString)
+     Parameter   Description
+  1  $arena      Arena descriptor
+  2  @variables  Variables
 
-Print the specified byte string addressed by rax on sysout
+=head2 Nasm::X86::Arena::out($arena)
 
-     Parameter    Description
-  1  $byteString  Byte string descriptor
+Print the specified arena addressed by rax on sysout
 
-=head2 Nasm::X86::ByteString::dump($byteString, $depth)
+     Parameter  Description
+  1  $arena     Arena descriptor
 
-Dump details of a byte string
+=head2 Nasm::X86::Arena::dump($arena, $depth)
 
-     Parameter    Description
-  1  $byteString  Byte string descriptor
-  2  $depth       Optional amount of memory to dump  as the number of 64 byte blocks
+Dump details of an arena
 
-=head1 Block Strings
+     Parameter  Description
+  1  $arena     Arena descriptor
+  2  $depth     Optional amount of memory to dump  as the number of 64 byte blocks
+
+=head1 String
 
 Strings made from zmm sized blocks of text
 
-=head2 Nasm::X86::ByteString::CreateBlockString($byteString)
+=head2 Nasm::X86::Arena::CreateString($arena)
 
-Create a string from a doubly link linked list of 64 byte blocks linked via 4 byte offsets in the byte string addressed by rax and return its descriptor
-
-     Parameter    Description
-  1  $byteString  Byte string description
-
-=head2 Nasm::X86::BlockString::dump($blockString)
-
-Dump a block string to sysout
-
-     Parameter     Description
-  1  $blockString  Block string descriptor
-
-=head2 Nasm::X86::BlockString::len($blockString, $size)
-
-Find the length of a block string
-
-     Parameter     Description
-  1  $blockString  Block string descriptor
-  2  $size         Size variable
-
-=head2 Nasm::X86::BlockString::concatenate($target, $source)
-
-Concatenate two block strings by appending a copy of the source to the target block string.
+Create a string from a doubly link linked list of 64 byte blocks linked via 4 byte offsets in the arena addressed by rax and return its descriptor
 
      Parameter  Description
-  1  $target    Target block string
-  2  $source    Source block string
+  1  $arena     Arena description
 
-=head2 Nasm::X86::BlockString::insertChar($blockString, @variables)
+=head2 Nasm::X86::String::dump($String)
 
-Insert a character into a block string
+Dump a string to sysout
 
-     Parameter     Description
-  1  $blockString  Block string
-  2  @variables    Variables
+     Parameter  Description
+  1  $String    String descriptor
 
-=head2 Nasm::X86::BlockString::deleteChar($blockString, @variables)
+=head2 Nasm::X86::String::len($String, $size)
 
-Delete a character in a block string
+Find the length of a string
 
-     Parameter     Description
-  1  $blockString  Block string
-  2  @variables    Variables
+     Parameter  Description
+  1  $String    String descriptor
+  2  $size      Size variable
 
-=head2 Nasm::X86::BlockString::getCharacter($blockString, @variables)
+=head2 Nasm::X86::String::concatenate($target, $source)
 
-Get a character from a block string
+Concatenate two strings by appending a copy of the source to the target string.
 
-     Parameter     Description
-  1  $blockString  Block string
-  2  @variables    Variables
+     Parameter  Description
+  1  $target    Target string
+  2  $source    Source string
 
-=head2 Nasm::X86::BlockString::append($blockString, @variables)
+=head2 Nasm::X86::String::insertChar($String, @variables)
 
-Append the specified content in memory to the specified block string
+Insert a character into a string
 
-     Parameter     Description
-  1  $blockString  Block string descriptor
-  2  @variables    Variables
+     Parameter   Description
+  1  $String     String
+  2  @variables  Variables
 
-=head2 Nasm::X86::BlockString::clear($blockString)
+=head2 Nasm::X86::String::deleteChar($String, @variables)
+
+Delete a character in a string
+
+     Parameter   Description
+  1  $String     String
+  2  @variables  Variables
+
+=head2 Nasm::X86::String::getCharacter($String, @variables)
+
+Get a character from a string
+
+     Parameter   Description
+  1  $String     String
+  2  @variables  Variables
+
+=head2 Nasm::X86::String::append($String, @variables)
+
+Append the specified content in memory to the specified string
+
+     Parameter   Description
+  1  $String     String descriptor
+  2  @variables  Variables
+
+=head2 Nasm::X86::String::clear($String)
 
 Clear the block by freeing all but the first block
 
-     Parameter     Description
-  1  $blockString  Block string descriptor
+     Parameter  Description
+  1  $String    String descriptor
 
-=head1 Block Array
+=head1 Array
 
-Array constructed as a tree of blocks in a byte string
+Array constructed as a set of blocks in an arena
 
-=head2 Nasm::X86::ByteString::CreateBlockArray($byteString)
+=head2 Nasm::X86::Arena::CreateArray($arena)
 
-Create a block array in a byte string
+Create a array in an arena
 
-     Parameter    Description
-  1  $byteString  Byte string description
+     Parameter  Description
+  1  $arena     Arena description
 
-=head2 Nasm::X86::BlockArray::dump($blockArray, @variables)
+=head2 Nasm::X86::Array::dump($Array, @variables)
 
-Dump a block array
+Dump a array
 
-     Parameter    Description
-  1  $blockArray  Block array descriptor
-  2  @variables   Variables
+     Parameter   Description
+  1  $Array      Array descriptor
+  2  @variables  Variables
 
-=head2 Nasm::X86::BlockArray::push($blockArray, @variables)
+=head2 Nasm::X86::Array::push($Array, @variables)
 
 Push an element onto the array
 
-     Parameter    Description
-  1  $blockArray  Block array descriptor
-  2  @variables   Variables
+     Parameter   Description
+  1  $Array      Array descriptor
+  2  @variables  Variables
 
-=head2 Nasm::X86::BlockArray::pop($blockArray, @variables)
+=head2 Nasm::X86::Array::pop($Array, @variables)
 
 Pop an element from an array
 
-     Parameter    Description
-  1  $blockArray  Block array descriptor
-  2  @variables   Variables
+     Parameter   Description
+  1  $Array      Array descriptor
+  2  @variables  Variables
 
-=head2 Nasm::X86::BlockArray::get($blockArray, @variables)
+=head2 Nasm::X86::Array::get($Array, @variables)
 
 Get an element from the array
 
-     Parameter    Description
-  1  $blockArray  Block array descriptor
-  2  @variables   Variables
+     Parameter   Description
+  1  $Array      Array descriptor
+  2  @variables  Variables
 
-=head2 Nasm::X86::BlockArray::put($blockArray, @variables)
+=head2 Nasm::X86::Array::put($Array, @variables)
 
 Put an element into an array as long as it is with in its limits established by pushing.
 
-     Parameter    Description
-  1  $blockArray  Block array descriptor
-  2  @variables   Variables
+     Parameter   Description
+  1  $Array      Array descriptor
+  2  @variables  Variables
 
-=head1 Block Multi Way Tree
+=head1 Tree
 
-Multi Way Tree constructed as a tree of blocks in a byte string
+Tree constructed as sets of blocks in an arena.
 
-=head2 Nasm::X86::ByteString::DescribeBlockMultiWayTree($byteString)
+=head2 Nasm::X86::Arena::DescribeTree($arena)
 
-Return a descriptor for a multi way block tree in the specified byte string
+Return a descriptor for a tree in the specified arena
 
-     Parameter    Description
-  1  $byteString  Byte string descriptor
+     Parameter  Description
+  1  $arena     Arena descriptor
 
-=head2 Nasm::X86::ByteString::CreateBlockMultiWayTree($byteString)
+=head2 Nasm::X86::Arena::CreateTree($arena)
 
-Create a block multi way tree in a byte string
+Create a tree in an arena.
 
-     Parameter    Description
-  1  $byteString  Byte string description
+     Parameter  Description
+  1  $arena     Arena description
 
 B<Example:>
 
 
     my $N = 12;
-    my $b = CreateByteString;                                                     # Resizable memory block
-    my $t = $b->CreateBlockMultiWayTree;                                          # Multi way tree in memory block
-  
+    my $b = CreateArena;                                                     # Resizable memory block
+    my $t = $b->CreateTree;                                          # Multi way tree in memory block
+
     K(count, $N)->for(sub                                                         # Add some entries to the tree
      {my ($index, $start, $next, $end) = @_;
       my $k = $index + 1;
       $t->insert($k,      $k + 0x100);
       $t->insert($k + $N, $k + 0x200);
      });
-  
+
     $t->by(sub                                                                    # Iterate through the tree
      {my ($iter, $end) = @_;
       $iter->key ->out('key: ');
       $iter->data->out(' data: ');
       $iter->tree->depth($iter->node, my $D = V(depth));
-  
+
       $t->find($iter->key);
       $t->found->out(' found: '); $t->data->out(' data: '); $D->outNL(' depth: ');
      });
-  
+
     $t->find(K(key, 0xffff));  $t->found->outNL('Found: ');                      # Find some entries
     $t->find(K(key, 0xd));     $t->found->outNL('Found: ');
     If ($t->found,
     Then
      {$t->data->outNL("Data : ");
      });
-  
+
     ok Assemble(debug => 0, eq => <<END);
   key: 0000 0000 0000 0001 data: 0000 0000 0000 0101 found: 0000 0000 0000 0001 data: 0000 0000 0000 0101 depth: 0000 0000 0000 0002
   key: 0000 0000 0000 0002 data: 0000 0000 0000 0102 found: 0000 0000 0000 0001 data: 0000 0000 0000 0102 depth: 0000 0000 0000 0002
@@ -12663,31 +12669,31 @@ B<Example:>
   Found: 0000 0000 0000 0001
   Data : 0000 0000 0000 0201
   END
-  
 
-=head2 Nasm::X86::BlockMultiWayTree::Clone($tree)
+
+=head2 Nasm::X86::Tree::Clone($tree)
 
 Clone the specified tree descriptions
 
      Parameter  Description
-  1  $tree      Block multi way tree descriptor
+  1  $tree      Tree descriptor
 
 B<Example:>
 
 
     my $L = K(loop, 4);
-    my $b = CreateByteString;
-    my $T = $b->CreateBlockMultiWayTree;
+    my $b = CreateArena;
+    my $T = $b->CreateTree;
     my $t = $T->Clone;
-  
+
     $L->for(sub
      {my ($i, $start, $next, $end) = @_;
       $t->insertTreeAndClone($i);
       $t->first->outNL;
      });
-  
+
     $t->insert($L, $L*2);
-  
+
     my $f = $T->Clone;
     $L->for(sub
      {my ($i, $start, $next, $end) = @_;
@@ -12696,7 +12702,7 @@ B<Example:>
      });
     $f->find($L);
     $L->out('N: '); $f->found->out('  f: '); $f->data->out('  d: ');   $f->subTree->outNL('  s: ');
-  
+
     ok Assemble(debug => 0, eq => <<END);
   first: 0000 0000 0000 0098
   first: 0000 0000 0000 0118
@@ -12708,40 +12714,40 @@ B<Example:>
   i: 0000 0000 0000 0003  f: 0000 0000 0000 0001  d: 0000 0000 0000 0218  s: 0000 0000 0000 0001
   N: 0000 0000 0000 0004  f: 0000 0000 0000 0001  d: 0000 0000 0000 0008  s: 0000 0000 0000 0000
   END
-  
 
-=head2 Nasm::X86::BlockMultiWayTree::find($t, $key)
+
+=head2 Nasm::X86::Tree::find($t, $key)
 
 Find a key in a tree and test whether the found data is a sub tree.  The results are held in the variables "found", "data", "subTree" addressed by the tree descriptor.
 
      Parameter  Description
-  1  $t         Block multi way tree descriptor
+  1  $t         Tree descriptor
   2  $key       Key field to search for
 
-=head2 Nasm::X86::BlockMultiWayTree::findAndClone($t, $key)
+=head2 Nasm::X86::Tree::findAndClone($t, $key)
 
 Find a key in the specified tree and clone it is it is a sub tree.
 
      Parameter  Description
-  1  $t         Block multi way tree descriptor
+  1  $t         Tree descriptor
   2  $key       Key as a dword
 
 B<Example:>
 
 
     my $L = K(loop, 4);
-    my $b = CreateByteString;
-    my $T = $b->CreateBlockMultiWayTree;
+    my $b = CreateArena;
+    my $T = $b->CreateTree;
     my $t = $T->Clone;
-  
+
     $L->for(sub
      {my ($i, $start, $next, $end) = @_;
       $t->insertTreeAndClone($i);
       $t->first->outNL;
      });
-  
+
     $t->insert($L, $L*2);
-  
+
     my $f = $T->Clone;
     $L->for(sub
      {my ($i, $start, $next, $end) = @_;
@@ -12750,7 +12756,7 @@ B<Example:>
      });
     $f->find($L);
     $L->out('N: '); $f->found->out('  f: '); $f->data->out('  d: ');   $f->subTree->outNL('  s: ');
-  
+
     ok Assemble(debug => 0, eq => <<END);
   first: 0000 0000 0000 0098
   first: 0000 0000 0000 0118
@@ -12762,80 +12768,80 @@ B<Example:>
   i: 0000 0000 0000 0003  f: 0000 0000 0000 0001  d: 0000 0000 0000 0218  s: 0000 0000 0000 0001
   N: 0000 0000 0000 0004  f: 0000 0000 0000 0001  d: 0000 0000 0000 0008  s: 0000 0000 0000 0000
   END
-  
 
-=head2 Nasm::X86::BlockMultiWayTree::insertDataOrTree($t, $tnd, $key, $data)
+
+=head2 Nasm::X86::Tree::insertDataOrTree($t, $tnd, $key, $data)
 
 Insert either a key, data pair into the tree or create a sub tree at the specified key (if it does not already exist) and return the offset of the first block of the sub tree in the data variable.
 
      Parameter  Description
-  1  $t         Block multi way tree descriptor
+  1  $t         Tree descriptor
   2  $tnd       0 - data or 1 - tree
   3  $key       Key as a dword
   4  $data      Data as a dword
 
-=head2 Nasm::X86::BlockMultiWayTree::insert($t, $key, $data)
+=head2 Nasm::X86::Tree::insert($t, $key, $data)
 
 Insert a dword into into the specified tree at the specified key.
 
      Parameter  Description
-  1  $t         Block multi way tree descriptor
+  1  $t         Tree descriptor
   2  $key       Key as a dword
   3  $data      Data as a dword
 
-=head2 Nasm::X86::BlockMultiWayTree::insertTree($t, $key, $subTree)
+=head2 Nasm::X86::Tree::insertTree($t, $key, $subTree)
 
 Insert a sub tree into the specified tree tree under the specified key. If no sub tree is supplied an empty one is provided gratis.
 
      Parameter  Description
-  1  $t         Block multi way tree descriptor
+  1  $t         Tree descriptor
   2  $key       Key as a dword
   3  $subTree   Sub tree to insert else an empty one will be added
 
 B<Example:>
 
 
-    my $b = CreateByteString;
-    my $t = $b->CreateBlockMultiWayTree;
-    my $T = $b->CreateBlockMultiWayTree;
-  
+    my $b = CreateArena;
+    my $t = $b->CreateTree;
+    my $T = $b->CreateTree;
+
     $T->insert    (K(key, 2), K(data, 4));
     $t->insertTree(K(key, 1), $T);
-  
+
     $t->print;
-  
+
     ok Assemble(debug => 0, eq => <<END);
   Tree at:    r15: 0000 0000 0000 0018
   key: 0000 0000 0000 0001 data: 0000 0000 0000 0098 depth: 0000 0000 0000 0001
   Tree at:    r15: 0000 0000 0000 0098
   key: 0000 0000 0000 0002 data: 0000 0000 0000 0004 depth: 0000 0000 0000 0001
   END
-  
 
-=head2 Nasm::X86::BlockMultiWayTree::insertTreeAndClone($t, $key)
+
+=head2 Nasm::X86::Tree::insertTreeAndClone($t, $key)
 
 Insert a new sub tree into the specified tree tree under the specified key and return a descriptor for it.  If the tree already exists, return a descriptor for it.
 
      Parameter  Description
-  1  $t         Block multi way tree descriptor
+  1  $t         Tree descriptor
   2  $key       Key as a dword
 
 B<Example:>
 
 
     my $L = K(loop, 4);
-    my $b = CreateByteString;
-    my $T = $b->CreateBlockMultiWayTree;
+    my $b = CreateArena;
+    my $T = $b->CreateTree;
     my $t = $T->Clone;
-  
+
     $L->for(sub
      {my ($i, $start, $next, $end) = @_;
       $t->insertTreeAndClone($i);
       $t->first->outNL;
      });
-  
+
     $t->insert($L, $L*2);
-  
+
     my $f = $T->Clone;
     $L->for(sub
      {my ($i, $start, $next, $end) = @_;
@@ -12844,7 +12850,7 @@ B<Example:>
      });
     $f->find($L);
     $L->out('N: '); $f->found->out('  f: '); $f->data->out('  d: ');   $f->subTree->outNL('  s: ');
-  
+
     ok Assemble(debug => 0, eq => <<END);
   first: 0000 0000 0000 0098
   first: 0000 0000 0000 0118
@@ -12856,39 +12862,39 @@ B<Example:>
   i: 0000 0000 0000 0003  f: 0000 0000 0000 0001  d: 0000 0000 0000 0218  s: 0000 0000 0000 0001
   N: 0000 0000 0000 0004  f: 0000 0000 0000 0001  d: 0000 0000 0000 0008  s: 0000 0000 0000 0000
   END
-  
 
-=head2 Nasm::X86::BlockMultiWayTree::leftOrRightMost($t, $dir, @variables)
+
+=head2 Nasm::X86::Tree::leftOrRightMost($t, $dir, @variables)
 
 Return the left most or right most node
 
      Parameter   Description
-  1  $t          Block multi way tree descriptor
+  1  $t          Tree descriptor
   2  $dir        Direction: left = 0 or right = 1
   3  @variables  Variables
 
-=head2 Nasm::X86::BlockMultiWayTree::leftMost($t, @variables)
+=head2 Nasm::X86::Tree::leftMost($t, @variables)
 
 Return the left most node
 
      Parameter   Description
-  1  $t          Block multi way tree descriptor
+  1  $t          Tree descriptor
   2  @variables  Variables
 
-=head2 Nasm::X86::BlockMultiWayTree::rightMost($t, @variables)
+=head2 Nasm::X86::Tree::rightMost($t, @variables)
 
 Return the right most node
 
      Parameter   Description
-  1  $t          Block multi way tree descriptor
+  1  $t          Tree descriptor
   2  @variables  Variables
 
-=head2 Nasm::X86::BlockMultiWayTree::depth($t, @variables)
+=head2 Nasm::X86::Tree::depth($t, @variables)
 
 Return the depth of a node within a tree.
 
      Parameter   Description
-  1  $t          Block multi way tree descriptor
+  1  $t          Tree descriptor
   2  @variables  Variables
 
 =head2 Sub trees
@@ -12899,20 +12905,20 @@ Construct trees of trees.
 
 Print a tree
 
-=head3 Nasm::X86::BlockMultiWayTree::print($t)
+=head3 Nasm::X86::Tree::print($t)
 
 Print a tree
 
      Parameter  Description
-  1  $t         Block multi way tree
+  1  $t         Tree
 
 B<Example:>
 
 
     my $L = V(loop, 45);
-    my $b = CreateByteString;
-    my $t = $b->CreateBlockMultiWayTree;
-  
+    my $b = CreateArena;
+    my $t = $b->CreateTree;
+
     $L->for(sub
      {my ($i, $start, $next, $end) = @_;
       my $l = $L - $i;
@@ -12921,9 +12927,9 @@ B<Example:>
         $t->insertTree($l);
        });
      });
-  
+
     $t->print;
-  
+
     ok Assemble(debug => 0, eq => <<END);
   Tree at:    r15: 0000 0000 0000 0018
   key: 0000 0000 0000 0000 data: 0000 0000 0000 002D depth: 0000 0000 0000 0002
@@ -12996,32 +13002,32 @@ B<Example:>
   Tree at:    r15: 0000 0000 0000 0E58
   Tree at:    r15: 0000 0000 0000 0ED8
   END
-  
+
 
 =head2 Iteration
 
 Iterate through a tree non recursively
 
-=head3 Nasm::X86::BlockMultiWayTree::iterator($b)
+=head3 Nasm::X86::Tree::iterator($b)
 
 Iterate through a multi way tree
 
      Parameter  Description
-  1  $b         Block multi way tree
+  1  $b         Tree
 
-=head3 Nasm::X86::BlockMultiWayTree::Iterator::next($iter)
+=head3 Nasm::X86::Tree::Iterator::next($iter)
 
 Next element in the tree
 
      Parameter  Description
   1  $iter      Iterator
 
-=head3 Nasm::X86::BlockMultiWayTree::by($b, $body)
+=head3 Nasm::X86::Tree::by($b, $body)
 
 Call the specified body with each (key, data) from the specified tree in order
 
      Parameter  Description
-  1  $b         Block Multi Way Tree descriptor
+  1  $b         Tree descriptor
   2  $body      Body
 
 =head1 Assemble
@@ -13042,27 +13048,27 @@ B<Example:>
     my $format = Rs "Hello %s
 ";
     my $data   = Rs "World";
-  
+
     Extern qw(printf exit malloc strcpy); Link 'c';
-  
-  
+
+
     CallC 'malloc', length($format)+1;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     Mov r15, rax;
-  
+
     CallC 'strcpy', r15, $format;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-  
+
     CallC 'printf', r15, $data;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-  
+
     CallC 'exit', 0;  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-  
+
     ok Assemble(eq => <<END);
   Hello World
   END
-  
+
 
 =head2 Extern(@externalReferences)
 
@@ -13077,21 +13083,21 @@ B<Example:>
     my $format = Rs "Hello %s
 ";
     my $data   = Rs "World";
-  
-  
+
+
     Extern qw(printf exit malloc strcpy); Link 'c';  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-  
+
     CallC 'malloc', length($format)+1;
     Mov r15, rax;
     CallC 'strcpy', r15, $format;
     CallC 'printf', r15, $data;
     CallC 'exit', 0;
-  
+
     ok Assemble(eq => <<END);
   Hello World
   END
-  
+
 
 =head2 Link(@libraries)
 
@@ -13106,21 +13112,21 @@ B<Example:>
     my $format = Rs "Hello %s
 ";
     my $data   = Rs "World";
-  
-  
+
+
     Extern qw(printf exit malloc strcpy); Link 'c';  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-  
+
     CallC 'malloc', length($format)+1;
     Mov r15, rax;
     CallC 'strcpy', r15, $format;
     CallC 'printf', r15, $data;
     CallC 'exit', 0;
-  
+
     ok Assemble(eq => <<END);
   Hello World
   END
-  
+
 
 =head2 Start()
 
@@ -13142,16 +13148,16 @@ B<Example:>
     Mov rax, Rs($s);
     Mov rdi, length $s;
     PrintOutMemory;
-  
+
     Exit(0);  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
-  
+
     ok Assemble =~ m(Hello World);
-  
+
 
 =head2 Assemble(%options)
 
-Assemble the generated code. # Options: debug => 0,1,2 eq => expected output on 1, commentCount => count comments
+Assemble the generated code.
 
      Parameter  Description
   1  %options   Options
@@ -13163,15 +13169,15 @@ B<Example:>
     PrintOutStringNL "Hello
 World";
     PrintErrStringNL "Hello World";
-  
-  
+
+
     ok Assemble(debug => 0, eq => <<END);  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
   Hello World
   Hello
   World
   END
-  
+
 
 
 =head1 Hash Definitions
@@ -13192,7 +13198,7 @@ Iterator
 
 =head4 bs
 
-Byte string definition.
+Arena definition.
 
 =head4 constant
 
@@ -13351,7 +13357,7 @@ default value supplied for this attribute by this package.
 =head2 Replaceable Attribute List
 
 
-Pi32 Pi64 
+Pi32 Pi64
 
 
 =head2 Pi32
@@ -13427,7 +13433,7 @@ B<Example:>
     my $g = $a *  $b; $g->outNL;
     my $h = $g /  $b; $h->outNL;
     my $i = $a %  $b; $i->outNL;
-  
+
     If ($a == 3,
     Then
      {PrintOutStringNL "a == 3"
@@ -13435,10 +13441,10 @@ B<Example:>
     Else
      {PrintOutStringNL "a != 3"
      });
-  
+
     ++$a; $a->outNL;
     --$a; $a->outNL;
-  
+
     ok Assemble(debug => 0, eq => <<END);
   a: 0000 0000 0000 0003
   b: 0000 0000 0000 0002
@@ -13453,7 +13459,7 @@ B<Example:>
   a: 0000 0000 0000 0004
   a: 0000 0000 0000 0003
   END
-  
+
 
 =head2 PushRR(@r)
 
@@ -13474,19 +13480,19 @@ B<Example:>
 
     Mov rax, 0x11111111;
     Mov rbx, 0x22222222;
-  
+
     PushR my @save = (rax, rbx);  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
 
     Mov rax, 0x33333333;
     PopR @save;
     PrintOutRegisterInHex rax;
     PrintOutRegisterInHex rbx;
-  
+
     is_deeply Assemble,<<END;
      rax: 0000 0000 1111 1111
      rbx: 0000 0000 2222 2222
   END
-  
+
 
 =head2 PopRR(@r)
 
@@ -13516,22 +13522,22 @@ Print the specified number of utf32 characters at the specified address
 Length of the C style string addressed by rax returning the length in r15
 
 
-=head2 Nasm::X86::ByteString::chain($byteString, $bs, $variable, @offsets)
+=head2 Nasm::X86::Arena::chain($arena, $bs, $variable, @offsets)
 
-Return a variable with the end point of a chain of double words in the byte string starting at the specified variable.
+Return a variable with the end point of a chain of double words in the arena starting at the specified variable.
 
-     Parameter    Description
-  1  $byteString  Byte string descriptor
-  2  $bs          Byte string locator
-  3  $variable    Start variable
-  4  @offsets     Offsets chain
+     Parameter  Description
+  1  $arena     Arena descriptor
+  2  $bs        Arena locator
+  3  $variable  Start variable
+  4  @offsets   Offsets chain
 
 B<Example:>
 
 
     my $format = Rd(map{4*$_+24} 0..64);
-  
-    my $b = CreateByteString;
+
+    my $b = CreateArena;
     my $a = $b->allocBlock;
     Vmovdqu8 zmm31, "[$format]";
     $b->putBlock($b->bs, $a, 31);
@@ -13539,11 +13545,11 @@ B<Example:>
     my $s = $b->chain($b->bs, $r, 4);                   $s->outNL("chain2: ");
     my $t = $b->chain($b->bs, $s, 4);                   $t->outNL("chain3: ");
     my $A = $b->chain($b->bs, V(start, 0x18), 4, 4, 4); $A->outNL("chain4: ");    # Get a long chain
-  
+
     $b->putChain($b->bs, V(start, 0x18), V(end, 0xff), 4, 4, 4);                  # Put at the end of a long chain
-  
+
     $b->dump;
-  
+
     my $sub = Subroutine
      {my ($p) = @_;                                                               # Parameters
       If ($$p{c} == -1,
@@ -13554,32 +13560,32 @@ B<Example:>
         sub {PrintOutStringNL "D is minus one"},
         sub {PrintOutStringNL "D is NOT minus one"},
        );
-  
+
       my $C = $$p{c}->clone;
       $C->outNL;
-  
+
       $$p{e} += 1;
       $$p{e}->outNL('E: ');
-  
+
       $$p{f}->outNL('F1: ');
       $$p{f}++;
       $$p{f}->outNL('F2: ');
      } name=> 'aaa', in => [qw(c)], io => [qw(d  e  f)];
-  
+
     my $c = K(c, -1);
     my $d = K(d, -1);
     my $e = V(e,  1);
     my $f = V(f,  2);
-  
+
     $sub->call($c, $d, $e, $f);
     $f->outNL('F3: ');
-  
+
     ok Assemble(debug => 0, eq => <<END);
   chain1: 0000 0000 0000 001C
   chain2: 0000 0000 0000 0020
   chain3: 0000 0000 0000 0024
   chain4: 0000 0000 0000 0024
-  Byte String
+  Arena
     Size: 0000 0000 0000 1000
     Used: 0000 0000 0000 0058
   0000: 0010 0000 0000 00005800 0000 0000 00000000 0000 0000 00001800 0000 1C00 00002000 0000 FF00 00002800 0000 2C00 00003000 0000 3400 00003800 0000 3C00 0000
@@ -13594,96 +13600,96 @@ B<Example:>
   F2: 0000 0000 0000 0003
   F3: 0000 0000 0000 0003
   END
-  
 
-=head2 Nasm::X86::ByteString::putChain($byteString, $bs, $start, $value, @offsets)
 
-Write the double word in the specified variable to the double word location at the the specified offset in the specified byte string.
+=head2 Nasm::X86::Arena::putChain($arena, $bs, $start, $value, @offsets)
 
-     Parameter    Description
-  1  $byteString  Byte string descriptor
-  2  $bs          Byte string locator variable
-  3  $start       Start variable
-  4  $value       Value to put as a variable
-  5  @offsets     Offsets chain
+Write the double word in the specified variable to the double word location at the the specified offset in the specified arena.
 
-=head2 Nasm::X86::ByteString::updateSpace($byteString, @variables)
+     Parameter  Description
+  1  $arena     Arena descriptor
+  2  $bs        Arena locator variable
+  3  $start     Start variable
+  4  $value     Value to put as a variable
+  5  @offsets   Offsets chain
 
-Make sure that the byte string addressed by rax has enough space to accommodate content of length rdi
+=head2 Nasm::X86::Arena::updateSpace($arena, @variables)
 
-     Parameter    Description
-  1  $byteString  Byte string descriptor
-  2  @variables   Variables
+Make sure that the arena addressed by rax has enough space to accommodate content of length rdi
 
-=head2 Nasm::X86::ByteString::blockSize($byteString)
+     Parameter   Description
+  1  $arena      Arena descriptor
+  2  @variables  Variables
+
+=head2 Nasm::X86::Arena::blockSize($arena)
 
 Size of a block
 
-     Parameter    Description
-  1  $byteString  Byte string
+     Parameter  Description
+  1  $arena     Arena
 
-=head2 Nasm::X86::ByteString::firstFreeBlock($byteString)
+=head2 Nasm::X86::Arena::firstFreeBlock($arena)
 
-Create and load a variable with the first free block on the free block chain or zero if no such block in the given byte string
+Create and load a variable with the first free block on the free block chain or zero if no such block in the given arena
 
-     Parameter    Description
-  1  $byteString  Byte string address as a variable
+     Parameter  Description
+  1  $arena     Arena address as a variable
 
-=head2 Nasm::X86::ByteString::setFirstFreeBlock($byteString, $offset)
+=head2 Nasm::X86::Arena::setFirstFreeBlock($arena, $offset)
 
 Set the first free block field from a variable
 
-     Parameter    Description
-  1  $byteString  Byte string descriptor
-  2  $offset      First free block offset as a variable
+     Parameter  Description
+  1  $arena     Arena descriptor
+  2  $offset    First free block offset as a variable
 
-=head2 Nasm::X86::ByteString::freeBlock($byteString, @variables)
+=head2 Nasm::X86::Arena::freeBlock($arena, @variables)
 
-Free a block in a byte string by placing it on the free chain
+Free a block in an arena by placing it on the free chain
 
-     Parameter    Description
-  1  $byteString  Byte string descriptor
-  2  @variables   Variables
+     Parameter   Description
+  1  $arena      Arena descriptor
+  2  @variables  Variables
 
 B<Example:>
 
 
-    my $a = CreateByteString; $a->dump;
+    my $a = CreateArena; $a->dump;
     my $b1 = $a->allocBlock;  $a->dump;
     my $b2 = $a->allocBlock;  $a->dump;
     $a->freeBlock($b2);       $a->dump;
     $a->freeBlock($b1);       $a->dump;
-  
+
     ok Assemble(debug => 0, eq => <<END);
-  Byte String
+  Arena
     Size: 0000 0000 0000 1000
     Used: 0000 0000 0000 0018
   0000: 0010 0000 0000 00001800 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
   0040: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
   0080: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
   00C0: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
-  Byte String
+  Arena
     Size: 0000 0000 0000 1000
     Used: 0000 0000 0000 0058
   0000: 0010 0000 0000 00005800 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
   0040: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
   0080: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
   00C0: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
-  Byte String
+  Arena
     Size: 0000 0000 0000 1000
     Used: 0000 0000 0000 0098
   0000: 0010 0000 0000 00009800 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
   0040: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
   0080: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
   00C0: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
-  Byte String
+  Arena
     Size: 0000 0000 0000 1000
     Used: 0000 0000 0000 0098
   0000: 0010 0000 0000 00009800 0000 0000 00005800 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
   0040: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
   0080: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
   00C0: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
-  Byte String
+  Arena
     Size: 0000 0000 0000 1000
     Used: 0000 0000 0000 0098
   0000: 0010 0000 0000 00009800 0000 0000 00001800 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
@@ -13691,151 +13697,151 @@ B<Example:>
   0080: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
   00C0: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
   END
-  
 
-=head2 Nasm::X86::ByteString::getBlock($byteString, $bsa, $block, $zmm)
 
-Get the block with the specified offset in the specified block string and return it in the numbered zmm
+=head2 Nasm::X86::Arena::getBlock($arena, $bsa, $block, $zmm)
 
-     Parameter    Description
-  1  $byteString  Byte string descriptor
-  2  $bsa         Byte string variable
-  3  $block       Offset of the block as a variable
-  4  $zmm         Number of zmm register to contain block
+Get the block with the specified offset in the specified string and return it in the numbered zmm
 
-=head2 Nasm::X86::ByteString::putBlock($byteString, $bsa, $block, $zmm)
+     Parameter  Description
+  1  $arena     Arena descriptor
+  2  $bsa       Arena variable
+  3  $block     Offset of the block as a variable
+  4  $zmm       Number of zmm register to contain block
 
-Write the numbered zmm to the block at the specified offset in the specified byte string
+=head2 Nasm::X86::Arena::putBlock($arena, $bsa, $block, $zmm)
 
-     Parameter    Description
-  1  $byteString  Byte string descriptor
-  2  $bsa         Byte string variable
-  3  $block       Block in byte string
-  4  $zmm         Content variable
+Write the numbered zmm to the block at the specified offset in the specified arena
 
-=head2 Nasm::X86::BlockString::address($blockString)
+     Parameter  Description
+  1  $arena     Arena descriptor
+  2  $bsa       Arena variable
+  3  $block     Block in arena
+  4  $zmm       Content variable
 
-Address of a block string
+=head2 Nasm::X86::String::address($String)
 
-     Parameter     Description
-  1  $blockString  Block string descriptor
+Address of a string
 
-=head2 Nasm::X86::BlockString::allocBlock($blockString)
+     Parameter  Description
+  1  $String    String descriptor
 
-Allocate a block to hold a zmm register in the specified byte string and return the offset of the block in a variable
+=head2 Nasm::X86::String::allocBlock($String)
 
-     Parameter     Description
-  1  $blockString  Block string descriptor
+Allocate a block to hold a zmm register in the specified arena and return the offset of the block in a variable
 
-=head2 Nasm::X86::BlockString::getBlockLength($blockString, $zmm)
+     Parameter  Description
+  1  $String    String descriptor
+
+=head2 Nasm::X86::String::getBlockLength($String, $zmm)
 
 Get the block length of the numbered zmm and return it in a variable
 
-     Parameter     Description
-  1  $blockString  Block string descriptor
-  2  $zmm          Number of zmm register
+     Parameter  Description
+  1  $String    String descriptor
+  2  $zmm       Number of zmm register
 
-=head2 Nasm::X86::BlockString::setBlockLengthInZmm($blockString, $length, $zmm)
+=head2 Nasm::X86::String::setBlockLengthInZmm($String, $length, $zmm)
 
 Set the block length of the numbered zmm to the specified length
 
-     Parameter     Description
-  1  $blockString  Block string descriptor
-  2  $length       Length as a variable
-  3  $zmm          Number of zmm register
+     Parameter  Description
+  1  $String    String descriptor
+  2  $length    Length as a variable
+  3  $zmm       Number of zmm register
 
-=head2 Nasm::X86::BlockString::getBlock($blockString, $bsa, $block, $zmm)
+=head2 Nasm::X86::String::getBlock($String, $bsa, $block, $zmm)
 
-Get the block with the specified offset in the specified block string and return it in the numbered zmm
+Get the block with the specified offset in the specified string and return it in the numbered zmm
 
-     Parameter     Description
-  1  $blockString  Block string descriptor
-  2  $bsa          Byte string variable
-  3  $block        Offset of the block as a variable
-  4  $zmm          Number of zmm register to contain block
+     Parameter  Description
+  1  $String    String descriptor
+  2  $bsa       Arena variable
+  3  $block     Offset of the block as a variable
+  4  $zmm       Number of zmm register to contain block
 
-=head2 Nasm::X86::BlockString::putBlock($blockString, $bsa, $block, $zmm)
+=head2 Nasm::X86::String::putBlock($String, $bsa, $block, $zmm)
 
-Write the numbered zmm to the block at the specified offset in the specified byte string
+Write the numbered zmm to the block at the specified offset in the specified arena
 
-     Parameter     Description
-  1  $blockString  Block string descriptor
-  2  $bsa          Byte string variable
-  3  $block        Block in byte string
-  4  $zmm          Content variable
+     Parameter  Description
+  1  $String    String descriptor
+  2  $bsa       Arena variable
+  3  $block     Block in arena
+  4  $zmm       Content variable
 
-=head2 Nasm::X86::BlockString::getNextAndPrevBlockOffsetFromZmm($blockString, $zmm)
+=head2 Nasm::X86::String::getNextAndPrevBlockOffsetFromZmm($String, $zmm)
 
 Get the offsets of the next and previous blocks as variables from the specified zmm
 
-     Parameter     Description
-  1  $blockString  Block string descriptor
-  2  $zmm          Zmm containing block
+     Parameter  Description
+  1  $String    String descriptor
+  2  $zmm       Zmm containing block
 
-=head2 Nasm::X86::BlockString::putNextandPrevBlockOffsetIntoZmm($blockString, $zmm, $next, $prev)
+=head2 Nasm::X86::String::putNextandPrevBlockOffsetIntoZmm($String, $zmm, $next, $prev)
 
 Save next and prev offsets into a zmm representing a block
 
-     Parameter     Description
-  1  $blockString  Block string descriptor
-  2  $zmm          Zmm containing block
-  3  $next         Next offset as a variable
-  4  $prev         Prev offset as a variable
+     Parameter  Description
+  1  $String    String descriptor
+  2  $zmm       Zmm containing block
+  3  $next      Next offset as a variable
+  4  $prev      Prev offset as a variable
 
-=head2 Nasm::X86::BlockArray::address($blockArray)
+=head2 Nasm::X86::Array::address($Array)
 
-Address of a block string
+Address of a string
 
-     Parameter    Description
-  1  $blockArray  Block array descriptor
+     Parameter  Description
+  1  $Array     Array descriptor
 
-=head2 Nasm::X86::BlockArray::allocBlock($blockArray)
+=head2 Nasm::X86::Array::allocBlock($Array)
 
-Allocate a block to hold a zmm register in the specified byte string and return the offset of the block in a variable
+Allocate a block to hold a zmm register in the specified arena and return the offset of the block in a variable
 
-     Parameter    Description
-  1  $blockArray  Block array descriptor
+     Parameter  Description
+  1  $Array     Array descriptor
 
-=head2 Nasm::X86::BlockMultiWayTree::allocKeysDataNode($t, $K, $D, $N, @variables)
+=head2 Nasm::X86::Tree::allocKeysDataNode($t, $K, $D, $N, @variables)
 
 Allocate a keys/data/node block and place it in the numbered zmm registers
 
      Parameter   Description
-  1  $t          Block multi way tree descriptor
+  1  $t          Tree descriptor
   2  $K          Numbered zmm for keys
   3  $D          Numbered zmm for data
   4  $N          Numbered zmm for children
   5  @variables  Variables
 
-=head2 Nasm::X86::BlockMultiWayTree::splitNode($t, $bs, $node, $key, @variables)
+=head2 Nasm::X86::Tree::splitNode($t, $bs, $node, $key, @variables)
 
-Split a node given its offset in a byte string retaining the key being inserted in the node split while putting the remainder to the left or right.
+Split a node given its offset in an arena retaining the key being inserted in the node split while putting the remainder to the left or right.
 
      Parameter   Description
-  1  $t          Block multi way tree descriptor
-  2  $bs         Backing byte string
+  1  $t          Tree descriptor
+  2  $bs         Backing arena
   3  $node       Offset of node
   4  $key        Key
   5  @variables  Variables
 
-=head2 Nasm::X86::BlockMultiWayTree::reParent($t, $bs, $PK, $PD, $PN, @variables)
+=head2 Nasm::X86::Tree::reParent($t, $bs, $PK, $PD, $PN, @variables)
 
-Reparent the children of a node held in registers. The children are in the backing byte string not registers.
+Reparent the children of a node held in registers. The children are in the backing arena not registers.
 
      Parameter   Description
-  1  $t          Block multi way tree descriptor
-  2  $bs         Backing byte string
+  1  $t          Tree descriptor
+  2  $bs         Backing arena
   3  $PK         Numbered zmm key node
   4  $PD         Numbered zmm data node
   5  $PN         Numbered zmm child node
   6  @variables  Variables
 
-=head2 Nasm::X86::BlockMultiWayTree::transferTreeBitsFromParent($b, $parent, $left, $right)
+=head2 Nasm::X86::Tree::transferTreeBitsFromParent($b, $parent, $left, $right)
 
-Transfer tree bits when splitting a full node
+Transfer tree bits when splitting a full node.
 
      Parameter  Description
-  1  $b         Block multi way tree descriptor
+  1  $b         Tree descriptor
   2  $parent    Numbered parent zmm
   3  $left      Numbered left zmm
   4  $right     Numbered right zmm
@@ -13846,27 +13852,27 @@ B<Example:>
     my $B = Rb(0..63);
     Vmovdqu8 zmm0, "[$B]";
     loadFromZmm r15, w, zmm, 14;
-  
-    my $b = CreateByteString;
-    my $t = $b->CreateBlockMultiWayTree;
+
+    my $b = CreateArena;
+    my $t = $b->CreateTree;
     $t->getTreeBits(0, r14);
-  
+
     PrintOutRegisterInHex zmm0, r15, r14;
-  
+
     Mov r14, my $treeBits = 0xDCBA;
     $t->putTreeBits(1, r14);
     PrintOutRegisterInHex zmm1;
-  
+
     $t->transferTreeBitsFromParent(1, 2, 3);
     PrintOutStringNL "Split:";
     PrintOutRegisterInHex zmm1, zmm2, zmm3;
-  
+
     my $left  =  $treeBits & ((1<<$t->leftLength)  - 1);
     my $right = ($treeBits >>    ($t->leftLength   + 1)) & ((1<<$t->rightLength) - 1);
-  
+
     my $l = sprintf("%02X", $left);
     my $r = sprintf("%02X", $right);
-  
+
     ok Assemble(debug => 0, eq => <<END);
     zmm0: 3F3E 3D3C 3B3A 3938   3736 3534 3332 3130   2F2E 2D2C 2B2A 2928   2726 2524 2322 2120   1F1E 1D1C 1B1A 1918   1716 1514 1312 1110   0F0E 0D0C 0B0A 0908   0706 0504 0302 0100
      r15: 0000 0000 0000 0F0E
@@ -13877,26 +13883,26 @@ B<Example:>
     zmm2: 0000 0000 00$l 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
     zmm3: 0000 0000 00$r 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
   END
-  
 
-=head2 Nasm::X86::BlockMultiWayTree::transferTreeBitsFromLeftOrRight($b, $rnl, $point, $parent, $left, $right)
 
-Transfer tree bits when splitting a full left or right node
+=head2 Nasm::X86::Tree::transferTreeBitsFromLeftOrRight($b, $rnl, $point, $parent, $left, $right)
+
+Transfer tree bits when splitting a full left or right node.
 
      Parameter  Description
-  1  $b         Block multi way tree descriptor
+  1  $b         Tree descriptor
   2  $rnl       0 - left 1 - right
   3  $point     Register indicating point of left in parent
   4  $parent    Numbered parent zmm
   5  $left      Numbered left zmm
   6  $right     Numbered right zmm
 
-=head2 Nasm::X86::BlockMultiWayTree::transferTreeBitsFromLeft($b, $point, $parent, $left, $right)
+=head2 Nasm::X86::Tree::transferTreeBitsFromLeft($b, $point, $parent, $left, $right)
 
 Transfer tree bits when splitting a full left node
 
      Parameter  Description
-  1  $b         Block multi way tree descriptor
+  1  $b         Tree descriptor
   2  $point     Register indicating point of left in parent
   3  $parent    Numbered parent zmm
   4  $left      Numbered left zmm
@@ -13905,31 +13911,31 @@ Transfer tree bits when splitting a full left node
 B<Example:>
 
 
-    my $b = CreateByteString;
-    my $t = $b->CreateBlockMultiWayTree;
+    my $b = CreateArena;
+    my $t = $b->CreateTree;
     my $lR = "110110";
     my $lP = "1";
     my $lL = "1110111";
-  
+
     my $p1 = "01010_110010";
     my $p2 = "1";
-  
+
     my $epe = sprintf("%04X", eval "0b$p1$lP$p2");
     my $ele = sprintf("%04X", eval "0b$lL"      );
     my $ere = sprintf("%04X", eval "0b$lR"      );
-  
+
     my @expected;
     for my $i(0..1)
      {Mov r15, eval "0b$lR$lP$lL"; $t->putTreeBits(1+$i, r15);
       Mov r15, eval "0b$p1$p2";    $t->putTreeBits(0,    r15);
-  
+
       PrintOutRegisterInHex zmm 0, 1+$i;
-  
+
       Mov r15, 0b10;
       $t->transferTreeBitsFromLeft (r15, 0, 1, 2) unless $i;
       $t->transferTreeBitsFromRight(r15, 0, 1, 2) if     $i;
       PrintOutRegisterInHex zmm 0..2;
-  
+
       my $zzz = $i ? "zmm2" : "zmm1";
       push @expected, <<END;
     zmm0: 0000 0000 0565 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
@@ -13939,16 +13945,16 @@ B<Example:>
     zmm2: 0000 0000 $ere 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
   END
      }
-  
-    ok Assemble(debug => 0, eq => join "", @expected);
-  
 
-=head2 Nasm::X86::BlockMultiWayTree::transferTreeBitsFromRight($b, $point, $parent, $left, $right)
+    ok Assemble(debug => 0, eq => join "", @expected);
+
+
+=head2 Nasm::X86::Tree::transferTreeBitsFromRight($b, $point, $parent, $left, $right)
 
 Transfer tree bits when splitting a full right node
 
      Parameter  Description
-  1  $b         Block multi way tree descriptor
+  1  $b         Tree descriptor
   2  $point     Register indicating point of right in parent
   3  $parent    Numbered parent zmm
   4  $left      Numbered left zmm
@@ -13957,31 +13963,31 @@ Transfer tree bits when splitting a full right node
 B<Example:>
 
 
-    my $b = CreateByteString;
-    my $t = $b->CreateBlockMultiWayTree;
+    my $b = CreateArena;
+    my $t = $b->CreateTree;
     my $lR = "110110";
     my $lP = "1";
     my $lL = "1110111";
-  
+
     my $p1 = "01010_110010";
     my $p2 = "1";
-  
+
     my $epe = sprintf("%04X", eval "0b$p1$lP$p2");
     my $ele = sprintf("%04X", eval "0b$lL"      );
     my $ere = sprintf("%04X", eval "0b$lR"      );
-  
+
     my @expected;
     for my $i(0..1)
      {Mov r15, eval "0b$lR$lP$lL"; $t->putTreeBits(1+$i, r15);
       Mov r15, eval "0b$p1$p2";    $t->putTreeBits(0,    r15);
-  
+
       PrintOutRegisterInHex zmm 0, 1+$i;
-  
+
       Mov r15, 0b10;
       $t->transferTreeBitsFromLeft (r15, 0, 1, 2) unless $i;
       $t->transferTreeBitsFromRight(r15, 0, 1, 2) if     $i;
       PrintOutRegisterInHex zmm 0..2;
-  
+
       my $zzz = $i ? "zmm2" : "zmm1";
       push @expected, <<END;
     zmm0: 0000 0000 0565 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
@@ -13991,31 +13997,31 @@ B<Example:>
     zmm2: 0000 0000 $ere 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
   END
      }
-  
-    ok Assemble(debug => 0, eq => join "", @expected);
-  
 
-=head2 Nasm::X86::BlockMultiWayTree::splitFullRoot($t)
+    ok Assemble(debug => 0, eq => join "", @expected);
+
+
+=head2 Nasm::X86::Tree::splitFullRoot($t)
 
 Split a full root block held in 31..29 and place the left block in 28..26 and the right block in 25..23. The left and right blocks should have their loop offsets set so they can be inserted into the root.
 
      Parameter  Description
-  1  $t         Block multi way tree descriptor
+  1  $t         Tree descriptor
 
-=head2 Nasm::X86::BlockMultiWayTree::splitFullLeftOrRightNode($t, $right)
+=head2 Nasm::X86::Tree::splitFullLeftOrRightNode($t, $right)
 
 Split a full a full left node (held in 28..26) or a full right node (held in 25..23) whose parent is in 31..29.
 
      Parameter  Description
-  1  $t         Block multi way tree descriptor
+  1  $t         Tree descriptor
   2  $right     0 left or 1 right
 
-=head2 Nasm::X86::BlockMultiWayTree::splitFullLeftNode($t)
+=head2 Nasm::X86::Tree::splitFullLeftNode($t)
 
 Split a full left node block held in 28..26 whose parent is in 31..29 and place the new right block in 25..23. The parent is assumed to be not full. The loop and length fields are assumed to be authoritative and hence are preserved.
 
      Parameter  Description
-  1  $t         Block multi way tree descriptor
+  1  $t         Tree descriptor
 
 B<Example:>
 
@@ -14023,34 +14029,34 @@ B<Example:>
     my $Sk = Rd(17..28, 0, 0, 12,   0xFF);
     my $Sd = Rd(17..28, 0, 0, 0xDD, 0xEE);
     my $Sn = Rd(1..13,     0, 0,    0xCC);
-  
+
     my $sk = Rd(1..14, 14,   0xA1);
     my $sd = Rd(1..14, 0xCC, 0xA2);
     my $sn = Rd(1..15,       0xA3);
-  
+
     my $rk = Rd((0)x14, 14,   0xB1);
     my $rd = Rd((0)x14, 0xCC, 0xB2);
     my $rn = Rd((0)x15,       0xB3);
-  
-    my $b = CreateByteString;
-    my $t = $b->CreateBlockMultiWayTree;
-  
+
+    my $b = CreateArena;
+    my $t = $b->CreateTree;
+
     Vmovdqu8 zmm31, "[$Sk]";
     Vmovdqu8 zmm30, "[$Sd]";
     Vmovdqu8 zmm29, "[$Sn]";
-  
+
     Vmovdqu8 zmm28, "[$sk]";
     Vmovdqu8 zmm27, "[$sd]";
     Vmovdqu8 zmm26, "[$sn]";
-  
+
     Vmovdqu8 zmm25, "[$rk]";
     Vmovdqu8 zmm24, "[$rd]";
     Vmovdqu8 zmm23, "[$rn]";
-  
+
      $t->splitFullLeftNode;
-  
+
     PrintOutRegisterInHex reverse zmm(23..31);
-  
+
     ok Assemble(debug => 0, eq => <<END);
    zmm31: 0000 00FF 0000 000D   0000 0000 0000 0000   0000 001C 0000 001B   0000 001A 0000 0019   0000 0018 0000 0017   0000 0016 0000 0015   0000 0014 0000 0013   0000 0012 0000 0011
    zmm30: 0000 00EE 0000 00DD   0000 0000 0000 0000   0000 001C 0000 001B   0000 001A 0000 0019   0000 0018 0000 0017   0000 0016 0000 0015   0000 0014 0000 0013   0000 0012 0000 0011
@@ -14062,14 +14068,14 @@ B<Example:>
    zmm24: 0000 00B2 0000 00CC   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 000E 0000 000D   0000 000C 0000 000B   0000 000A 0000 0009
    zmm23: 0000 00B3 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 000E 0000 000D   0000 000C 0000 000B   0000 000A 0000 0009
   END
-  
 
-=head2 Nasm::X86::BlockMultiWayTree::splitFullRightNode($t)
+
+=head2 Nasm::X86::Tree::splitFullRightNode($t)
 
 Split a full right node block held in 25..23 whose parent is in 31..29 and place the new left block in 28..26.  The loop and length fields are assumed to be authoritative and hence are preserved.
 
      Parameter  Description
-  1  $t         Block multi way tree descriptor
+  1  $t         Tree descriptor
 
 B<Example:>
 
@@ -14077,34 +14083,34 @@ B<Example:>
     my $tk = Rd(1..12, 0, 0, 12,      0xC1);
     my $td = Rd(1..12, 0, 0,  0,      0xC2);
     my $tn = Rd(1, 0xBB, 3..13, 0, 0, 0xCC);
-  
+
     my $lk = Rd(17..30, 14,   0xA1);
     my $ld = Rd(17..30, 0xCC, 0xA2);
     my $ln = Rd(17..31,       0xAA);
-  
+
     my $rk = Rd(17..30, 14,   0xB1);
     my $rd = Rd(17..30, 0xCC, 0xB2);
     my $rn = Rd(17..31,       0xBB);
-  
-    my $b = CreateByteString;
-    my $t = $b->CreateBlockMultiWayTree;
-  
+
+    my $b = CreateArena;
+    my $t = $b->CreateTree;
+
     Vmovdqu8 zmm31, "[$tk]";
     Vmovdqu8 zmm30, "[$td]";
     Vmovdqu8 zmm29, "[$tn]";
-  
+
     Vmovdqu8 zmm28, "[$lk]";
     Vmovdqu8 zmm27, "[$ld]";
     Vmovdqu8 zmm26, "[$ln]";
-  
+
     Vmovdqu8 zmm25, "[$rk]";
     Vmovdqu8 zmm24, "[$rd]";
     Vmovdqu8 zmm23, "[$rn]";
-  
+
     $t->splitFullRightNode;
-  
+
     PrintOutRegisterInHex reverse zmm(23..31);
-  
+
     ok Assemble(debug => 0, eq => <<END);
    zmm31: 0000 00C1 0000 000D   0000 0000 0000 000C   0000 000B 0000 000A   0000 0009 0000 0008   0000 0007 0000 0006   0000 0005 0000 0004   0000 0003 0000 0002   0000 0018 0000 0001
    zmm30: 0000 00C2 0000 0000   0000 0000 0000 000C   0000 000B 0000 000A   0000 0009 0000 0008   0000 0007 0000 0006   0000 0005 0000 0004   0000 0003 0000 0002   0000 0018 0000 0001
@@ -14116,181 +14122,181 @@ B<Example:>
    zmm24: 0000 00B2 0000 00CC   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 001E 0000 001D   0000 001C 0000 001B   0000 001A 0000 0019
    zmm23: 0000 00BB 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 001E 0000 001D   0000 001C 0000 001B   0000 001A 0000 0019
   END
-  
 
-=head2 Nasm::X86::BlockMultiWayTree::findAndSplit($t, @variables)
+
+=head2 Nasm::X86::Tree::findAndSplit($t, @variables)
 
 Find a key in a tree which is known to contain at least one key splitting full nodes along the path to the key.
 
      Parameter   Description
-  1  $t          Block multi way tree descriptor
+  1  $t          Tree descriptor
   2  @variables  Variables
 
-=head2 Nasm::X86::BlockMultiWayTree::getKeysData($t, $offset, $zmmKeys, $zmmData)
+=head2 Nasm::X86::Tree::getKeysData($t, $offset, $zmmKeys, $zmmData)
 
 Load the keys and data blocks for a node
 
      Parameter  Description
-  1  $t         Block multi way tree descriptor
+  1  $t         Tree descriptor
   2  $offset    Offset as a variable
   3  $zmmKeys   Numbered zmm for keys
   4  $zmmData   Numbered data for keys
 
-=head2 Nasm::X86::BlockMultiWayTree::putKeysData($t, $offset, $zmmKeys, $zmmData)
+=head2 Nasm::X86::Tree::putKeysData($t, $offset, $zmmKeys, $zmmData)
 
 Save the key and data blocks for a node
 
      Parameter  Description
-  1  $t         Block multi way tree descriptor
+  1  $t         Tree descriptor
   2  $offset    Offset as a variable
   3  $zmmKeys   Numbered zmm for keys
   4  $zmmData   Numbered data for keys
 
-=head2 Nasm::X86::BlockMultiWayTree::getNode($t, $offset, $zmmNode)
+=head2 Nasm::X86::Tree::getNode($t, $offset, $zmmNode)
 
 Load the child nodes for a node
 
      Parameter  Description
-  1  $t         Block multi way tree descriptor
+  1  $t         Tree descriptor
   2  $offset    Offset of nodes
   3  $zmmNode   Numbered zmm for keys
 
-=head2 Nasm::X86::BlockMultiWayTree::getKeysDataNode($t, $offset, $zmmKeys, $zmmData, $zmmNode)
+=head2 Nasm::X86::Tree::getKeysDataNode($t, $offset, $zmmKeys, $zmmData, $zmmNode)
 
 Load the keys, data and child nodes for a node
 
      Parameter  Description
-  1  $t         Block multi way tree descriptor
+  1  $t         Tree descriptor
   2  $offset    Offset as a variable
   3  $zmmKeys   Numbered zmm for keys
   4  $zmmData   Numbered data for keys
   5  $zmmNode   Numbered numbered for keys
 
-=head2 Nasm::X86::BlockMultiWayTree::putKeysDataNode($t, $offset, $zmmKeys, $zmmData, $zmmNode)
+=head2 Nasm::X86::Tree::putKeysDataNode($t, $offset, $zmmKeys, $zmmData, $zmmNode)
 
 Save the keys, data and child nodes for a node
 
      Parameter  Description
-  1  $t         Block multi way tree descriptor
+  1  $t         Tree descriptor
   2  $offset    Offset as a variable
   3  $zmmKeys   Numbered zmm for keys
   4  $zmmData   Numbered data for keys
   5  $zmmNode   Numbered numbered for keys
 
-=head2 Nasm::X86::BlockMultiWayTree::getLengthInKeys($t, $zmm)
+=head2 Nasm::X86::Tree::getLengthInKeys($t, $zmm)
 
 Get the length of the keys block in the numbered zmm and return it as a variable
 
      Parameter  Description
-  1  $t         Block multi way tree descriptor
+  1  $t         Tree descriptor
   2  $zmm       Zmm number
 
-=head2 Nasm::X86::BlockMultiWayTree::putLengthInKeys($t, $zmm, $length)
+=head2 Nasm::X86::Tree::putLengthInKeys($t, $zmm, $length)
 
 Get the length of the block in the numbered zmm from the specified variable
 
      Parameter  Description
-  1  $t         Block multi way tree
+  1  $t         Tree
   2  $zmm       Zmm number
   3  $length    Length variable
 
-=head2 Nasm::X86::BlockMultiWayTree::getUpFromData($t, $zmm)
+=head2 Nasm::X86::Tree::getUpFromData($t, $zmm)
 
 Get the up offset from the data block in the numbered zmm and return it as a variable
 
      Parameter  Description
-  1  $t         Block multi way tree descriptor
+  1  $t         Tree descriptor
   2  $zmm       Zmm number
 
-=head2 Nasm::X86::BlockMultiWayTree::putUpIntoData($t, $offset, $zmm)
+=head2 Nasm::X86::Tree::putUpIntoData($t, $offset, $zmm)
 
 Put the offset of the parent keys block expressed as a variable into the numbered zmm
 
      Parameter  Description
-  1  $t         Block multi way tree descriptor
+  1  $t         Tree descriptor
   2  $offset    Variable containing up offset
   3  $zmm       Zmm number
 
-=head2 Nasm::X86::BlockMultiWayTree::getLoop($t, $zmm, $transfer)
+=head2 Nasm::X86::Tree::getLoop($t, $zmm, $transfer)
 
 Return the value of the loop field as a variable
 
      Parameter  Description
-  1  $t         Block multi way tree descriptor
+  1  $t         Tree descriptor
   2  $zmm       Numbered zmm
   3  $transfer  Optional transfer register
 
-=head2 Nasm::X86::BlockMultiWayTree::putLoop($t, $value, $zmm)
+=head2 Nasm::X86::Tree::putLoop($t, $value, $zmm)
 
 Set the value of the loop field from a variable
 
      Parameter  Description
-  1  $t         Block multi way tree descriptor
+  1  $t         Tree descriptor
   2  $value     Variable containing offset of next loop entry
   3  $zmm       Numbered zmm
 
-=head2 Nasm::X86::BlockMultiWayTree::nodeFromData($t, $data, $node)
+=head2 Nasm::X86::Tree::nodeFromData($t, $data, $node)
 
 Load the the node block into the numbered zmm corresponding to the data block held in the numbered zmm.
 
      Parameter  Description
-  1  $t         Block multi way tree descriptor
+  1  $t         Tree descriptor
   2  $data      Numbered zmm containing data
   3  $node      Numbered zmm to hold node block
 
-=head2 Nasm::X86::BlockMultiWayTree::address($t)
+=head2 Nasm::X86::Tree::address($t)
 
-Address of the byte string containing a block multi way tree
+Address of the arena containing a tree
 
      Parameter  Description
-  1  $t         Block multi way tree descriptor
+  1  $t         Tree descriptor
 
-=head2 Nasm::X86::BlockMultiWayTree::allocBlock($t, @variables)
+=head2 Nasm::X86::Tree::allocBlock($t, @variables)
 
-Allocate a block to hold a zmm register in the specified byte string and return the offset of the block in a variable
+Allocate a block to hold a zmm register in the specified arena and return the offset of the block in a variable
 
      Parameter   Description
-  1  $t          Block multi way tree descriptor
+  1  $t          Tree descriptor
   2  @variables  Variables
 
-=head2 Nasm::X86::BlockMultiWayTree::isTree($t, $register, $zmm)
+=head2 Nasm::X86::Tree::isTree($t, $register, $zmm)
 
-Set the Zero Flag to oppose the tree bit in the numbered zmm register holding the keys of a node to indicate whether the data element indicated by the specified register is an offset to a sub tree in the containing byte string or not.
+Set the Zero Flag to oppose the tree bit in the numbered zmm register holding the keys of a node to indicate whether the data element indicated by the specified register is an offset to a sub tree in the containing arena or not.
 
      Parameter  Description
-  1  $t         Block multi way tree descriptor
+  1  $t         Tree descriptor
   2  $register  Word register holding a bit shifted into the position to test
   3  $zmm       Numbered zmm register holding the keys for a node in the tree
 
-=head2 Nasm::X86::BlockMultiWayTree::setOrClearTree($t, $set, $register, $zmm)
+=head2 Nasm::X86::Tree::setOrClearTree($t, $set, $register, $zmm)
 
-Set or clear the tree bit in the numbered zmm register holding the keys of a node to indicate that the data element indicated by the specified register is an offset to a sub tree in the containing byte string.
+Set or clear the tree bit in the numbered zmm register holding the keys of a node to indicate that the data element indicated by the specified register is an offset to a sub tree in the containing arena.
 
      Parameter  Description
-  1  $t         Block multi way tree descriptor
+  1  $t         Tree descriptor
   2  $set       Set if true else clear
   3  $register  Register holding a single one in the lowest 14 bits at the insertion point
   4  $zmm       Numbered zmm register holding the keys for a node in the tree
 
-=head2 Nasm::X86::BlockMultiWayTree::setTree($t, $register, $zmm)
+=head2 Nasm::X86::Tree::setTree($t, $register, $zmm)
 
-Set the tree bit in the numbered zmm register holding the keys of a node to indicate that the data element indexed by the specified register is an offset to a sub tree in the containing byte string.
+Set the tree bit in the numbered zmm register holding the keys of a node to indicate that the data element indexed by the specified register is an offset to a sub tree in the containing arena.
 
      Parameter  Description
-  1  $t         Block multi way tree descriptor
+  1  $t         Tree descriptor
   2  $register  Register holding data element index 0..13
   3  $zmm       Numbered zmm register holding the keys for a node in the tree
 
-=head2 Nasm::X86::BlockMultiWayTree::clearTree($t, $register, $zmm)
+=head2 Nasm::X86::Tree::clearTree($t, $register, $zmm)
 
-Clear the tree bit in the numbered zmm register holding the keys of a node to indicate that the data element indexed by the specified register is an offset to a sub tree in the containing byte string.
+Clear the tree bit in the numbered zmm register holding the keys of a node to indicate that the data element indexed by the specified register is an offset to a sub tree in the containing arena.
 
      Parameter  Description
-  1  $t         Block multi way tree descriptor
+  1  $t         Tree descriptor
   2  $register  Register holding data element index 0..13
   3  $zmm       Numbered zmm register holding the keys for a node in the tree
 
-=head2 Nasm::X86::BlockMultiWayTree::getTreeBits($t, $zmm, $register)
+=head2 Nasm::X86::Tree::getTreeBits($t, $zmm, $register)
 
 Load the tree bits from the numbered zmm into the specified register.
 
@@ -14299,7 +14305,7 @@ Load the tree bits from the numbered zmm into the specified register.
   2  $zmm       Numbered zmm
   3  $register  Target register
 
-=head2 Nasm::X86::BlockMultiWayTree::putTreeBits($t, $zmm, $register)
+=head2 Nasm::X86::Tree::putTreeBits($t, $zmm, $register)
 
 Put the tree bits in the specified register into the numbered zmm.
 
@@ -14308,7 +14314,7 @@ Put the tree bits in the specified register into the numbered zmm.
   2  $zmm       Numbered zmm
   3  $register  Target register
 
-=head2 Nasm::X86::BlockMultiWayTree::expandTreeBitsWithZeroOrOne($t, $onz, $zmm, $point)
+=head2 Nasm::X86::Tree::expandTreeBitsWithZeroOrOne($t, $onz, $zmm, $point)
 
 Insert a zero or one into the tree bits field in the numbered zmm at the specified point
 
@@ -14318,7 +14324,7 @@ Insert a zero or one into the tree bits field in the numbered zmm at the specifi
   3  $zmm       Numbered zmm
   4  $point     Register indicating point
 
-=head2 Nasm::X86::BlockMultiWayTree::expandTreeBitsWithZero($t, $zmm, $point)
+=head2 Nasm::X86::Tree::expandTreeBitsWithZero($t, $zmm, $point)
 
 Insert a zero into the tree bits field in the numbered zmm at the specified point
 
@@ -14327,7 +14333,7 @@ Insert a zero into the tree bits field in the numbered zmm at the specified poin
   2  $zmm       Numbered zmm
   3  $point     Register indicating point
 
-=head2 Nasm::X86::BlockMultiWayTree::expandTreeBitsWithOne($t, $zmm, $point)
+=head2 Nasm::X86::Tree::expandTreeBitsWithOne($t, $zmm, $point)
 
 Insert a one into the tree bits field in the numbered zmm at the specified point
 
@@ -14399,7 +14405,7 @@ Total size in bytes of all files assembled during testing
 
 21 L<cr|/cr> - Call a subroutine with a reordering of the registers.
 
-22 L<CreateByteString|/CreateByteString> - Create an relocatable string of bytes in an arena and returns its address in rax.
+22 L<CreateArena|/CreateArena> - Create an relocatable arena and returns its address in rax.
 
 23 L<Cstrlen|/Cstrlen> - Length of the C style string addressed by rax returning the length in r15
 
@@ -14419,7 +14425,7 @@ Total size in bytes of all files assembled during testing
 
 31 L<Else|/Else> - Else body for an If statement
 
-32 L<executeFileViaBash|/executeFileViaBash> - Execute the file named in the byte string addressed by rax with bash
+32 L<executeFileViaBash|/executeFileViaBash> - Execute the file named in the arena addressed by rax with bash
 
 33 L<Exit|/Exit> - Exit with the specified return code or zero if no return code supplied.
 
@@ -14533,229 +14539,229 @@ Total size in bytes of all files assembled during testing
 
 88 L<MaskMemoryInRange4_22|/MaskMemoryInRange4_22> - Write the specified byte into locations in the target mask that correspond to the locations in the source that contain 4 bytes in the specified range.
 
-89 L<Nasm::X86::BlockArray::address|/Nasm::X86::BlockArray::address> - Address of a block string
+89 L<Nasm::X86::Arena::allocate|/Nasm::X86::Arena::allocate> - Allocate the amount of space indicated in rdi in the arena addressed by rax and return the offset of the allocation in the arena in rdi
 
-90 L<Nasm::X86::BlockArray::allocBlock|/Nasm::X86::BlockArray::allocBlock> - Allocate a block to hold a zmm register in the specified byte string and return the offset of the block in a variable
+90 L<Nasm::X86::Arena::allocBlock|/Nasm::X86::Arena::allocBlock> - Allocate a block to hold a zmm register in the specified arena and return the offset of the block in a variable
 
-91 L<Nasm::X86::BlockArray::dump|/Nasm::X86::BlockArray::dump> - Dump a block array
+91 L<Nasm::X86::Arena::allocZmmBlock|/Nasm::X86::Arena::allocZmmBlock> - Allocate a block to hold a zmm register in the specified arena and return the offset of the block in a variable
 
-92 L<Nasm::X86::BlockArray::get|/Nasm::X86::BlockArray::get> - Get an element from the array
+92 L<Nasm::X86::Arena::append|/Nasm::X86::Arena::append> - Append one arena to another
 
-93 L<Nasm::X86::BlockArray::pop|/Nasm::X86::BlockArray::pop> - Pop an element from an array
+93 L<Nasm::X86::Arena::blockSize|/Nasm::X86::Arena::blockSize> - Size of a block
 
-94 L<Nasm::X86::BlockArray::push|/Nasm::X86::BlockArray::push> - Push an element onto the array
+94 L<Nasm::X86::Arena::chain|/Nasm::X86::Arena::chain> - Return a variable with the end point of a chain of double words in the arena starting at the specified variable.
 
-95 L<Nasm::X86::BlockArray::put|/Nasm::X86::BlockArray::put> - Put an element into an array as long as it is with in its limits established by pushing.
+95 L<Nasm::X86::Arena::char|/Nasm::X86::Arena::char> - Append a character expressed as a decimal number to the arena addressed by rax
 
-96 L<Nasm::X86::BlockMultiWayTree::address|/Nasm::X86::BlockMultiWayTree::address> - Address of the byte string containing a block multi way tree
+96 L<Nasm::X86::Arena::clear|/Nasm::X86::Arena::clear> - Clear the arena addressed by rax
 
-97 L<Nasm::X86::BlockMultiWayTree::allocBlock|/Nasm::X86::BlockMultiWayTree::allocBlock> - Allocate a block to hold a zmm register in the specified byte string and return the offset of the block in a variable
+97 L<Nasm::X86::Arena::CreateArray|/Nasm::X86::Arena::CreateArray> - Create a array in an arena
 
-98 L<Nasm::X86::BlockMultiWayTree::allocKeysDataNode|/Nasm::X86::BlockMultiWayTree::allocKeysDataNode> - Allocate a keys/data/node block and place it in the numbered zmm registers
+98 L<Nasm::X86::Arena::CreateString|/Nasm::X86::Arena::CreateString> - Create a string from a doubly link linked list of 64 byte blocks linked via 4 byte offsets in the arena addressed by rax and return its descriptor
 
-99 L<Nasm::X86::BlockMultiWayTree::by|/Nasm::X86::BlockMultiWayTree::by> - Call the specified body with each (key, data) from the specified tree in order
+99 L<Nasm::X86::Arena::CreateTree|/Nasm::X86::Arena::CreateTree> - Create a tree in an arena.
 
-100 L<Nasm::X86::BlockMultiWayTree::clearTree|/Nasm::X86::BlockMultiWayTree::clearTree> - Clear the tree bit in the numbered zmm register holding the keys of a node to indicate that the data element indexed by the specified register is an offset to a sub tree in the containing byte string.
+100 L<Nasm::X86::Arena::DescribeTree|/Nasm::X86::Arena::DescribeTree> - Return a descriptor for a tree in the specified arena
 
-101 L<Nasm::X86::BlockMultiWayTree::Clone|/Nasm::X86::BlockMultiWayTree::Clone> - Clone the specified tree descriptions
+101 L<Nasm::X86::Arena::dump|/Nasm::X86::Arena::dump> - Dump details of an arena
 
-102 L<Nasm::X86::BlockMultiWayTree::depth|/Nasm::X86::BlockMultiWayTree::depth> - Return the depth of a node within a tree.
+102 L<Nasm::X86::Arena::firstFreeBlock|/Nasm::X86::Arena::firstFreeBlock> - Create and load a variable with the first free block on the free block chain or zero if no such block in the given arena
 
-103 L<Nasm::X86::BlockMultiWayTree::expandTreeBitsWithOne|/Nasm::X86::BlockMultiWayTree::expandTreeBitsWithOne> - Insert a one into the tree bits field in the numbered zmm at the specified point
+103 L<Nasm::X86::Arena::freeBlock|/Nasm::X86::Arena::freeBlock> - Free a block in an arena by placing it on the free chain
 
-104 L<Nasm::X86::BlockMultiWayTree::expandTreeBitsWithZero|/Nasm::X86::BlockMultiWayTree::expandTreeBitsWithZero> - Insert a zero into the tree bits field in the numbered zmm at the specified point
+104 L<Nasm::X86::Arena::getBlock|/Nasm::X86::Arena::getBlock> - Get the block with the specified offset in the specified string and return it in the numbered zmm
 
-105 L<Nasm::X86::BlockMultiWayTree::expandTreeBitsWithZeroOrOne|/Nasm::X86::BlockMultiWayTree::expandTreeBitsWithZeroOrOne> - Insert a zero or one into the tree bits field in the numbered zmm at the specified point
+105 L<Nasm::X86::Arena::length|/Nasm::X86::Arena::length> - Get the length of an arena
 
-106 L<Nasm::X86::BlockMultiWayTree::find|/Nasm::X86::BlockMultiWayTree::find> - Find a key in a tree and test whether the found data is a sub tree.
+106 L<Nasm::X86::Arena::m|/Nasm::X86::Arena::m> - Append the content with length rdi addressed by rsi to the arena addressed by rax
 
-107 L<Nasm::X86::BlockMultiWayTree::findAndClone|/Nasm::X86::BlockMultiWayTree::findAndClone> - Find a key in the specified tree and clone it is it is a sub tree.
+107 L<Nasm::X86::Arena::makeReadOnly|/Nasm::X86::Arena::makeReadOnly> - Make an arena read only
 
-108 L<Nasm::X86::BlockMultiWayTree::findAndSplit|/Nasm::X86::BlockMultiWayTree::findAndSplit> - Find a key in a tree which is known to contain at least one key splitting full nodes along the path to the key.
+108 L<Nasm::X86::Arena::makeWriteable|/Nasm::X86::Arena::makeWriteable> - Make an arena writable
 
-109 L<Nasm::X86::BlockMultiWayTree::getKeysData|/Nasm::X86::BlockMultiWayTree::getKeysData> - Load the keys and data blocks for a node
+109 L<Nasm::X86::Arena::nl|/Nasm::X86::Arena::nl> - Append a new line to the arena addressed by rax
 
-110 L<Nasm::X86::BlockMultiWayTree::getKeysDataNode|/Nasm::X86::BlockMultiWayTree::getKeysDataNode> - Load the keys, data and child nodes for a node
+110 L<Nasm::X86::Arena::out|/Nasm::X86::Arena::out> - Print the specified arena addressed by rax on sysout
 
-111 L<Nasm::X86::BlockMultiWayTree::getLengthInKeys|/Nasm::X86::BlockMultiWayTree::getLengthInKeys> - Get the length of the keys block in the numbered zmm and return it as a variable
+111 L<Nasm::X86::Arena::putBlock|/Nasm::X86::Arena::putBlock> - Write the numbered zmm to the block at the specified offset in the specified arena
 
-112 L<Nasm::X86::BlockMultiWayTree::getLoop|/Nasm::X86::BlockMultiWayTree::getLoop> - Return the value of the loop field as a variable
+112 L<Nasm::X86::Arena::putChain|/Nasm::X86::Arena::putChain> - Write the double word in the specified variable to the double word location at the the specified offset in the specified arena.
 
-113 L<Nasm::X86::BlockMultiWayTree::getNode|/Nasm::X86::BlockMultiWayTree::getNode> - Load the child nodes for a node
+113 L<Nasm::X86::Arena::q|/Nasm::X86::Arena::q> - Append a constant string to the arena
 
-114 L<Nasm::X86::BlockMultiWayTree::getTreeBits|/Nasm::X86::BlockMultiWayTree::getTreeBits> - Load the tree bits from the numbered zmm into the specified register.
+114 L<Nasm::X86::Arena::ql|/Nasm::X86::Arena::ql> - Append a quoted string containing new line characters to the arena addressed by rax
 
-115 L<Nasm::X86::BlockMultiWayTree::getUpFromData|/Nasm::X86::BlockMultiWayTree::getUpFromData> - Get the up offset from the data block in the numbered zmm and return it as a variable
+115 L<Nasm::X86::Arena::read|/Nasm::X86::Arena::read> - Read the named file (terminated with a zero byte) and place it into the named arena.
 
-116 L<Nasm::X86::BlockMultiWayTree::insert|/Nasm::X86::BlockMultiWayTree::insert> - Insert a dword into into the specified tree at the specified key.
+116 L<Nasm::X86::Arena::setFirstFreeBlock|/Nasm::X86::Arena::setFirstFreeBlock> - Set the first free block field from a variable
 
-117 L<Nasm::X86::BlockMultiWayTree::insertDataOrTree|/Nasm::X86::BlockMultiWayTree::insertDataOrTree> - Insert either a key, data pair into the tree or create a sub tree at the specified key (if it does not already exist) and return the offset of the first block of the sub tree in the data variable.
+117 L<Nasm::X86::Arena::updateSpace|/Nasm::X86::Arena::updateSpace> - Make sure that the arena addressed by rax has enough space to accommodate content of length rdi
 
-118 L<Nasm::X86::BlockMultiWayTree::insertTree|/Nasm::X86::BlockMultiWayTree::insertTree> - Insert a sub tree into the specified tree tree under the specified key.
+118 L<Nasm::X86::Arena::write|/Nasm::X86::Arena::write> - Write the content in an arena addressed by rax to a temporary file and replace the arena content with the name of the  temporary file
 
-119 L<Nasm::X86::BlockMultiWayTree::insertTreeAndClone|/Nasm::X86::BlockMultiWayTree::insertTreeAndClone> - Insert a new sub tree into the specified tree tree under the specified key and return a descriptor for it.
+119 L<Nasm::X86::Arena::z|/Nasm::X86::Arena::z> - Append a trailing zero to the arena addressed by rax
 
-120 L<Nasm::X86::BlockMultiWayTree::isTree|/Nasm::X86::BlockMultiWayTree::isTree> - Set the Zero Flag to oppose the tree bit in the numbered zmm register holding the keys of a node to indicate whether the data element indicated by the specified register is an offset to a sub tree in the containing byte string or not.
+120 L<Nasm::X86::Array::address|/Nasm::X86::Array::address> - Address of a string
 
-121 L<Nasm::X86::BlockMultiWayTree::iterator|/Nasm::X86::BlockMultiWayTree::iterator> - Iterate through a multi way tree
+121 L<Nasm::X86::Array::allocBlock|/Nasm::X86::Array::allocBlock> - Allocate a block to hold a zmm register in the specified arena and return the offset of the block in a variable
 
-122 L<Nasm::X86::BlockMultiWayTree::Iterator::next|/Nasm::X86::BlockMultiWayTree::Iterator::next> - Next element in the tree
+122 L<Nasm::X86::Array::dump|/Nasm::X86::Array::dump> - Dump a array
 
-123 L<Nasm::X86::BlockMultiWayTree::leftMost|/Nasm::X86::BlockMultiWayTree::leftMost> - Return the left most node
+123 L<Nasm::X86::Array::get|/Nasm::X86::Array::get> - Get an element from the array
 
-124 L<Nasm::X86::BlockMultiWayTree::leftOrRightMost|/Nasm::X86::BlockMultiWayTree::leftOrRightMost> - Return the left most or right most node
+124 L<Nasm::X86::Array::pop|/Nasm::X86::Array::pop> - Pop an element from an array
 
-125 L<Nasm::X86::BlockMultiWayTree::nodeFromData|/Nasm::X86::BlockMultiWayTree::nodeFromData> - Load the the node block into the numbered zmm corresponding to the data block held in the numbered zmm.
+125 L<Nasm::X86::Array::push|/Nasm::X86::Array::push> - Push an element onto the array
 
-126 L<Nasm::X86::BlockMultiWayTree::print|/Nasm::X86::BlockMultiWayTree::print> - Print a tree
+126 L<Nasm::X86::Array::put|/Nasm::X86::Array::put> - Put an element into an array as long as it is with in its limits established by pushing.
 
-127 L<Nasm::X86::BlockMultiWayTree::putKeysData|/Nasm::X86::BlockMultiWayTree::putKeysData> - Save the key and data blocks for a node
+127 L<Nasm::X86::LocalData::allocate8|/Nasm::X86::LocalData::allocate8> - Add some 8 byte local variables and return an array of variable definitions
 
-128 L<Nasm::X86::BlockMultiWayTree::putKeysDataNode|/Nasm::X86::BlockMultiWayTree::putKeysDataNode> - Save the keys, data and child nodes for a node
+128 L<Nasm::X86::LocalData::free|/Nasm::X86::LocalData::free> - Free a local data area on the stack
 
-129 L<Nasm::X86::BlockMultiWayTree::putLengthInKeys|/Nasm::X86::BlockMultiWayTree::putLengthInKeys> - Get the length of the block in the numbered zmm from the specified variable
+129 L<Nasm::X86::LocalData::start|/Nasm::X86::LocalData::start> - Start a local data area on the stack
 
-130 L<Nasm::X86::BlockMultiWayTree::putLoop|/Nasm::X86::BlockMultiWayTree::putLoop> - Set the value of the loop field from a variable
+130 L<Nasm::X86::LocalData::variable|/Nasm::X86::LocalData::variable> - Add a local variable
 
-131 L<Nasm::X86::BlockMultiWayTree::putTreeBits|/Nasm::X86::BlockMultiWayTree::putTreeBits> - Put the tree bits in the specified register into the numbered zmm.
+131 L<Nasm::X86::LocalVariable::stack|/Nasm::X86::LocalVariable::stack> - Address a local variable on the stack
 
-132 L<Nasm::X86::BlockMultiWayTree::putUpIntoData|/Nasm::X86::BlockMultiWayTree::putUpIntoData> - Put the offset of the parent keys block expressed as a variable into the numbered zmm
+132 L<Nasm::X86::String::address|/Nasm::X86::String::address> - Address of a string
 
-133 L<Nasm::X86::BlockMultiWayTree::reParent|/Nasm::X86::BlockMultiWayTree::reParent> - Reparent the children of a node held in registers.
+133 L<Nasm::X86::String::allocBlock|/Nasm::X86::String::allocBlock> - Allocate a block to hold a zmm register in the specified arena and return the offset of the block in a variable
 
-134 L<Nasm::X86::BlockMultiWayTree::rightMost|/Nasm::X86::BlockMultiWayTree::rightMost> - Return the right most node
+134 L<Nasm::X86::String::append|/Nasm::X86::String::append> - Append the specified content in memory to the specified string
 
-135 L<Nasm::X86::BlockMultiWayTree::setOrClearTree|/Nasm::X86::BlockMultiWayTree::setOrClearTree> - Set or clear the tree bit in the numbered zmm register holding the keys of a node to indicate that the data element indicated by the specified register is an offset to a sub tree in the containing byte string.
+135 L<Nasm::X86::String::clear|/Nasm::X86::String::clear> - Clear the block by freeing all but the first block
 
-136 L<Nasm::X86::BlockMultiWayTree::setTree|/Nasm::X86::BlockMultiWayTree::setTree> - Set the tree bit in the numbered zmm register holding the keys of a node to indicate that the data element indexed by the specified register is an offset to a sub tree in the containing byte string.
+136 L<Nasm::X86::String::concatenate|/Nasm::X86::String::concatenate> - Concatenate two strings by appending a copy of the source to the target string.
 
-137 L<Nasm::X86::BlockMultiWayTree::splitFullLeftNode|/Nasm::X86::BlockMultiWayTree::splitFullLeftNode> - Split a full left node block held in 28.
+137 L<Nasm::X86::String::deleteChar|/Nasm::X86::String::deleteChar> - Delete a character in a string
 
-138 L<Nasm::X86::BlockMultiWayTree::splitFullLeftOrRightNode|/Nasm::X86::BlockMultiWayTree::splitFullLeftOrRightNode> - Split a full a full left node (held in 28.
+138 L<Nasm::X86::String::dump|/Nasm::X86::String::dump> - Dump a string to sysout
 
-139 L<Nasm::X86::BlockMultiWayTree::splitFullRightNode|/Nasm::X86::BlockMultiWayTree::splitFullRightNode> - Split a full right node block held in 25.
+139 L<Nasm::X86::String::getBlock|/Nasm::X86::String::getBlock> - Get the block with the specified offset in the specified string and return it in the numbered zmm
 
-140 L<Nasm::X86::BlockMultiWayTree::splitFullRoot|/Nasm::X86::BlockMultiWayTree::splitFullRoot> - Split a full root block held in 31.
+140 L<Nasm::X86::String::getBlockLength|/Nasm::X86::String::getBlockLength> - Get the block length of the numbered zmm and return it in a variable
 
-141 L<Nasm::X86::BlockMultiWayTree::splitNode|/Nasm::X86::BlockMultiWayTree::splitNode> - Split a node given its offset in a byte string retaining the key being inserted in the node split while putting the remainder to the left or right.
+141 L<Nasm::X86::String::getCharacter|/Nasm::X86::String::getCharacter> - Get a character from a string
 
-142 L<Nasm::X86::BlockMultiWayTree::transferTreeBitsFromLeft|/Nasm::X86::BlockMultiWayTree::transferTreeBitsFromLeft> - Transfer tree bits when splitting a full left node
+142 L<Nasm::X86::String::getNextAndPrevBlockOffsetFromZmm|/Nasm::X86::String::getNextAndPrevBlockOffsetFromZmm> - Get the offsets of the next and previous blocks as variables from the specified zmm
 
-143 L<Nasm::X86::BlockMultiWayTree::transferTreeBitsFromLeftOrRight|/Nasm::X86::BlockMultiWayTree::transferTreeBitsFromLeftOrRight> - Transfer tree bits when splitting a full left or right node
+143 L<Nasm::X86::String::insertChar|/Nasm::X86::String::insertChar> - Insert a character into a string
 
-144 L<Nasm::X86::BlockMultiWayTree::transferTreeBitsFromParent|/Nasm::X86::BlockMultiWayTree::transferTreeBitsFromParent> - Transfer tree bits when splitting a full node
+144 L<Nasm::X86::String::len|/Nasm::X86::String::len> - Find the length of a string
 
-145 L<Nasm::X86::BlockMultiWayTree::transferTreeBitsFromRight|/Nasm::X86::BlockMultiWayTree::transferTreeBitsFromRight> - Transfer tree bits when splitting a full right node
+145 L<Nasm::X86::String::putBlock|/Nasm::X86::String::putBlock> - Write the numbered zmm to the block at the specified offset in the specified arena
 
-146 L<Nasm::X86::BlockString::address|/Nasm::X86::BlockString::address> - Address of a block string
+146 L<Nasm::X86::String::putNextandPrevBlockOffsetIntoZmm|/Nasm::X86::String::putNextandPrevBlockOffsetIntoZmm> - Save next and prev offsets into a zmm representing a block
 
-147 L<Nasm::X86::BlockString::allocBlock|/Nasm::X86::BlockString::allocBlock> - Allocate a block to hold a zmm register in the specified byte string and return the offset of the block in a variable
+147 L<Nasm::X86::String::setBlockLengthInZmm|/Nasm::X86::String::setBlockLengthInZmm> - Set the block length of the numbered zmm to the specified length
 
-148 L<Nasm::X86::BlockString::append|/Nasm::X86::BlockString::append> - Append the specified content in memory to the specified block string
+148 L<Nasm::X86::Structure::field|/Nasm::X86::Structure::field> - Add a field of the specified length with an optional comment
 
-149 L<Nasm::X86::BlockString::clear|/Nasm::X86::BlockString::clear> - Clear the block by freeing all but the first block
+149 L<Nasm::X86::StructureField::addr|/Nasm::X86::StructureField::addr> - Address a field in a structure by either the default register or the named register
 
-150 L<Nasm::X86::BlockString::concatenate|/Nasm::X86::BlockString::concatenate> - Concatenate two block strings by appending a copy of the source to the target block string.
+150 L<Nasm::X86::Sub::call|/Nasm::X86::Sub::call> - Call a sub passing it some parameters
 
-151 L<Nasm::X86::BlockString::deleteChar|/Nasm::X86::BlockString::deleteChar> - Delete a character in a block string
+151 L<Nasm::X86::Tree::address|/Nasm::X86::Tree::address> - Address of the arena containing a tree
 
-152 L<Nasm::X86::BlockString::dump|/Nasm::X86::BlockString::dump> - Dump a block string to sysout
+152 L<Nasm::X86::Tree::allocBlock|/Nasm::X86::Tree::allocBlock> - Allocate a block to hold a zmm register in the specified arena and return the offset of the block in a variable
 
-153 L<Nasm::X86::BlockString::getBlock|/Nasm::X86::BlockString::getBlock> - Get the block with the specified offset in the specified block string and return it in the numbered zmm
+153 L<Nasm::X86::Tree::allocKeysDataNode|/Nasm::X86::Tree::allocKeysDataNode> - Allocate a keys/data/node block and place it in the numbered zmm registers
 
-154 L<Nasm::X86::BlockString::getBlockLength|/Nasm::X86::BlockString::getBlockLength> - Get the block length of the numbered zmm and return it in a variable
+154 L<Nasm::X86::Tree::by|/Nasm::X86::Tree::by> - Call the specified body with each (key, data) from the specified tree in order
 
-155 L<Nasm::X86::BlockString::getCharacter|/Nasm::X86::BlockString::getCharacter> - Get a character from a block string
+155 L<Nasm::X86::Tree::clearTree|/Nasm::X86::Tree::clearTree> - Clear the tree bit in the numbered zmm register holding the keys of a node to indicate that the data element indexed by the specified register is an offset to a sub tree in the containing arena.
 
-156 L<Nasm::X86::BlockString::getNextAndPrevBlockOffsetFromZmm|/Nasm::X86::BlockString::getNextAndPrevBlockOffsetFromZmm> - Get the offsets of the next and previous blocks as variables from the specified zmm
+156 L<Nasm::X86::Tree::Clone|/Nasm::X86::Tree::Clone> - Clone the specified tree descriptions
 
-157 L<Nasm::X86::BlockString::insertChar|/Nasm::X86::BlockString::insertChar> - Insert a character into a block string
+157 L<Nasm::X86::Tree::depth|/Nasm::X86::Tree::depth> - Return the depth of a node within a tree.
 
-158 L<Nasm::X86::BlockString::len|/Nasm::X86::BlockString::len> - Find the length of a block string
+158 L<Nasm::X86::Tree::expandTreeBitsWithOne|/Nasm::X86::Tree::expandTreeBitsWithOne> - Insert a one into the tree bits field in the numbered zmm at the specified point
 
-159 L<Nasm::X86::BlockString::putBlock|/Nasm::X86::BlockString::putBlock> - Write the numbered zmm to the block at the specified offset in the specified byte string
+159 L<Nasm::X86::Tree::expandTreeBitsWithZero|/Nasm::X86::Tree::expandTreeBitsWithZero> - Insert a zero into the tree bits field in the numbered zmm at the specified point
 
-160 L<Nasm::X86::BlockString::putNextandPrevBlockOffsetIntoZmm|/Nasm::X86::BlockString::putNextandPrevBlockOffsetIntoZmm> - Save next and prev offsets into a zmm representing a block
+160 L<Nasm::X86::Tree::expandTreeBitsWithZeroOrOne|/Nasm::X86::Tree::expandTreeBitsWithZeroOrOne> - Insert a zero or one into the tree bits field in the numbered zmm at the specified point
 
-161 L<Nasm::X86::BlockString::setBlockLengthInZmm|/Nasm::X86::BlockString::setBlockLengthInZmm> - Set the block length of the numbered zmm to the specified length
+161 L<Nasm::X86::Tree::find|/Nasm::X86::Tree::find> - Find a key in a tree and test whether the found data is a sub tree.
 
-162 L<Nasm::X86::ByteString::allocate|/Nasm::X86::ByteString::allocate> - Allocate the amount of space indicated in rdi in the byte string addressed by rax and return the offset of the allocation in the arena in rdi
+162 L<Nasm::X86::Tree::findAndClone|/Nasm::X86::Tree::findAndClone> - Find a key in the specified tree and clone it is it is a sub tree.
 
-163 L<Nasm::X86::ByteString::allocBlock|/Nasm::X86::ByteString::allocBlock> - Allocate a block to hold a zmm register in the specified byte string and return the offset of the block in a variable
+163 L<Nasm::X86::Tree::findAndSplit|/Nasm::X86::Tree::findAndSplit> - Find a key in a tree which is known to contain at least one key splitting full nodes along the path to the key.
 
-164 L<Nasm::X86::ByteString::allocZmmBlock|/Nasm::X86::ByteString::allocZmmBlock> - Allocate a block to hold a zmm register in the specified byte string and return the offset of the block in a variable
+164 L<Nasm::X86::Tree::getKeysData|/Nasm::X86::Tree::getKeysData> - Load the keys and data blocks for a node
 
-165 L<Nasm::X86::ByteString::append|/Nasm::X86::ByteString::append> - Append one byte string to another
+165 L<Nasm::X86::Tree::getKeysDataNode|/Nasm::X86::Tree::getKeysDataNode> - Load the keys, data and child nodes for a node
 
-166 L<Nasm::X86::ByteString::blockSize|/Nasm::X86::ByteString::blockSize> - Size of a block
+166 L<Nasm::X86::Tree::getLengthInKeys|/Nasm::X86::Tree::getLengthInKeys> - Get the length of the keys block in the numbered zmm and return it as a variable
 
-167 L<Nasm::X86::ByteString::chain|/Nasm::X86::ByteString::chain> - Return a variable with the end point of a chain of double words in the byte string starting at the specified variable.
+167 L<Nasm::X86::Tree::getLoop|/Nasm::X86::Tree::getLoop> - Return the value of the loop field as a variable
 
-168 L<Nasm::X86::ByteString::char|/Nasm::X86::ByteString::char> - Append a character expressed as a decimal number to the byte string addressed by rax
+168 L<Nasm::X86::Tree::getNode|/Nasm::X86::Tree::getNode> - Load the child nodes for a node
 
-169 L<Nasm::X86::ByteString::clear|/Nasm::X86::ByteString::clear> - Clear the byte string addressed by rax
+169 L<Nasm::X86::Tree::getTreeBits|/Nasm::X86::Tree::getTreeBits> - Load the tree bits from the numbered zmm into the specified register.
 
-170 L<Nasm::X86::ByteString::CreateBlockArray|/Nasm::X86::ByteString::CreateBlockArray> - Create a block array in a byte string
+170 L<Nasm::X86::Tree::getUpFromData|/Nasm::X86::Tree::getUpFromData> - Get the up offset from the data block in the numbered zmm and return it as a variable
 
-171 L<Nasm::X86::ByteString::CreateBlockMultiWayTree|/Nasm::X86::ByteString::CreateBlockMultiWayTree> - Create a block multi way tree in a byte string
+171 L<Nasm::X86::Tree::insert|/Nasm::X86::Tree::insert> - Insert a dword into into the specified tree at the specified key.
 
-172 L<Nasm::X86::ByteString::CreateBlockString|/Nasm::X86::ByteString::CreateBlockString> - Create a string from a doubly link linked list of 64 byte blocks linked via 4 byte offsets in the byte string addressed by rax and return its descriptor
+172 L<Nasm::X86::Tree::insertDataOrTree|/Nasm::X86::Tree::insertDataOrTree> - Insert either a key, data pair into the tree or create a sub tree at the specified key (if it does not already exist) and return the offset of the first block of the sub tree in the data variable.
 
-173 L<Nasm::X86::ByteString::DescribeBlockMultiWayTree|/Nasm::X86::ByteString::DescribeBlockMultiWayTree> - Return a descriptor for a multi way block tree in the specified byte string
+173 L<Nasm::X86::Tree::insertTree|/Nasm::X86::Tree::insertTree> - Insert a sub tree into the specified tree tree under the specified key.
 
-174 L<Nasm::X86::ByteString::dump|/Nasm::X86::ByteString::dump> - Dump details of a byte string
+174 L<Nasm::X86::Tree::insertTreeAndClone|/Nasm::X86::Tree::insertTreeAndClone> - Insert a new sub tree into the specified tree tree under the specified key and return a descriptor for it.
 
-175 L<Nasm::X86::ByteString::firstFreeBlock|/Nasm::X86::ByteString::firstFreeBlock> - Create and load a variable with the first free block on the free block chain or zero if no such block in the given byte string
+175 L<Nasm::X86::Tree::isTree|/Nasm::X86::Tree::isTree> - Set the Zero Flag to oppose the tree bit in the numbered zmm register holding the keys of a node to indicate whether the data element indicated by the specified register is an offset to a sub tree in the containing arena or not.
 
-176 L<Nasm::X86::ByteString::freeBlock|/Nasm::X86::ByteString::freeBlock> - Free a block in a byte string by placing it on the free chain
+176 L<Nasm::X86::Tree::iterator|/Nasm::X86::Tree::iterator> - Iterate through a multi way tree
 
-177 L<Nasm::X86::ByteString::getBlock|/Nasm::X86::ByteString::getBlock> - Get the block with the specified offset in the specified block string and return it in the numbered zmm
+177 L<Nasm::X86::Tree::Iterator::next|/Nasm::X86::Tree::Iterator::next> - Next element in the tree
 
-178 L<Nasm::X86::ByteString::length|/Nasm::X86::ByteString::length> - Get the length of a byte string
+178 L<Nasm::X86::Tree::leftMost|/Nasm::X86::Tree::leftMost> - Return the left most node
 
-179 L<Nasm::X86::ByteString::m|/Nasm::X86::ByteString::m> - Append the content with length rdi addressed by rsi to the byte string addressed by rax
+179 L<Nasm::X86::Tree::leftOrRightMost|/Nasm::X86::Tree::leftOrRightMost> - Return the left most or right most node
 
-180 L<Nasm::X86::ByteString::makeReadOnly|/Nasm::X86::ByteString::makeReadOnly> - Make a byte string read only
+180 L<Nasm::X86::Tree::nodeFromData|/Nasm::X86::Tree::nodeFromData> - Load the the node block into the numbered zmm corresponding to the data block held in the numbered zmm.
 
-181 L<Nasm::X86::ByteString::makeWriteable|/Nasm::X86::ByteString::makeWriteable> - Make a byte string writable
+181 L<Nasm::X86::Tree::print|/Nasm::X86::Tree::print> - Print a tree
 
-182 L<Nasm::X86::ByteString::nl|/Nasm::X86::ByteString::nl> - Append a new line to the byte string addressed by rax
+182 L<Nasm::X86::Tree::putKeysData|/Nasm::X86::Tree::putKeysData> - Save the key and data blocks for a node
 
-183 L<Nasm::X86::ByteString::out|/Nasm::X86::ByteString::out> - Print the specified byte string addressed by rax on sysout
+183 L<Nasm::X86::Tree::putKeysDataNode|/Nasm::X86::Tree::putKeysDataNode> - Save the keys, data and child nodes for a node
 
-184 L<Nasm::X86::ByteString::putBlock|/Nasm::X86::ByteString::putBlock> - Write the numbered zmm to the block at the specified offset in the specified byte string
+184 L<Nasm::X86::Tree::putLengthInKeys|/Nasm::X86::Tree::putLengthInKeys> - Get the length of the block in the numbered zmm from the specified variable
 
-185 L<Nasm::X86::ByteString::putChain|/Nasm::X86::ByteString::putChain> - Write the double word in the specified variable to the double word location at the the specified offset in the specified byte string.
+185 L<Nasm::X86::Tree::putLoop|/Nasm::X86::Tree::putLoop> - Set the value of the loop field from a variable
 
-186 L<Nasm::X86::ByteString::q|/Nasm::X86::ByteString::q> - Append a constant string to the byte string
+186 L<Nasm::X86::Tree::putTreeBits|/Nasm::X86::Tree::putTreeBits> - Put the tree bits in the specified register into the numbered zmm.
 
-187 L<Nasm::X86::ByteString::ql|/Nasm::X86::ByteString::ql> - Append a quoted string containing new line characters to the byte string addressed by rax
+187 L<Nasm::X86::Tree::putUpIntoData|/Nasm::X86::Tree::putUpIntoData> - Put the offset of the parent keys block expressed as a variable into the numbered zmm
 
-188 L<Nasm::X86::ByteString::read|/Nasm::X86::ByteString::read> - Read the named file (terminated with a zero byte) and place it into the named byte string.
+188 L<Nasm::X86::Tree::reParent|/Nasm::X86::Tree::reParent> - Reparent the children of a node held in registers.
 
-189 L<Nasm::X86::ByteString::setFirstFreeBlock|/Nasm::X86::ByteString::setFirstFreeBlock> - Set the first free block field from a variable
+189 L<Nasm::X86::Tree::rightMost|/Nasm::X86::Tree::rightMost> - Return the right most node
 
-190 L<Nasm::X86::ByteString::updateSpace|/Nasm::X86::ByteString::updateSpace> - Make sure that the byte string addressed by rax has enough space to accommodate content of length rdi
+190 L<Nasm::X86::Tree::setOrClearTree|/Nasm::X86::Tree::setOrClearTree> - Set or clear the tree bit in the numbered zmm register holding the keys of a node to indicate that the data element indicated by the specified register is an offset to a sub tree in the containing arena.
 
-191 L<Nasm::X86::ByteString::write|/Nasm::X86::ByteString::write> - Write the content in a byte string addressed by rax to a temporary file and replace the byte string content with the name of the  temporary file
+191 L<Nasm::X86::Tree::setTree|/Nasm::X86::Tree::setTree> - Set the tree bit in the numbered zmm register holding the keys of a node to indicate that the data element indexed by the specified register is an offset to a sub tree in the containing arena.
 
-192 L<Nasm::X86::ByteString::z|/Nasm::X86::ByteString::z> - Append a trailing zero to the byte string addressed by rax
+192 L<Nasm::X86::Tree::splitFullLeftNode|/Nasm::X86::Tree::splitFullLeftNode> - Split a full left node block held in 28.
 
-193 L<Nasm::X86::LocalData::allocate8|/Nasm::X86::LocalData::allocate8> - Add some 8 byte local variables and return an array of variable definitions
+193 L<Nasm::X86::Tree::splitFullLeftOrRightNode|/Nasm::X86::Tree::splitFullLeftOrRightNode> - Split a full a full left node (held in 28.
 
-194 L<Nasm::X86::LocalData::free|/Nasm::X86::LocalData::free> - Free a local data area on the stack
+194 L<Nasm::X86::Tree::splitFullRightNode|/Nasm::X86::Tree::splitFullRightNode> - Split a full right node block held in 25.
 
-195 L<Nasm::X86::LocalData::start|/Nasm::X86::LocalData::start> - Start a local data area on the stack
+195 L<Nasm::X86::Tree::splitFullRoot|/Nasm::X86::Tree::splitFullRoot> - Split a full root block held in 31.
 
-196 L<Nasm::X86::LocalData::variable|/Nasm::X86::LocalData::variable> - Add a local variable
+196 L<Nasm::X86::Tree::splitNode|/Nasm::X86::Tree::splitNode> - Split a node given its offset in an arena retaining the key being inserted in the node split while putting the remainder to the left or right.
 
-197 L<Nasm::X86::LocalVariable::stack|/Nasm::X86::LocalVariable::stack> - Address a local variable on the stack
+197 L<Nasm::X86::Tree::transferTreeBitsFromLeft|/Nasm::X86::Tree::transferTreeBitsFromLeft> - Transfer tree bits when splitting a full left node
 
-198 L<Nasm::X86::Structure::field|/Nasm::X86::Structure::field> - Add a field of the specified length with an optional comment
+198 L<Nasm::X86::Tree::transferTreeBitsFromLeftOrRight|/Nasm::X86::Tree::transferTreeBitsFromLeftOrRight> - Transfer tree bits when splitting a full left or right node.
 
-199 L<Nasm::X86::StructureField::addr|/Nasm::X86::StructureField::addr> - Address a field in a structure by either the default register or the named register
+199 L<Nasm::X86::Tree::transferTreeBitsFromParent|/Nasm::X86::Tree::transferTreeBitsFromParent> - Transfer tree bits when splitting a full node.
 
-200 L<Nasm::X86::Sub::call|/Nasm::X86::Sub::call> - Call a sub passing it some parameters
+200 L<Nasm::X86::Tree::transferTreeBitsFromRight|/Nasm::X86::Tree::transferTreeBitsFromRight> - Transfer tree bits when splitting a full right node
 
 201 L<Nasm::X86::Variable::add|/Nasm::X86::Variable::add> - Add the right hand variable to the left hand variable and return the result as a new variable
 
@@ -14771,7 +14777,7 @@ Total size in bytes of all files assembled during testing
 
 207 L<Nasm::X86::Variable::boolean|/Nasm::X86::Variable::boolean> - Combine the left hand variable with the right hand variable via a boolean operator
 
-208 L<Nasm::X86::Variable::booleanC|/Nasm::X86::Variable::booleanC> - Combine the left hand variable with the right hand variable via a boolean operator using a Cmove instruction
+208 L<Nasm::X86::Variable::booleanC|/Nasm::X86::Variable::booleanC> - Combine the left hand variable with the right hand variable via a boolean operator using a conditional move instruction.
 
 209 L<Nasm::X86::Variable::clearBit|/Nasm::X86::Variable::clearBit> - Clear a bit in the specified mask register retaining the other bits
 
@@ -15547,8 +15553,8 @@ if (1) {                                                                        
  }
 
 #latest:;
-if (1) {                                                                        #TCreateByteString #TByteString::clear #TByteString::out #TByteString::copy #TByteString::nl
-  my $a = CreateByteString;                                                     # Create a string
+if (1) {                                                                        #TCreateArena #TArena::clear #TArena::out #TArena::copy #TArena::nl
+  my $a = CreateArena;                                                     # Create a string
   $a->q('aa');
   $a->out;
   PrintOutNL;
@@ -15557,9 +15563,9 @@ aa
 END
  }
 
-if (1) {                                                                        #TCreateByteString #TByteString::clear #TByteString::out #TByteString::copy #TByteString::nl
-  my $a = CreateByteString;                                                     # Create a string
-  my $b = CreateByteString;                                                     # Create a string
+if (1) {                                                                        #TCreateArena #TArena::clear #TArena::out #TArena::copy #TArena::nl
+  my $a = CreateArena;                                                     # Create a string
+  my $b = CreateArena;                                                     # Create a string
   $a->q('aa');
   $b->q('bb');
   $a->out;
@@ -15572,9 +15578,9 @@ bb
 END
  }
 
-if (1) {                                                                        #TCreateByteString #TByteString::clear #TByteString::out #TByteString::copy #TByteString::nl
-  my $a = CreateByteString;                                                     # Create a string
-  my $b = CreateByteString;                                                     # Create a string
+if (1) {                                                                        #TCreateArena #TArena::clear #TArena::out #TArena::copy #TArena::nl
+  my $a = CreateArena;                                                     # Create a string
+  my $b = CreateArena;                                                     # Create a string
   $a->q('aa');
   $a->q('AA');
   $a->out;
@@ -15584,9 +15590,9 @@ aaAA
 END
  }
 
-if (1) {                                                                        #TCreateByteString #TByteString::clear #TByteString::out #TByteString::copy #TByteString::nl
-  my $a = CreateByteString;                                                     # Create a string
-  my $b = CreateByteString;                                                     # Create a string
+if (1) {                                                                        #TCreateArena #TArena::clear #TArena::out #TArena::copy #TArena::nl
+  my $a = CreateArena;                                                     # Create a string
+  my $b = CreateArena;                                                     # Create a string
   $a->q('aa');
   $b->q('bb');
   $a->q('AA');
@@ -15601,10 +15607,10 @@ aaAAaabbBBbb
 END
  }
 
-if (1) {                                                                        #TCreateByteString #TByteString::length  #TByteString::clear #TByteString::out #TByteString::copy #TByteString::nl
-  my $a = CreateByteString;                                                     # Create a string
+if (1) {                                                                        #TCreateArena #TArena::length  #TArena::clear #TArena::out #TArena::copy #TArena::nl
+  my $a = CreateArena;                                                     # Create a string
   $a->q('ab');
-  my $b = CreateByteString;                                                     # Create target byte string
+  my $b = CreateArena;                                                     # Create target arena
   $b->append(source=>$a->bs);
   $b->append(source=>$a->bs);
   $a->append(source=>$b->bs);
@@ -15616,8 +15622,8 @@ if (1) {                                                                        
   $b->append(source=>$a->bs);
 
 
-  $a->out;   PrintOutNL;                                                        # Print byte string
-  $b->out;   PrintOutNL;                                                        # Print byte string
+  $a->out;   PrintOutNL;                                                        # Print arena
+  $b->out;   PrintOutNL;                                                        # Print arena
   $a->length(my $sa = V(size)); $sa->outNL;
   $b->length(my $sb = V(size)); $sb->outNL;
   $a->clear;
@@ -15667,20 +15673,20 @@ if (1) {                                                                        
  }
 
 if (1) {                                                                        # Count leading zeros
-  Mov   rax, 8;                                                                 # Append a constant to the byte string
+  Mov   rax, 8;                                                                 # Append a constant to the arena
   Lzcnt rax, rax;                                                               # New line
   PrintOutRegisterInHex rax;
   KeepFree rax;
 
-  Mov   rax, 8;                                                                 # Append a constant to the byte string
+  Mov   rax, 8;                                                                 # Append a constant to the arena
   Tzcnt rax, rax;                                                               # New line
   PrintOutRegisterInHex rax;
 
   ok Assemble =~ m(rax: 0000 0000 0000 003C.*rax: 0000 0000 0000 0003)s;
  }
 
-if (1) {                                                                        #TByteString::nl
-  my $s = CreateByteString;
+if (1) {                                                                        #TArena::nl
+  my $s = CreateArena;
   $s->q("A");
   $s->nl;
   $s->q("B");
@@ -15693,8 +15699,8 @@ B
 END
  }
 
-if (1) {                                                                        # Print this file  #TByteString::read #TByteString::z #TByteString::q
-  my $s = CreateByteString;                                                     # Create a string
+if (1) {                                                                        # Print this file  #TArena::read #TArena::z #TArena::q
+  my $s = CreateArena;                                                          # Create a string
   $s->read(V(file, Rs($0)));
   $s->out;
 
@@ -15702,15 +15708,15 @@ if (1) {                                                                        
   is_deeply stringMd5Sum($r), fileMd5Sum($0);                                   # Output contains this file
  }
 
-if (1) {                                                                        # Print rdi in hex into a byte string #TGetPidInHex
+if (1) {                                                                        # Print rdi in hex into an arena #TGetPidInHex
   GetPidInHex;
   PrintOutRegisterInHex rax;
 
   ok Assemble =~ m(rax: 00);
  }
 
-if (1) {                                                                        # Execute the content of a byte string #TexecuteFileViaBash #TByteString::write #TByteString::out #TunlinkFile #TByteString::ql
-  my $s = CreateByteString;                                                     # Create a string
+if (1) {                                                                        # Execute the content of an arena #TexecuteFileViaBash #TArena::write #TArena::out #TunlinkFile #TArena::ql
+  my $s = CreateArena;                                                          # Create a string
   $s->ql(<<END);                                                                # Write code to execute
 #!/usr/bin/bash
 whoami
@@ -15725,28 +15731,28 @@ END
   ok Assemble(emulator=>0) =~ m($u);                                            # The Intel Software Development Emulator is way too slow on these operations.
  }
 
-if (1) {                                                                        # Make a byte string readonly
-  my $s = CreateByteString;                                                     # Create a byte string
-  $s->q("Hello");                                                               # Write code to byte string
-  $s->makeReadOnly;                                                             # Make byte string read only
-  $s->q(" World");                                                              # Try to write to byte string
+if (1) {                                                                        # Make an arena readonly
+  my $s = CreateArena;                                                          # Create an arena
+  $s->q("Hello");                                                               # Write code to arena
+  $s->makeReadOnly;                                                             # Make arena read only
+  $s->q(" World");                                                              # Try to write to arena
 
   ok Assemble(debug=>2) =~ m(SDE ERROR: DEREFERENCING BAD MEMORY POINTER.*mov byte ptr .rax.rdx.1., r8b);
  }
 
-if (1) {                                                                        # Make a read only byte string writable  #TByteString::makeReadOnly #TByteString::makeWriteable
-  my $s = CreateByteString;                                                     # Create a byte string
-  $s->q("Hello");                                                               # Write data to byte string
-  $s->makeReadOnly;                                                             # Make byte string read only - tested above
-  $s->makeWriteable;                                                            # Make byte string writable again
-  $s->q(" World");                                                              # Try to write to byte string
+if (1) {                                                                        # Make a read only arena writable  #TArena::makeReadOnly #TArena::makeWriteable
+  my $s = CreateArena;                                                          # Create an arena
+  $s->q("Hello");                                                               # Write data to arena
+  $s->makeReadOnly;                                                             # Make arena read only - tested above
+  $s->makeWriteable;                                                            # Make arena writable again
+  $s->q(" World");                                                              # Try to write to arena
   $s->out;
 
   ok Assemble =~ m(Hello World);
  }
 
-if (1) {                                                                        # Allocate some space in byte string #TByteString::allocate
-  my $s = CreateByteString;                                                     # Create a byte string
+if (1) {                                                                        # Allocate some space in arena #TArena::allocate
+  my $s = CreateArena;                                                          # Create an arena
   $s->allocate(V(size, 0x20), my $o1 = V(offset));                              # Allocate space wanted
   $s->allocate(V(size, 0x30), my $o2 = V(offset));
   $s->allocate(V(size, 0x10), my $o3 = V(offset));
@@ -16290,39 +16296,39 @@ END
  }
 
 #latest:;
-if (1) {                                                                        #TCreateBlockString
+if (1) {                                                                        #TCreateString
   my $s = Rb(0..255);
-  my $B =     CreateByteString;
-  my $b = $B->CreateBlockString;
+  my $B =     CreateArena;
+  my $b = $B->CreateString;
   $b->append(V(source, $s), V(size,  3)); $b->dump;
   $b->append(V(source, $s), V(size,  4)); $b->dump;
   $b->append(V(source, $s), V(size,  5)); $b->dump;
 
   ok Assemble(debug => 0, eq => <<END);
-Block String Dump
+string Dump
 Offset: 0000 0000 0000 0018   Length: 0000 0000 0000 0003
  zmm31: 0000 0018 0000 0018   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0201 0003
 
-Block String Dump
+string Dump
 Offset: 0000 0000 0000 0018   Length: 0000 0000 0000 0007
  zmm31: 0000 0018 0000 0018   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0302 0100 0201 0007
 
-Block String Dump
+string Dump
 Offset: 0000 0000 0000 0018   Length: 0000 0000 0000 000C
  zmm31: 0000 0018 0000 0018   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0004 0302 0100   0302 0100 0201 000C
 
 END
  }
 
-if (1) {                                                                        #TCreateBlockString
+if (1) {                                                                        #TCreateString
   my $s = Rb(0..255);
-  my $B =     CreateByteString;
-  my $b = $B->CreateBlockString;
+  my $B =     CreateArena;
+  my $b = $B->CreateString;
   $b->append(V(source, $s), V(size, 165)); $b->dump;
   $b->append(V(source, $s), V(size,   2)); $b->dump;
 
   ok Assemble(debug => 0, eq => <<END);
-Block String Dump
+string Dump
 Offset: 0000 0000 0000 0018   Length: 0000 0000 0000 0037
  zmm31: 0000 0058 0000 0098   3635 3433 3231 302F   2E2D 2C2B 2A29 2827   2625 2423 2221 201F   1E1D 1C1B 1A19 1817   1615 1413 1211 100F   0E0D 0C0B 0A09 0807   0605 0403 0201 0037
 Offset: 0000 0000 0000 0058   Length: 0000 0000 0000 0037
@@ -16330,7 +16336,7 @@ Offset: 0000 0000 0000 0058   Length: 0000 0000 0000 0037
 Offset: 0000 0000 0000 0098   Length: 0000 0000 0000 0037
  zmm31: 0000 0018 0000 0058   A4A3 A2A1 A09F 9E9D   9C9B 9A99 9897 9695   9493 9291 908F 8E8D   8C8B 8A89 8887 8685   8483 8281 807F 7E7D   7C7B 7A79 7877 7675   7473 7271 706F 6E37
 
-Block String Dump
+string Dump
 Offset: 0000 0000 0000 0018   Length: 0000 0000 0000 0037
  zmm31: 0000 0058 0000 00D8   3635 3433 3231 302F   2E2D 2C2B 2A29 2827   2625 2423 2221 201F   1E1D 1C1B 1A19 1817   1615 1413 1211 100F   0E0D 0C0B 0A09 0807   0605 0403 0201 0037
 Offset: 0000 0000 0000 0058   Length: 0000 0000 0000 0037
@@ -16343,10 +16349,10 @@ Offset: 0000 0000 0000 00D8   Length: 0000 0000 0000 0002
 END
  }
 
-if (1) {                                                                        #TCreateBlockString
+if (1) {                                                                        #TCreateString
   my $s = Rb(0..255);
-  my $B =     CreateByteString;
-  my $b = $B->CreateBlockString;
+  my $B =     CreateArena;
+  my $b = $B->CreateString;
   $b->append(V(source, $s), V(size,  56)); $b->dump;
   $b->append(V(source, $s), V(size,   4)); $b->dump;
   $b->append(V(source, $s), V(size,   5)); $b->dump;
@@ -16354,31 +16360,31 @@ if (1) {                                                                        
   $b->append(V(source, $s), V(size, 256)); $b->dump;
 
   ok Assemble(debug => 0, eq => <<END);
-Block String Dump
+string Dump
 Offset: 0000 0000 0000 0018   Length: 0000 0000 0000 0037
  zmm31: 0000 0058 0000 0058   3635 3433 3231 302F   2E2D 2C2B 2A29 2827   2625 2423 2221 201F   1E1D 1C1B 1A19 1817   1615 1413 1211 100F   0E0D 0C0B 0A09 0807   0605 0403 0201 0037
 Offset: 0000 0000 0000 0058   Length: 0000 0000 0000 0001
  zmm31: 0000 0018 0000 0018   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 3701
 
-Block String Dump
+string Dump
 Offset: 0000 0000 0000 0018   Length: 0000 0000 0000 0037
  zmm31: 0000 0058 0000 0058   3635 3433 3231 302F   2E2D 2C2B 2A29 2827   2625 2423 2221 201F   1E1D 1C1B 1A19 1817   1615 1413 1211 100F   0E0D 0C0B 0A09 0807   0605 0403 0201 0037
 Offset: 0000 0000 0000 0058   Length: 0000 0000 0000 0005
  zmm31: 0000 0018 0000 0018   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0302 0100 3705
 
-Block String Dump
+string Dump
 Offset: 0000 0000 0000 0018   Length: 0000 0000 0000 0037
  zmm31: 0000 0058 0000 0058   3635 3433 3231 302F   2E2D 2C2B 2A29 2827   2625 2423 2221 201F   1E1D 1C1B 1A19 1817   1615 1413 1211 100F   0E0D 0C0B 0A09 0807   0605 0403 0201 0037
 Offset: 0000 0000 0000 0058   Length: 0000 0000 0000 000A
  zmm31: 0000 0018 0000 0018   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0004 0302   0100 0302 0100 370A
 
-Block String Dump
+string Dump
 Offset: 0000 0000 0000 0018   Length: 0000 0000 0000 0037
  zmm31: 0000 0058 0000 0058   3635 3433 3231 302F   2E2D 2C2B 2A29 2827   2625 2423 2221 201F   1E1D 1C1B 1A19 1817   1615 1413 1211 100F   0E0D 0C0B 0A09 0807   0605 0403 0201 0037
 Offset: 0000 0000 0000 0058   Length: 0000 0000 0000 000A
  zmm31: 0000 0018 0000 0018   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0004 0302   0100 0302 0100 370A
 
-Block String Dump
+string Dump
 Offset: 0000 0000 0000 0018   Length: 0000 0000 0000 0037
  zmm31: 0000 0058 0000 0158   3635 3433 3231 302F   2E2D 2C2B 2A29 2827   2625 2423 2221 201F   1E1D 1C1B 1A19 1817   1615 1413 1211 100F   0E0D 0C0B 0A09 0807   0605 0403 0201 0037
 Offset: 0000 0000 0000 0058   Length: 0000 0000 0000 0037
@@ -16397,8 +16403,8 @@ END
 
 if (1) {
   my $s = Rb(0..255);
-  my $B = CreateByteString;
-  my $b = $B->CreateBlockString;
+  my $B = CreateArena;
+  my $b = $B->CreateString;
 
   $b->append(source=>V(source, $s), V(size, 256));
   $b->len(my $size = V(size));
@@ -16411,7 +16417,7 @@ if (1) {
 
   is_deeply Assemble, <<END;
 size: 0000 0000 0000 0100
-Block String Dump
+string Dump
 Offset: 0000 0000 0000 0018   Length: 0000 0000 0000 0010
  zmm31: 0000 0018 0000 0018   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 000F   0E0D 0C0B 0A09 0807   0605 0403 0201 0010
 
@@ -16422,15 +16428,15 @@ END
 #latest:;
 if (1) {
   my $c = Rb(0..255);
-  my $S = CreateByteString;   my $s = $S->CreateBlockString;
-  my $T = CreateByteString;   my $t = $T->CreateBlockString;
+  my $S = CreateArena;   my $s = $S->CreateString;
+  my $T = CreateArena;   my $t = $T->CreateString;
 
   $s->append(source=>V(source, $c), V(size, 256));
   $t->concatenate($s);
   $t->dump;
 
   ok Assemble(debug => 0, eq => <<END);
-Block String Dump
+string Dump
 Offset: 0000 0000 0000 0018   Length: 0000 0000 0000 0000
  zmm31: 0000 0058 0000 0158   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
 Offset: 0000 0000 0000 0058   Length: 0000 0000 0000 0037
@@ -16448,9 +16454,9 @@ END
  }
 
 #latest:;
-if (1) {                                                                        # Insert char in a one block string
+if (1) {                                                                        # Insert char in a one string
   my $c = Rb(0..255);
-  my $S = CreateByteString;   my $s = $S->CreateBlockString;
+  my $S = CreateArena;   my $s = $S->CreateString;
 
   $s->append(source=>V(source, $c), V(size, 3));
   $s->dump;
@@ -16462,15 +16468,15 @@ if (1) {                                                                        
   $s->dump;
 
   ok Assemble(debug => 0, eq => <<END);
-Block String Dump
+string Dump
 Offset: 0000 0000 0000 0018   Length: 0000 0000 0000 0003
  zmm31: 0000 0018 0000 0018   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0201 0003
 
-Block String Dump
+string Dump
 Offset: 0000 0000 0000 0018   Length: 0000 0000 0000 0004
  zmm31: 0000 0018 0000 0018   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0002 4401 0004
 
-Block String Dump
+string Dump
 Offset: 0000 0000 0000 0018   Length: 0000 0000 0000 0005
  zmm31: 0000 0018 0000 0018   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0244 8801 0005
 
@@ -16479,9 +16485,9 @@ END
 
 #latest:;
 
-if (1) {                                                                        # Insert char in a multi block string at position 22
+if (1) {                                                                        # Insert char in a multi string at position 22
   my $c = Rb(0..255);
-  my $S = CreateByteString;   my $s = $S->CreateBlockString;
+  my $S = CreateArena;   my $s = $S->CreateString;
 
   $s->append(source=>V(source, $c), V(size, 58));
   $s->dump;
@@ -16493,13 +16499,13 @@ if (1) {                                                                        
   $s->dump;
 
   ok Assemble(debug => 0, eq => <<END);
-Block String Dump
+string Dump
 Offset: 0000 0000 0000 0018   Length: 0000 0000 0000 0037
  zmm31: 0000 0058 0000 0058   3635 3433 3231 302F   2E2D 2C2B 2A29 2827   2625 2423 2221 201F   1E1D 1C1B 1A19 1817   1615 1413 1211 100F   0E0D 0C0B 0A09 0807   0605 0403 0201 0037
 Offset: 0000 0000 0000 0058   Length: 0000 0000 0000 0003
  zmm31: 0000 0018 0000 0018   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 3938 3703
 
-Block String Dump
+string Dump
 Offset: 0000 0000 0000 0018   Length: 0000 0000 0000 0016
  zmm31: 0000 0098 0000 0098   3635 3433 3231 302F   2E2D 2C2B 2A29 2827   2625 2423 2221 201F   1E1D 1C1B 1A19 1817   1615 1413 1211 100F   0E0D 0C0B 0A09 0807   0605 0403 0201 0016
 Offset: 0000 0000 0000 0098   Length: 0000 0000 0000 0022
@@ -16507,7 +16513,7 @@ Offset: 0000 0000 0000 0098   Length: 0000 0000 0000 0022
 Offset: 0000 0000 0000 0058   Length: 0000 0000 0000 0003
  zmm31: 0000 0018 0000 0018   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 3938 3703
 
-Block String Dump
+string Dump
 Offset: 0000 0000 0000 0018   Length: 0000 0000 0000 0017
  zmm31: 0000 0098 0000 0098   3635 3433 3231 302F   2E2D 2C2B 2A29 2827   2625 2423 2221 201F   1E1D 1C1B 1A19 1817   8815 1413 1211 100F   0E0D 0C0B 0A09 0807   0605 0403 0201 0017
 Offset: 0000 0000 0000 0098   Length: 0000 0000 0000 0022
@@ -16518,9 +16524,9 @@ Offset: 0000 0000 0000 0058   Length: 0000 0000 0000 0003
 END
  }
 
-if (1) {                                                                        #BlockString::insertChar
+if (1) {                                                                        #String::insertChar
   my $c = Rb(0..255);
-  my $S = CreateByteString;   my $s = $S->CreateBlockString;
+  my $S = CreateArena;   my $s = $S->CreateString;
 
   $s->append(source=>V(source, $c), V(size, 166));
   $s->dump;
@@ -16532,7 +16538,7 @@ if (1) {                                                                        
   $s->dump;
 
   ok Assemble(debug => 0, eq => <<END);
-Block String Dump
+string Dump
 Offset: 0000 0000 0000 0018   Length: 0000 0000 0000 0037
  zmm31: 0000 0058 0000 00D8   3635 3433 3231 302F   2E2D 2C2B 2A29 2827   2625 2423 2221 201F   1E1D 1C1B 1A19 1817   1615 1413 1211 100F   0E0D 0C0B 0A09 0807   0605 0403 0201 0037
 Offset: 0000 0000 0000 0058   Length: 0000 0000 0000 0037
@@ -16542,7 +16548,7 @@ Offset: 0000 0000 0000 0098   Length: 0000 0000 0000 0037
 Offset: 0000 0000 0000 00D8   Length: 0000 0000 0000 0001
  zmm31: 0000 0018 0000 0098   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 A501
 
-Block String Dump
+string Dump
 Offset: 0000 0000 0000 0018   Length: 0000 0000 0000 0037
  zmm31: 0000 0058 0000 00D8   3635 3433 3231 302F   2E2D 2C2B 2A29 2827   2625 2423 2221 201F   1E1D 1C1B 1A19 1817   1615 1413 1211 100F   0E0D 0C0B 0A09 0807   0605 0403 0201 0037
 Offset: 0000 0000 0000 0058   Length: 0000 0000 0000 0009
@@ -16554,7 +16560,7 @@ Offset: 0000 0000 0000 0098   Length: 0000 0000 0000 0037
 Offset: 0000 0000 0000 00D8   Length: 0000 0000 0000 0001
  zmm31: 0000 0018 0000 0098   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 A501
 
-Block String Dump
+string Dump
 Offset: 0000 0000 0000 0018   Length: 0000 0000 0000 0037
  zmm31: 0000 0058 0000 00D8   3635 3433 3231 302F   2E2D 2C2B 2A29 2827   2625 2423 2221 201F   1E1D 1C1B 1A19 1817   1615 1413 1211 100F   0E0D 0C0B 0A09 0807   0605 0403 0201 0037
 Offset: 0000 0000 0000 0058   Length: 0000 0000 0000 0037
@@ -16573,18 +16579,18 @@ END
 
 if (1) {                                                                        # Append a char
   my $c = Rb(0..255);
-  my $S = CreateByteString;   my $s = $S->CreateBlockString;
+  my $S = CreateArena;   my $s = $S->CreateString;
 
   $s->append(source=>V(source, $c),  V(size, 3));      $s->dump;
   $s->insertChar(V(character, 0x44), V(position, 64)); $s->dump;
   $s->len(my $size = V(size));                          $size->outNL;
 
   ok Assemble(debug => 0, eq => <<END);
-Block String Dump
+string Dump
 Offset: 0000 0000 0000 0018   Length: 0000 0000 0000 0003
  zmm31: 0000 0018 0000 0018   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0201 0003
 
-Block String Dump
+string Dump
 Offset: 0000 0000 0000 0018   Length: 0000 0000 0000 0004
  zmm31: 0000 0018 0000 0018   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0044 0201 0004
 
@@ -16592,16 +16598,16 @@ size: 0000 0000 0000 0004
 END
  }
 
-if (1) {                                                                        #TBlockString::deleteChar #TBlockString::len
+if (1) {                                                                        #TString::deleteChar #TString::len
   my $c = Rb(0..255);
-  my $S = CreateByteString;   my $s = $S->CreateBlockString;
+  my $S = CreateArena;   my $s = $S->CreateString;
 
   $s->append(source=>V(source, $c),  V(size, 165)); $s->dump;
   $s->deleteChar(V(position, 0x44));                 $s->dump;
   $s->len(my $size = V(size));                       $size->outNL;
 
   ok Assemble(debug => 0, eq => <<END);
-Block String Dump
+string Dump
 Offset: 0000 0000 0000 0018   Length: 0000 0000 0000 0037
  zmm31: 0000 0058 0000 0098   3635 3433 3231 302F   2E2D 2C2B 2A29 2827   2625 2423 2221 201F   1E1D 1C1B 1A19 1817   1615 1413 1211 100F   0E0D 0C0B 0A09 0807   0605 0403 0201 0037
 Offset: 0000 0000 0000 0058   Length: 0000 0000 0000 0037
@@ -16609,7 +16615,7 @@ Offset: 0000 0000 0000 0058   Length: 0000 0000 0000 0037
 Offset: 0000 0000 0000 0098   Length: 0000 0000 0000 0037
  zmm31: 0000 0018 0000 0058   A4A3 A2A1 A09F 9E9D   9C9B 9A99 9897 9695   9493 9291 908F 8E8D   8C8B 8A89 8887 8685   8483 8281 807F 7E7D   7C7B 7A79 7877 7675   7473 7271 706F 6E37
 
-Block String Dump
+string Dump
 Offset: 0000 0000 0000 0018   Length: 0000 0000 0000 0037
  zmm31: 0000 0058 0000 0098   3635 3433 3231 302F   2E2D 2C2B 2A29 2827   2625 2423 2221 201F   1E1D 1C1B 1A19 1817   1615 1413 1211 100F   0E0D 0C0B 0A09 0807   0605 0403 0201 0037
 Offset: 0000 0000 0000 0058   Length: 0000 0000 0000 0036
@@ -16623,15 +16629,15 @@ END
 
 #latest:;
 
-if (1) {                                                                        #TBlockString::getChar
+if (1) {                                                                        #TString::getChar
   my $c = Rb(0..255);
-  my $S = CreateByteString;   my $s = $S->CreateBlockString;
+  my $S = CreateArena;   my $s = $S->CreateString;
 
   $s->append(source=>V(source, $c),  V(size, 110)); $s->dump;
   $s->getCharacter(V(position, 0x44), my $out = V(out)); $out->outNL;
 
   ok Assemble(debug => 0, eq => <<END);
-Block String Dump
+string Dump
 Offset: 0000 0000 0000 0018   Length: 0000 0000 0000 0037
  zmm31: 0000 0058 0000 0058   3635 3433 3231 302F   2E2D 2C2B 2A29 2827   2625 2423 2221 201F   1E1D 1C1B 1A19 1817   1615 1413 1211 100F   0E0D 0C0B 0A09 0807   0605 0403 0201 0037
 Offset: 0000 0000 0000 0058   Length: 0000 0000 0000 0037
@@ -16671,9 +16677,9 @@ END
  }
 
 #latest:;
-if (1) {                                                                        #TCreateBlockArray  #TBlockArray::push
+if (1) {                                                                        #TCreateArray  #TArray::push
   my $c = Rb(0..255);
-  my $A = CreateByteString;  my $a = $A->CreateBlockArray;
+  my $A = CreateArena;  my $a = $A->CreateArray;
 
   $a->push(element => V($_, $_)) for 1..15;  $A->dump;
   $a->push(element => V($_, $_)) for 0xff;   $A->dump;
@@ -16682,35 +16688,35 @@ if (1) {                                                                        
   $a->push(element => V($_, $_)) for 33..36; $A->dump;
 
   ok Assemble(debug => 0, eq => <<END);
-Byte String
+Arena
   Size: 0000 0000 0000 1000
   Used: 0000 0000 0000 0058
 0000: 0010 0000 0000 00005800 0000 0000 00000000 0000 0000 00000F00 0000 0100 00000200 0000 0300 00000400 0000 0500 00000600 0000 0700 00000800 0000 0900 0000
 0040: 0A00 0000 0B00 00000C00 0000 0D00 00000E00 0000 0F00 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
 0080: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
 00C0: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
-Byte String
+Arena
   Size: 0000 0000 0000 1000
   Used: 0000 0000 0000 0098
 0000: 0010 0000 0000 00009800 0000 0000 00000000 0000 0000 00001000 0000 5800 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
 0040: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000100 0000 0200 00000300 0000 0400 00000500 0000 0600 00000700 0000 0800 00000900 0000 0A00 0000
 0080: 0B00 0000 0C00 00000D00 0000 0E00 00000F00 0000 FF00 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
 00C0: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
-Byte String
+Arena
   Size: 0000 0000 0000 1000
   Used: 0000 0000 0000 00D8
 0000: 0010 0000 0000 0000D800 0000 0000 00000000 0000 0000 00001F00 0000 5800 00009800 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
 0040: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000100 0000 0200 00000300 0000 0400 00000500 0000 0600 00000700 0000 0800 00000900 0000 0A00 0000
 0080: 0B00 0000 0C00 00000D00 0000 0E00 00000F00 0000 FF00 00001100 0000 1200 00001300 0000 1400 00001500 0000 1600 00001700 0000 1800 00001900 0000 1A00 0000
 00C0: 1B00 0000 1C00 00001D00 0000 1E00 00001F00 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
-Byte String
+Arena
   Size: 0000 0000 0000 1000
   Used: 0000 0000 0000 00D8
 0000: 0010 0000 0000 0000D800 0000 0000 00000000 0000 0000 00002000 0000 5800 00009800 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
 0040: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000100 0000 0200 00000300 0000 0400 00000500 0000 0600 00000700 0000 0800 00000900 0000 0A00 0000
 0080: 0B00 0000 0C00 00000D00 0000 0E00 00000F00 0000 FF00 00001100 0000 1200 00001300 0000 1400 00001500 0000 1600 00001700 0000 1800 00001900 0000 1A00 0000
 00C0: 1B00 0000 1C00 00001D00 0000 1E00 00001F00 0000 EE00 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
-Byte String
+Arena
   Size: 0000 0000 0000 1000
   Used: 0000 0000 0000 0118
 0000: 0010 0000 0000 00001801 0000 0000 00000000 0000 0000 00002400 0000 5800 00009800 0000 D800 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
@@ -16721,9 +16727,9 @@ END
  }
 
 #latest:;
-if (1) {                                                                        #TCreateBlockArray  #TBlockArray::push #TBlockArray::pop #TBlockArray::put #TBlockArray::get
+if (1) {                                                                        #TCreateArray  #TArray::push #TArray::pop #TArray::put #TArray::get
   my $c = Rb(0..255);
-  my $A = CreateByteString;  my $a = $A->CreateBlockArray;
+  my $A = CreateArena;  my $a = $A->CreateArray;
   my $l = V(limit, 15);
   my $L = $l + 5;
 
@@ -16835,7 +16841,7 @@ index: 0000 0000 0000 0022  element: 0000 0000 0000 0023
 index: 0000 0000 0000 0023  element: 0000 0000 0000 0024
 index: 0000 0000 0000 0009  element: 0000 0000 0000 FFF9
 index: 0000 0000 0000 0013  element: 0000 0000 0000 EEE9
-Block Array
+array
 Size: 0000 0000 0000 0024   zmm31: 0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 00D8 0000 0098   0000 0058 0000 0024
 Full: 0000 0000 0000 0058   zmm30: 0000 0010 0000 000F   0000 000E 0000 000D   0000 000C 0000 000B   0000 FFF9 0000 0009   0000 0008 0000 0007   0000 0006 0000 0005   0000 0004 0000 0003   0000 0002 0000 0001
 Full: 0000 0000 0000 0098   zmm30: 0000 0020 0000 001F   0000 001E 0000 001D   0000 001C 0000 001B   0000 001A 0000 0019   0000 0018 0000 0017   0000 0016 0000 0015   0000 EEE9 0000 0013   0000 0012 0000 0011
@@ -16844,12 +16850,12 @@ element: 0000 0000 0000 0024
 element: 0000 0000 0000 0023
 element: 0000 0000 0000 0022
 element: 0000 0000 0000 0021
-Block Array
+array
 Size: 0000 0000 0000 0020   zmm31: 0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0098   0000 0058 0000 0020
 Full: 0000 0000 0000 0058   zmm30: 0000 0010 0000 000F   0000 000E 0000 000D   0000 000C 0000 000B   0000 FFF9 0000 0009   0000 0008 0000 0007   0000 0006 0000 0005   0000 0004 0000 0003   0000 0002 0000 0001
 Full: 0000 0000 0000 0098   zmm30: 0000 0020 0000 001F   0000 001E 0000 001D   0000 001C 0000 001B   0000 001A 0000 0019   0000 0018 0000 0017   0000 0016 0000 0015   0000 EEE9 0000 0013   0000 0012 0000 0011
 element: 0000 0000 0000 0020
-Block Array
+array
 Size: 0000 0000 0000 001F   zmm31: 0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0098   0000 0058 0000 001F
 Full: 0000 0000 0000 0058   zmm30: 0000 0010 0000 000F   0000 000E 0000 000D   0000 000C 0000 000B   0000 FFF9 0000 0009   0000 0008 0000 0007   0000 0006 0000 0005   0000 0004 0000 0003   0000 0002 0000 0001
 Last: 0000 0000 0000 0098   zmm30: 0000 0020 0000 001F   0000 001E 0000 001D   0000 001C 0000 001B   0000 001A 0000 0019   0000 0018 0000 0017   0000 0016 0000 0015   0000 EEE9 0000 0013   0000 0012 0000 0011
@@ -16868,17 +16874,17 @@ element: 0000 0000 0000 EEE9
 element: 0000 0000 0000 0013
 element: 0000 0000 0000 0012
 element: 0000 0000 0000 0011
-Block Array
+array
 Size: 0000 0000 0000 0010   zmm31: 0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0058 0000 0010
 Full: 0000 0000 0000 0058   zmm30: 0000 0010 0000 000F   0000 000E 0000 000D   0000 000C 0000 000B   0000 FFF9 0000 0009   0000 0008 0000 0007   0000 0006 0000 0005   0000 0004 0000 0003   0000 0002 0000 0001
 element: 0000 0000 0000 0010
-Block Array
+array
 Size: 0000 0000 0000 000F   zmm31: 0000 000F 0000 000E   0000 000D 0000 000C   0000 000B 0000 FFF9   0000 0009 0000 0008   0000 0007 0000 0006   0000 0005 0000 0004   0000 0003 0000 0002   0000 0001 0000 000F
 element: 0000 0000 0000 000F
-Block Array
+array
 Size: 0000 0000 0000 000E   zmm31: 0000 000F 0000 000E   0000 000D 0000 000C   0000 000B 0000 FFF9   0000 0009 0000 0008   0000 0007 0000 0006   0000 0005 0000 0004   0000 0003 0000 0002   0000 0001 0000 000E
 element: 0000 0000 0000 000E
-Block Array
+array
 Size: 0000 0000 0000 000D   zmm31: 0000 000F 0000 000E   0000 000D 0000 000C   0000 000B 0000 FFF9   0000 0009 0000 0008   0000 0007 0000 0006   0000 0005 0000 0004   0000 0003 0000 0002   0000 0001 0000 000D
 element: 0000 0000 0000 000D
 element: 0000 0000 0000 000C
@@ -16893,9 +16899,9 @@ element: 0000 0000 0000 0004
 element: 0000 0000 0000 0003
 element: 0000 0000 0000 0002
 element: 0000 0000 0000 0001
-Block Array
+array
 Size: 0000 0000 0000 0000   zmm31: 0000 000F 0000 000E   0000 000D 0000 000C   0000 000B 0000 FFF9   0000 0009 0000 0008   0000 0007 0000 0006   0000 0005 0000 0004   0000 0003 0000 0002   0000 0001 0000 0000
-Block Array
+array
 Size: 0000 0000 0000 0026   zmm31: 0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 00D8 0000 0098   0000 0058 0000 0026
 Full: 0000 0000 0000 0058   zmm30: 0000 001E 0000 001C   0000 001A 0000 0018   0000 0016 0000 0014   0000 0012 0000 0010   0000 000E 0000 000C   0000 000A 0000 0008   0000 0006 0000 0004   0000 0002 0000 0000
 Full: 0000 0000 0000 0098   zmm30: 0000 003E 0000 003C   0000 003A 0000 0038   0000 0036 0000 0034   0000 0032 0000 0030   0000 002E 0000 002C   0000 002A 0000 0028   0000 0026 0000 0024   0000 0022 0000 0020
@@ -16938,50 +16944,50 @@ element: 0000 0000 0000 0006
 element: 0000 0000 0000 0004
 element: 0000 0000 0000 0002
 element: 0000 0000 0000 0000
-Block Array
+array
 Size: 0000 0000 0000 0000   zmm31: 0000 001C 0000 001A   0000 0018 0000 0016   0000 0014 0000 0012   0000 0010 0000 000E   0000 000C 0000 000A   0000 0008 0000 0006   0000 0004 0000 0002   0000 0000 0000 0000
 END
  }
 #exit if $develop;
 
 #latest:;
-if (1) {                                                                        #TNasm::X86::ByteString::allocBlock #TNasm::X86::ByteString::freeBlock
-  my $a = CreateByteString; $a->dump;
+if (1) {                                                                        #TNasm::X86::Arena::allocBlock #TNasm::X86::Arena::freeBlock
+  my $a = CreateArena; $a->dump;
   my $b1 = $a->allocBlock;  $a->dump;
   my $b2 = $a->allocBlock;  $a->dump;
   $a->freeBlock($b2);       $a->dump;
   $a->freeBlock($b1);       $a->dump;
 
   ok Assemble(debug => 0, eq => <<END);
-Byte String
+Arena
   Size: 0000 0000 0000 1000
   Used: 0000 0000 0000 0018
 0000: 0010 0000 0000 00001800 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
 0040: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
 0080: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
 00C0: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
-Byte String
+Arena
   Size: 0000 0000 0000 1000
   Used: 0000 0000 0000 0058
 0000: 0010 0000 0000 00005800 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
 0040: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
 0080: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
 00C0: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
-Byte String
+Arena
   Size: 0000 0000 0000 1000
   Used: 0000 0000 0000 0098
 0000: 0010 0000 0000 00009800 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
 0040: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
 0080: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
 00C0: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
-Byte String
+Arena
   Size: 0000 0000 0000 1000
   Used: 0000 0000 0000 0098
 0000: 0010 0000 0000 00009800 0000 0000 00005800 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
 0040: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
 0080: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
 00C0: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
-Byte String
+Arena
   Size: 0000 0000 0000 1000
   Used: 0000 0000 0000 0098
 0000: 0010 0000 0000 00009800 0000 0000 00001800 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
@@ -16993,9 +16999,9 @@ END
 
 #latest:;
 
-if (1) {                                                                        #TCreateBlockArray  #TBlockArray::push
+if (1) {                                                                        #TCreateArray  #TArray::push
   my $c = Rb(0..255);
-  my $A = CreateByteString;  my $a = $A->CreateBlockArray;
+  my $A = CreateArena;  my $a = $A->CreateArray;
 
   my sub put
    {my ($e) = @_;
@@ -17053,7 +17059,7 @@ END
  }
 
 #latest:
-if (1) {                                                                        # Insert key for BlockMultiWayTree
+if (1) {                                                                        # Insert key for Tree
 # 0000000001111111 A Length    = k7
 # .........1111000 B Greater   = k6
 # 0000000001111000 C =  A&B    = k5
@@ -17079,10 +17085,10 @@ END
  }
 
 #latest:
-if (1) {                                                                        #TNasm::X86::ByteString::chain
+if (1) {                                                                        #TNasm::X86::Arena::chain
   my $format = Rd(map{4*$_+24} 0..64);
 
-  my $b = CreateByteString;
+  my $b = CreateArena;
   my $a = $b->allocBlock;
   Vmovdqu8 zmm31, "[$format]";
   $b->putBlock($b->bs, $a, 31);
@@ -17130,7 +17136,7 @@ chain1: 0000 0000 0000 001C
 chain2: 0000 0000 0000 0020
 chain3: 0000 0000 0000 0024
 chain4: 0000 0000 0000 0024
-Byte String
+Arena
   Size: 0000 0000 0000 1000
   Used: 0000 0000 0000 0058
 0000: 0010 0000 0000 00005800 0000 0000 00000000 0000 0000 00001800 0000 1C00 00002000 0000 FF00 00002800 0000 2C00 00003000 0000 3400 00003800 0000 3C00 0000
@@ -17196,7 +17202,7 @@ END
  }
 
 #latest:
-if (1) {                                                                        #TNasm::X86::BlockMultiWayTree::splitFullLeftNode
+if (1) {                                                                        #TNasm::X86::Tree::splitFullLeftNode
   my $Sk = Rd(17..28, 0, 0, 12,   0xFF);
   my $Sd = Rd(17..28, 0, 0, 0xDD, 0xEE);
   my $Sn = Rd(1..13,     0, 0,    0xCC);
@@ -17209,8 +17215,8 @@ if (1) {                                                                        
   my $rd = Rd((0)x14, 0xCC, 0xB2);
   my $rn = Rd((0)x15,       0xB3);
 
-  my $b = CreateByteString;
-  my $t = $b->CreateBlockMultiWayTree;
+  my $b = CreateArena;
+  my $t = $b->CreateTree;
 
   Vmovdqu8 zmm31, "[$Sk]";
   Vmovdqu8 zmm30, "[$Sd]";
@@ -17255,8 +17261,8 @@ if (1) {                                                                        
   my $rd = Rd((0)x14, 0xCC, 0xB2);
   my $rn = Rd((0)x15,       0xBB);
 
-  my $b = CreateByteString;
-  my $t = $b->CreateBlockMultiWayTree;
+  my $b = CreateArena;
+  my $t = $b->CreateTree;
 
   Vmovdqu8 zmm31, "[$tk]";
   Vmovdqu8 zmm30, "[$td]";
@@ -17288,7 +17294,7 @@ END
  }
 
 #latest:
-if (1) {                                                                        #TNasm::X86::BlockMultiWayTree::splitFullRightNode
+if (1) {                                                                        #TNasm::X86::Tree::splitFullRightNode
   my $tk = Rd(1..12, 0, 0, 12,      0xC1);
   my $td = Rd(1..12, 0, 0,  0,      0xC2);
   my $tn = Rd(1, 0xBB, 3..13, 0, 0, 0xCC);
@@ -17301,8 +17307,8 @@ if (1) {                                                                        
   my $rd = Rd(17..30, 0xCC, 0xB2);
   my $rn = Rd(17..31,       0xBB);
 
-  my $b = CreateByteString;
-  my $t = $b->CreateBlockMultiWayTree;
+  my $b = CreateArena;
+  my $t = $b->CreateTree;
 
   Vmovdqu8 zmm31, "[$tk]";
   Vmovdqu8 zmm30, "[$td]";
@@ -17347,8 +17353,8 @@ if (1) {                                                                        
   my $rd = Rd(17..30, 0xCC, 0xB2);
   my $rn = Rd(17..31,       0xBB);
 
-  my $b = CreateByteString;
-  my $t = $b->CreateBlockMultiWayTree;
+  my $b = CreateArena;
+  my $t = $b->CreateTree;
 
   Vmovdqu8 zmm31, "[$tk]";
   Vmovdqu8 zmm30, "[$td]";
@@ -17381,8 +17387,8 @@ END
 
 #latest:
 if (1) {
-  my $b = CreateByteString;
-  my $t = $b->CreateBlockMultiWayTree;
+  my $b = CreateArena;
+  my $t = $b->CreateTree;
 
   V(count, 24)->for(sub
    {my ($index, $start, $next, $end) = @_;
@@ -17431,10 +17437,10 @@ END
  }
 
 #latest:
-if (1) {                                                                        #TNasm::X86::ByteString::CreateBlockMultiWayTree
+if (1) {                                                                        #TNasm::X86::Arena::CreateTree
   my $N = 12;
-  my $b = CreateByteString;                                                     # Resizable memory block
-  my $t = $b->CreateBlockMultiWayTree;                                          # Multi way tree in memory block
+  my $b = CreateArena;                                                     # Resizable memory block
+  my $t = $b->CreateTree;                                          # Multi way tree in memory block
 
   K(count, $N)->for(sub                                                         # Add some entries to the tree
    {my ($index, $start, $next, $end) = @_;
@@ -17518,8 +17524,8 @@ END
 
 #latest:
 if (1) {
-  my $b = CreateByteString;
-  my $t = $b->CreateBlockMultiWayTree;
+  my $b = CreateArena;
+  my $t = $b->CreateTree;
   my $d = V(data);
   my $f = V(found);
 
@@ -17665,8 +17671,8 @@ END
 #latest:
 if (1) {                                                                        #TsetOrClearTreeBits
   ClearRegisters zmm0;
-  my $b = CreateByteString;
-  my $t = $b->CreateBlockMultiWayTree;
+  my $b = CreateArena;
+  my $t = $b->CreateTree;
 
   Mov r15, 8;
   $t->setTree  (r15, 0); PrintOutRegisterInHex zmm0;
@@ -17711,8 +17717,8 @@ END
 
 #latest:
 if (1) {
-  my $b = CreateByteString;
-  my $t = $b->CreateBlockMultiWayTree;
+  my $b = CreateArena;
+  my $t = $b->CreateTree;
   my $k = V(key,  15);
 
   $t->insertTree($k);  $t->data->outNL;
@@ -17726,8 +17732,8 @@ END
 
 #latest:
 if (1) {                                                                        # Replace a scalar with a tree in the first node
-  my $b = CreateByteString;
-  my $t = $b->CreateBlockMultiWayTree;
+  my $b = CreateArena;
+  my $t = $b->CreateTree;
   my $k = V(key,  15);
   my $d = V(data, 14);
 
@@ -17744,8 +17750,8 @@ END
 
 #latest:
 if (1) {                                                                        # Replace a scalar with a tree in the first node
-  my $b = CreateByteString;
-  my $t = $b->CreateBlockMultiWayTree;
+  my $b = CreateArena;
+  my $t = $b->CreateTree;
   my $k = V(key,  15);
   my $d = V(data, 14);
 
@@ -17766,7 +17772,7 @@ data: 0000 0000 0000 0418
 data: 0000 0000 0000 0498
 data: 0000 0000 0000 0518
 data: 0000 0000 0000 0598
-Byte String
+Arena
   Size: 0000 0000 0000 1000
   Used: 0000 0000 0000 0618
 0000: 0010 0000 0000 00001806 0000 0000 00000000 0000 0000 00000100 0000 0200 00000300 0000 0400 00000500 0000 0600 00000700 0000 0800 00000900 0000 0A00 0000
@@ -17777,13 +17783,13 @@ END
  }
 
 #latest:
-if (1) {                                                                        #TNasm::X86::BlockMultiWayTree::transferTreeBitsFromParent
+if (1) {                                                                        #TNasm::X86::Tree::transferTreeBitsFromParent
   my $B = Rb(0..63);
   Vmovdqu8 zmm0, "[$B]";
   loadFromZmm r15, w, zmm, 14;
 
-  my $b = CreateByteString;
-  my $t = $b->CreateBlockMultiWayTree;
+  my $b = CreateArena;
+  my $t = $b->CreateTree;
   $t->getTreeBits(0, r14);
 
   PrintOutRegisterInHex zmm0, r15, r14;
@@ -17815,9 +17821,9 @@ END
  }
 
 #latest:
-if (1) {                                                                        #TNasm::X86::BlockMultiWayTree::transferTreeBitsFromLeft #TNasm::X86::BlockMultiWayTree::transferTreeBitsFromRight
-  my $b = CreateByteString;
-  my $t = $b->CreateBlockMultiWayTree;
+if (1) {                                                                        #TNasm::X86::Tree::transferTreeBitsFromLeft #TNasm::X86::Tree::transferTreeBitsFromRight
+  my $b = CreateArena;
+  my $t = $b->CreateTree;
   my $lR = "110110";
   my $lP = "1";
   my $lL = "1110111";
@@ -17856,8 +17862,8 @@ END
 
 #latest:
 if (1) {                                                                        # Replace a scalar with a tree in the first node
-  my $b = CreateByteString;
-  my $t = $b->CreateBlockMultiWayTree;
+  my $b = CreateArena;
+  my $t = $b->CreateTree;
   my $k = V(key,  15);
 
   for my $i(1..15)                                                              # Overflow the root node to force a split
@@ -17883,7 +17889,7 @@ data: 0000 0000 0000 0318
 data: 0000 0000 0000 001A
 data: 0000 0000 0000 0398
 data: 0000 0000 0000 001E
-Byte String
+Arena
   Size: 0000 0000 0000 1000
   Used: 0000 0000 0000 05D8
 0000: 0010 0000 0000 0000D805 0000 0000 00000000 0000 0000 00000800 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
@@ -17911,8 +17917,8 @@ END
 
 #latest:
 if (1) {                                                                        # Extended sub tree testing
-  my $b  = CreateByteString;
-  my $t  = $b->CreateBlockMultiWayTree;
+  my $b  = CreateArena;
+  my $t  = $b->CreateTree;
   LoadZmm(0, (0) x 58, 0xf7, (0) x 5);
   PrintOutRegisterInHex zmm0;
 
@@ -17950,8 +17956,8 @@ END
 if (1) {                                                                        #
   my $N = 45; my $M = 0;
      $N % 2 == 1 or confess "Must be odd";
-  my $b = CreateByteString;
-  my $t = $b->CreateBlockMultiWayTree;
+  my $b = CreateArena;
+  my $t = $b->CreateTree;
   my $L = V(loop, $N);
   my %I;
 
@@ -18057,10 +18063,10 @@ END
  }
 
 #latest:
-if (1) {                                                                        #TNasm::X86::BlockMultiWayTree::insertTree
-  my $b = CreateByteString;
-  my $t = $b->CreateBlockMultiWayTree;
-  my $T = $b->CreateBlockMultiWayTree;
+if (1) {                                                                        #TNasm::X86::Tree::insertTree
+  my $b = CreateArena;
+  my $t = $b->CreateTree;
+  my $T = $b->CreateTree;
 
   $T->insert    (K(key, 2), K(data, 4));
   $t->insertTree(K(key, 1), $T);
@@ -18076,10 +18082,10 @@ END
  }
 
 #latest:
-if (1) {                                                                        #TNasm::X86::BlockMultiWayTree::print
+if (1) {                                                                        #TNasm::X86::Tree::print
   my $L = V(loop, 45);
-  my $b = CreateByteString;
-  my $t = $b->CreateBlockMultiWayTree;
+  my $b = CreateArena;
+  my $t = $b->CreateTree;
 
   $L->for(sub
    {my ($i, $start, $next, $end) = @_;
@@ -18167,10 +18173,10 @@ END
  }
 
 #latest:
-if (1) {                                                                        #TNasm::X86::BlockMultiWayTree::insertTreeAndClone #TNasm::X86::BlockMultiWayTree::Clone  #TNasm::X86::BlockMultiWayTree::findAndClone
+if (1) {                                                                        #TNasm::X86::Tree::insertTreeAndClone #TNasm::X86::Tree::Clone  #TNasm::X86::Tree::findAndClone
   my $L = K(loop, 4);
-  my $b = CreateByteString;
-  my $T = $b->CreateBlockMultiWayTree;
+  my $b = CreateArena;
+  my $T = $b->CreateTree;
   my $t = $T->Clone;
 
   $L->for(sub
