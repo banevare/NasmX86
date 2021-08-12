@@ -3991,13 +3991,13 @@ sub Nasm::X86::Arena::getBlock($$$$)                                            
   defined($block) or confess;
 
   Comment "Get block start";
-  PushR my @save = (r14, r15);                                                  # Result register
   If ($block < $arena->data->loc,
   Then                                                                          #DEBUG
    {PrintErrStringNL "Attempt to get block below start of arena";
     Exit(1);
    });
 
+  PushR my @save = (r14, r15);                                                  # Result register
   $bsa  ->setReg(r15);                                                          # Arena address
   $block->setReg(r14);                                                          # Offset of block in arena
   Vmovdqu64 "zmm$zmm", "[r15+r14]";                                             # Read from memory
@@ -6011,7 +6011,7 @@ sub Nasm::X86::Tree::getKeysDataNode($$$$$)                                     
   Then                                                                          # Check for optional node block
    {$b->getBlock($b->bs, $node, $zmmNode);                                      # Get the node block
    },
-  sub                                                                           # No children
+  Else                                                                          # No children
    {ClearRegisters zmm $zmmNode;                                                # Clear the child block to signal that there was not one - if there were it would have child nodes in it which would be none zero
    });
  }
