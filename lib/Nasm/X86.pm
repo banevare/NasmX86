@@ -4,9 +4,9 @@
 # Philip R Brenan at appaapps dot com, Appa Apps Ltd Inc., 2021
 #-------------------------------------------------------------------------------
 # podDocumentation
-# Finished in 17.46s, bytes assembled: 3669616
+# Finished in 17.32s, bytes assembled: 3551872
 package Nasm::X86;
-our $VERSION = "20210813";
+our $VERSION = "20210814";
 use warnings FATAL => qw(all);
 use strict;
 use Carp qw(confess cluck);
@@ -430,6 +430,20 @@ sub ChooseRegisters($@)                                                         
   sort keys %r
  }
 
+sub CheckGeneralPurposeRegister($)                                              # Check that a register is in fact a general purpose register
+ {my ($reg) = @_;                                                               # Mask register to check
+  @_ == 1 or confess;
+  $Registers{$reg} && $reg =~ m(\Ar) or
+    confess "Not a general purpose register: $reg";
+ }
+
+sub CheckNumberedGeneralPurposeRegister($)                                      # Check that a register is in fact a numbered general purpose register
+ {my ($reg) = @_;                                                               # Mask register to check
+  @_ == 1 or confess;
+  $Registers{$reg} && $reg =~ m(\Ar\d+) or
+    confess "Not a numbered general purpose register: $reg";
+ }
+
 sub InsertZeroIntoRegisterAtPoint($$)                                           # Insert a zero into the specified register at the point indicated by another register
  {my ($point, $in) = @_;                                                        # Register with a single 1 at the insertion point, register to be inserted into.
 
@@ -660,25 +674,34 @@ sub KeepFree(@)                                                                 
 
 #D2 Mask                                                                        # Operations on mask registers
 
-sub LoadConstantIntoMaskRegister($$)                                            # Set a mask register equal to a constant.
- {my ($mask, $value) = @_;                                                      # Mask register to load, constant to load
-  $mask =~ m(\Ak[0-7])i or confess "Not a mask register $mask";
-  PushR rax;
-  Mov rax, $value;                                                              # Load a general register
-  Kmovq $mask, rax;                                                             # Load mask register
-  PopR rax;
+sub CheckMaskRegister($)                                                        # Check that a register is in fact a mask register
+ {my ($mask) = @_;                                                              # Mask register to check
+  @_ == 1 or confess;
+  $Registers{$mask} && $mask =~ m(\Ak[0-7]\Z) or
+    confess "Not a mask register: $mask";
  }
 
-sub LoadBitsIntoMaskRegister($$@)                                               # Load a bit string specification into a mask register
- {my ($mask, $prefix, @values) = @_;                                            # Mask register to load, prefix bits, +n 1 bits -n 0 bits
-  $mask =~ m(\Ak[0-7])i or confess "Not a mask register $mask";
+sub LoadConstantIntoMaskRegister($$$)                                           # Set a mask register equal to a constant.
+ {my ($mask, $transfer, $value) = @_;                                           # Mask register to load, transfer register, constant to load
+  @_ == 3 or confess;
+  CheckMaskRegister $mask;
+  CheckGeneralPurposeRegister $transfer;
+  Mov $transfer, $value;                                                        # Load mask into a general purpose register
+  Kmovq $mask, $transfer;                                                       # Load mask register from general purpose register
+ }
+
+sub LoadBitsIntoMaskRegister($$$@)                                              # Load a bit string specification into a mask register
+ {my ($mask, $transfer, $prefix, @values) = @_;                                 # Mask register to load, transfer register, prefix bits, +n 1 bits -n 0 bits
+  @_ > 3 or confess;
+  CheckMaskRegister $mask;
+  CheckGeneralPurposeRegister $transfer;
   my $b = "0b$prefix";
   for my $v(@values)                                                            # String representation of bit string
    {$b .= '1' x +$v if $v > 0;
     $b .= '0' x -$v if $v < 0;
     $v or confess "Count must be positive or negative bit not zero";
    }
-  LoadConstantIntoMaskRegister($mask, eval $b)
+  LoadConstantIntoMaskRegister($mask, $transfer, eval $b)
  }
 
 my $Vpcmp = genHash("NasmX86::CompareCodes",                                    # Compare codes for "Vpcmp"
@@ -956,7 +979,7 @@ sub Nasm::X86::Sub::call($%)                                                    
 
   if (1)                                                                        # Check for duplicate parameters
    {my %dup; $dup{$_}++ for map {keys $sub->{$_}->%*} qw(in out io);
-    for my $d(keys %dup) {delete $dup{$d} if $dup{$d} <= 1}                       # Remove singletons
+    for my $d(keys %dup) {delete $dup{$d} if $dup{$d} <= 1}                     # Remove singletons
     keys %dup and confess "Duplicate keys ".dump([keys %dup]);
    }
 
@@ -1499,6 +1522,7 @@ sub Nasm::X86::Variable::address($;$)                                           
 sub Nasm::X86::Variable::copy($$;$)                                             # Copy one variable into another
  {my ($left, $right, $Transfer) = @_;                                           # Left variable, right variable, optional transfer register
   @_ == 2 or @_ == 3 or confess;
+  CheckGeneralPurposeRegister $Transfer if $Transfer;
 
   my $transfer = $Transfer // r15;                                              # Transfer register
 
@@ -1535,6 +1559,8 @@ sub Nasm::X86::Variable::copy($$;$)                                             
 
 sub Nasm::X86::Variable::copyAddress($$;$)                                      # Copy a reference to a variable
  {my ($left, $right, $Transfer) = @_;                                           # Left variable, right variable, optional transfer register
+  CheckGeneralPurposeRegister $Transfer if $Transfer;
+
   my $transfer = $Transfer // r15;
 
   $left->reference  or confess "Left hand side must be a reference";
@@ -2184,7 +2210,7 @@ sub getBwdqFromMm($$$;$)                                                        
  {my ($size, $mm, $offset, $Transfer) = @_;                                     # Size of get, mm register, offset in bytes either as a constant or as a variable, optional transfer register
   @_ == 3 or @_ == 4 or confess;
   my $w = RegisterSize $mm;                                                     # Size of mm register
-  !$Transfer or $Transfer =~ m(\Ar\d+\Z) or confess "Need a numbered register"; # Check that we have a numbered register
+  CheckNumberedGeneralPurposeRegister $Transfer if $Transfer;                   # Check that we have a numbered register
   my $transfer = $Transfer // r15;                                              # Register to use to transfer value to variable
 
   my $o;                                                                        # The offset into the mm register
@@ -2252,7 +2278,7 @@ sub getWFromZmm($$)                                                             
   getBwdqFromMm('w', "zmm$zmm", $offset)                                        # Get the numbered byte|word|double word|quad word from the numbered zmm register and return it in a variable
  }
 
-sub getDFromZmm($$;$)                                                           # Get the double word from the numbered zmm register and return it in a variable
+sub getDFromZmm($$$)                                                           # Get the double word from the numbered zmm register and return it in a variable
  {my ($zmm, $offset, $transfer) = @_;                                           # Numbered zmm, offset in bytes, optional transfer register
   getBwdqFromMm('d', "zmm$zmm", $offset, $transfer)                             # Get the numbered byte|word|double word|quad word from the numbered zmm register and return it in a variable
  }
@@ -3883,9 +3909,9 @@ sub Nasm::X86::Arena::allocZmmBlock($@)                                         
   my $ffb = $arena->firstFreeBlock;                                             # Check for a free block
   If ($ffb > 0,
   Then                                                                          # Free block available
-   {PushR zmm31;
+   {PushR my @save = (r8, zmm31);
     $arena->getBlock($arena->bs, $ffb, 31);                                     # Load the first block on the free chain
-    my $second = getDFromZmm(31, 60);                                           # The location of the next pointer is forced upon us by string which got there first.
+    my $second = getDFromZmm(31, 60, r8);                                       # The location of the next pointer is forced upon us by string which got there first.
     $arena->setFirstFreeBlock($second);                                         # Set the first free block field to point to the second block
     for my $v(@variables)
      {if (ref($v) and $v->name eq "offset")
@@ -3893,7 +3919,7 @@ sub Nasm::X86::Arena::allocZmmBlock($@)                                         
         last;
        }
      }
-    PopR zmm31;
+    PopR @save;
    },
   Else                                                                          # Cannot reuse a free block so use unassigned memory
    {$arena->allocate(V(size, RegisterSize(zmm0)), @variables);
@@ -4769,9 +4795,9 @@ sub Nasm::X86::Array::dump($@)                                                  
     my $B = $$p{bs};                                                            # Arena
     my $F = $$p{first};                                                         # First block
 
-    PushR my @save = (zmm30, zmm31);
+    PushR my @save = (r8, zmm30, zmm31);
     $b->getBlock($B, $F, 31);                                                   # Get the first block
-    my $size = getDFromZmm(31, 0);                                              # Size of array
+    my $size = getDFromZmm(31, 0, r8);                                          # Size of array
     PrintOutStringNL("array");
     $size->out("Size: ", "  ");
     PrintOutRegisterInHex zmm31;
@@ -4782,7 +4808,7 @@ sub Nasm::X86::Array::dump($@)                                                  
 
       $T->for(sub                                                               # Print out each block
        {my ($index, $start, $next, $end) = @_;                                  # Execute body
-        my $S = getDFromZmm(31, ($index + 1) * $w);                             # Address secondary block from first block
+        my $S = getDFromZmm(31, ($index + 1) * $w, r8);                         # Address secondary block from first block
         $b->getBlock($B, $S, 30);                                               # Get the secondary block
         $S->out("Full: ", "  ");
         PrintOutRegisterInHex zmm30;
@@ -4790,7 +4816,7 @@ sub Nasm::X86::Array::dump($@)                                                  
 
       my $lastBlockCount = $size % $N;                                          # Number of elements in the last block
       If ($lastBlockCount, sub                                                  # Print non empty last block
-       {my $S = getDFromZmm(31, ($T + 1) * $w);                                 # Address secondary block from first block
+       {my $S = getDFromZmm(31, ($T + 1) * $w, r8);                             # Address secondary block from first block
         $b->getBlock($B, $S, 30);                                               # Get the secondary block
         $S->out("Last: ", "  ");
         PrintOutRegisterInHex zmm30;
@@ -4820,9 +4846,11 @@ sub Nasm::X86::Array::push($@)                                                  
     my $F = $$p{first};                                                         # First block
     my $E = $$p{element};                                                       # The element to be inserted
 
-    PushR my @save = (zmm31);
+    PushR my @save = (r8, zmm31);
+    my $transfer = r8;                                                          # Transfer data from zmm to variable via this register
+
     $b->getBlock($B, $F, 31);                                                   # Get the first block
-    my $size = getDFromZmm(31, 0);                                              # Size of array
+    my $size = getDFromZmm(31, 0, $transfer);                                   # Size of array
 
     If ($size < $n,
     Then                                                                        # Room in the first block
@@ -4866,9 +4894,9 @@ sub Nasm::X86::Array::push($@)                                                  
 
       if (1)                                                                    # Continue with existing secondary block
        {PushR my @save = (rax, r14, zmm30);
-        my $S = getDFromZmm(31, ($size / $N + 1) * $w);                         # Offset of second block in first block
+        my $S = getDFromZmm(31, ($size / $N + 1) * $w, $transfer);              # Offset of second block in first block
         $b       ->getBlock($B, $S, 30);                                        # Get the second block
-        $E       ->putDIntoZmm(30, ($size % $N) * $w);                          # Place new element last in new second block
+        $E       ->putDIntoZmm(30, ($size % $N) * $w, $transfer);               # Place new element last in new second block
         ($size+1)->putDIntoZmm(31, 0);                                          # Save new size in first block
         $b       ->putBlock($B, $S, 30);                                        # Put the second block back into memory
         $b       ->putBlock($B, $F, 31);                                        # Put the first  block back into memory
@@ -4901,15 +4929,16 @@ sub Nasm::X86::Array::pop($@)                                                   
     my $F = $$p{first};                                                         # First block
     my $E = $$p{element};                                                       # The element being popped
 
-    PushR my @save = (zmm31);
+    PushR my @save = (r8, zmm31);
+    my $transfer = r8;                                                          # Transfer data from zmm to variable via this register
     $b->getBlock($B, $F, 31);                                                   # Get the first block
-    my $size = getDFromZmm(31, 0);                                              # Size of array
+    my $size = getDFromZmm(31, 0, $transfer);                                   # Size of array
 
     If ($size > 0,
     Then                                                                        # Array has elements
      {If ($size <= $n,
       Then                                                                      # In the first block
-       {$E       ->getDFromZmm(31, $size * $w);                                 # Get element
+       {$E       ->getDFromZmm(31, $size * $w, $transfer);                      # Get element
         ($size-1)->putDIntoZmm(31, 0);                                          # Update size
         $b       ->putBlock($B, $F, 31);                                        # Put the first block back into memory
         Jmp $success;                                                           # Element successfully retrieved from secondary block
@@ -4918,9 +4947,9 @@ sub Nasm::X86::Array::pop($@)                                                   
       If ($size == $N,
       Then                                                                      # Migrate the second block to the first block now that the last slot is empty
        {PushR my @save = (rax, k7, zmm30);
-        my $S = getDFromZmm(31, $w);                                            # Offset of second block in first block
+        my $S = getDFromZmm(31, $w, $transfer);                                 # Offset of second block in first block
         $b->getBlock($B, $S, 30);                                               # Get the second block
-        $E->getDFromZmm(30, $n * $w);                                           # Get element from second block
+        $E->getDFromZmm(30, $n * $w, $transfer);                                # Get element from second block
         Mov rax, -2;                                                            # Load expansion mask
         Kmovq k7, rax;                                                          # Set  expansion mask
         Vpexpandd "zmm31{k7}{z}", zmm30;                                        # Expand second block into first block
@@ -4936,9 +4965,9 @@ sub Nasm::X86::Array::pop($@)                                                   
        {If ($size % $N == 1,
         Then                                                                    # Secondary block can be freed
          {PushR my @save = (rax, zmm30);
-          my $S = getDFromZmm(31, ($size / $N + 1) * $w);                       # Address secondary block from first block
+          my $S = getDFromZmm(31, ($size / $N + 1) * $w, $transfer);            # Address secondary block from first block
           $b       ->getBlock($B, $S, 30);                                      # Load secondary block
-          $E->getDFromZmm(30, 0);                                               # Get first element from secondary block
+          $E->getDFromZmm(30, 0, $transfer);                                    # Get first element from secondary block
           V(zero, 0)->putDIntoZmm(31, ($size / $N + 1) * $w);                   # Zero at offset of secondary block in first block
           ($size-1)->putDIntoZmm(31, 0);                                        # Save new size in first block
           $b       ->freeBlock($B, offset=>$S);                                 # Free the secondary block
@@ -4949,9 +4978,9 @@ sub Nasm::X86::Array::pop($@)                                                   
 
         if (1)                                                                  # Continue with existing secondary block
          {PushR my @save = (rax, r14, zmm30);
-          my $S = getDFromZmm(31, (($size-1) / $N + 1) * $w);                   # Offset of secondary block in first block
+          my $S = getDFromZmm(31, (($size-1) / $N + 1) * $w, $transfer);        # Offset of secondary block in first block
           $b       ->getBlock($B, $S, 30);                                      # Get the secondary block
-          $E       ->getDFromZmm(30, (($size - 1)  % $N) * $w);                 # Get element from secondary block
+          $E       ->getDFromZmm(30, (($size - 1)  % $N) * $w, $transfer);      # Get element from secondary block
           ($size-1)->putDIntoZmm(31, 0);                                        # Save new size in first block
           $b       ->putBlock($B, $S, 30);                                      # Put the secondary block back into memory
           $b       ->putBlock($B, $F, 31);                                      # Put the first  block back into memory
@@ -4986,23 +5015,24 @@ sub Nasm::X86::Array::get($@)                                                   
     my $E = $$p{element};                                                       # The element to be returned
     my $I = $$p{index};                                                         # Index of the element to be returned
 
-    PushR my @save = (zmm31);
+    PushR my @save = (r8, zmm31);
+    my $transfer = r8;                                                          # Transfer data from zmm to variable via this register
     $b->getBlock($B, $F, 31);                                                   # Get the first block
-    my $size = getDFromZmm(31, 0);                                              # Size of array
+    my $size = getDFromZmm(31, 0, $transfer);                                   # Size of array
 
     If ($I < $size,
     Then                                                                        # Index is in array
      {If ($size <= $n,
       Then                                                                      # Element is in the first block
-       {$E->getDFromZmm(31, ($I + 1) * $w);                                     # Get element
+       {$E->getDFromZmm(31, ($I + 1) * $w, $transfer);                          # Get element
         Jmp $success;                                                           # Element successfully inserted in first block
        });
 
       If ($size <= $N * ($N - 1),
       Then                                                                      # Still within two levels
-       {my $S = getDFromZmm(31, ($I / $N + 1) * $w);                            # Offset of second block in first block
+       {my $S = getDFromZmm(31, ($I / $N + 1) * $w, $transfer);                 # Offset of second block in first block
         $b->getBlock($B, $S, 31);                                               # Get the second block
-        $E->getDFromZmm(31, ($I % $N) * $w);                                    # Offset of element in second block
+        $E->getDFromZmm(31, ($I % $N) * $w, $transfer);                         # Offset of element in second block
         Jmp $success;                                                           # Element successfully inserted in second block
        });
      });
@@ -5036,9 +5066,10 @@ sub Nasm::X86::Array::put($@)                                                   
     my $E = $$p{element};                                                       # The element to be added
     my $I = $$p{index};                                                         # Index of the element to be inserted
 
-    PushR my @save = (zmm31);
+    PushR my @save = (r8, zmm31);
+    my $transfer = r8;                                                          # Transfer data from zmm to variable via this register
     $b->getBlock($B, $F, 31);                                                   # Get the first block
-    my $size = getDFromZmm(31, 0          );                                    # Size of array
+    my $size = getDFromZmm(31, 0, $transfer);                                   # Size of array
     If ($I < $size,
     Then                                                                        # Index is in array
      {If ($size <= $n,
@@ -5050,9 +5081,9 @@ sub Nasm::X86::Array::put($@)                                                   
 
       If ($size <= $N * ($N - 1),
       Then                                                                      # Still within two levels
-       {my $S = getDFromZmm(31, ($I / $N + 1) * $w);                            # Offset of second block in first block
+       {my $S = getDFromZmm(31, ($I / $N + 1) * $w, $transfer);                 # Offset of second block in first block
         $b->getBlock($B, $S, 31);                                               # Get the second block
-        $E->putDIntoZmm(31, ($I % $N) * $w);                                    # Put the element into the second block in first block
+        $E->putDIntoZmm(31, ($I % $N) * $w, $transfer);                         # Put the element into the second block in first block
         $b->putBlock($B, $S, 31);                                               # Get the first block
         Jmp $success;                                                           # Element successfully inserted in second block
        });
@@ -5180,7 +5211,7 @@ sub Nasm::X86::Tree::splitNode($$$$@)                                           
      {Jmp $success;
      });
 
-    my $p = $t->getUpFromData($D);                                              # Parent
+    my $p = $t->getUpFromData($D, $transfer);                                   # Parent
     If ($p,
     Then                                                                        # Not the root
      {my $s = getDFromZmm $K, $t->splittingKey, $transfer;                      # Splitting key
@@ -5216,7 +5247,7 @@ sub Nasm::X86::Tree::splitNode($$$$@)                                           
         $t->putKeysDataNode($n, 25, 24, 23);                                    # Save right back into node we just split
        });
      },
-    Then
+    Else
      {$t->splitFullRoot;                                                        # Root
       my $l = getDFromZmm $N, 0,         $transfer;
       my $r = getDFromZmm $N, $t->width, $transfer;
@@ -5239,10 +5270,10 @@ sub Nasm::X86::Tree::reParent($$$$$@)                                           
 
   my $s = Subroutine
    {my ($parameters) = @_;                                                      # Parameters
-
+    PushR my @save = (r8);
     my $B = $$parameters{bs};                                                   # Arena
     my $L = $t->getLengthInKeys($PK) + 1;                                       # Number of children
-    my $p = $t->getUpFromData ($PD);                                            # Parent node offset as a variable
+    my $p = $t->getUpFromData  ($PD, r8);                                       # Parent node offset as a variable
 
     If ($t->getLoop($PD), sub                                                   # Not a leaf
      {PushR my @save = (rax, rdi);
@@ -5261,6 +5292,7 @@ sub Nasm::X86::Tree::reParent($$$$$@)                                           
       Mov rsp, rdi;                                                             # Level stack
       PopR @save;
      });
+    PopR @save;
    } io => [qw(bs)];
 
   $s->call($t->address, @variables);
@@ -5361,22 +5393,22 @@ sub Nasm::X86::Tree::splitFullRoot($)                                           
     my $lo = $t->getLoop($LN, $transfer);                                       # Offset of left block
     my $ro = $t->getLoop($RN, $transfer);                                       # Offset of right block
 
-    LoadBitsIntoMaskRegister(k7, "11",-$length);                                # Area to clear preserving loop and up/length
+    LoadBitsIntoMaskRegister(k7, $transfer, "11", -$length);                    # Area to clear preserving loop and up/length
     &Vmovdqu32   (zmm $LK."{k7}{z}",   $LK);                                    # Clear left
     &Vmovdqu32   (zmm $LD."{k7}{z}",   $LD);
     &Vmovdqu32   (zmm $RK."{k7}{z}",   $RK);                                    # Clear right
     &Vmovdqu32   (zmm $RD."{k7}{z}",   $RD);
 
-    LoadBitsIntoMaskRegister(k7, "10" -$length);                                # Area to clear preserving loop
+    LoadBitsIntoMaskRegister(k7, $transfer, "10", -$length);                    # Area to clear preserving loop
     &Vmovdqu32   (zmm $LN."{k7}{z}",   $LN);                                    # Clear left
     &Vmovdqu32   (zmm $RK."{k7}{z}",   $RK);                                    # Clear right
 
-    LoadBitsIntoMaskRegister(k7, "",  +$ll);                                    # Constant mask up to the split point
+    LoadBitsIntoMaskRegister(k7, $transfer, "",  +$ll);                         # Constant mask up to the split point
     &Vmovdqu32   (zmm $LK."{k7}",      $TK);                                    # Split keys left
     &Vmovdqu32   (zmm $LD."{k7}",      $TD);                                    # Split data left
     If ($n, sub  {&Vmovdqu32 (zmm $LN."{k7}", $TN)});                           # Split nodes left
 
-    LoadBitsIntoMaskRegister(k6, '',  +$rl, -($ll+1));                          # Constant mask from one beyond split point to end of keys
+    LoadBitsIntoMaskRegister(k6, $transfer, '',  +$rl, -($ll+1));               # Constant mask from one beyond split point to end of keys
     Kshiftrq k7, k6, $ll+1;                                                     # Constant mask for compressed right keys
 
     &Vmovdqu32   (zmm $Test."{k6}{z}", $TK);                                    # Split right keys
@@ -5397,18 +5429,18 @@ sub Nasm::X86::Tree::splitFullRoot($)                                           
     my $k = getDFromZmm $TK, $ll * (my $w = $t->width), $transfer;              # Splitting key
     my $d = getDFromZmm $TD, $ll * $w,                  $transfer;              # Splitting data
 
-    LoadConstantIntoMaskRegister(k7, 1);                                        # Position of key, data in root node
+    LoadConstantIntoMaskRegister(k7, $transfer, 1);                                        # Position of key, data in root node
     $k->zBroadCastD($Test);                                                     # Broadcast keys
     &Vmovdqu32 (zmm $TK."{k7}",  $Test);                                        # Insert key in root
     $d->zBroadCastD($Test);                                                     # Broadcast keys
     &Vmovdqu32 (zmm $TD."{k7}",  $Test);                                        # Insert data in root
-    LoadBitsIntoMaskRegister(k7, "11", -($length-1), 1);                        # Unused fields
+    LoadBitsIntoMaskRegister(k7, $transfer, "11", -($length-1), 1);                        # Unused fields
     &Vmovdqu32 (zmm $TK."{k7}{z}",  $TK);                                       # Clear unused keys in root
     &Vmovdqu32 (zmm $TD."{k7}{z}",  $TD);                                       # Clear unused data in root
 
     If ($n,
     Then
-     {LoadBitsIntoMaskRegister(k7, "1", -$length, 1);                           # Unused fields
+     {LoadBitsIntoMaskRegister(k7, $transfer, "1", -$length, 1);                           # Unused fields
       &Vmovdqu32 (zmm $TN."{k7}{z}",  $TN);                                     # Clear unused node in root
      });
 
@@ -5459,17 +5491,17 @@ sub Nasm::X86::Tree::splitFullLeftOrRightNode($$)                               
     my $ro = $t->getLoop($RN, $transfer);                                       # Offset of right block
 
     if ($right)
-     {LoadBitsIntoMaskRegister(k7, "00", +$length);                             # Left mask for keys and data
+     {LoadBitsIntoMaskRegister(k7, $transfer, "00", +$length);                             # Left mask for keys and data
       &Vmovdqu32(zmm $LK."{k7}", $RK);                                          # Copy right keys  to left node
       &Vmovdqu32(zmm $LD."{k7}", $RD);                                          # Copy right data  to left node
-      LoadBitsIntoMaskRegister(k7, "01", +$length);                             # Left mask for child nodes
+      LoadBitsIntoMaskRegister(k7, $transfer, "01", +$length);                             # Left mask for child nodes
       &Vmovdqu32(zmm $LN."{k7}", $RN);                                          # Copy right nodes to left node
      }
 
     my $k = getDFromZmm $LK, $ll * (my $w = $t->width), $transfer;              # Splitting key
     my $d = getDFromZmm $LD, $ll * $w,                  $transfer;              # Splitting data
 
-    LoadBitsIntoMaskRegister(k6, '', +$rl, -($ll+1));                           # Constant mask from one beyond split point to end of keys
+    LoadBitsIntoMaskRegister(k6, $transfer, '', +$rl, -($ll+1));                           # Constant mask from one beyond split point to end of keys
     Kshiftrq k7, k6, $ll+1;                                                     # Constant mask for compressed right keys
 
     &Vmovdqu32   (zmm $Test."{k6}{z}", $LK);                                    # Split out right keys
@@ -5488,15 +5520,15 @@ sub Nasm::X86::Tree::splitFullLeftOrRightNode($$)                               
      });
 
     if ($right)
-     {LoadBitsIntoMaskRegister(k7, '11', -($rl+2), +($ll-1));                   # Areas to retain
-      LoadBitsIntoMaskRegister(k6, '11', -($rl+1),  +$ll);
+     {LoadBitsIntoMaskRegister(k7, $transfer, '11', -($rl+2), +($ll-1));                   # Areas to retain
+      LoadBitsIntoMaskRegister(k6, $transfer, '11', -($rl+1),  +$ll);
 
       &Vmovdqu32   (zmm $RK."{k7}{z}",   $RK);                                  # Remove unused keys on right
       &Vmovdqu32   (zmm $RD."{k7}{z}",   $RD);                                  # Remove unused data on right
 
       If ($n,
       Then                                                                      # Split nodes left
-       {LoadBitsIntoMaskRegister(k7, '10', -($rl+2), +($ll-1));
+       {LoadBitsIntoMaskRegister(k7, $transfer, '10', -($rl+2), +($ll-1));
         &Vmovdqu32 (zmm $RN."{k7}{z}",   $RN);
        });
 
@@ -5505,23 +5537,23 @@ sub Nasm::X86::Tree::splitFullLeftOrRightNode($$)                               
 
       If ($n,
       Then                                                                      # Split nodes left
-       {LoadBitsIntoMaskRegister(k6, '10', -($rl+1), +$ll);
+       {LoadBitsIntoMaskRegister(k6, $transfer, '10', -($rl+1), +$ll);
         &Vmovdqu32 (zmm $LN."{k6}{z}",   $LN);
        });
      }
     else
-     {LoadBitsIntoMaskRegister(k7, "11", -($rl+1), +$ll);                       # Mask to reset moved keys
+     {LoadBitsIntoMaskRegister(k7, $transfer, "11", -($rl+1), +$ll);                       # Mask to reset moved keys
 
       &Vmovdqu32   (zmm $LK."{k7}{z}",   $LK);                                  # Remove unused keys
       &Vmovdqu32   (zmm $LD."{k7}{z}",   $LD);                                  # Split data left
       If ($n,
       Then                                                                      # Split nodes left
-       {LoadBitsIntoMaskRegister(k7, '10', -($rl+1), +$ll);
+       {LoadBitsIntoMaskRegister(k7, $transfer, '10', -($rl+1), +$ll);
         &Vmovdqu32 (zmm $LN."{k7}{z}",   $LN);
        });
      }
     ($right ? $ro : $lo)->zBroadCastD($Test);                                   # Find index in parent of left node - broadcast offset of left node so we can locate it in the parent
-    LoadBitsIntoMaskRegister(k7, '', +$length);                                 # Nodes
+    LoadBitsIntoMaskRegister(k7, $transfer, '', +$length);                                 # Nodes
     &Vpcmpud("k6{k7}", zmm($PN, $Test), 0);                                     # Check for equal offset - one of them will match to create the single insertion point in k6
 
     Kandnq k5, k6, k7;                                                          # Expansion mask
@@ -5752,7 +5784,7 @@ sub Nasm::X86::Tree::insertDataOrTree($$$$)                                     
     my $K = $$p{key};                                                           # Key  to be inserted
     my $D = $$p{data};                                                          # Data to be inserted
 
-    PushR my @save = (k4, k5, k6, k7, r13, r14, r15, zmm 22..31);
+    PushR my @save = (k4, k5, k6, k7, r8, r13, r14, r15, zmm 22..31);
     my $point = r13;                                                            # Insertion indicator
     $t->getKeysDataNode($F, 31, 30, 29);                                        # Get the first block
 
@@ -5788,7 +5820,7 @@ sub Nasm::X86::Tree::insertDataOrTree($$$$)                                     
           IfNz                                                                  # If the data element is already a tree then get its value and return it in the data variable
           Then
            {Tzcnt r14, r15;                                                     # Trailing zeros
-            $D->copy(getDFromZmm(30, "r14*$$t{width}"));                        # Data associated with the key
+            $D->copy(getDFromZmm 30, "r14*$$t{width}", r8);                     # Data associated with the key
             Jmp $success;                                                       # Return offset of sub tree
            },
           Else                                                                  # The existing element is not a tree so we mark it as such using the single bit in r15/k6
@@ -5952,12 +5984,6 @@ sub Nasm::X86::Tree::putKeysData($$$$)                                          
   @_ == 4 or confess;
   $t->bs->putBlock($t->address, $offset, $zmmKeys);                             # Put the keys block
   my $data = $t->getLoop($zmmKeys);                                             # Get the offset of the corresponding data block
-  my $up   = $t->getUpFromData($zmmData);                                       #DEBUG Check up pointer
-  If ($up >= $offset,
-  Then
-   {PrintErrStringNL "Up is not less than node";
-    Exit(0);
-   });
   $t->bs->putBlock($t->address, $data, $zmmData);                               # Put the data block
  }
 
@@ -6009,10 +6035,10 @@ sub Nasm::X86::Tree::putLengthInKeys($$$)                                       
   $length->putBIntoZmm($zmm, $t->lengthOffset)                                  # Set the length field
  }
 
-sub Nasm::X86::Tree::getUpFromData($$)                                          #P Get the up offset from the data block in the numbered zmm and return it as a variable
- {my ($t, $zmm) = @_;                                                           # Tree descriptor, zmm number
-  @_ == 2 or confess;
-  getDFromZmm($zmm, $t->lengthOffset);                                          # The length field as a variable
+sub Nasm::X86::Tree::getUpFromData($$$)                                         #P Get the up offset from the data block in the numbered zmm and return it as a variable
+ {my ($t, $zmm, $transfer) = @_;                                                # Tree descriptor, zmm number, transfer register
+  @_ == 3 or confess;
+  getDFromZmm($zmm, $t->lengthOffset, $transfer);                               # The length field as a variable
  }
 
 sub Nasm::X86::Tree::putUpIntoData($$$)                                         #P Put the offset of the parent keys block expressed as a variable into the numbered zmm
@@ -6044,24 +6070,24 @@ sub Nasm::X86::Tree::leftOrRightMost($$@)                                       
    {my ($p) = @_;                                                               # Parameters
 
     my $F = $$p{node};                                                          # First block
-    PushR my @save = (rax, zmm29, zmm30, zmm31);
+    PushR my @save = (rax, r8, zmm29, zmm30, zmm31);
 
     K(loopLimit, 9)->for(sub                                                    # Loop a reasonable number of times
      {my ($index, $start, $next, $end) = @_;
       $t->getKeysDataNode($F, 31, 30, 29);                                      # Get the first keys block
-      my $n = getDFromZmm(29, 0);                                               # Get the node block offset from the data block loop
+      my $n = getDFromZmm 29, 0, r8;                                               # Get the node block offset from the data block loop
       If ($n == 0,
       Then                                                                      # Reached the end so return the containing block
        {$$p{offset}->copy($F);
         Jmp $success;
        });
       if ($dir == 0)                                                            # Left most
-       {my $l = getDFromZmm(29, 0);                                             # Get the left most node
+       {my $l = getDFromZmm 29, 0, r8;                                          # Get the left most node
         $F->copy($l);                                                           # Continue with the next level
        }
       else                                                                      # Right most
        {my $l = $t->getLengthInKeys(31);                                        # Length of the node
-        my $r = getDFromZmm(31, $l);                                            # Get the right most child
+        my $r = getDFromZmm(31, $l, r8);                                        # Get the right most child
         $F->copy($r);                                                           # Continue with the next level
        }
      });
@@ -6089,6 +6115,7 @@ sub Nasm::X86::Tree::rightMost($@)                                              
 
 sub Nasm::X86::Tree::nodeFromData($$$)                                          #P Load the the node block into the numbered zmm corresponding to the data block held in the numbered zmm.
  {my ($t, $data, $node) = @_;                                                   # Tree descriptor, numbered zmm containing data, numbered zmm to hold node block
+confess "Not needed";
   @_ == 3 or confess;
   my $loop = $t->getLoop($data);                                                # Get loop offset from data
   $t->getBlock($t->address, $loop, $node);                                      # Node
@@ -6116,13 +6143,13 @@ sub Nasm::X86::Tree::depth($@)                                                  
 
     my $N = $$parameters{node};                                                 # Starting node
 
-    PushR my @save = (r14, r15, zmm30, zmm31);
+    PushR my @save = (r8, r14, r15, zmm30, zmm31);
     my $tree = $N->clone;                                                       # Start at the specified node
 
     K(loop, 9)->for(sub                                                         # Step up through tree
      {my ($index, $start, $next, $end) = @_;
       $t->getKeysData($tree, 31, 30);                                           # Get the keys block
-      my $p = $t->getUpFromData(30);                                            # Parent
+      my $p = $t->getUpFromData(30, r8);                                        # Parent
       If ($p == 0,
       Then                                                                      # Empty tree so we have not found the key
        {$$parameters{depth}->copy($index+1);                                    # Key not found
@@ -6305,14 +6332,14 @@ sub Nasm::X86::Tree::Iterator::next($)                                          
 
     my $new  = sub                                                              # Load iterator with latest position
      {my ($node, $pos) = @_;                                                    # Parameters
-      PushR my @save = (zmm31, zmm30,  zmm29);
+      PushR my @save = (r8, zmm31, zmm30,  zmm29);
       $$p{node}->copy($node);                                                   # Set current node
       $$p{pos} ->copy($pos);                                                    # Set current position in node
       $iter->tree->getKeysData($node, 31, 30);                                  # Load keys and data
 
       my $offset = $pos * $iter->tree->width;                                   # Load key and data
-      $$p{key} ->copy(getDFromZmm(31, $offset));
-      $$p{data}->copy(getDFromZmm(30, $offset));
+      $$p{key} ->copy(getDFromZmm 31, $offset, r8);
+      $$p{data}->copy(getDFromZmm 30, $offset, r8);
       PopR @save;
      };
 
@@ -6356,13 +6383,13 @@ sub Nasm::X86::Tree::Iterator::next($)                                          
       my $zmmNK = 31; my $zmmPK = 28; my $zmmTest = 25;
       my $zmmND = 30; my $zmmPD = 27;
       my $zmmNN = 29; my $zmmPN = 26;
-      PushR my @save = (k7, r14, r15, map {"zmm$_"} 25..31);
+      PushR my @save = (k7, r8, r14, r15, map {"zmm$_"} 25..31);
       my $t = $iter->tree;
 
       ForEver                                                                   # Up through the tree
        {my ($start, $end) = @_;                                                 # Parameters
         $t->getKeysData($n, $zmmNK, $zmmND);                                    # Load keys and data for current node
-        my $p = $t->getUpFromData($zmmND);
+        my $p = $t->getUpFromData($zmmND, r8);
         If ($p == 0, sub{Jmp $end});                                            # Jump to the end if we have reached the top of the tree
         $t->getKeysDataNode($p, $zmmPK, $zmmPD, $zmmPN);                        # Load keys, data and children nodes for parent which must have children
         $n->setReg(r15);                                                        # Offset of child
@@ -6386,10 +6413,10 @@ sub Nasm::X86::Tree::Iterator::next($)                                          
      };
 
     $$p{pos}->copy(my $i = $$p{pos} + 1);                                       # Next position in block being scanned
-    PushR my @save = (zmm31, zmm30, zmm29);
+    PushR my @save = (r8, zmm31, zmm30, zmm29);
     $iter->tree->getKeysDataNode($C,    31, 30, 29);                            # Load keys and data
     my $l = $iter->tree->getLengthInKeys(31);                                   # Length of keys
-    my $n = getDFromZmm(29, 0);                                                 # First node will ne zero if on a leaf
+    my $n = getDFromZmm 29, 0, r8;                                              # First node will ne zero if on a leaf
     If ($n == 0,
     Then                                                                        # Leaf
      {If ($i < $l,
@@ -6401,7 +6428,7 @@ sub Nasm::X86::Tree::Iterator::next($)                                          
        });
      },
     Then                                                                        # Node
-     {my $offsetAtI = getDFromZmm(29, $i * $iter->tree->width);
+     {my $offsetAtI = getDFromZmm 29, $i * $iter->tree->width, r8;
       $iter->tree->leftMost(node=>$offsetAtI, my $l = V(offset));
       &$new($l, K(zero, 0));
      });
@@ -7051,7 +7078,7 @@ present. If the test fails we continue rather than calling L<Carp::confess>.
 Generate X86 assembler code using Perl as a macro pre-processor.
 
 
-Version "20210813".
+Version "20210814".
 
 
 The following sections describe the methods in each functional area of this
@@ -16283,7 +16310,7 @@ if (1) {                                                                        
   PrintOutRegisterInHex zmm0;
   getBFromZmm(0, 12)->outNL;
   getWFromZmm(0, 12)->outNL;
-  getDFromZmm(0, 12)->outNL;
+  getDFromZmm(0, 12, r15)->outNL;
   getQFromZmm(0, 12)->outNL;
 
   is_deeply Assemble, <<END;
@@ -17162,12 +17189,12 @@ if (1) {                                                                        
   IfZ Then {PrintOutStringNL "0 & 0 == 0"};
   PrintOutZF;
 
-  LoadConstantIntoMaskRegister k1, 1;
+  LoadConstantIntoMaskRegister k1, r13, 1;
   Ktestq k1, k1;
   IfNz Then {PrintOutStringNL "1 & 1 != 0"};
   PrintOutZF;
 
-  LoadConstantIntoMaskRegister k2, eval "0b".(('1'x4).('0'x4))x2;
+  LoadConstantIntoMaskRegister k2, r13, eval "0b".(('1'x4).('0'x4))x2;
 
   PrintOutRegisterInHex k0, k1, k2;
 
@@ -17506,7 +17533,7 @@ if (1) {                                                                        
    }
 
   ClearRegisters k7;
-  LoadBitsIntoMaskRegister(k7, '1010', -4, +4, -2, +2, -1, +1, -1, +1);
+  LoadBitsIntoMaskRegister(k7, r15, '1010', -4, +4, -2, +2, -1, +1, -1, +1);
   PrintOutRegisterInHex "k7";
 
   ok Assemble(debug => 0, eq => <<END);
