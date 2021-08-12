@@ -3984,42 +3984,44 @@ sub Nasm::X86::Arena::freeBlock($@)                                             
   $s->call($arena->bs, @variables);
  }
 
-sub Nasm::X86::Arena::getBlock($$$$)                                            #P Get the block with the specified offset in the specified string and return it in the numbered zmm
- {my ($arena, $bsa, $block, $zmm) = @_;                                         # Arena descriptor, arena variable, offset of the block as a variable, number of zmm register to contain block
-  @_ == 4 or confess;
-  defined($bsa)   or confess;
-  defined($block) or confess;
+sub Nasm::X86::Arena::getBlock($$$$;$$)                                         #P Get the block with the specified offset in the specified string and return it in the numbered zmm
+ {my ($arena, $address, $block, $zmm, $work1, $work2) = @_;                     # Arena descriptor, arena address variable, offset of the block as a variable, number of zmm register to contain block, first optional work register, second optional work register
+  @_ == 4 or @_ == 6 or confess;
+  defined($address)  or confess;
+  defined($block)    or confess;
 
-  Comment "Get block start";
   If ($block < $arena->data->loc,
   Then                                                                          #DEBUG
    {PrintErrStringNL "Attempt to get block below start of arena";
     Exit(1);
    });
 
-  PushR my @save = (r14, r15);                                                  # Result register
-  $bsa  ->setReg(r15);                                                          # Arena address
-  $block->setReg(r14);                                                          # Offset of block in arena
-  Vmovdqu64 "zmm$zmm", "[r15+r14]";                                             # Read from memory
-  PopR @save;                                                                   # Restore registers
-  Comment "Get block end";
+  my $a = $work1 // r14;                                                        # Work registers
+  my $o = $work2 // r15;
+  PushR my @save = ($a, $o) unless @_ == 6;
+  $address->setReg($a);                                                         # Arena address
+  $block  ->setReg($o);                                                         # Offset of block in arena
+  Vmovdqu64 "zmm$zmm", "[$a+$o]";                                               # Read from memory
+  PopR @save unless @_ == 6;                                                    # Restore registers
  }
 
-sub Nasm::X86::Arena::putBlock($$$$)                                            #P Write the numbered zmm to the block at the specified offset in the specified arena
- {my ($arena, $bsa, $block, $zmm) = @_;                                         # Arena descriptor, arena variable, block in arena, content variable
-  @_ >= 4 or confess;
-  PushR my @save = (r14, r15);                                                  # Work registers
-  defined($bsa) or confess "Arena not set";
-  $bsa->setReg(r15);                                                            # Arena address
-  defined($block) or confess;
+sub Nasm::X86::Arena::putBlock($$$$;$$)                                         #P Write the numbered zmm to the block at the specified offset in the specified arena
+ {my ($arena, $address, $block, $zmm, $work1, $work2) = @_;                     # Arena descriptor, arena address variable, offset of the block as a variable, number of zmm register to contain block, first optional work register, second optional work register
+  @_ >= 4 or @_ >= 6 or confess;
+  defined($address) or confess "Arena not set";
+  defined($block)   or confess;
   If ($block < $arena->data->loc,
   Then                                                                          #DEBUG
    {PrintErrStringNL "Attempt to put block below start of arena";
     Exit(1);
    });
-  $block->setReg(r14);                                                          # Offset of block in arena
-  Vmovdqu64 "[r15+r14]", "zmm$zmm";                                             # Write to memory
-  PopR @save;                                                                   # Restore registers
+  my $a = $work1 // r14;                                                        # Work registers
+  my $o = $work2 // r15;
+  PushR my @save = ($a, $o) unless @_ == 6;
+  $address->setReg($a);                                                         # Arena address
+  $block  ->setReg($o);                                                         # Offset of block in arena
+  Vmovdqu64 "[$a+$o]", "zmm$zmm";                                               # Read from memory
+  PopR @save unless @_ == 6;                                                    # Restore registers
  }
 
 sub Nasm::X86::Arena::m($@)                                                     # Append the content with length rdi addressed by rsi to the arena addressed by rax
