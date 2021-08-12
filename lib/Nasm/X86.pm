@@ -4,7 +4,8 @@
 # Philip R Brenan at appaapps dot com, Appa Apps Ltd Inc., 2021
 #-------------------------------------------------------------------------------
 # podDocumentation
-# Finished in 17.32s, bytes assembled: 3551872
+# Finished in 17.21s, bytes assembled: 3546128
+# putBlock - needs two registers
 package Nasm::X86;
 our $VERSION = "20210814";
 use warnings FATAL => qw(all);
@@ -424,7 +425,7 @@ sub zmm(@)                                                                      
 
 sub ChooseRegisters($@)                                                         # Choose the specified numbers of registers excluding those on the specified list
  {my ($number, @registers) = @_;                                                # Number of registers needed, Registers not to choose
-  my %r = (map {"r$_"} 8..15);
+  my %r = (map {$_=>1} map {"r$_"} 8..15);
   delete $r{$_} for @registers;
   $number <= keys %r or confess "Not enough registers available";
   sort keys %r
@@ -541,7 +542,7 @@ sub UnReorderSyscallRegisters(@)                                                
 
 sub RegisterSize($)                                                             # Return the size of a register
  {my ($r) = @_;                                                                 # Register
-
+  defined($r) or confess;
   eval "${r}Size()";
  }
 
@@ -2298,9 +2299,9 @@ sub Nasm::X86::Variable::getWFromZmm($$$)                                       
   $variable->copy(getBwdqFromMm('w', "zmm$zmm", $offset))                       # Get the numbered byte|word|double word|quad word from the numbered zmm register and put it in a variable
  }
 
-sub Nasm::X86::Variable::getDFromZmm($$$)                                       # Get the double word from the numbered zmm register and put it in a variable
- {my ($variable, $zmm, $offset) = @_;                                           # Variable, numbered zmm, offset in bytes
-  $variable->copy(getBwdqFromMm('d', "zmm$zmm", $offset))                       # Get the numbered byte|word|double word|quad word from the numbered zmm register and put it in a variable
+sub Nasm::X86::Variable::getDFromZmm($$$;$)                                     # Get the double word from the numbered zmm register and put it in a variable
+ {my ($variable, $zmm, $offset, $transfer) = @_;                                # Variable, numbered zmm, offset in bytes, transfer register
+  $variable->copy(getBwdqFromMm 'd', "zmm$zmm", $offset, $transfer)             # Get the numbered byte|word|double word|quad word from the numbered zmm register and put it in a variable
  }
 
 sub Nasm::X86::Variable::getQFromZmm($$$)                                       # Get the quad word from the numbered zmm register and put it in a variable
@@ -2308,12 +2309,15 @@ sub Nasm::X86::Variable::getQFromZmm($$$)                                       
   $variable->copy(getBwdqFromMm('q', "zmm$zmm", $offset))                       # Get the numbered byte|word|double word|quad word from the numbered zmm register and put it in a variable
  }
 
-sub Nasm::X86::Variable::putBwdqIntoMm($$$$)                                    # Place the value of the content variable at the byte|word|double word|quad word in the numbered zmm register
- {my ($content, $size, $mm, $offset) = @_;                                      # Variable with content, size of put, numbered zmm, offset in bytes
-  @_ == 4 or confess;
+sub Nasm::X86::Variable::putBwdqIntoMm($$$$;$)                                  # Place the value of the content variable at the byte|word|double word|quad word in the numbered zmm register
+ {my ($content, $size, $mm, $offset, $Transfer) = @_;                           # Variable with content, size of put, numbered zmm, offset in bytes, optional transfer register
+  @_ == 4 or @_ == 5 or confess;
+  CheckNumberedGeneralPurposeRegister $Transfer if $Transfer;
   my $w = RegisterSize $mm;                                                     # Size of mm register
-
+  my ($temp)   = ChooseRegisters(1, r14);
+  my $transfer = $Transfer // $temp;
   my $o;                                                                        # The offset into the mm register
+
   if (ref($offset))                                                             # The offset is being passed in a variable
    {my $name = $offset->name;
     Comment "Put $size at $name in $mm";
@@ -2325,19 +2329,18 @@ sub Nasm::X86::Variable::putBwdqIntoMm($$$$)                                    
     Comment "Put $size at $offset in $mm";
     $offset >= 0 && $offset <= RegisterSize $mm or
       confess "Out of range" if $offset =~ m(\A\d+\Z);                          # Check the offset if it is a number
-    $offset =~ m(r15) and
-      confess "Cannot pass offset: '$offset', in r15, choose another register";
    }
 
-  PushR my @save = (r15);                                                        # Push target register
-  $content->setReg(r15);
+  my @save = ($transfer);
+  PushR @save unless $Transfer;                                                 # Push target register
+  $content->setReg($transfer);
   Vmovdqu32 "[rsp-$w]", $mm;                                                    # Write below the stack
-  Mov   "[rsp+$o-$w]", r15b if $size =~ m(b);                                   # Write byte register
-  Mov   "[rsp+$o-$w]", r15w if $size =~ m(w);                                   # Write word register
-  Mov   "[rsp+$o-$w]", r15d if $size =~ m(d);                                   # Write double word register
-  Mov   "[rsp+$o-$w]", r15  if $size =~ m(q);                                   # Write register
+  Mov   "[rsp+$o-$w]", $transfer."b" if $size =~ m(b);                          # Write byte register
+  Mov   "[rsp+$o-$w]", $transfer."w" if $size =~ m(w);                          # Write word register
+  Mov   "[rsp+$o-$w]", $transfer."d" if $size =~ m(d);                          # Write double word register
+  Mov   "[rsp+$o-$w]", $transfer     if $size =~ m(q);                          # Write register
   Vmovdqu32 $mm, "[rsp-$w]";                                                    # Read below the stack
-  PopR @save;
+  PopR @save unless $Transfer;
 
   PopR $o if ref($offset);                                                      # The offset is being passed in a variable
  }
@@ -2374,10 +2377,10 @@ sub Nasm::X86::Variable::putWIntoZmm($$$)                                       
   $content->putBwdqIntoMm('w', "zmm$zmm", $offset)                              # Place the value of the content variable at the byte|word|double word|quad word in the numbered zmm register
  }
 
-sub Nasm::X86::Variable::putDIntoZmm($$$)                                       # Place the value of the content variable at the double word in the numbered zmm register
- {my ($content, $zmm, $offset) = @_;                                            # Variable with content, numbered zmm, offset in bytes
+sub Nasm::X86::Variable::putDIntoZmm($$$;$)                                     # Place the value of the content variable at the double word in the numbered zmm register
+ {my ($content, $zmm, $offset, $transfer) = @_;                                 # Variable with content, numbered zmm, offset in bytes, optional transfer register
   $zmm =~ m(\A(0|1|2|3|4|5|6|7|8|9|10|11|12|13|14|15|16|17|18|19|20|21|22|23|24|25|26|27|28|29|30|31)\Z) or confess;
-  $content->putBwdqIntoMm('d', "zmm$zmm", $offset)                              # Place the value of the content variable at the byte|word|double word|quad word in the numbered zmm register
+  $content->putBwdqIntoMm('d', "zmm$zmm", $offset, $transfer)                   # Place the value of the content variable at the byte|word|double word|quad word in the numbered zmm register
  }
 
 sub Nasm::X86::Variable::putQIntoZmm($$$)                                       # Place the value of the content variable at the quad word in the numbered zmm register
@@ -3969,13 +3972,13 @@ sub Nasm::X86::Arena::freeBlock($@)                                             
   my $s = Subroutine
    {my ($p) = @_;                                                               # Parameters
     Comment "Free a block in an arena";
-    PushR zmm31;
+    PushR my @save = (r8, zmm31);
     my $rfc = $arena->firstFreeBlock;                                           # Get first free block
-    ClearRegisters zmm31;                                                       # Second block
-    $rfc->putDIntoZmm(31, 60);                                                  # The position of the next pointer was dictated by strings.
+    ClearRegisters @save;                                                       # Second block
+    $rfc->putDIntoZmm(31, 60, r8);                                              # The position of the next pointer was dictated by strings.
     $arena->putBlock($$p{bs}, $$p{offset}, 31);                                 # Link the freed block to the rest of the free chain
     $arena->setFirstFreeBlock($$p{offset});                                     # Set free chain field to point to latest free chain element
-    PopR zmm31;
+    PopR @save;
    } in => [qw(offset)], io => [qw(bs)];
 
   $s->call($arena->bs, @variables);
@@ -4336,17 +4339,17 @@ sub Nasm::X86::String::putNextandPrevBlockOffsetIntoZmm($$$$)                   
     PopR @regs;                                                                 # Free work registers
    }
   elsif ($next)                                                                 # Set just next
-   {PushR my @regs = (r15);                                                     # Work registers
+   {PushR my @regs = (r8, r15);                                                 # Work registers
     $next->setReg(r15);                                                         # Next offset
     my $l = V("Links", r15);                                                    # Links as variable
-    $l->putDIntoZmm($zmm, $String->next);                                       # Load links into zmm
+    $l->putDIntoZmm($zmm, $String->next, r8);                                   # Load links into zmm
     PopR @regs;                                                                 # Free work registers
    }
   elsif ($prev)                                                                 # Set just prev
-   {PushR my @regs = (r15);                                                     # Work registers
+   {PushR my @regs = (r8, r15);                                                 # Work registers
     $prev->setReg(r15);                                                         # Next offset
     my $l = V("Links", r15);                                                    # Links as variable
-    $l->putDIntoZmm($zmm, $String->prev);                                       # Load links into zmm
+    $l->putDIntoZmm($zmm, $String->prev, r8);                                   # Load links into zmm
     PopR @regs;                                                                 # Free work registers
    }
  }
@@ -4854,8 +4857,8 @@ sub Nasm::X86::Array::push($@)                                                  
 
     If ($size < $n,
     Then                                                                        # Room in the first block
-     {$E       ->putDIntoZmm(31, ($size + 1) * $w);                             # Place element
-      ($size+1)->putDIntoZmm(31, 0);                                            # Update size
+     {$E       ->putDIntoZmm(31, ($size + 1) * $w, $transfer);                  # Place element
+      ($size+1)->putDIntoZmm(31, 0, $transfer);                                 # Update size
       $b       ->putBlock($B, $F, 31);                                          # Put the first block back into memory
       Jmp $success;                                                             # Element successfully inserted in first block
      });
@@ -4867,10 +4870,10 @@ sub Nasm::X86::Array::push($@)                                                  
       Kmovq k7, rax;                                                            # Set  compression mask
       Vpcompressd "zmm30{k7}{z}", zmm31;                                        # Compress first block into second block
       ClearRegisters zmm31;                                                     # Clear first block
-      ($size+1)->putDIntoZmm(31, 0);                                            # Save new size in first block
+      ($size+1)->putDIntoZmm(31, 0, $transfer);                                 # Save new size in first block
       my $new = $b->allocBlock;                                                 # Allocate new block
-      $new->putDIntoZmm(31, $w);                                                # Save offset of second block in first block
-      $E  ->putDIntoZmm(30, $W - 1 * $w);                                       # Place new element
+      $new->putDIntoZmm(31, $w, $transfer);                                     # Save offset of second block in first block
+      $E  ->putDIntoZmm(30, $W - 1 * $w, $transfer);                            # Place new element
       $b  ->putBlock($B, $new, 30);                                             # Put the second block back into memory
       $b  ->putBlock($B, $F,   31);                                             # Put the first  block back into memory
       PopR @save;
@@ -4883,9 +4886,9 @@ sub Nasm::X86::Array::push($@)                                                  
       Then                                                                      # New secondary block needed
        {PushR my @save = (rax, zmm30);
         my $new = $b->allocBlock;                                               # Allocate new block
-        $E       ->putDIntoZmm(30, 0);                                          # Place new element last in new second block
-        ($size+1)->putDIntoZmm(31, 0);                                          # Save new size in first block
-        $new     ->putDIntoZmm(31, ($size / $N + 1) * $w);                      # Address new second block from first block
+        $E       ->putDIntoZmm(30, 0, $transfer);                               # Place new element last in new second block
+        ($size+1)->putDIntoZmm(31, 0, $transfer);                               # Save new size in first block
+        $new     ->putDIntoZmm(31, ($size / $N + 1) * $w, $transfer);           # Address new second block from first block
         $b       ->putBlock($B, $new, 30);                                      # Put the second block back into memory
         $b       ->putBlock($B, $F,   31);                                      # Put the first  block back into memory
         PopR @save;
@@ -4897,7 +4900,7 @@ sub Nasm::X86::Array::push($@)                                                  
         my $S = getDFromZmm(31, ($size / $N + 1) * $w, $transfer);              # Offset of second block in first block
         $b       ->getBlock($B, $S, 30);                                        # Get the second block
         $E       ->putDIntoZmm(30, ($size % $N) * $w, $transfer);               # Place new element last in new second block
-        ($size+1)->putDIntoZmm(31, 0);                                          # Save new size in first block
+        ($size+1)->putDIntoZmm(31, 0, $transfer);                               # Save new size in first block
         $b       ->putBlock($B, $S, 30);                                        # Put the second block back into memory
         $b       ->putBlock($B, $F, 31);                                        # Put the first  block back into memory
         PopR @save;
@@ -4939,7 +4942,7 @@ sub Nasm::X86::Array::pop($@)                                                   
      {If ($size <= $n,
       Then                                                                      # In the first block
        {$E       ->getDFromZmm(31, $size * $w, $transfer);                      # Get element
-        ($size-1)->putDIntoZmm(31, 0);                                          # Update size
+        ($size-1)->putDIntoZmm(31, 0, $transfer);                               # Update size
         $b       ->putBlock($B, $F, 31);                                        # Put the first block back into memory
         Jmp $success;                                                           # Element successfully retrieved from secondary block
        });
@@ -4953,7 +4956,7 @@ sub Nasm::X86::Array::pop($@)                                                   
         Mov rax, -2;                                                            # Load expansion mask
         Kmovq k7, rax;                                                          # Set  expansion mask
         Vpexpandd "zmm31{k7}{z}", zmm30;                                        # Expand second block into first block
-        ($size-1)->putDIntoZmm(31, 0);                                          # Save new size in first block
+        ($size-1)->putDIntoZmm(31, 0, $transfer);                               # Save new size in first block
         $b  -> putBlock($B, $F, 31);                                            # Save the first block
         $b  ->freeBlock($B, offset=>$S);                                        # Free the now redundant second block
         PopR @save;
@@ -4968,8 +4971,8 @@ sub Nasm::X86::Array::pop($@)                                                   
           my $S = getDFromZmm(31, ($size / $N + 1) * $w, $transfer);            # Address secondary block from first block
           $b       ->getBlock($B, $S, 30);                                      # Load secondary block
           $E->getDFromZmm(30, 0, $transfer);                                    # Get first element from secondary block
-          V(zero, 0)->putDIntoZmm(31, ($size / $N + 1) * $w);                   # Zero at offset of secondary block in first block
-          ($size-1)->putDIntoZmm(31, 0);                                        # Save new size in first block
+          V(zero, 0)->putDIntoZmm(31, ($size / $N + 1) * $w, $transfer);        # Zero at offset of secondary block in first block
+          ($size-1)->putDIntoZmm(31, 0, $transfer);                             # Save new size in first block
           $b       ->freeBlock($B, offset=>$S);                                 # Free the secondary block
           $b       ->putBlock ($B, $F, 31);                                     # Put the first  block back into memory
           PopR @save;
@@ -4981,7 +4984,7 @@ sub Nasm::X86::Array::pop($@)                                                   
           my $S = getDFromZmm(31, (($size-1) / $N + 1) * $w, $transfer);        # Offset of secondary block in first block
           $b       ->getBlock($B, $S, 30);                                      # Get the secondary block
           $E       ->getDFromZmm(30, (($size - 1)  % $N) * $w, $transfer);      # Get element from secondary block
-          ($size-1)->putDIntoZmm(31, 0);                                        # Save new size in first block
+          ($size-1)->putDIntoZmm(31, 0, $transfer);                             # Save new size in first block
           $b       ->putBlock($B, $S, 30);                                      # Put the secondary block back into memory
           $b       ->putBlock($B, $F, 31);                                      # Put the first  block back into memory
           PopR @save;
@@ -5074,7 +5077,7 @@ sub Nasm::X86::Array::put($@)                                                   
     Then                                                                        # Index is in array
      {If ($size <= $n,
        Then                                                                     # Element is in the first block
-       {$E->putDIntoZmm(31, ($I + 1) * $w);                                     # Put element
+       {$E->putDIntoZmm(31, ($I + 1) * $w, $transfer);                          # Put element
         $b->putBlock($B, $F, 31);                                               # Get the first block
         Jmp $success;                                                           # Element successfully inserted in first block
        });
@@ -5143,9 +5146,9 @@ sub Nasm::X86::Arena::CreateTree($)                                             
     Comment "Create a block multiway Tree start";
     my $keys = $t->allocBlock;                                                  # Allocate first keys block
     $$p{first}->copy($keys);
-    PushR my @save = (zmm31);
+    PushR my @save = (r8, zmm31);
     ClearRegisters zmm31;
-    $t->putLoop($t->allocBlock, 31);                                            # Keys loops to data - for the first 7 keys we should store the corresponding data further up in the block rather than creating a new block.
+    $t->putLoop($t->allocBlock, 31, r8);                                        # Keys loops to data - for the first 7 keys we should store the corresponding data further up in the block rather than creating a new block.
     $arena->putBlock($t->address, $keys, 31);                                   # Write first keys
     PopR @save;
     Comment "Create a block multiway Tree end";
@@ -5178,9 +5181,11 @@ sub Nasm::X86::Tree::allocKeysDataNode($$$$@)                                   
     $t->bs->allocZmmBlock($B, my $d = V(offset));                               # Data
     $t->bs->allocZmmBlock($B, my $n = V(offset));                               # Children
 
-    $t->putLoop($d, $K);                                                        # Set the link from key to data
-    $t->putLoop($n, $D);                                                        # Set the link from data to node
-    $t->putLoop($k, $N);                                                        # Set the link from node  to key
+    PushR r8;
+    $t->putLoop($d, $K, r8);                                                    # Set the link from key to data
+    $t->putLoop($n, $D, r8);                                                    # Set the link from data to node
+    $t->putLoop($k, $N, r8);                                                    # Set the link from node  to key
+    PopR r8;
    }
   name=>qq(Nasm::X86::Tree::allocKeysDataNode::${K}::${D}::${N}),               # Create a subroutine for each combination of registers encountered
   io => [qw(bs)];
@@ -5228,7 +5233,7 @@ sub Nasm::X86::Tree::splitNode($$$$@)                                           
         $t->putKeysDataNode($p, $K, $D, $N);                                    # Save parent
         $t->putKeysDataNode($n, 28, 27, 26);                                    # Save left
         my $r = $t->getLoop    (23, $transfer);                                 # Offset of right keys
-        $t->putUpIntoData  ($p, 24);                                            # Reparent new block
+        $t->putUpIntoData  ($p, 24, $transfer);                                 # Reparent new block
         $t->putKeysDataNode($r, 25, 24, 23);                                    # Save right back into node we just split
        },
       Else                                                                      # Split right node pushing remainder left  so that we keep the key we are looking for in the right node
@@ -5242,7 +5247,7 @@ sub Nasm::X86::Tree::splitNode($$$$@)                                           
         $t->splitFullRightNode;
         $t->putKeysDataNode($p, $K, $D, $N);                                    # Save parent
         my $l = $t->getLoop    (26, $transfer);                                 # Offset of left keys
-        $t->putUpIntoData  ($p, 27);                                            # Reparent new block
+        $t->putUpIntoData  ($p, 27, $transfer);                                 # Reparent new block
         $t->putKeysDataNode($l, 28, 27, 26);                                    # Save left
         $t->putKeysDataNode($n, 25, 24, 23);                                    # Save right back into node we just split
        });
@@ -5429,18 +5434,18 @@ sub Nasm::X86::Tree::splitFullRoot($)                                           
     my $k = getDFromZmm $TK, $ll * (my $w = $t->width), $transfer;              # Splitting key
     my $d = getDFromZmm $TD, $ll * $w,                  $transfer;              # Splitting data
 
-    LoadConstantIntoMaskRegister(k7, $transfer, 1);                                        # Position of key, data in root node
+    LoadConstantIntoMaskRegister(k7, $transfer, 1);                             # Position of key, data in root node
     $k->zBroadCastD($Test);                                                     # Broadcast keys
     &Vmovdqu32 (zmm $TK."{k7}",  $Test);                                        # Insert key in root
     $d->zBroadCastD($Test);                                                     # Broadcast keys
     &Vmovdqu32 (zmm $TD."{k7}",  $Test);                                        # Insert data in root
-    LoadBitsIntoMaskRegister(k7, $transfer, "11", -($length-1), 1);                        # Unused fields
+    LoadBitsIntoMaskRegister(k7, $transfer, "11", -($length-1), 1);             # Unused fields
     &Vmovdqu32 (zmm $TK."{k7}{z}",  $TK);                                       # Clear unused keys in root
     &Vmovdqu32 (zmm $TD."{k7}{z}",  $TD);                                       # Clear unused data in root
 
     If ($n,
     Then
-     {LoadBitsIntoMaskRegister(k7, $transfer, "1", -$length, 1);                           # Unused fields
+     {LoadBitsIntoMaskRegister(k7, $transfer, "1", -$length, 1);                # Unused fields
       &Vmovdqu32 (zmm $TN."{k7}{z}",  $TN);                                     # Clear unused node in root
      });
 
@@ -5448,11 +5453,11 @@ sub Nasm::X86::Tree::splitFullRoot($)                                           
     $t->putLengthInKeys($LK, K(leftLength,  $ll));                              # Length of left node
     $t->putLengthInKeys($RK, K(rightLength, $rl));                              # Length of right node
 
-    $t->putUpIntoData($to, $LD);                                                # Set parent of left node
-    $t->putUpIntoData($to, $RD);                                                # Set parent of right node
+    $t->putUpIntoData($to, $LD, $transfer);                                     # Set parent of left node
+    $t->putUpIntoData($to, $RD, $transfer);                                     # Set parent of right node
 
-    $lo->putDIntoZmm($TN, 0);                                                   # Insert offset of left node in root nodes
-    $ro->putDIntoZmm($TN, $w);                                                  # Insert offset of right node in root nodes
+    $lo->putDIntoZmm($TN, 0,  $transfer);                                       # Insert offset of left node in root nodes
+    $ro->putDIntoZmm($TN, $w, $transfer);                                       # Insert offset of right node in root nodes
 
     $t->transferTreeBitsFromParent($TK, $LK, $RK);                              # Transfer any tree bits present
 
@@ -5785,20 +5790,21 @@ sub Nasm::X86::Tree::insertDataOrTree($$$$)                                     
     my $D = $$p{data};                                                          # Data to be inserted
 
     PushR my @save = (k4, k5, k6, k7, r8, r13, r14, r15, zmm 22..31);
+    my $transfer = r8;                                                          # Use this register to transfer data between zmm blocks and variables
     my $point = r13;                                                            # Insertion indicator
     $t->getKeysDataNode($F, 31, 30, 29);                                        # Get the first block
 
     my $l = $t->getLengthInKeys(31);                                            # Length of the block
     If ($l == 0,                                                                # Check for  empty tree.
     Then                                                                        # Empty tree
-     {$K->putDIntoZmm    (31, 0);                                               # Write key
+     {$K->putDIntoZmm    (31, 0, $transfer);                                    # Write key
       $t->putLengthInKeys(31, K(one, 1));                                       # Set the length of the block
       if ($tnd)                                                                 # Create and mark key as addressing a sub tree
        {$D->copy($t->bs->CreateTree->first) if $tnd == 1;                       # Create sub tree in the same arena as parent tree if requested
         Mov r15, 1;                                                             # Indicate first position
         $t->setTree(r15,  31);                                                  # Mark this key as addressing a sub tree from the existing tree
        }
-      $D->putDIntoZmm    (30, 0);                                               # Write data
+      $D->putDIntoZmm    (30,  0, $transfer);                                   # Write data
       $t->putKeysData($F, 31, 30);                                              # Write the data block back into the underlying arena
       Jmp $success;                                                             # Insert completed successfully
      });
@@ -5820,7 +5826,7 @@ sub Nasm::X86::Tree::insertDataOrTree($$$$)                                     
           IfNz                                                                  # If the data element is already a tree then get its value and return it in the data variable
           Then
            {Tzcnt r14, r15;                                                     # Trailing zeros
-            $D->copy(getDFromZmm 30, "r14*$$t{width}", r8);                     # Data associated with the key
+            $D->copy(getDFromZmm 30, "r14*$$t{width}", $transfer);              # Data associated with the key
             Jmp $success;                                                       # Return offset of sub tree
            },
           Else                                                                  # The existing element is not a tree so we mark it as such using the single bit in r15/k6
@@ -5869,8 +5875,8 @@ sub Nasm::X86::Tree::insertDataOrTree($$$$)                                     
       If $l + 1 == $t->maxKeys,
       Then                                                                      # Root is now full: allocate the node block for it and chain it in
        {$t->bs->allocZmmBlock($B, my $n = V(offset));                           # Children
-        $t->putLoop($n, 30);                                                    # Set the link from data to node
-        $t->putLoop($F, 29);                                                    # Set the link from node to key
+        $t->putLoop($n, 30, $transfer);                                         # Set the link from data to node
+        $t->putLoop($F, 29, $transfer);                                         # Set the link from node to key
        };
 
       $t->putKeysDataNode($F, 31, 30, 29);                                      # Write the data block back into the underlying arena
@@ -5891,7 +5897,7 @@ sub Nasm::X86::Tree::insertDataOrTree($$$$)                                     
 
     If $compare == 0,                                                           # Duplicate key
     Then                                                                        # Found an equal key so update the data
-     {$D->putDIntoZmm(30, $index * $t->width);                                  # Update data at key
+     {$D->putDIntoZmm(30, $index * $t->width, $transfer);                       # Update data at key
       $t->putKeysDataNode($offset, 31, 30, 29);                                 # Rewrite data and keys
       $t->setOrClearTree($tnd, $point, 31);                                     # Set or clear tree bit as necessary
      },
@@ -6041,11 +6047,11 @@ sub Nasm::X86::Tree::getUpFromData($$$)                                         
   getDFromZmm($zmm, $t->lengthOffset, $transfer);                               # The length field as a variable
  }
 
-sub Nasm::X86::Tree::putUpIntoData($$$)                                         #P Put the offset of the parent keys block expressed as a variable into the numbered zmm
- {my ($t, $offset, $zmm) = @_;                                                  # Tree descriptor, variable containing up offset, zmm number
-  @_ == 3 or confess;
+sub Nasm::X86::Tree::putUpIntoData($$$;$)                                       #P Put the offset of the parent keys block expressed as a variable into the numbered zmm
+ {my ($t, $offset, $zmm, $transfer) = @_;                                       # Tree descriptor, variable containing up offset, zmm number, optional transfer register
+  @_ == 3 or @_ == 4 or confess;
   defined($offset) or confess;
-  $offset->putDIntoZmm($zmm, $t->lengthOffset);                                 # Save the up offset into the data block
+  $offset->putDIntoZmm($zmm, $t->lengthOffset, $transfer);                      # Save the up offset into the data block
  }
 
 sub Nasm::X86::Tree::getLoop($$;$)                                              #P Return the value of the loop field as a variable
@@ -6054,10 +6060,10 @@ sub Nasm::X86::Tree::getLoop($$;$)                                              
   getDFromZmm($zmm, $t->loop, $transfer);                                       # Get loop field as a variable
  }
 
-sub Nasm::X86::Tree::putLoop($$$)                                               #P Set the value of the loop field from a variable
- {my ($t, $value, $zmm) = @_;                                                   # Tree descriptor, variable containing offset of next loop entry, numbered zmm
+sub Nasm::X86::Tree::putLoop($$$;$)                                             #P Set the value of the loop field from a variable
+ {my ($t, $value, $zmm, $transfer) = @_;                                        # Tree descriptor, variable containing offset of next loop entry, numbered zmm, optional transfer register
   @_ >= 1 or confess;
-  $value->putDIntoZmm($zmm, $t->loop);                                          # Put loop field as a variable
+  $value->putDIntoZmm($zmm, $t->loop, $transfer);                               # Put loop field as a variable
  }
 
 sub Nasm::X86::Tree::leftOrRightMost($$@)                                       # Return the left most or right most node
