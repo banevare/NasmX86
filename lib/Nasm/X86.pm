@@ -15,6 +15,8 @@ use Data::Table::Text qw(:all);
 use Asm::C qw(:all);
 use feature qw(say current_sub);
 
+makeDieConfess;
+
 my %rodata;                                                                     # Read only data already written
 my %rodatas;                                                                    # Read only string already written
 my %subroutines;                                                                # Subroutines generated
@@ -34,6 +36,8 @@ our $stderr = 2;                                                                
 
 my %Registers;                                                                  # The names of all the registers
 my %RegisterContaining;                                                         # The largest register containing a register
+my @GeneralPurposeRegisters = (qw(rax rbx rcx rdx rsi rdi), map {"r$_"} 8..15); # General purpose registers
+my @RegistersAvailable = ({map {$_=>1} @GeneralPurposeRegisters});              # A stack of hashes of registers that are currently free and this can be used without pushing and poping them.
 
 BEGIN{
   my %r = (    map {$_=>[ 8,  '8'  ]}  qw(al bl cl dl r8b r9b r10b r11b r12b r13b r14b r15b r8l r9l r10l r11l r12l r13l r14l r15l sil dil spl bpl ah bh ch dh));
@@ -430,6 +434,17 @@ sub ChooseRegisters($@)                                                         
   delete $r{$_} for @registers;
   $number <= keys %r or confess "Not enough registers available";
   sort keys %r
+ }
+
+sub RegistersAvailable(@)                                                       # Add a new set of registers that are available
+ {my (@reg) = @_;                                                               # Registers known to be available at the moment
+  my %r = map {$_=>1} @reg;
+  push @RegistersAvailable, \%r;
+ }
+
+sub RegistersFree                                                               # Remove the current set of registers known to be free
+ {@RegistersAvailable or confess "No registers to free";
+  pop @RegistersAvailable;
  }
 
 sub CheckGeneralPurposeRegister($)                                              # Check that a register is in fact a general purpose register
@@ -895,58 +910,49 @@ sub Macro(&%)                                                                   
   $start
  }
 
-my @VariableStack = ();                                                         # Counts the number of variables on the stack in each invocation of L<Subroutine>.
+my @VariableStack = (0);                                                        # Counts the number of variables on the stack in each invocation of L<Subroutine>.
 
-sub Subroutine(&%)                                                              # Create a subroutine that can be called in assembler code
- {my ($body, %options) = @_;                                                    # Body, options.
-  @_ >= 1 or confess;
+sub Subroutine(&$%)                                                             # Create a subroutine that can be called in assembler code
+ {lll "AAAA", dump(\@_);
+  my ($body, $parameters, %options) = @_;                                       # Body, [parameters  names], options.
+  @_ >= 2 or confess;
+  !$parameters or ref($parameters) =~ m(array)i or confess "Array of parameter names required";
   my $name       =  $options{name} // [caller(1)]->[3];                         # Subroutine name
-  my @in         = ($options{in}   // [])->@*;                                  # Input parameters
-  my @out        = ($options{out}  // [])->@*;                                  # Output parameters
-  my @io         = ($options{io}   // [])->@*;                                  # Update in place parameters
-  my $recursive  =  $options{recursive},                                        # Recursive sub routine - parameters will be passed on the stack and variables will be defined on the stack
   my $comment    =  $options{comment};                                          # Optional comment describing sub
   Comment "Subroutine " .($comment) if $comment;                                # Assemble comment
 
   if ($name and my $n = $subroutines{$name}) {return $n}                        # Return the label of a pre-existing copy of the code
 
-  my %p;
-  my sub check($)                                                               # Check a parameter
-   {my ($name) = @_;
-    $p{$name} = V($name, 3);                                                    # Make a value parameter variable
-   }
-
-  my sub checkIo($)                                                             # Check an io parameter
-   {my ($name) = @_;
-    $p{$name} = R($name, 3);                                                    # Make a reference parameter variable
-   }
-
-  check  ($_) for @in;
-  check  ($_) for @out;
-  checkIo($_) for @io;
+  push @VariableStack, 0;                                                       # Open new stack layout with references to parameters
+  my %p; $p{$_} = R($_) for @$parameters;                                       # Reference each parameter
 
   my $start = Label;                                                            # Jump over code - would be better to put it in a different section
   my $end   = Label;
   Jmp $end;
 
-  push @VariableStack, 0;                                                       # Open new stack layout
   SetLabel $start;
+  my $E = @text;                                                                # Code entry that will contain the Enter instruction
   Enter 0, 0;
   &$body({%p});                                                                 # Code with parameters
   Leave;
   Ret;
   SetLabel $end;
-  pop @VariableStack;                                                           # Close new stack layout
+
+  my $V = pop @VariableStack;                                                   # Number of variables
+  my $P = @$parameters;                                                         # Number of parameters supplied
+  my $N = $P + $V;                                                              # Size of stack frame
+  $text[$E] = <<END;                                                            # Rewrite enter instruction now that we know how much stack space we need
+  Enter $N*8, 0 ; Subroutine $name
+END
 
   defined($name) or confess "Name missing";
   $subroutines{$name} = genHash(__PACKAGE__."::Sub",                            # Subroutine definition
     start     => $start,                                                        # Start label for this subroutine
     name      => $name,                                                         # Name of the subroutine from which the entry label is located
-    in        => {map {$_=>3} @in},                                             # Input parameter list
-    out       => {map {$_=>3} @out},                                            # Output parameter list
-    io        => {map {$_=>3} @io},                                             # References to parameters
-    recursive => $options{recursive},                                           # Recursive sub routine - parameters will be passed on the stack and variables will be defined on the stack
-    variables => {%p},
+    args      => {map {$_=>1} @$parameters},                                    # {argument name, argument variable}
+    variables => {%p},                                                          # Argument variables
+    P         => $P,                                                            # Number of parameters in subroutine
+    V         => $V,                                                            # Number of variables  in subroutine
    );
  }
 
@@ -959,49 +965,47 @@ sub Nasm::X86::Sub::call($%)                                                    
     my $n = ref($p) ? $p->name : $p;
     defined($n) or confess "No name or variable";
     my $v = ref($p) ? $p       : shift @parameters;
-    unless ($sub->in->{$n} or $sub->out->{$n} or $sub->io->{$n})                # Describe valid parameters using a table
+    unless ($sub->args->{$n})                                                   # Describe valid parameters using a table
      {my @t;
-      push @t, map {[q(in),  $_]} keys $sub->in ->%*;
-      push @t, map {[q(io),  $_]} keys $sub->io ->%*;
-      push @t, map {[q(out), $_]} keys $sub->out->%*;
-      my $t = formatTable([@t], [qw(Type Name)]);
+      push @t, map {[$_]} keys $sub->args->%*;
+      my $t = formatTable([@t], [qw(Name)]);
       confess "Invalid parameter: '$n'\n$t";
      }
     $p{$n} = $v;
    }
 
-  if (1)                                                                        # Check for duplicate parameters
-   {my %dup; $dup{$_}++ for map {keys $sub->{$_}->%*} qw(in out io);
-    for my $d(keys %dup) {delete $dup{$d} if $dup{$d} <= 1}                     # Remove singletons
-    keys %dup and confess "Duplicate keys ".dump([keys %dup]);
+lll "PPPP", dump(\%p, \@parameters);
+
+  if (1)                                                                        # Check for missing arguments
+   {my %m = map {$_=>1} keys $sub->args->%*;                                    # Formal arguments
+    delete $m{$_} for sort keys %p;                                             # Remove actual arguments
+    keys %m and confess "Missing arguments ".dump([sort keys %m]);              # Print missing parameter names
    }
 
-  if ((keys $sub->in->%*) or (keys $sub->io->%*))                               # Transfer input parameters
-   {PushR my $transfer = r15;
-
-    for my $p(keys $sub->in->%*)                                                # Load input parameters
-     {confess "Missing in parameter: $p" unless my $v = $p{$p};
-      $sub->variables->{$p}->copy($v, $transfer);
-     }
-
-    for my $p(keys $sub->io->%*)                                                # Load io parameters
-     {confess "Missing io parameter: $p" unless my $v = $p{$p};
-      $sub->variables->{$p}->copyAddress($v, $transfer);
-     }
-
-    PopR $transfer;
+  if (1)                                                                        # Check for misnamed arguments
+   {my %m = map {$_=>1} keys %p;                                                # Actual arguments
+    delete $m{$_} for sort keys $sub->args->%*;                                 # Remove formal arguments
+    keys %m and confess "Invalid arguments ".dump([sort keys %m]);              # Print misnamed arguments
    }
+
+  PushR my @save = (r14, r15);                                                  # Use this register to transfer between the current frame and the next frame
+  for my $p(sort keys %p)                                                       # Transfer parameters from current frame to next frame
+   {my $P = $p{$p}->label;                                                      # Source in current frame
+    if (my $q = $sub->variables->{$p})                                          # Target in new frame
+     {if ($p{$p}->reference)                                                    # Source is a reference
+       {Mov r15, "[$P]";
+       }
+      else                                                                      # Source is not a reference
+       {Lea r15, "[$P]";
+       }
+      my $Q = $q->label;
+         $Q =~ s(rbp) (rsp);
+      Mov "[$Q]", r15;
+     }
+   }
+  PopR @save;
 
   Call $$sub{start};                                                            # Call the sub routine
-
-  if ((keys $sub->out->%*))                                                     # Transfer output parameters
-   {PushR my $transfer = r15;
-    for my $p(keys $sub->out->%*)                                               # Load output parameters
-     {confess qq(Missing output parameter: "$p") unless my $v = $p{$p};
-      $v->copy($sub->variables->{$p}, $transfer);
-     }
-    PopR $transfer;
-   }
  }
 
 sub cr(&@)                                                                      # Call a subroutine with a reordering of the registers.
@@ -1092,7 +1096,7 @@ sub PrintString($@)                                                             
     Syscall;
     RestoreFirstFour();
     Comment "Write end to channel  $channel, the string: ".dump($c);
-   } name => "PrintString_${channel}_${c}";
+   } [], name => "PrintString_${channel}_${c}";
 
   $s->call;
  }
@@ -1311,97 +1315,56 @@ sub PrintOutZF                                                                  
 
 #D2 Definitions                                                                 # Variable definitions
 
-sub Variable($$;$%)                                                             # Create a new variable with the specified size and name initialized via an expression
- {my ($size, $name, $expr, %options) = @_;                                      # Size as a power of 2, name of variable, optional expression initializing variable, options
-  $size =~ m(\A0|1|2|3|4|5|6|b|w|d|q|x|y|z\Z)i or                               # Check size of variable
-    confess "Size must be 0..6 or b|w|d|q|x|y|z";
-
+sub Variable($;$%)                                                              # Create a new variable with the specified name initialized via an optional expression.
+ {my ($name, $expr, %options) = @_;                                             # Name of variable, optional expression initializing variable, options
+  my $size  = 3;                                                                # Size  of variable in bytes as a power of 2
+  my $width = 2**$size;                                                         # Size of variable in bytes
   my $const = $options{constant} // 0;                                          # Whether the variable is in fact a constant
-  if ($const)                                                                   # Comment in appropriate section
+
+  my $label;
+  if ($const)                                                                   # Constant
    {defined($expr) or confess "Value required for constant";
-    defined($name) or confess "Name required";
-    RComment qq(Constant name: "$name", size: $size, value $expr);
+    $expr =~ m(r) and confess
+     "Cannot use register expression $expr to initialize a constant";
+    RComment qq(Constant name: "$name", value $expr);
+    $label = Rq($expr);
    }
-  else
-   {#DComment qq(Variable name: "$name", size: $size);
-   }
+  else                                                                          # Position on stack of variable
+   {my $stack = ++$VariableStack[-1];
+    $label = "rbp-8*($stack)";
 
-  my $init = 0;                                                                 # Initializer
-  if (defined $expr)                                                            # Initialize value
-   {if ($Registers{$expr})
-     {$const and confess "Cannot use a register to initialize a constant";
-     }
-#   elsif (ref($expr)) {}                                                       # Reference a variable
-    else
-     {$init = $expr;
-     }
-   }
-  else
-   {$const and confess "Expression required for constant";
-   }
-
-  my $label;                                                                    # Allocate space
-     $label = $size =~ m(\A0|b\Z) ? Db(0) :
-              $size =~ m(\A1|w\Z) ? Dw(0) :
-              $size =~ m(\A2|d\Z) ? Dd(0) :
-              $size =~ m(\A3|q\Z) ? Dq(0) :
-              $size =~ m(\A4|x\Z) ? Dq(0,0) :
-              $size =~ m(\A5|y\Z) ? Dq(0,0,0,0) :
-              $size =~ m(\A6|z\Z) ? Dq(0,0,0,0,0,0,0,0) : undef unless $const;
-
-     $label = $size =~ m(\A0|b\Z) ? Rb($init) :
-              $size =~ m(\A1|w\Z) ? Rw($init) :
-              $size =~ m(\A2|d\Z) ? Rd($init) :
-              $size =~ m(\A3|q\Z) ? Rq($init) :
-              $size =~ m(\A4|x\Z) ? Rq(0,0) :
-              $size =~ m(\A5|y\Z) ? Rq(0,0,0,0) :
-              $size =~ m(\A6|z\Z) ? Rq(0,0,0,0,0,0,0,0) : undef if     $const;
-
-  my $nSize = $size =~ tr(bwdqxyz) (0123456)r;                                  # Size of variable
-
-  if (defined $expr)                                                            # Initialize variable if an initializer was supplied
-   {my $t = "[$label]";
-    if ($Registers{$expr})
-     {$const and confess "Cannot use a register to initialize a constant";
-      Mov $t, $expr;
-     }
-#   elsif (ref($expr)) {}                                                       # Reference a variable
-    elsif (!$const)
+    if (defined $expr)                                                            # Initialize variable if an initializer was supplied
      {PushR r15;
       Mov r15, $expr;
-      Mov $t, r15b        if $nSize == 0;
-      Mov $t, r15w        if $nSize == 1;
-      Mov $t, r15d        if $nSize == 2;
-      Mov $t, r15         if $nSize == 3;
+      Mov "[$label]", r15;
       PopR r15;
      }
    }
 
   genHash(__PACKAGE__."::Variable",                                             # Variable definition
-    constant  => $options{constant},                                            # Constant if true
+    constant  => $const,                                                        # Constant if true
     expr      => $expr,                                                         # Expression that initializes the variable
     label     => $label,                                                        # Address in memory
     name      => $name,                                                         # Name of the variable
-    stack     => @VariableStack ? ++$VariableStack[-1] : undef,                 # Position on stack, undefined if not held on the stack
+    level     => scalar @VariableStack,                                         # Lexical level
     reference => undef,                                                         # Reference to another variable
-    size      => $nSize,                                                        # Size of variable
    );
  }
 
 sub V(*;$%)                                                                     # Define a quad variable
  {my ($name, $expr, %options) = @_;                                             # Name of variable, initializing expression, options
-  &Variable(3, @_)
+  &Variable(@_)
  }
 
 sub K(*;$%)                                                                     # Define a quad constant
  {my ($name, $expr, %options) = @_;                                             # Name of variable, initializing expression, options
-  &Variable(3, @_, constant=>1)
+  &Variable(@_, constant=>1)
  }
 
-sub R(*;$)                                                                      # Define a reference variable
- {my ($name, $size) = @_;                                                       # Name of variable, variable being referenced
-  my $r = &Variable(3, $name);                                                  # The referring variable is 64 bits wide
-  $r->reference = $size;                                                        # Mark variable as a reference
+sub R(*)                                                                        # Define a reference variable
+ {my ($name) = @_;                                                              # Name of variable
+  my $r = &Variable($name);                                                     # The referring variable is 64 bits wide
+  $r->reference = 1;                                                            # Mark variable as a reference
   $r                                                                            # Size of the referenced variable
  }
 
@@ -1410,37 +1373,16 @@ sub R(*;$)                                                                      
 sub Nasm::X86::Variable::dump($$$;$$)                                           #P Dump the value of a variable to the specified channel adding an optional title and new line if requested
  {my ($left, $channel, $newLine, $title1, $title2) = @_;                        # Left variable, channel, new line required, optional leading title, optional trailing title
   @_ >= 3 or confess;
-  if ($left->size == 3)                                                         # General purpose register
-   {PushR my @regs = (rax, rdi);
-    Mov rax, $left->label;                                                      # Address in memory
-    KeepFree rax;
-    if ($left->reference)
-     {Mov rax, "[rax]";
-      KeepFree rax;
-     }
-    Mov rax, "[rax]";
-    confess  dump($channel) unless $channel =~ m(\A1|2\Z);
-    PrintString  ($channel, $title1//$left->name.": ");
-    PrintRaxInHex($channel);
-    PrintString  ($channel, $title2) if defined $title2;
-    PrintNL      ($channel) if $newLine;
-    PopR @regs;
-   }
-  elsif ($left->size == 4)                                                      # xmm
-   {PushR my @regs = (rax, rdi);
-    my $l = $left->label;                                                       # Address in memory
-    my $s = RegisterSize rax;
-    Mov rax, "[$l]";
-    Mov rdi, "[$l+$s]";
-    &PrintErrString($title1//$left->name.": ");
-    &PrintErrRaxInHex();
-    &PrintErrString("  ");
-    KeepFree rax;
-    Mov rax, rdi;
-    &PrintErrRaxInHex();
-    &PrintErrNL();
-    PopR @regs;
-   }
+  PushR my @regs = (rax, rdi);
+  my $label = $left->label;                                                     # Address in memory
+  Mov rax, "[$label]";
+  Mov rax, "[rax]" if $left->reference;
+  confess  dump($channel) unless $channel =~ m(\A1|2\Z);
+  PrintString  ($channel, $title1//$left->name.": ");
+  PrintRaxInHex($channel);
+  PrintString  ($channel, $title2) if defined $title2;
+  PrintNL      ($channel) if $newLine;
+  PopR @regs;
  }
 
 sub Nasm::X86::Variable::err($;$$)                                              # Dump the value of a variable on stderr
@@ -1520,31 +1462,26 @@ sub Nasm::X86::Variable::copy($$;$)                                             
   my $l = $left ->address;
   my $r = $right->address;
 
-  if ($left->size == 3 and $right->size == 3)
-   {my $lr = $left ->reference;
-    my $rr = $right->reference;
+  my $lr = $left ->reference;
+  my $rr = $right->reference;
 
-    PushR $transfer unless $Transfer;
-    Mov $transfer, $r;
-    if ($rr)
-     {Mov $transfer, "[$transfer]";
-     }
-    if (!$lr)
-     {Mov $l, $transfer;
-     }
-    else
-     {Comment "Copy ".$right->name.' to '.$left->name;
-      my ($ref) = ChooseRegisters(1, $transfer);
-      PushR $ref;
-      Mov $ref, $l;
-      Mov "[$ref]", $transfer;
-      PopR $ref;
-     }
-    PopR $transfer unless $Transfer;
-    return;
+  PushR $transfer unless $Transfer;
+  Mov $transfer, $r;
+  if ($rr)
+   {Mov $transfer, "[$transfer]";
    }
-
-  confess "Need more code";
+  if (!$lr)
+   {Mov $l, $transfer;
+   }
+  else
+   {Comment "Copy ".$right->name.' to '.$left->name;
+    my ($ref) = ChooseRegisters(1, $transfer);
+    PushR $ref;
+    Mov $ref, $l;
+    Mov "[$ref]", $transfer;
+    PopR $ref;
+   }
+  PopR $transfer unless $Transfer;
  }
 
 sub Nasm::X86::Variable::copyAddress($$;$)                                      # Copy a reference to a variable
@@ -1620,18 +1557,14 @@ sub Nasm::X86::Variable::clone($)                                               
   @_ == 1 or confess;
 
   my $a = $var->address;
-  if ($var->size == 3)
-   {Comment "Clone ".$var->name;
-    my $new = V('Clone of '.$var->name);
-    PushR my @save = (r15);
-    Mov r15, $var->address;
-    Mov $new->address, r15;
-    PopR @save;
-    $new->reference = $var->reference;
-    return $new;
-   }
-
-  confess "Need more code";
+  Comment "Clone ".$var->name;
+  my $new = V('Clone of '.$var->name);
+  PushR my @save = (r15);
+  Mov r15, $var->address;
+  Mov $new->address, r15;
+  PopR @save;
+  $new->reference = $var->reference;
+  $new
  }
 sub Nasm::X86::Variable::equals($$$)                                            # Equals operator
  {my ($op, $left, $right) = @_;                                                 # Operator, left variable,  right variable
@@ -1642,39 +1575,34 @@ sub Nasm::X86::Variable::assign($$$)                                            
  {my ($left, $op, $right) = @_;                                                 # Left variable, operator, right variable
   $left->constant and confess "cannot assign to a constant";
 
-  if ($left->size == 3 and !ref($right) || $right->size == 3)
-   {Comment "Variable assign";
-    PushR my @save = (r14, r15);
-    Mov r14, $left ->address;
-    if ($left->reference)                                                       # Dereference left if necessary
-     {KeepFree r14;
-      Mov r14, "[r14]";
-     }
-    if (!ref($right))                                                           # Load right constant
-     {KeepFree r15;
-      Mov r15, $right;
-     }
-    else                                                                        # Load right variable
-     {Mov r15, $right->address;
-      if ($right->reference)                                                    # Dereference right if necessary
-       {KeepFree r15;
-        Mov r15, "[r15]";
-       }
-     }
-    &$op(r14, r15);
-    if ($left->reference)                                                       # Store in reference on left if necessary
-     {PushR r13;
-      Mov r13, $left->address;
-      Mov "[r13]", r14;
-      PopR r13;
-     }
-    else                                                                        # Store in variable
-     {Mov $left ->address, r14;
-     }
-    PopR @save;
-    return $left;
+  Comment "Variable assign";
+  PushR my @save = (r14, r15);
+  Mov r14, $left ->address;
+  if ($left->reference)                                                         # Dereference left if necessary
+   {Mov r14, "[r14]";
    }
-  confess "Need more code";
+  if (!ref($right))                                                             # Load right constant
+   {Mov r15, $right;
+   }
+  else                                                                          # Load right variable
+   {Mov r15, $right->address;
+    if ($right->reference)                                                      # Dereference right if necessary
+     {Mov r15, "[r15]";
+     }
+   }
+  &$op(r14, r15);
+  if ($left->reference)                                                         # Store in reference on left if necessary
+   {PushR r13;
+    Mov r13, $left->address;
+    Mov "[r13]", r14;
+    PopR r13;
+   }
+  else                                                                          # Store in variable
+   {Mov $left ->address, r14;
+   }
+  PopR @save;
+
+  $left;
  }
 
 sub Nasm::X86::Variable::plusAssign($$)                                         # Implement plus and assign
@@ -1693,39 +1621,21 @@ sub Nasm::X86::Variable::arithmetic($$$$)                                       
   my $l = $left ->address;
   my $r = ref($right) ? $right->address : $right;                               # Right can be either a variable reference or a constant
 
-  if ($left->size == 3 and !ref($right) || $right->size == 3)                   # Vq
-   {PushR my @save = (r14, r15);
-    Mov r15, $l;
-    if ($left->reference)                                                       # Dereference left if necessary
-     {KeepFree r15;
-      Mov r15, "[r15]";
-     }
-    Mov r14, $r;
-    if (ref($right) and $right->reference)                                      # Dereference right if necessary
-     {KeepFree r14;
-      Mov r14, "[r14]";
-     }
-    &$op(r15, r14);
-    my $v = V(join(' ', '('.$left->name, $name, (ref($right) ? $right->name : $right).')'), r15);
-    PopR @save;
-    return $v;
+  Comment "Arithmetic";
+  PushR my @save = (r14, r15);
+  Mov r15, $l;
+  if ($left->reference)                                                         # Dereference left if necessary
+   {Mov r15, "[r15]";
    }
-
-  if ($left->size == 6 and ref($right) and $right->size == 6)                   # Vz
-   {if ($name =~ m(add|sub))
-     {PushR my @save = (zmm0, zmm1);
-      Vmovdqu64 zmm0, $left->address;
-      Vmovdqu64 zmm1, $right->address;
-      my $l = $left->laneSize // $right->laneSize // 0;                         # Size of elements to add
-      my $o = substr("bwdq", $l, 1);                                            # Size of operation
-      eval "Vp$name$o zmm0, zmm0, zmm1";                                        # Add or subtract
-      my $z = Vz(join(' ', $left->name, $op, $right->name));                    # Variable to hold result
-      Vmovdqu64 $z->address, zmm0;                                              # Save result in variable
-      PopR @save;
-      return $z;
-     }
+  Mov r14, $r;
+  if (ref($right) and $right->reference)                                        # Dereference right if necessary
+   {KeepFree r14;
+    Mov r14, "[r14]";
    }
-  confess "Need more code";
+  &$op(r15, r14);
+  my $v = V(join(' ', '('.$left->name, $name, (ref($right) ? $right->name : $right).')'), r15);
+  PopR @save;
+  return $v;
  }
 
 sub Nasm::X86::Variable::add($$)                                                # Add the right hand variable to the left hand variable and return the result as a new variable
@@ -1748,16 +1658,13 @@ sub Nasm::X86::Variable::division($$$)                                          
 
   my $l = $left ->address;
   my $r = ref($right) ? $right->address : $right;                               # Right can be either a variable reference or a constant
-  if ($left->size == 3 and ! ref($right) || $right->size == 3)
-   {PushR my @regs = (rax, rdx, r15);
-    Mov rax, $l;
-    Mov r15, $r;
-    Idiv r15;
-    my $v = V(join(' ', '('.$left->name, $op, (ref($right) ? $right->name : '').')'), $op eq "%" ? rdx : rax);
-    PopR @regs;
-    return $v;
-   }
-  confess "Need more code";
+  PushR my @regs = (rax, rdx, r15);
+  Mov rax, $l;
+  Mov r15, $r;
+  Idiv r15;
+  my $v = V(join(' ', '('.$left->name, $op, (ref($right) ? $right->name : '').')'), $op eq "%" ? rdx : rax);
+  PopR @regs;
+  $v;
  }
 
 sub Nasm::X86::Variable::divide($$)                                             # Divide the left hand variable by the right hand variable and return the result as a new variable
@@ -1776,34 +1683,32 @@ sub Nasm::X86::Variable::boolean($$$$)                                          
   !ref($right) or ref($right) =~ m(Variable) or confess "Variable expected";
   my $r = ref($right) ? $right->address : $right;                               # Right can be either a variable reference or a constant
 
-  if ($left->size == 3)
-   {PushR r15;
-    Mov r15, $left ->address;
-    if ($left->reference)                                                       # Dereference left if necessary
-     {KeepFree r15;
-      Mov r15, "[r15]";
-     }
-    if (ref($right) and $right->reference)                                      # Dereference on right if necessary
-     {PushR r14;
-      Mov r14, $right ->address;
-      KeepFree r14;
-      Mov r14, "[r14]";
-      Cmp r15, r14;
-     }
-    elsif (ref($right))                                                         # Variable but not a reference on the right
-     {Cmp r15, $right->address;
-     }
-    else                                                                        # Constant on the right
-     {Cmp r15, $right;
-     }
-    KeepFree r15;
-
-    &$sub(sub {Mov  r15, 1;  KeepFree r15}, sub {Mov  r15, 0;  KeepFree r15});
-    my $v = V(join(' ', '('.$left->name, $op, (ref($right) ? $right->name : '').')'), r15);
-    PopR r15;
-    return $v;
+  PushR r15;
+  Mov r15, $left ->address;
+  if ($left->reference)                                                       # Dereference left if necessary
+   {KeepFree r15;
+    Mov r15, "[r15]";
    }
-  confess "Need more code";
+  if (ref($right) and $right->reference)                                      # Dereference on right if necessary
+   {PushR r14;
+    Mov r14, $right ->address;
+    KeepFree r14;
+    Mov r14, "[r14]";
+    Cmp r15, r14;
+   }
+  elsif (ref($right))                                                         # Variable but not a reference on the right
+   {Cmp r15, $right->address;
+   }
+  else                                                                        # Constant on the right
+   {Cmp r15, $right;
+   }
+  KeepFree r15;
+
+  &$sub(sub {Mov  r15, 1;  KeepFree r15}, sub {Mov  r15, 0;  KeepFree r15});
+  my $v = V(join(' ', '('.$left->name, $op, (ref($right) ? $right->name : '').')'), r15);
+  PopR r15;
+
+  $v
  }
 
 sub Nasm::X86::Variable::booleanC($$$$)                                         # Combine the left hand variable with the right hand variable via a boolean operator using a conditional move instruction.
@@ -1812,35 +1717,33 @@ sub Nasm::X86::Variable::booleanC($$$$)                                         
   !ref($right) or ref($right) =~ m(Variable) or confess "Variable expected";
   my $r = ref($right) ? $right->address : $right;                               # Right can be either a variable reference or a constant
 
-  if ($left->size == 3)
-   {PushR r15;
-    Mov r15, $left ->address;
-    if ($left->reference)                                                       # Dereference left if necessary
-     {Mov r15, "[r15]";
-     }
-    if (ref($right) and $right->reference)                                      # Dereference on right if necessary
-     {PushR r14;
-      Mov r14, $right ->address;
-      Mov r14, "[r14]";
-      Cmp r15, r14;
-     }
-    elsif (ref($right))                                                         # Variable but not a reference on the right
-     {Cmp r15, $right->address;
-     }
-    else                                                                        # Constant on the right
-     {Cmp r15, $right;
-     }
-
-    Mov r15, 1;                                                                 # Place a one below the stack
-    my $w = RegisterSize r15;
-    Mov "[rsp-$w]", r15;
-    Mov r15, 0;                                                                 # Assume the result was false
-    &$cmov(r15, "[rsp-$w]");                                                    # Indicate true result
-    my $v = V(join(' ', '('.$left->name, $op, (ref($right) ? $right->name : '').')'), r15);
-    PopR r15;
-    return $v;
+  PushR r15;
+  Mov r15, $left ->address;
+  if ($left->reference)                                                       # Dereference left if necessary
+   {Mov r15, "[r15]";
    }
-  confess "Need more code";
+  if (ref($right) and $right->reference)                                      # Dereference on right if necessary
+   {PushR r14;
+    Mov r14, $right ->address;
+    Mov r14, "[r14]";
+    Cmp r15, r14;
+   }
+  elsif (ref($right))                                                         # Variable but not a reference on the right
+   {Cmp r15, $right->address;
+   }
+  else                                                                        # Constant on the right
+   {Cmp r15, $right;
+   }
+
+  Mov r15, 1;                                                                 # Place a one below the stack
+  my $w = RegisterSize r15;
+  Mov "[rsp-$w]", r15;
+  Mov r15, 0;                                                                 # Assume the result was false
+  &$cmov(r15, "[rsp-$w]");                                                    # Indicate true result
+  my $v = V(join(' ', '('.$left->name, $op, (ref($right) ? $right->name : '').')'), r15);
+  PopR r15;
+
+  $v
  }
 
 sub Nasm::X86::Variable::eq($$)                                                 # Check whether the left hand variable is equal to the right hand variable
@@ -1876,101 +1779,72 @@ sub Nasm::X86::Variable::lt($$)                                                 
 sub Nasm::X86::Variable::isRef($)                                               # Check whether the specified  variable is a reference to another variable
  {my ($variable) = @_;                                                          # Variable
   my $n = $variable->name;                                                      # Variable name
-  $variable->size == 3 or confess "Wrong size for reference: $n";
   $variable->reference
  }
 
-sub Nasm::X86::Variable::setReg($$@)                                            # Set the named registers from the content of the variable
- {my ($variable, $register, @registers) = @_;                                   # Variable, register to load, optional further registers to load
-  if ($variable->size == 3)                                                     # General purpose register
-   {if ($variable->isRef)
-     {Mov $register, $variable->address;
-      KeepFree $register;
-      Mov $register, "[$register]";
-     }
-    else
-     {Mov $register, $variable->address;
-     }
-   }
-  elsif ($variable->size == 4)                                                  # Xmm
+sub Nasm::X86::Variable::setReg($$)                                             # Set the named registers from the content of the variable
+ {my ($variable, $register) = @_;                                               # Variable, register to load
+
+  if ($variable->isRef)
    {Mov $register, $variable->address;
-    for my $i(keys @registers)
-     {Mov $registers[$i], $variable->address(($i + 1) * RegisterSize rax);
-     }
+    KeepFree $register;
+    Mov $register, "[$register]";
    }
   else
-   {confess "More code needed";
+   {Mov $register, $variable->address;
    }
+
   $register
  }
 
 sub Nasm::X86::Variable::getReg($$@)                                            # Load the variable from the named registers
  {my ($variable, $register, @registers) = @_;                                   # Variable, register to load, optional further registers to load from
-  if ($variable->size == 3)
-   {if ($variable->isRef)                                                       # Move to the location referred to by this variable
-     {$Registers{$register} or confess "No such register: $register";           # Check we have been given a register
-      Comment "Get variable value from register $register";
-      my $r = $register eq r15 ? r14 : r15;
-      PushR $r;
-      Mov $r, $variable->address;
-      Mov "[$r]", $register;
-      PopR $r;
-     }
-    else                                                                        # Move to this variable
-     {Mov $variable->address, $register;
-     }
+  if ($variable->isRef)                                                         # Move to the location referred to by this variable
+   {$Registers{$register} or confess "No such register: $register";             # Check we have been given a register
+    Comment "Get variable value from register $register";
+    my $r = $register eq r15 ? r14 : r15;
+    PushR $r;
+    Mov $r, $variable->address;
+    Mov "[$r]", $register;
+    PopR $r;
    }
-  elsif ($variable->size == 4)                                                  # Xmm
+  else                                                                          # Move to this variable
    {Mov $variable->address, $register;
-    for my $i(keys @registers)
-     {Mov $variable->address(($i + 1) * RegisterSize rax), $registers[$i];
-     }
-   }
-  else
-   {confess "More code needed";
    }
  }
 
 sub Nasm::X86::Variable::getConst($$)                                           # Load the variable from a constant in effect setting a variable to a specified value
  {my ($variable, $constant) = @_;                                               # Variable, constant to load
-  if ($variable->size == 3)
-   {PushR my @save = (r14, r15);
-    Comment "Load constant $constant into variable: ".$variable->name;
-    Mov r15, $constant;
-    Lea r14, $variable->address;
-    Mov "[r14]", r15;
-    PopR @save;
-   }
-  else
-   {confess "More code needed";
-   }
+  PushR my @save = (r14, r15);
+  Comment "Load constant $constant into variable: ".$variable->name;
+  Mov r15, $constant;
+  Lea r14, $variable->address;
+  Mov "[r14]", r15;
+  PopR @save;
  }
 
 sub Nasm::X86::Variable::incDec($$)                                             # Increment or decrement a variable
  {my ($left, $op) = @_;                                                         # Left variable operator, address of operator to perform inc or dec
   $left->constant and confess "Cannot increment or decrement a constant";
   my $l = $left->address;
-  if ($left->size == 3)
-   {if ($left->reference)
-     {PushR my @save = (r14, r15);
-      Mov r15, $l;
-      KeepFree r15;
-      Mov r14, "[r15]";
-      &$op(r14);
-      Mov "[r15]", r14;
-      PopR @save;
-      return $left;
-     }
-    else
-     {PushR r15;
-      Mov r15, $l;
-      &$op(r15);
-      Mov $l, r15;
-      PopR r15;
-      return $left;
-     }
+  if ($left->reference)
+   {PushR my @save = (r14, r15);
+    Mov r15, $l;
+    KeepFree r15;
+    Mov r14, "[r15]";
+    &$op(r14);
+    Mov "[r15]", r14;
+    PopR @save;
+    return $left;
    }
-  confess "Need more code";
+  else
+   {PushR r15;
+    Mov r15, $l;
+    &$op(r15);
+    Mov $l, r15;
+    PopR r15;
+    return $left;
+   }
  }
 
 sub Nasm::X86::Variable::inc($)                                                 # Increment a variable
@@ -6495,8 +6369,10 @@ sub Link(@)                                                                     
  }
 
 sub Start()                                                                     # Initialize the assembler
- {@bss = @data = @rodata = %rodata = %rodatas = %subroutines = @text = %Keep = %KeepStack = @extern = @link = ();
-
+ {@bss = @data = @rodata = %rodata = %rodatas = %subroutines = @text =
+    %Keep = %KeepStack = @extern = @link = ();
+  @RegistersAvailable = ({map {$_=>1} @GeneralPurposeRegisters});               # A stack of hashes of registers that are currently free and this can be used without pushing and poping them.
+  @VariableStack = (0);                                                         # Number of variables at each lexical level
   $Labels = 0;
  }
 
@@ -6511,7 +6387,7 @@ sub Exit(;$)                                                                    
     Mov rax, 60;
     Syscall;
     PopR @save;
-   } name => "Exit_$c";
+   } [], name => "Exit_$c";
 
   $s->call;
  }
@@ -6562,7 +6438,7 @@ our $totalBytesAssembled  = 0;                                                  
 
 sub Assemble(%)                                                                 # Assemble the generated code.
  {my (%options) = @_;                                                           # Options
-  Exit 0 unless @text > 4 and $text[-4] =~ m(Exit code:);                       # Exit with code 0 if no other exit has been taken
+  Exit 0 unless @text > 4 and $text[-4] =~ m(Exit code:);                       # Exit with code 0 if an exit was not the last thing coded.
   my $debug = $options{debug}//0;                                               # 0 - none (minimal output), 1 - normal (debug output and confess of failure), 2 - failures (debug output and no confess on failure) .
 
   my $k = $options{keep};                                                       # Keep the executable
@@ -6572,6 +6448,7 @@ sub Assemble(%)                                                                 
   my $t = join "\n", map {s/\s+\Z//sr}   @text;
   my $x = join "\n", map {qq(extern $_)} @extern;
   my $L = join " ",  map {qq(-l$_)}      @link;
+  my $N = $VariableStack[0];                                                    # Number of variables needed on the stack
   my $A = <<END;
 section .rodata
   $r
@@ -6584,9 +6461,9 @@ $x
 global _start, main
   _start:
   main:
-  push rbp     ; function prologue
-  mov  rbp,rsp
+  Enter $N*8, 0
   $t
+  Leave
 END
 
   my $c    = owf(q(z.asm), $A);                                                 # Source file
@@ -6644,9 +6521,8 @@ END
   unlink $o1, $o2;                                                              # Remove output files
   my $out  = $k ? '' : "1>$o1";
   my $err  = $k ? '' : "2>$o2";
-  my $exec = $emulator                                                          # Execute with or without the emulator
-             ? qq($sde -mix -ptr-check -- ./$e $err $out)
-             :                         qq(./$e $err $out);
+  my $opt =  qq($sde -mix -ptr-check -debugtrace);                              # Emulator options
+  my $exec = $emulator ? qq($opt -- ./$e $err $out) : qq(./$e $err $out);       # Execute with or without the emulator
 
   $cmd .= qq( && $exec) unless $k;                                              # Execute automatically unless suppressed by user
 
@@ -18268,6 +18144,78 @@ i: 0000 0000 0000 0001  f: 0000 0000 0000 0001  d: 0000 0000 0000 0118  s: 0000 
 i: 0000 0000 0000 0002  f: 0000 0000 0000 0001  d: 0000 0000 0000 0198  s: 0000 0000 0000 0001
 i: 0000 0000 0000 0003  f: 0000 0000 0000 0001  d: 0000 0000 0000 0218  s: 0000 0000 0000 0001
 N: 0000 0000 0000 0004  f: 0000 0000 0000 0001  d: 0000 0000 0000 0008  s: 0000 0000 0000 0000
+END
+ }
+
+#latest:
+if (1) {                                                                        #TNasm::X86::Tree::insertTreeAndClone #TNasm::X86::Tree::Clone  #TNasm::X86::Tree::findAndClone
+  my $a = V(a,1);
+  my $b = V(b,2);
+  my $c = $a + $b;
+  Mov r15, 22;
+  $a->getReg(r15);
+  $b->copy($a);
+  $b = $b + 1;
+  $b->setReg(r14);
+  $a->outNL;
+  $b->outNL;
+  $c->outNL;
+  PrintOutRegisterInHex r14, r15;
+
+  ok Assemble(debug => 0, eq => <<END);
+a: 0000 0000 0000 0016
+(b add 1): 0000 0000 0000 0017
+(a add b): 0000 0000 0000 0003
+   r14: 0000 0000 0000 0017
+   r15: 0000 0000 0000 0016
+END
+ }
+
+latest:
+if (1) {                                                                        #TNasm::X86::Tree::insertTreeAndClone #TNasm::X86::Tree::Clone  #TNasm::X86::Tree::findAndClone
+  my $s = Subroutine
+   {my ($p) = @_;
+    $$p{in} ->setReg(r15);
+    $$p{in2}->setReg(r14);
+    $$p{in3}->setReg(r13);
+    $$p{in4}->setReg(r12);
+    Add r15, r14;
+    Add r15, r13;
+    Add r15, r12;
+    $$p{in}->getReg(r15);
+   } [qw(in in2 in3 in4)], name => 'add';
+
+  my $in  = V(in,  2);
+  my $in2 = V(in2, 4);
+  my $in3 = V(in3, 6);
+  my $in4 = V(in4, 8);
+
+  $s->call($in, $in2, $in3, $in4);
+
+  $in->outNL;
+
+  ok Assemble(debug => 0, eq => <<END);
+in: 0000 0000 0000 0014
+END
+ }
+
+latest:
+if (1) {                                                                        #TNasm::X86::Tree::insertTreeAndClone #TNasm::X86::Tree::Clone  #TNasm::X86::Tree::findAndClone
+  my $s = Subroutine
+   {my ($p) = @_;
+    $$p{in} ->setReg(r15);
+    my $r = $$p{in} + 1;
+    $$p{in}->copy($r);
+   } [qw(in in2)], name => 'add';
+
+  my $in   = V(in,  1);
+  my $in2  = V(in,  2);
+  my $in3  = V(in,  3);
+  $s->call($in, $in2, $in3);
+  $in->outNL;
+
+  ok Assemble(debug => 0, eq => <<END);
+in: 0000 0000 0000 0003
 END
  }
 
