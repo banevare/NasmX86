@@ -15,6 +15,7 @@ use Data::Table::Text qw(:all);
 use Asm::C qw(:all);
 use feature qw(say current_sub);
 
+my $debugTrace = 1;
 makeDieConfess;
 
 my %rodata;                                                                     # Read only data already written
@@ -2739,20 +2740,29 @@ sub AllocateMemory(@)                                                           
 
     Mov rax, 9;                                                                 # mmap
     $$p{size}->setReg(rsi);                                                     # Amount of memory
+PrintErrStringNL "AAAA Reqwuest more space";
+PrintErrRegisterInHex rsi;
     Xor rdi, rdi;                                                               # Anywhere
     Mov rdx, $wr;                                                               # Read write protections
     Mov r10, $pa;                                                               # Private and anonymous map
     Mov r8,  -1;                                                                # File descriptor for file backing memory if any
     Mov r9,  0;                                                                 # Offset into file
     Syscall;
+    Cmp rax, -1;                                                                # Check return code
+    IfEq(sub
+     {PrintErrString "Cannot allocate memory, return code -1";
+      $$p{size}->errNL;
+      Exit(1);
+     });
     Cmp rax, -12;                                                               # Check return code
     IfEq(sub
-     {PrintErrString "Cannot allocate memory, ";
+     {PrintErrString "Cannot allocate memory, return code -12";
       $$p{size}->errNL;
       Exit(1);
      });
     $$p{address}->getReg(rax);                                                  # Amount of memory
 
+PrintErrStringNL "AAAA Reqwuest more space finished";
     RestoreFirstSeven;
    } [qw(size address)];
 
@@ -3407,8 +3417,7 @@ sub ClassifyRange($@)                                                           
 
     SetLabel $finish;
     PopR @save;
-   } name => "ClassifyRange_$recordOffsetInRange",
-     in   => [qw(address size)];
+   } [qw(address size)],  name => "ClassifyRange_$recordOffsetInRange";
 
   $s->call(@parameters);
  } # ClassifyRange
@@ -5953,9 +5962,8 @@ sub Nasm::X86::Tree::leftOrRightMost($$@)                                       
 
     SetLabel $success;                                                          # Insert completed successfully
     PopR @save;
-   } name => $dir == 0 ? "Nasm::X86::Tree::leftMost"
-                       : "Nasm::X86::Tree::rightMost",
-     [qw(node  offset )];
+   } [qw(node  offset )],
+   name => $dir==0 ? "Nasm::X86::Tree::leftMost" : "Nasm::X86::Tree::rightMost";
 
   $s->call(@variables);
  }
@@ -6514,8 +6522,8 @@ END
   unlink $o1, $o2;                                                              # Remove output files
   my $out  = $k ? '' : "1>$o1";
   my $err  = $k ? '' : "2>$o2";
-# my $opt =  qq($sde -mix -ptr-check -debugtrace);                              # Emulator options
   my $opt =  qq($sde -mix -ptr-check);                                          # Emulator options
+     $opt =  qq($sde -mix -ptr-check -debugtrace) if $debugTrace;               # Emulator options
   my $exec = $emulator ? qq($opt -- ./$e $err $out) : qq(./$e $err $out);       # Execute with or without the emulator
 
   $cmd .= qq( && $exec) unless $k;                                              # Execute automatically unless suppressed by user
@@ -17685,7 +17693,7 @@ data: 0000 0000 0000 0098
 END
  }
 
-latest:
+#latest:
 if (1) {                                                                        # Replace a scalar with a tree in the first node
   my $b = CreateArena;
   my $t = $b->CreateTree;
@@ -18018,7 +18026,7 @@ key: 0000 0000 0000 0002 data: 0000 0000 0000 0004 depth: 0000 0000 0000 0001
 END
  }
 
-#latest:
+latest:
 if (1) {                                                                        #TNasm::X86::Tree::print
   my $L = V(loop, 45);
   my $b = CreateArena;
@@ -18109,7 +18117,7 @@ Tree at:    r15: 0000 0000 0000 0ED8
 END
  }
 
-latest:
+#latest:
 if (1) {                                                                        #TNasm::X86::Tree::insertTreeAndClone #TNasm::X86::Tree::Clone  #TNasm::X86::Tree::findAndClone
   my $L = K(loop, 4);
   my $b = CreateArena;
@@ -18187,6 +18195,28 @@ if (1) {                                                                        
 v: 0000 0000 0000 0007
 END
  }
+
+#latest:
+if (1) {                                                                        #TV #TK #TG #TNasm::X86::Variable::copy
+  my $g = G g, 0;
+  my $s = Subroutine
+   {my ($p) = @_;
+    $$p{g}->copy(K value, 1);
+   } [qw(g)], name => 'ref2';
+
+  my $t = Subroutine
+   {my ($p) = @_;
+    $s->call($$p{g});
+   } [qw(g)], name => 'ref';
+
+  $t->call($g);
+  $g->outNL;
+
+  ok Assemble(debug => 0, eq => <<END);
+g: 0000 0000 0000 0001
+END
+ }
+
 #latest:
 if (0) {
   is_deeply Assemble(debug=>1), <<END;
