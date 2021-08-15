@@ -5,6 +5,7 @@
 #-------------------------------------------------------------------------------
 # podDocumentation
 # Time: 18.81s, bytes: 3,580,424, execs: 6,534,304
+# Fix print!
 package Nasm::X86;
 our $VERSION = "20210815";
 use warnings FATAL => qw(all);
@@ -15,7 +16,7 @@ use Data::Table::Text qw(:all);
 use Asm::C qw(:all);
 use feature qw(say current_sub);
 
-my $debugTrace = 1;                                                             # Trace execution via sde64 if true
+my $debugTrace = 0;                                                             # Trace execution via sde64 if true - slow!
 makeDieConfess;
 
 my %rodata;                                                                     # Read only data already written
@@ -1028,11 +1029,27 @@ sub Nasm::X86::Sub::call($%)                                                    
 sub PrintTraceBack($)                                                           # Trace the call stack
  {my ($channel) = @_;                                                           # Channel to write on
   my $s = Subroutine
-   {PushR my @save = (rax, rdi, r12, r13, r14, r15);
+   {PushR my @save = (rax, rdi, r11, r12, r13, r14, r15);
     my $stack     = r15;
     my $count     = r14;
     my $index     = r13;
     my $parameter = r12;
+    my $maxCount  = r11;                                                        # Maximum number of parameters
+    ClearRegisters @save;
+
+    Mov $stack, rbp;                                                            # Current stack frame
+    Block                                                                       # Each level
+     {my ($start, $end) = @_;                                                   # End
+      Mov $stack, "[$stack]";                                                   # Up one level
+      Mov rax, "[$stack-8]";
+      Mov $count, rax;
+      Shr $count, 56;                                                           # Top byte contains the parameter count
+      Cmp $count, $maxCount;                                                    # Compare this count with maximum so far
+      Cmovg $maxCount, $count;                                                  # Update count if greater
+      Shl rax, 8; Shr rax, 8;                                                   # Remove parameter count
+      Je $end;                                                                  # Reached top of stack if rax is zero
+      Jmp $start;                                                               # Next level
+     };
 
     Mov $stack, rbp;                                                            # Current stack frame
     &PrintNL($channel);
@@ -1066,7 +1083,7 @@ sub PrintTraceBack($)                                                           
         For                                                                     # Vertically align subroutine names
          {my ($start, $end, $next) = @_;
           &PrintSpace($channel, 23);
-         } $index, 4;
+         } $index, $maxCount;
        };
 
       Push $stack;                                                              # Print the name of the subroutine
@@ -1088,7 +1105,7 @@ sub PrintErrTraceBack()                                                         
  }
 
 sub PrintOutTraceBack()                                                         # Print sub routine track back on stdout.
- {PrintTraceBack($stderr);
+ {PrintTraceBack($stdout);
  }
 
 sub cr(&@)                                                                      # Call a subroutine with a reordering of the registers.
@@ -2876,13 +2893,10 @@ sub AllocateMemory(@)                                                           
       $$p{size}->errNL;
       Exit(1);
      });
-    $$p{address}->getReg(rax);                                                  # Amount of memory
-PrintErrStringNL "AAAAAAAAAAAAAAAA Allocated MMMMM memory";
-PrintErrRegisterInHex rax, rsi;
-PrintErrTraceBack;
+     $$p{address}->getReg(rax);                                                  # Amount of memory
 
     RestoreFirstSeven;
-   } [qw(size address)], name => 'AllocateMemory';
+   } [qw(address size)], name => 'AllocateMemory';
 
   $s->call(@variables);
  }
@@ -3691,33 +3705,32 @@ sub StringLength(@)                                                             
 sub CreateArena(%)                                                              # Create an relocatable arena and returns its address in rax. Optionally add a chain header so that 64 byte blocks of memory can be freed and reused within the arena.
  {my (%options) = @_;                                                           # free=>1 adds a free chain.
   Comment "Create arena";
-  my $N = K size, 4096;                                                         # Initial size of string
+  my $N = 4096;                                                                 # Initial size of arena
 
-  my ($string, $size, $used, $free) = All8Structure 3;                          # String base
-  my $data = $string->field(0, "start of data");                                # Start of data
+  my $quad = RegisterSize rax;                                                  # Field offsets
+  my $size = 0;
+  my $used = $size + $quad;
+  my $free = $used + $quad;
+  my $data = $free + $quad;
 
   my $s = Subroutine
    {my ($p) = @_;                                                               # Parameters
     SaveFirstFour;
 
-    AllocateMemory($N, address=>$$p{bs});                                       # Allocate memory and save its location in a variable
+    AllocateMemory(K(size, $N), address=>$$p{bs});                              # Allocate memory and save its location in a variable
 
     $$p{bs}->setReg(rax);
-    $N     ->setReg(rdx);
-    Mov rdi, $string->size;                                                     # Size of arena base structure which is constant
-    Mov $used->addr, rdi;                                                       # Used space
-    Mov $size->addr, rdx;                                                       # Size
+    Mov "dword[rax+$used]", $data;                                              # Initially used space
+    Mov "dword[rax+$size]", $N;                                                 # Size
 
     RestoreFirstFour;
    } [qw(bs)], name => 'CreateArena';
 
   $s->call(my $bs = G(bs));                                                     # Variable that holds the reference to the arena
-lll "LLLLabel", dump($bs->label);
 
   genHash(__PACKAGE__."::Arena",                                                # Definition of arena
-    structure => $string,                                                       # Structure details
-    size      => $size,                                                         # Size field details
-    used      => $used,                                                         # Used field details
+    size      => $size,                                                         # Size field offset
+    used      => $used,                                                         # Used field offset
     free      => $free,                                                         # Free chain offset
     data      => $data,                                                         # The start of the data
     bs        => $bs,                                                           # Variable that addresses the arena
@@ -3766,19 +3779,32 @@ sub Nasm::X86::Arena::putChain($$$$@)                                           
 sub Nasm::X86::Arena::length($@)                                                # Get the length of an arena
  {my ($arena, @variables) = @_;                                                 # Arena descriptor, variables
   @_ >= 2 or confess;
-  my $size = $arena->size->addr;
-  my $used = $arena->used->addr;
 
   my $s = Subroutine                                                            # Allocate more space if required
    {my ($p) = @_;                                                               # Parameters
-    Comment "Arena length";
     SaveFirstFour;
     $$p{bs}->setReg(rax);                                                       # Address arena
-    Mov rdx, $arena->used->addr;                                                # Used
-    Sub rdx, $arena->structure->size;
+    Mov rdx, "[rax+$$arena{used}]";                                             # Used
+    Sub rdx, $arena->data;                                                      # Offset of size field
     $$p{size}->getReg(rdx);
     RestoreFirstFour;
    } [qw(bs size)], name => 'Nasm::X86::Arena::length';
+
+  $s->call($arena->bs, @variables);
+ }
+
+sub Nasm::X86::Arena::arenaSize($@)                                             # Get the size of an arena
+ {my ($arena, @variables) = @_;                                                 # Arena descriptor, variables
+  @_ >= 2 or confess;
+
+  my $s = Subroutine                                                            # Allocate more space if required
+   {my ($p) = @_;                                                               # Parameters
+    PushR my @save = (rax);
+    $$p{bs}->setReg(rax);                                                       # Address arena
+    Mov rax, "[rax+$$arena{size}]";
+    $$p{size}->getReg(rax);
+    PopR @save;
+   } [qw(bs size)], name => 'Nasm::X86::Arena::size';
 
   $s->call($arena->bs, @variables);
  }
@@ -3787,38 +3813,47 @@ sub Nasm::X86::Arena::updateSpace($@)                                           
  {my ($arena, @variables) = @_;                                                 # Arena descriptor, variables
 
   @_ >= 3 or confess;
-  my $size = $arena->size->addr;
-  my $used = $arena->used->addr;
 
   my $s = Subroutine
    {my ($p) = @_;                                                               # Parameters
-    Comment "Allocate more space for an arena";
-    SaveFirstFour;
-    $$p{bs}->setReg(rax);                                                       # Address arena
-    my $oldSize = V(oldSize, $size);                                            # Size
-    my $oldUsed = V(oldUsed, $used);                                            # Used
-    my $minSize = $oldUsed + $$p{size};                                         # Minimum size of new string
-    KeepFree rax;
-    If ($minSize > $oldSize,
+    PushR my @save = (rax, r11, r12, r13, r14, r15);
+    my $base     = rax;                                                         # Base of arena
+    my $size     = r15;                                                         # Current size
+    my $used     = r14;                                                         # Currently used space
+    my $request  = r13;                                                         # Requested space
+    my $newSize  = r12;                                                         # New size needed
+    my $proposed = r11;                                                         # Proposed size
+
+    $$p{bs}  ->setReg($base);                                                   # Address arena
+    $$p{size}->setReg($request);                                                # Requested space
+
+    Mov $size, "[$base+$$arena{size}]";
+    Mov $used, "[$base+$$arena{used}]";
+    Mov $newSize, $used;
+    Add $newSize, $request;
+
+    Cmp $newSize,$size;                                                         # New size needed
+    IfGt                                                                        # New size is bigger than current size
     Then                                                                        # More space needed
-     {Mov rax, 4096;                                                            # Minimum arena size
-      $minSize->setReg(rdx);
-      K(loop, 36)->for(sub                                                          # Maximum of this number of shifts
+     {Mov $proposed, 4096;                                                      # Minimum proposed arena size
+      K(loop, 36)->for(sub                                                      # Maximum number of shifts
        {my ($index, $start, $next, $end) = @_;
-        Shl rax, 1;                                                             # New arena size - double the size of the old arena
-        Cmp rax, rdx;                                                           # Big enough?
+        Shl $proposed, 1;                                                       # New proposed size
+        Cmp $proposed, $newSize;                                                # Big enough?
         Jge $end;                                                               # Big enough!
        });
-      my $newSize = V(size, rax);                                               # Save new arena size
+      my $oldSize = V(size, $size);                                             # The old size of the arena
+      my $newSize = V(size, $proposed);                                         # The old size of the arena
       AllocateMemory(size => $newSize, my $address = V(address));               # Create new arena
-      CopyMemory(target  => $address, source => $$p{bs}, size => $oldUsed);     # Copy old arena into new arena
-      FreeMemory(address => $$p{bs},  size   => $oldSize);                      # Free previous memory previously occupied arena
+      CopyMemory(target   => $address, source => $$p{bs}, $oldSize);            # Copy old arena into new arena
+      FreeMemory(address  => $$p{bs},  size   => $oldSize);                     # Free previous memory previously occupied arena
       $$p{bs}->copy($address);                                                  # Save new arena address
-lll "AAAA Updatesa[pce", dump($$p{bs});
-cluck;
-     });
 
-    RestoreFirstFour;
+      $$p{bs}->setReg($base);                                                   # Address arena
+      Mov "[$base+$$arena{size}]", $proposed;                                   # Save the new size in the arena
+     };
+
+    PopR @save;
    } [qw(bs size)] , name => 'Nasm::X86::Arena::updateSpace';
 
   $s->call(@variables);
@@ -3834,7 +3869,7 @@ sub Nasm::X86::Arena::makeReadOnly($)                                           
     SaveFirstFour;
     $$p{bs}->setReg(rax);
     Mov rdi, rax;                                                               # Address of arena
-    Mov rsi, $arena->size->addr;                                                # Size of arena
+    Mov rsi, "[rax+$$arena{size}]";                                             # Size of arena
     KeepFree rax;
 
     Mov rdx, 1;                                                                 # Read only access
@@ -3856,7 +3891,7 @@ sub Nasm::X86::Arena::makeWriteable($)                                          
     SaveFirstFour;
     $$p{bs}->setReg(rax);
     Mov rdi, rax;                                                               # Address of arena
-    Mov rsi, $arena->size->addr;                                                # Size of arena
+    Mov rsi, "[rax+$$arena{size}]";                                                # Size of arena
     KeepFree rax;
     Mov rdx, 3;                                                                 # Read only access
     Mov rax, 10;
@@ -3875,21 +3910,18 @@ sub Nasm::X86::Arena::allocate($@)                                              
    {my ($p) = @_;                                                               # Parameters
     Comment "Allocate space in an arena";
     SaveFirstFour;
-lll "AAAASSSSS22", dump($$p{bs}->label);
 
     $arena->updateSpace($$p{bs}, $$p{size});                                    # Update space if needed
     $$p{bs}  ->setReg(rax);
-    Mov rsi, $arena->used->addr;                                                # Currently used
+    Mov rsi, "[rax+$$arena{used}]";                                             # Currently used
     $$p{offset}->getReg(rsi);
     $$p{size}  ->setReg(rdi);
     Add rsi, rdi;
-    Mov $arena->used->addr, rsi;                                                # Currently used
-    KeepFree rax, rdi, rsi;
+    Mov "[rax+$$arena{used}]", rsi;                                             # Currently used
 
     RestoreFirstFour;
-   } [qw(size bs offset)], name => 'Nasm::X86::Arena::allocate';
+   } [qw(bs size offset)], name => 'Nasm::X86::Arena::allocate';
 
-lll "AAAASSSSS11", dump($$p{bs}->label);
   $s->call($arena->bs, @variables);
  }
 
@@ -3934,7 +3966,7 @@ sub Nasm::X86::Arena::firstFreeBlock($)                                         
   @_ == 1 or confess;
   PushR rax;
   $arena->bs->setReg(rax);                                                      #P Address underlying arena
-  Mov rax, $arena->free->addr;                                                  # Content of free chain pointer
+  Mov rax, "[rax+$$arena{free}]";                                               # Content of free chain pointer
   my $v = V('free', rax);                                                       # Remainder of the free chain
   PopR rax;
   $v
@@ -3946,7 +3978,7 @@ sub Nasm::X86::Arena::setFirstFreeBlock($$)                                     
 
   PushR my @save = (rax, rsi, rdx);
   $arena->bs->setReg(rax);                                                      # Address underlying arena
-  Lea rdx, $arena->free->addr;                                                  # Address of address of free chain
+  Lea rdx, "[rax+$$arena{free}]";                                               # Address of address of free chain
   $offset->setReg(rsi);                                                         # Offset of block being freed
   Mov "[rdx]", rsi;                                                             # Set head of free chain to point to block just freed
   PopR @save;
@@ -3976,9 +4008,11 @@ sub Nasm::X86::Arena::getBlock($$$$;$$)                                         
   defined($address)  or confess;
   defined($block)    or confess;
 
-  If ($block < $arena->data->loc,
+  If ($block < $arena->data,
   Then                                                                          #DEBUG
-   {PrintErrStringNL "Attempt to get block below start of arena";
+   {PrintErrStringNL "Attempt to get block before start of arena";
+    $block->errNL("Attempt to get block: ");
+    PrintErrTraceBack;
     Exit(1);
    });
 
@@ -3996,9 +4030,12 @@ sub Nasm::X86::Arena::putBlock($$$$;$$)                                         
   @_ >= 4 or @_ >= 6 or confess;
   defined($address) or confess "Arena not set";
   defined($block)   or confess;
-  If ($block < $arena->data->loc,
+
+  If ($block < $arena->data,
   Then                                                                          #DEBUG
-   {PrintErrStringNL "Attempt to put block below start of arena";
+   {PrintErrStringNL "Attempt to put block before start of arena";
+    $block->errNL("Attempt to put block: ");
+    PrintErrTraceBack;
     Exit(1);
    });
   my $a = $work1 // r14;                                                        # Work registers
@@ -4013,7 +4050,7 @@ sub Nasm::X86::Arena::putBlock($$$$;$$)                                         
 sub Nasm::X86::Arena::m($@)                                                     # Append the content with length rdi addressed by rsi to the arena addressed by rax
  {my ($arena, @variables) = @_;                                                 # Arena descriptor, variables
   @_ >= 4 or confess;
-  my $used = $arena->used->addr;
+  my $used = "[rax+$$arena{used}]";
 
   my $s = Subroutine
    {my ($p) = @_;                                                               # Parameters
@@ -4089,9 +4126,9 @@ sub Nasm::X86::Arena::append($@)                                                
     Comment "Concatenate arenas";
     SaveFirstFour;
     $$p{source}->setReg(rax);
-    Mov rdi, $arena->used->addr;
-    Sub rdi, $arena->structure->size;
-    Lea rsi, $arena->data->addr;
+    Mov rdi, "[rax+$$arena{used}]";
+    Sub rdi, $arena->data;
+    Lea rsi, "[rax+$$arena{data}]";
     $arena->m(bs=>$$p{target}, V(address, rsi), V(size, rdi));
     RestoreFirstFour;
    } [qw(target source)], name => 'Nasm::X86::Arena::append';
@@ -4108,8 +4145,8 @@ sub Nasm::X86::Arena::clear($)                                                  
     Comment "Clear arena";
     PushR my @save = (rax, rdi);
     $$p{bs}->setReg(rax);
-    Mov rdi, $arena->structure->size;
-    Mov $arena->used->addr, rdi;
+    Mov rdi, $arena->data;
+    Mov "[rax+$$arena{used}]", rdi;
     PopR     @save;
    } [qw(bs)], name => 'Nasm::X86::Arena::clear';
 
@@ -4131,9 +4168,9 @@ sub Nasm::X86::Arena::write($@)                                                 
     KeepFree rax;
 
     $$p{bs}->setReg(rax);                                                       # Write file
-    Lea rsi, $arena->data->addr;
-    Mov rdx, $arena->used->addr;
-    Sub rdx, $arena->structure->size;
+    Lea rsi, "[rax+$$arena{data}]";
+    Mov rdx, "[rax+$$arena{used}]";
+    Sub rdx, $arena->data;
     KeepFree rax;
 
     Mov rax, 1;                                                                 # Write content to file
@@ -4173,9 +4210,10 @@ sub Nasm::X86::Arena::out($)                                                    
     Comment "Write an arena";
     SaveFirstFour;
     $$p{bs}->setReg(rax);
-    Mov rdi, $arena->used->addr;                                                # Length to print
-    Sub rdi, $arena->structure->size;                                           # Length to print
-    Lea rax, $arena->data->addr;                                                # Address of data field
+
+    Mov rdi, "[rax+$$arena{used}]";                                             # Length to print
+    Sub rdi, $arena->data;                                                      # Length to print
+    Lea rax, "[rax+$$arena{data}]";                                             # Address of data field
     PrintOutMemory;
     RestoreFirstFour;
    } [qw(bs)], name => 'Nasm::X86::Arena::out';
@@ -4197,14 +4235,14 @@ sub Nasm::X86::Arena::dump($;$)                                                 
     PrintOutStringNL("Arena");
 
     PushR rax;                                                                  # Print size
-    Mov rax, $arena->size->addr;
+    Mov rax, "[rax+$$arena{size}]";
     PrintOutString("  Size: ");
     PrintOutRaxInHex;
     PrintOutNL;
     PopR rax;
 
     PushR rax;                                                                  # Print used
-    Mov rax, $arena->used->addr;
+    Mov rax, "[rax+$$arena{used}]";
     PrintOutString("  Used: ");
     PrintOutRaxInHex;
     PrintOutNL;
@@ -4702,7 +4740,8 @@ sub Nasm::X86::String::clear($)                                                 
     If ($last != $first,
     Then                                                                        # Two or more blocks on the chain
      {$$p{bs}->setReg(rax);                                                     # Address underlying arena
-      Lea r14, $String->bs->free->addr;                                         # Address of address of free chain
+      my $free = $String->bs->free;
+      Lea r14, "[rax+$free]";                                                   # Address of address of free chain
       Mov r15, "[r14]";                                                         # Address of free chain
       my $rfc = V('next', r15);                                                 # Remainder of the free chain
 
@@ -5139,6 +5178,7 @@ sub Nasm::X86::Arena::CreateTree($)                                             
     $t->putLoop($t->allocBlock, 31, r8);                                        # Keys loops to data - for the first 7 keys we should store the corresponding data further up in the block rather than creating a new block.
     $arena->putBlock($t->address, $keys, 31, r8, r9);                           # Write first keys
     PopR @save;
+
     Comment "Create a block multiway Tree end";
    } [qw(bs first)], name => 'Nasm::X86::Arena::CreateTree';
 
@@ -5251,7 +5291,7 @@ sub Nasm::X86::Tree::splitNode($$$$@)                                           
 
     SetLabel $success;                                                          # Insert completed successfully
     PopR @save;
-   }  [qw(node key bs)], name => 'Nasm::X86::Tree::splitNode';
+   }  [qw(bs node key)], name => 'Nasm::X86::Tree::splitNode';
 
   $s->call(bs=>$bs, node=>$node, key=>$key, @variables);
 
@@ -5932,7 +5972,7 @@ sub Nasm::X86::Tree::insertDataOrTree($$$$)                                     
 
     SetLabel $success;                                                          # Insert completed successfully
     PopR @save;
-   } [qw(first key bs data)], name => "Nasm::X86::Tree::insertDataOrTree_$tnd"; # Data either supplies the data or returns the offset of the sub tree
+   } [qw(bs first key data)], name => "Nasm::X86::Tree::insertDataOrTree_$tnd"; # Data either supplies the data or returns the offset of the sub tree
 
   $s->call($t->address, first => $t->first, key => $key,
     data => $tnd == 1 ? $t->data : $data);
@@ -6311,6 +6351,7 @@ sub Nasm::X86::Tree::iterator($)                                                
   $i->pos  ->copy(K('pos', -1));                                                # Initialize iterator
   $i->count->copy(K(count,  0));
   $i->more ->copy(K(more,   1));
+
   $i->next;                                                                     # First element if any
  }
 
@@ -6350,7 +6391,10 @@ sub Nasm::X86::Tree::Iterator::next($)                                          
      {my $t = $iter->tree;
 
       PushR my @save = (zmm31, zmm30,  zmm29);
+PrintErrStringNL "AAAA";
+$C->errNL;
       $t->getKeysDataNode($C, 31, 30, 29);                                      # Load keys and data
+PrintErrStringNL "BBBB";
       my $nodes = $t->getLoop(30);                                              # Nodes
 
       If ($nodes,
@@ -6371,6 +6415,7 @@ sub Nasm::X86::Tree::Iterator::next($)                                          
       PopR @save;
       Jmp $success;                                                             # Return with iterator loaded
      });
+PrintErrStringNL "CCCC";
 
     my $up = sub                                                                # Iterate up to next node that has not been visited
      {my $top = Label;                                                          # Reached the top of the tree
@@ -6406,6 +6451,7 @@ sub Nasm::X86::Tree::Iterator::next($)                                          
       SetLabel $top;
       PopR @save;
      };
+PrintErrStringNL "CCCC";
 
     $$p{pos}->copy(my $i = $$p{pos} + 1);                                       # Next position in block being scanned
     PushR my @save = (r8, zmm31, zmm30, zmm29);
@@ -6430,7 +6476,7 @@ sub Nasm::X86::Tree::Iterator::next($)                                          
 
     PopR @save;
     SetLabel $success;
-   }  [qw(node  pos  key  data  count  more )],
+   }  [qw(node pos key data count more)],
       name => 'Nasm::X86::Tree::Iterator::next ';
 
   $s->call($iter->node, $iter->pos,   $iter->key,                               # Call with iterator variables
@@ -6581,7 +6627,7 @@ sub Assemble(%)                                                                 
   my $x = join "\n", map {qq(extern $_)} @extern;
   my $L = join " ",  map {qq(-l$_)}      @link;
   my $N = $VariableStack[0];                                                    # Number of variables needed on the stack
-lll "AAAA", dump("N=$N");
+
   my $A = <<END;
 section .rodata
   $r
@@ -16614,7 +16660,23 @@ END
  }
 
 
-#latest:;
+latest:;
+if (1) {                                                                        #String::insertChar
+  my $c = Rb(0..255);
+  my $S = CreateArena;   my $s = $S->CreateString;
+
+  $s->append(source=>V(source, $c), K(size, 80));
+  $s->dump;
+
+
+  $s->insertChar(V(character, 0x88), V(position, 50));
+  $s->dump;
+
+  ok Assemble(debug => 0, eq => <<END);
+END
+ }
+
+latest:;
 if (1) {                                                                        #String::insertChar
   my $c = Rb(0..255);
   my $S = CreateArena;   my $s = $S->CreateString;
@@ -16625,7 +16687,7 @@ if (1) {                                                                        
    $s->insertChar(V(character, 0x44), V(position, 64));
    $s->dump;
 
-   $s->insertChar(V(character, 0x88), V(position, 64));
+#   $s->insertChar(V(character, 0x88), V(position, 64));
    $s->dump;
 
   ok Assemble(debug => 0, eq => <<END);
@@ -18172,7 +18234,7 @@ key: 0000 0000 0000 0002 data: 0000 0000 0000 0004 depth: 0000 0000 0000 0001
 END
  }
 
-latest:
+###latest:
 if (1) {                                                                        #TNasm::X86::Tree::print
   my $L = V(loop, 45);
   my $b = CreateArena;
@@ -18385,7 +18447,7 @@ g: 0000 0000 0000 0000
 END
  }
 
-latest:
+#latest:
 if (1) {                                                                        #TSubroutine
   PrintErrRegisterInHex rbp;
   my $g = G g, 3;
@@ -18405,19 +18467,104 @@ if (1) {                                                                        
   ok Assemble(debug => 1, eq => <<END);
 
 Subroutine trace back:
-0000 0000 0000 0003 ref
+0000 0000 0000 0003    ref
 
 
 Subroutine trace back:
-0000 0000 0000 0002 ref
-0000 0000 0000 0002 ref
+0000 0000 0000 0002    ref
+0000 0000 0000 0002    ref
 
 
 Subroutine trace back:
-0000 0000 0000 0001 ref
-0000 0000 0000 0001 ref
-0000 0000 0000 0001 ref
+0000 0000 0000 0001    ref
+0000 0000 0000 0001    ref
+0000 0000 0000 0001    ref
 
+END
+ }
+
+#latest:
+if (1) {                                                                        #TSubroutine
+  PrintErrRegisterInHex rbp;
+  my $g = G g, 2;
+  my $u = Subroutine
+   {my ($p, $s) = @_;
+    PrintOutTraceBack;
+    $$p{g}->copy(K gg, 1);
+    PrintOutTraceBack;
+   } [qw(g)], name => 'uuuu';
+  my $t = Subroutine
+   {my ($p, $s) = @_;
+    $u->call($$p{g});                                                           # Recurse
+   } [qw(g)], name => 'tttt';
+  my $s = Subroutine
+   {my ($p, $s) = @_;
+    $t->call($$p{g});                                                           # Recurse
+   } [qw(g)], name => 'ssss';
+
+  $g->outNL;
+  $s->call($g);
+  $g->outNL;
+
+  ok Assemble(debug => 1, eq => <<END);
+g: 0000 0000 0000 0002
+
+Subroutine trace back:
+0000 0000 0000 0002    uuuu
+0000 0000 0000 0002    tttt
+0000 0000 0000 0002    ssss
+
+
+Subroutine trace back:
+0000 0000 0000 0001    uuuu
+0000 0000 0000 0001    tttt
+0000 0000 0000 0001    ssss
+
+g: 0000 0000 0000 0001
+END
+ }
+
+#latest:
+if (1) {                                                                        #TSubroutine
+  PrintErrRegisterInHex rbp;
+  my $r = G r, 2;
+
+  my $u = Subroutine
+   {my ($p, $s) = @_;
+    PrintOutTraceBack;
+    $$p{u}->copy(K gg, 1);
+    PrintOutTraceBack;
+   } [qw(u)], name => 'uuuu';
+
+  my $t = Subroutine
+   {my ($p, $s) = @_;
+    $u->call(u => $$p{t});
+   } [qw(t)], name => 'tttt';
+
+  my $s = Subroutine
+   {my ($p, $s) = @_;
+   $t->call(t => $$p{s});
+   } [qw(s)], name => 'ssss';
+
+  $r->outNL;
+  $s->call(s=>$r);
+  $r->outNL;
+
+  ok Assemble(debug => 1, eq => <<END);
+r: 0000 0000 0000 0002
+
+Subroutine trace back:
+0000 0000 0000 0002    uuuu
+0000 0000 0000 0002    tttt
+0000 0000 0000 0002    ssss
+
+
+Subroutine trace back:
+0000 0000 0000 0001    uuuu
+0000 0000 0000 0001    tttt
+0000 0000 0000 0001    ssss
+
+r: 0000 0000 0000 0001
 END
  }
 
