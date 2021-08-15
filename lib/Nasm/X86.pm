@@ -15,7 +15,7 @@ use Data::Table::Text qw(:all);
 use Asm::C qw(:all);
 use feature qw(say current_sub);
 
-my $debugTrace = 1;
+my $debugTrace = 1;                                                             # Trace execution via sde64 if true
 makeDieConfess;
 
 my %rodata;                                                                     # Read only data already written
@@ -825,7 +825,7 @@ sub Block(&)                                                                    
   SetLabel $end;                                                                # Exit loop
  }
 
-sub For(&$$;$)                                                                  # For - iterate the body as long as register is less than limit incrementing by increment each time
+sub For(&$$;$)                                                                  # For - iterate the body as long as register is less than limit incrementing by increment each time. Nota Bene: The register is not explicitly set to zero as you might want to start at some other number.
  {my ($body, $register, $limit, $increment) = @_;                               # Body, register, limit on loop, increment on each iteration
   @_ == 3 or @_ == 4 or confess;
   $increment //= 1;                                                             # Default increment
@@ -911,7 +911,13 @@ sub Macro(&%)                                                                   
   $start
  }
 
-my @VariableStack = (0);                                                        # Counts the number of variables on the stack in each invocation of L<Subroutine>.
+#D2 Call                                                                        # Call a subroutine
+
+my @VariableStack = (1);                                                        # Counts the number of parameters and variables on the stack in each invocation of L<Subroutine>.  There is at least one variable - the first holds the traceback.
+
+sub SubroutineStartStack()                                                      # Initialize a new stack frame.  The first quad of each frame has the address of the name of the sub in the low dword, and the parameter count in the upper byte of the quad.  This field is all zeroes in the initial frame.
+ {push @VariableStack, 1;                                                       # Counts the number of variables on the stack in each invocation of L<Subroutine>.  The first quad provides the traceback.
+ }
 
 sub Subroutine(&$%)                                                             # Create a subroutine that can be called in assembler code
  {my ($body, $parameters, %options) = @_;                                       # Body, [parameters  names], options.
@@ -919,23 +925,36 @@ sub Subroutine(&$%)                                                             
   !$parameters or ref($parameters) =~ m(array)i or
     confess "Reference to array of parameter names required";
 
-  my $name       =  $options{name} // [caller(1)]->[3];                         # Subroutine name
-  my $comment    =  $options{comment};                                          # Optional comment describing sub
+  my $name    = $options{name};                                                 # Subroutine name
+  $name or confess "Name required";
+
+  my $comment = $options{comment};                                              # Optional comment describing sub
   Comment "Subroutine " .($comment) if $comment;                                # Assemble comment
 
   if ($name and my $n = $subroutines{$name}) {return $n}                        # Return the label of a pre-existing copy of the code
 
-  push @VariableStack, 0;                                                       # Open new stack layout with references to parameters
+  SubroutineStartStack;                                                         # Open new stack layout with references to parameters
   my %p; $p{$_} = R($_) for @$parameters;                                       # Reference each parameter
 
-  my $start = Label;                                                            # Jump over code - would be better to put it in a different section
-  my $end   = Label;
-  Jmp $end;
+  my $end = Label; Jmp $end;                                                    # End label
+  my $start = SetLabel;                                                         # Start label
 
-  SetLabel $start;
+  my $s = $subroutines{$name} = genHash(__PACKAGE__."::Sub",                    # Subroutine definition
+    start     => $start,                                                        # Start label for this subroutine
+    end       => $start,                                                        # Start label for this subroutine
+    name      => $name,                                                         # Name of the subroutine from which the entry label is located
+    args      => {map {$_=>1} @$parameters},                                    # {argument name, argument variable}
+    variables => {%p},                                                          # Argument variables
+    options   => \%options,                                                     # Options
+    parameters=> $parameters,                                                   # Parameters
+    vars      => $VariableStack[-1],                                            # Number of variables in subroutine
+    depth     => scalar @VariableStack,                                         # Lexical depth
+    nameString=> Rs($name),                                                     # Name of the sub as a string constant
+   );
+
   my $E = @text;                                                                # Code entry that will contain the Enter instruction
   Enter 0, 0;
-  &$body({%p});                                                                 # Code with parameters
+  &$body({%p}, $s);                                                             # Code with parameters
   Leave;
   Ret;
   SetLabel $end;
@@ -947,15 +966,7 @@ sub Subroutine(&$%)                                                             
   Enter $N*8, 0 ; Subroutine $name
 END
 
-  defined($name) or confess "Name missing";
-  $subroutines{$name} = genHash(__PACKAGE__."::Sub",                            # Subroutine definition
-    start     => $start,                                                        # Start label for this subroutine
-    name      => $name,                                                         # Name of the subroutine from which the entry label is located
-    args      => {map {$_=>1} @$parameters},                                    # {argument name, argument variable}
-    variables => {%p},                                                          # Argument variables
-    P         => $P,                                                            # Number of parameters in subroutine
-    V         => $V,                                                            # Number of variables  in subroutine
-   );
+  $s                                                                            # Subroutine definition
  }
 
 sub Nasm::X86::Sub::call($%)                                                    # Call a sub passing it some parameters
@@ -988,7 +999,13 @@ sub Nasm::X86::Sub::call($%)                                                    
     keys %m and confess "Invalid arguments ".dump([sort keys %m]);              # Print misnamed arguments
    }
 
+
   PushR my @save = (r14, r15);                                                  # Use this register to transfer between the current frame and the next frame
+  Mov r15, $sub->nameString;
+  Mov "[rsp-8]", r15;                                                           # Point to name
+  Mov r15, scalar $sub->parameters->@*;
+  Mov "[rsp-1]", r15b;                                                          # Number of parameters
+
   for my $p(sort keys %p)                                                       # Transfer parameters from current frame to next frame
    {my $P = $p{$p}->label;                                                      # Source in current frame
     if (my $q = $sub->variables->{$p})                                          # Target in new frame
@@ -1008,12 +1025,80 @@ sub Nasm::X86::Sub::call($%)                                                    
   Call $$sub{start};                                                            # Call the sub routine
  }
 
+sub PrintTraceBack($)                                                           # Trace the call stack
+ {my ($channel) = @_;                                                           # Channel to write on
+  my $s = Subroutine
+   {PushR my @save = (rax, rdi, r12, r13, r14, r15);
+    my $stack     = r15;
+    my $count     = r14;
+    my $index     = r13;
+    my $parameter = r12;
+
+    Mov $stack, rbp;                                                            # Current stack frame
+    &PrintNL($channel);
+    &PrintStringNL($channel, "Subroutine trace back:");
+    Block                                                                       # Each level
+     {my ($start, $end) = @_;                                                   # End
+      Mov $stack, "[$stack]";                                                   # Up one level
+      Mov rax, "[$stack-8]";
+      Mov $count, rax;
+      Shr $count, 56;                                                           # Top byte contains the parameter count
+      Shl rax, 8; Shr rax, 8;                                                   # Remove parameter count
+      Je $end;                                                                  # Reached top of stack
+      Cmp $count, 0;                                                            # Check for parameters
+      IfGt
+      Then                                                                      # One or more parameters
+       {Mov $index, 0;
+        For
+         {my ($start, $end, $next) = @_;
+          Mov $parameter, $index;
+          Add $parameter, 2;                                                    # Skip traceback
+          Shl $parameter, 3;                                                    # Each parameter is a quad
+          Neg $parameter;                                                       # Offset from stack
+          Add $parameter, $stack;                                               # Position on stack
+          Mov $parameter, "[$parameter]";                                       # Parameter reference to variable
+          Push rax;
+          Mov rax, "[$parameter]";                                              # Variable content
+          &PrintRaxInHex($channel);
+          Pop rax;
+          &PrintSpace($channel, 4);
+         } $index, $count;
+        For                                                                     # Vertically align subroutine names
+         {my ($start, $end, $next) = @_;
+          &PrintSpace($channel, 23);
+         } $index, 4;
+       };
+
+      Push $stack;                                                              # Print the name of the subroutine
+      &Cstrlen();                                                               # Length of name
+      Mov rdi, $stack;
+      Pop $stack;
+      &PrintMemoryNL($channel);                                                 # Print name
+      Jmp $start;                                                               # Next level
+     };
+    &PrintNL($channel);
+    PopR @save;
+   } [], name => 'SubroutineTraceBack';
+
+  $s->call;
+ }
+
+sub PrintErrTraceBack()                                                         # Print sub routine track back on stderr.
+ {PrintTraceBack($stderr);
+ }
+
+sub PrintOutTraceBack()                                                         # Print sub routine track back on stdout.
+ {PrintTraceBack($stderr);
+ }
+
 sub cr(&@)                                                                      # Call a subroutine with a reordering of the registers.
  {my ($body, @registers) = @_;                                                  # Code to execute with reordered registers, registers to reorder
   ReorderSyscallRegisters   @registers;
   &$body;
   UnReorderSyscallRegisters @registers;
  }
+
+#D1 Comments                                                                    # Inserts comments into the generated assember code.
 
 sub CommentWithTraceBack(@)                                                     # Insert a comment into the assembly code with a traceback showing how it was generated
  {my (@comment) = @_;                                                           # Text of comment
@@ -1101,6 +1186,12 @@ sub PrintString($@)                                                             
   $s->call;
  }
 
+sub PrintStringNL($@)                                                           # Print a constant string to the specified channel followed by a new line
+ {my ($channel, @string) = @_;                                                  # Channel, Strings
+  PrintString($channel, @string);
+  PrintNL    ($channel);
+ }
+
 sub PrintErrString(@)                                                           # Print a constant string to stderr.
  {my (@string) = @_;                                                            # String
   PrintString($stderr, @string);
@@ -1109,6 +1200,21 @@ sub PrintErrString(@)                                                           
 sub PrintOutString(@)                                                           # Print a constant string to stdout.
  {my (@string) = @_;                                                            # String
   PrintString($stdout, @string);
+ }
+
+sub PrintSpace($;$)                                                             # Print one or more spaces to the specified channel.
+ {my ($channel, $spaces) = @_;                                                  # Channel, number of spaces if not one.
+  PrintString($channel, ' ' x ($spaces // 1));
+ }
+
+sub PrintErrSpace(;$)                                                           # Print one or more spaces to stderr.
+ {my ($spaces) = @_;                                                            # Number of spaces if not one.
+  PrintErrString(' ', $spaces);
+ }
+
+sub PrintOutSpace(;$)                                                           # Print one or more spaces to stdout.
+ {my ($spaces) = @_;                                                            # Number of spaces if not one.
+  PrintOutString(' ', $spaces);
  }
 
 sub PrintErrStringNL(@)                                                         # Print a constant string followed by a new line to stderr
@@ -1145,7 +1251,6 @@ sub PrintRaxInHex($;$)                                                          
     SaveFirstFour rax;                                                          # Rax is a parameter
     Mov rdx, rax;                                                               # Content to be printed
     Mov rdi, 2;                                                                 # Length of a byte in hex
-    KeepFree rax;
 
     for my $i((7-$end)..7)                                                      # Each byte
      {my $s = 8*$i;
@@ -2687,7 +2792,7 @@ sub PrintOutMemoryInHexNL                                                       
   PrintNL($stdout);
  }
 
-sub PrintMemory                                                                 # Print the memory addressed by rax for a length of rdi on the specified channel
+sub PrintMemory                                                                 # Print the memory addressed by rax for a length of rdi on the specified channel.
  {my ($channel) = @_;                                                           # Channel
   @_ == 1 or confess;
 
@@ -2702,6 +2807,13 @@ sub PrintMemory                                                                 
     Syscall;
     RestoreFirstFour();
    } name => "PrintOutMemoryOnChannel$channel";
+ }
+
+sub PrintMemoryNL                                                               # Print the memory addressed by rax for a length of rdi on the specified channel followed by a new line.
+ {my ($channel) = @_;                                                           # Channel
+  @_ == 1 or confess;
+  PrintMemory($channel);
+  PrintNL($channel);
  }
 
 sub PrintErrMemory                                                              # Print the memory addressed by rax for a length of rdi on stderr
@@ -2740,8 +2852,6 @@ sub AllocateMemory(@)                                                           
 
     Mov rax, 9;                                                                 # mmap
     $$p{size}->setReg(rsi);                                                     # Amount of memory
-PrintErrStringNL "AAAA Reqwuest more space";
-PrintErrRegisterInHex rsi;
     Xor rdi, rdi;                                                               # Anywhere
     Mov rdx, $wr;                                                               # Read write protections
     Mov r10, $pa;                                                               # Private and anonymous map
@@ -2754,6 +2864,12 @@ PrintErrRegisterInHex rsi;
       $$p{size}->errNL;
       Exit(1);
      });
+    Cmp eax, 0xffffffea;                                                        # Check return code
+    IfEq(sub
+     {PrintErrString "Cannot allocate memory, return code 0xffffffea";
+      $$p{size}->errNL;
+      Exit(1);
+     });
     Cmp rax, -12;                                                               # Check return code
     IfEq(sub
      {PrintErrString "Cannot allocate memory, return code -12";
@@ -2761,10 +2877,12 @@ PrintErrRegisterInHex rsi;
       Exit(1);
      });
     $$p{address}->getReg(rax);                                                  # Amount of memory
+PrintErrStringNL "AAAAAAAAAAAAAAAA Allocated MMMMM memory";
+PrintErrRegisterInHex rax, rsi;
+PrintErrTraceBack;
 
-PrintErrStringNL "AAAA Reqwuest more space finished";
     RestoreFirstSeven;
-   } [qw(size address)];
+   } [qw(size address)], name => 'AllocateMemory';
 
   $s->call(@variables);
  }
@@ -2782,7 +2900,7 @@ sub FreeMemory(@)                                                               
     $$p{size}   ->setReg(rsi);                                                  # Length
     Syscall;
     RestoreFirstFour;
-   } [qw(size address)];
+   } [qw(size address)], name=> 'FreeMemory';
 
   $s->call(@variables);
  }
@@ -2816,7 +2934,7 @@ sub ClearMemory(@)                                                              
      } rax, rdx, RegisterSize zmm0;
 
     PopR @save;
-   } [qw(size address)];
+   } [qw(size address)], name => 'ClearMemory';
 
   $s->call(@variables);
  }
@@ -2960,7 +3078,7 @@ sub CopyMemory(@)                                                               
       Mov "[rax+rdx]", "r8b";
      } rdx, rdi, 1;
     RestoreFirstSeven;
-   } [qw(source target size)];
+   } [qw(source target size)], name => 'CopyMemory';
 
   $s->call(@variables);
  }
@@ -3089,7 +3207,7 @@ sub ReadFile(@)                                                                 
     $$p{address}->getReg(rax);
     $$p{size}   ->getReg(rdi);
     RestoreFirstSeven;
-   } [qw(file address size)];
+   } [qw(file address size)], name => 'ReadFile';
 
   $s->call(@variables);
  }
@@ -3119,7 +3237,7 @@ sub executeFileViaBash(@)                                                       
       Syscall;
      };
     RestoreFirstFour;
-   } [qw(file)];
+   } [qw(file)], name => 'executeFileViaBash';
 
   $s->call(@variables);
  }
@@ -3136,7 +3254,7 @@ sub unlinkFile(@)                                                               
     Mov rax, 87;
     Syscall;
     RestoreFirstFour;
-   } [qw(file)];
+   } [qw(file)], name => 'unlinkFile';
 
   $s->call(@variables);
  }
@@ -3293,7 +3411,7 @@ sub GetNextUtf8CharAsUtf32(@)                                                   
     SetLabel $success;
 
     PopR @save;
-   } [qw(in out  size  fail)];
+   } [qw(in out  size  fail)], name => 'GetNextUtf8CharAsUtf32';
 
   $s->call(@parameters);
  } # GetNextUtf8CharAsUtf32
@@ -3342,7 +3460,7 @@ sub ConvertUtf8ToUtf32(@)                                                       
     $$p{size32}->copy($size);                                                   # Size of allocation
     $$p{count} ->getReg(r12);                                                   # Number of unicode points converted from utf8 to utf32
     PopR @save;
-   } [qw(u8  size8 u32 size32 count)];
+   } [qw(u8  size8 u32 size32 count)], name => 'ConvertUtf8ToUtf32';
 
   $s->call(@parameters);
  } # ConvertUtf8ToUtf32
@@ -3548,7 +3666,7 @@ END
     Not r15;
     Dec r15;
     PopR @regs;
-   } name=> "Cstrlen";
+   } name => "Cstrlen";
 
   Call $sub;
  }
@@ -3564,7 +3682,7 @@ sub StringLength(@)                                                             
     Cstrlen;                                                                    # Length now in r15
     $$p{size}->getReg(r15);                                                     # Save length
     RestoreFirstFour;
-   } [qw(string size)];
+   } [qw(string size)], name => 'StringLength';
 
   $s->call(@parameters, my $z = V(size));                                       # Variable that holds the length of the string
   $z
@@ -3573,7 +3691,7 @@ sub StringLength(@)                                                             
 sub CreateArena(%)                                                              # Create an relocatable arena and returns its address in rax. Optionally add a chain header so that 64 byte blocks of memory can be freed and reused within the arena.
  {my (%options) = @_;                                                           # free=>1 adds a free chain.
   Comment "Create arena";
-  my $N = V(size, 4096);                                                        # Initial size of string
+  my $N = K size, 4096;                                                         # Initial size of string
 
   my ($string, $size, $used, $free) = All8Structure 3;                          # String base
   my $data = $string->field(0, "start of data");                                # Start of data
@@ -3591,9 +3709,10 @@ sub CreateArena(%)                                                              
     Mov $size->addr, rdx;                                                       # Size
 
     RestoreFirstFour;
-   } [qw(bs)];
+   } [qw(bs)], name => 'CreateArena';
 
   $s->call(my $bs = G(bs));                                                     # Variable that holds the reference to the arena
+lll "LLLLabel", dump($bs->label);
 
   genHash(__PACKAGE__."::Arena",                                                # Definition of arena
     structure => $string,                                                       # Structure details
@@ -3659,7 +3778,7 @@ sub Nasm::X86::Arena::length($@)                                                
     Sub rdx, $arena->structure->size;
     $$p{size}->getReg(rdx);
     RestoreFirstFour;
-   } [qw(bs size)];
+   } [qw(bs size)], name => 'Nasm::X86::Arena::length';
 
   $s->call($arena->bs, @variables);
  }
@@ -3684,21 +3803,23 @@ sub Nasm::X86::Arena::updateSpace($@)                                           
     Then                                                                        # More space needed
      {Mov rax, 4096;                                                            # Minimum arena size
       $minSize->setReg(rdx);
-      ForEver
-       {my ($start, $end) = @_;
+      K(loop, 36)->for(sub                                                          # Maximum of this number of shifts
+       {my ($index, $start, $next, $end) = @_;
         Shl rax, 1;                                                             # New arena size - double the size of the old arena
         Cmp rax, rdx;                                                           # Big enough?
         Jge $end;                                                               # Big enough!
-       };
+       });
       my $newSize = V(size, rax);                                               # Save new arena size
       AllocateMemory(size => $newSize, my $address = V(address));               # Create new arena
       CopyMemory(target  => $address, source => $$p{bs}, size => $oldUsed);     # Copy old arena into new arena
       FreeMemory(address => $$p{bs},  size   => $oldSize);                      # Free previous memory previously occupied arena
       $$p{bs}->copy($address);                                                  # Save new arena address
+lll "AAAA Updatesa[pce", dump($$p{bs});
+cluck;
      });
 
     RestoreFirstFour;
-   } [qw(bs size)];
+   } [qw(bs size)] , name => 'Nasm::X86::Arena::updateSpace';
 
   $s->call(@variables);
  } # updateSpace
@@ -3720,7 +3841,7 @@ sub Nasm::X86::Arena::makeReadOnly($)                                           
     Mov rax, 10;
     Syscall;
     RestoreFirstFour;                                                           # Return the possibly expanded arena
-   } [qw(bs)];
+   } [qw(bs)], name => 'Nasm::X86::Arena::makeReadOnly';
 
   $s->call(bs => $arena->bs);
  }
@@ -3741,7 +3862,7 @@ sub Nasm::X86::Arena::makeWriteable($)                                          
     Mov rax, 10;
     Syscall;
     RestoreFirstFour;                                                           # Return the possibly expanded arena
-   } [qw(bs)];
+   } [qw(bs)], name => 'Nasm::X86::Arena::makeWriteable';
 
   $s->call(bs => $arena->bs);
  }
@@ -3754,6 +3875,7 @@ sub Nasm::X86::Arena::allocate($@)                                              
    {my ($p) = @_;                                                               # Parameters
     Comment "Allocate space in an arena";
     SaveFirstFour;
+lll "AAAASSSSS22", dump($$p{bs}->label);
 
     $arena->updateSpace($$p{bs}, $$p{size});                                    # Update space if needed
     $$p{bs}  ->setReg(rax);
@@ -3765,8 +3887,9 @@ sub Nasm::X86::Arena::allocate($@)                                              
     KeepFree rax, rdi, rsi;
 
     RestoreFirstFour;
-   } [qw(size bs offset)];
+   } [qw(size bs offset)], name => 'Nasm::X86::Arena::allocate';
 
+lll "AAAASSSSS11", dump($$p{bs}->label);
   $s->call($arena->bs, @variables);
  }
 
@@ -3842,7 +3965,7 @@ sub Nasm::X86::Arena::freeBlock($@)                                             
     $arena->putBlock($$p{bs}, $$p{offset}, 31);                                 # Link the freed block to the rest of the free chain
     $arena->setFirstFreeBlock($$p{offset});                                     # Set free chain field to point to latest free chain element
     PopR @save;
-   } [qw(offset bs)];
+   } [qw(offset bs)], name => 'Nasm::X86::Arena::freeBlock';
 
   $s->call($arena->bs, @variables);
  }
@@ -3912,7 +4035,7 @@ sub Nasm::X86::Arena::m($@)                                                     
     Mov $used, rdi;
 
     RestoreFirstFour;
-   } [qw(bs address size)];
+   } [qw(bs address size)], name => 'Nasm::X86::Arena::m';
 
   $s->call(@variables);
  }
@@ -3971,7 +4094,7 @@ sub Nasm::X86::Arena::append($@)                                                
     Lea rsi, $arena->data->addr;
     $arena->m(bs=>$$p{target}, V(address, rsi), V(size, rdi));
     RestoreFirstFour;
-   } [qw(target source)];
+   } [qw(target source)], name => 'Nasm::X86::Arena::append';
 
   $s->call(target=>$arena->bs, @variables);
  }
@@ -3988,7 +4111,7 @@ sub Nasm::X86::Arena::clear($)                                                  
     Mov rdi, $arena->structure->size;
     Mov $arena->used->addr, rdi;
     PopR     @save;
-   } [qw(bs)];
+   } [qw(bs)], name => 'Nasm::X86::Arena::clear';
 
   $s->call(bs => $arena->bs);
  }
@@ -4021,7 +4144,7 @@ sub Nasm::X86::Arena::write($@)                                                 
     $file->setReg(rax);
     CloseFile;
     RestoreFirstFour;
-   }  [qw(file bs)];
+   }  [qw(file bs)], name => 'Nasm::X86::Arena::write';
 
   $s->call(bs => $arena->bs, @variables);
  }
@@ -4036,7 +4159,7 @@ sub Nasm::X86::Arena::read($@)                                                  
     ReadFile($$p{file}, (my $size = V(size)), my $address = V(address));
     $arena->m($$p{bs}, $size, $address);                                        # Move data into arena
     FreeMemory($size, $address);                                                # Free memory allocated by read
-   } [qw(bs file)];
+   } [qw(bs file)], name => 'Nasm::X86::Arena::read';
 
   $s->call(bs => $arena->bs, @variables);
  }
@@ -4055,7 +4178,7 @@ sub Nasm::X86::Arena::out($)                                                    
     Lea rax, $arena->data->addr;                                                # Address of data field
     PrintOutMemory;
     RestoreFirstFour;
-   } [qw(bs)];
+   } [qw(bs)], name => 'Nasm::X86::Arena::out';
 
   $s->call($arena->bs);
  }
@@ -4117,7 +4240,7 @@ sub Nasm::X86::Arena::CreateString($)                                           
     next    => $b - 1 * $o,                                                     # Location of next offset in block in bytes
     prev    => $b - 2 * $o,                                                     # Location of prev offset in block in bytes
     length  => $b - 2 * $o - 1,                                                 # Maximum length in a block
-    first   => V('first'),                                                      # Variable addressing first block in string
+    first   => G('first'),                                                      # Variable addressing first block in string
    );
 
   my $first = $s->allocBlock;                                                   # Allocate first block
@@ -4248,7 +4371,7 @@ sub Nasm::X86::String::dump($)                                                  
     PrintOutNL;
 
     PopR @save;
-   } [qw(first bs)];
+   } [qw(first bs)], name => 'Nasm::X86::String::dump';
 
   $s->call($String->address, $String->first);
  }
@@ -4274,7 +4397,7 @@ sub Nasm::X86::String::len($$)                                                  
      };
     $$p{size}->copy($length);
     PopR @save;
-   } [qw(first bs size)];
+   } [qw(first bs size)], name => 'Nasm::X86::String::len';
 
   $s->call($String->address, $String->first, $size);
  }
@@ -4324,7 +4447,7 @@ sub Nasm::X86::String::concatenate($$)                                          
      };
 
     PopR @save;
-   } [qw(sBs sFirst tBs tFirst)];
+   } [qw(sBs sFirst tBs tFirst)], name => 'Nasm::X86::String::concatenate';
 
   $s->call(sBs => $source->address, sFirst => $source->first,
            tBs => $target->address, tFirst => $target->first);
@@ -4411,7 +4534,7 @@ sub Nasm::X86::String::insertChar($@)                                           
      };
 
     PopR @save;
-   } [qw(first character position bs)];
+   } [qw(first character position bs)], name => 'Nasm::X86::String::insertChar';
 
   $s->call($String->address, first => $String->first, @variables)
  }
@@ -4455,7 +4578,7 @@ sub Nasm::X86::String::deleteChar($@)                                           
      };
 
     PopR @save;
-   } [qw(first  position  bs)];
+   } [qw(first  position  bs)], name => 'Nasm::X86::String::deleteChar';
 
   $s->call($String->address, first => $String->first, @variables)
  }
@@ -4497,7 +4620,7 @@ sub Nasm::X86::String::getCharacter($@)                                         
      };
 
     PopR @save;
-   } [qw(first  position  bs out)];
+   } [qw(first  position  bs out)], name => 'Nasm::X86::String::getCharacter';
 
   $s->call($String->address, first => $String->first, @variables)
  }
@@ -4555,7 +4678,7 @@ sub Nasm::X86::String::append($@)                                               
       $String->putBlock($B, $new,  30);                                         # Put the modified new block
      };
     PopR @save;
-   }  [qw(first source size bs)];
+   }  [qw(first source size bs)], name => 'Nasm::X86::String::append';
 
   $s->call($String->address, $String->first, @variables);
  }
@@ -4605,7 +4728,7 @@ sub Nasm::X86::String::clear($)                                                 
      });
 
     PopR @save;
-   }  [qw(first  bs)];
+   }  [qw(first  bs)], name => 'Nasm::X86::String::clear';
 
   $s->call($String->address, $String->first);
  }
@@ -4624,7 +4747,7 @@ sub Nasm::X86::Arena::CreateArray($)                                            
   my $s = genHash(__PACKAGE__."::Array",                                        # String definition
     bs     => $arena,                                                           # Bytes string definition
     width  => $o,                                                               # Width of each element
-    first  => V('first'),                                                       # Variable addressing first block in string
+    first  => G('first'),                                                       # Variable addressing first block in string
     slots1 => $b / $o - 1,                                                      # Number of slots in first block
     slots2 => $b / $o,                                                          # Number of slots in second and subsequent blocks
    );
@@ -4775,7 +4898,7 @@ sub Nasm::X86::Array::push($@)                                                  
 
     SetLabel $success;
     PopR @save;
-   }  [qw(first  element bs)];
+   }  [qw(first  element bs)], name => 'Nasm::X86::Array::push';
 
   $s->call($Array->address, $Array->first, @variables);
  }
@@ -4860,7 +4983,7 @@ sub Nasm::X86::Array::pop($@)                                                   
 
     SetLabel $success;
     PopR @save;
-   }  [qw(first bs element )];
+   }  [qw(first bs element)], name => 'Nasm::X86::Array::pop';
 
   $s->call($Array->address, $Array->first, @variables);
  }
@@ -4911,7 +5034,7 @@ sub Nasm::X86::Array::get($@)                                                   
 
     SetLabel $success;
     PopR @save;
-   }  [qw(first index bs element )];
+   }  [qw(first index bs element)], name => 'Nasm::X86::Array::get';
 
   $s->call($Array->address, $Array->first, @variables);
  }
@@ -4963,7 +5086,7 @@ sub Nasm::X86::Array::put($@)                                                   
 
     SetLabel $success;
     PopR @save;
-   }  [qw(first index element  bs)];
+   }  [qw(first index element  bs)], name => 'Nasm::X86::Array::put';
 
   $s->call($Array->address, $Array->first, @variables);
  }
@@ -4983,16 +5106,16 @@ sub Nasm::X86::Arena::DescribeTree($)                                           
 
   genHash(__PACKAGE__."::Tree",                                                 # tree.
     bs           => $arena,                                                     # Arena definition.
-    data         => V(data),                                                    # Variable containing the last data found
-    first        => V(first),                                                   # Variable addressing offset to first block of keys.
-    found        => V(found),                                                   # Variable indicating whether the last find was successful or not
+    data         => G(data),                                                    # Variable containing the last data found
+    first        => G(first),                                                   # Variable addressing offset to first block of keys.
+    found        => G(found),                                                   # Variable indicating whether the last find was successful or not
     leftLength   => $length / 2,                                                # Left split length
     lengthOffset => $b - $o * 2,                                                # Offset of length in keys block.  The length field is a word - see: "MultiWayTree.svg"
     loop         => $b - $o,                                                    # Offset of keys, data, node loop.
     maxKeys      => $length,                                                    # Maximum number of keys.
     splittingKey => $split,                                                     # POint at which to split a full block
     rightLength  => $length - 1 - $length / 2,                                  # Right split length
-    subTree      => V(subTree),                                                 # Variable indicating whether the last find found a sub tree
+    subTree      => G(subTree),                                                 # Variable indicating whether the last find found a sub tree
     treeBits     => $b - $o * 2 + 2,                                            # Offset of tree bits in keys block.  The tree bits field is a word, each bit of which tells us whether the corresponding data element is the offset (or not) to a sub tree of this tree .
     treeBitsMask => 0x3fff,                                                     # 14 tree bits
     up           => $b - $o * 2,                                                # Offset of up in data block.
@@ -5017,7 +5140,7 @@ sub Nasm::X86::Arena::CreateTree($)                                             
     $arena->putBlock($t->address, $keys, 31, r8, r9);                           # Write first keys
     PopR @save;
     Comment "Create a block multiway Tree end";
-   } [qw(bs first)];
+   } [qw(bs first)], name => 'Nasm::X86::Arena::CreateTree';
 
   $s->call(bs => $t->address, first => $t->first);
 
@@ -5073,6 +5196,7 @@ sub Nasm::X86::Tree::splitNode($$$$@)                                           
     PushR my @save = (r8, r9, zmm 22..31);
     my $transfer = r8;                                                          # Use this register to transfer data between zmm blocks and variables
     my $work     = r9;                                                          # Work register
+
     $t->getKeysDataNode($n, $K, $D, $N, $transfer, $work);                      # Load root node
 
     If ($t->getLengthInKeys($K) != $t->maxKeys,
@@ -5127,9 +5251,10 @@ sub Nasm::X86::Tree::splitNode($$$$@)                                           
 
     SetLabel $success;                                                          # Insert completed successfully
     PopR @save;
-   }  [qw(node key bs)];
+   }  [qw(node key bs)], name => 'Nasm::X86::Tree::splitNode';
 
   $s->call(bs=>$bs, node=>$node, key=>$key, @variables);
+
  } # splitNode
 
 sub Nasm::X86::Tree::reParent($$$$$@)                                           #P Reparent the children of a node held in registers. The children are in the backing arena not registers.
@@ -5162,7 +5287,7 @@ sub Nasm::X86::Tree::reParent($$$$$@)                                           
       PopR @save;
      });
     PopR @save;
-   } [qw(bs)];
+   } [qw(bs)], name => 'Nasm::X86::Tree::reParent';
 
   $s->call($t->address, @variables);
  } # reParent
@@ -5328,7 +5453,7 @@ sub Nasm::X86::Tree::splitFullRoot($)                                           
 
     SetLabel $success;                                                          # Insert completed successfully
     PopR @save;
-   } [qw(bs)];
+   } [qw(bs)], name => 'Nasm::X86::Tree::splitFullRoot';
 
   $s->call (bs => $t->address);
  } # splitFullRoot
@@ -5546,7 +5671,8 @@ sub Nasm::X86::Tree::findAndSplit($@)                                           
 
     SetLabel $success;                                                          # Insert completed successfully
     PopR @save;
-   }  [qw(first key bs compare offset index)];
+   }  [qw(first key bs compare offset index)],
+  name => 'Nasm::X86::Tree::findAndSplit';
 
   $s->call($t->address, first => $t->first, @variables);
  } # findAndSplit
@@ -5580,6 +5706,7 @@ sub Nasm::X86::Tree::find($$)                                                   
 
     K(loop, 99)->for(sub                                                        # Step down through tree
      {my ($index, $start, $next, $end) = @_;
+
       $t->getKeysDataNode($tree, $zmmKeys, $zmmData, $zmmNode, $transfer,$work);# Get the keys block
       my $l = $t->getLengthInKeys($zmmKeys);                                    # Length of the block
       If ($l == 0,
@@ -5624,7 +5751,7 @@ sub Nasm::X86::Tree::find($$)                                                   
 
     SetLabel $success;                                                          # Insert completed successfully
     PopR @save;
-   } [qw(first key data found data subTree)];
+   } [qw(first key data found data subTree)], name => 'Nasm::X86::Tree::find';
 
   $s->call(first => $t->first, key => $key, data => $t->data,
            found => $t->found, subTree => $t->subTree);
@@ -5660,6 +5787,7 @@ sub Nasm::X86::Tree::insertDataOrTree($$$$)                                     
     my $transfer =  r8;                                                         # Use this register to transfer data between zmm blocks and variables
     my $work     =  r9;                                                         # Work register
     my $point    = r13;                                                         # Insertion indicator
+
     $t->getKeysDataNode($F, 31, 30, 29, $transfer, $work);                      # Get the first block
 
     my $l = $t->getLengthInKeys(31);                                            # Length of the block
@@ -5813,7 +5941,7 @@ sub Nasm::X86::Tree::insertDataOrTree($$$$)                                     
 sub Nasm::X86::Tree::insert($$$)                                                # Insert a dword into into the specified tree at the specified key.
  {my ($t, $key, $data) = @_;                                                    # Tree descriptor, key as a dword, data as a dword
   @_ == 3 or confess;
-  $t->insertDataOrTree(0, $key, $data)                                          # Insert data
+  $t->insertDataOrTree(0, $key, $data);                                         # Insert data
  }
 
 sub Nasm::X86::Tree::insertTree($$;$)                                           # Insert a sub tree into the specified tree tree under the specified key. If no sub tree is supplied an empty one is provided gratis.
@@ -5863,9 +5991,11 @@ sub Nasm::X86::Tree::getKeysDataNode($$$$$;$$)                                  
  {my ($t, $offset, $zmmKeys, $zmmData, $zmmNode, $work1, $work2) = @_;          # Tree descriptor, offset as a variable, numbered zmm for keys, numbered data for keys, numbered numbered for keys, optional first work register, optional second work register
   @_ == 5 or @_ == 7 or confess;
   my $b = $t->bs;                                                               # Underlying arena
+
   $b->getBlock($b->bs, $offset, $zmmKeys, $work1, $work2);                      # Get the keys block
   my $data = $t->getLoop($zmmKeys, $work1, $work2);                             # Get the offset of the corresponding data block
   $b->getBlock($b->bs, $data, $zmmData, $work1, $work2);                        # Get the data block
+
   my $node = $t->getLoop($zmmData, $work1, $work2);                             # Get the offset of the corresponding node block
   If ($node,
   Then                                                                          # Check for optional node block
@@ -6027,7 +6157,7 @@ sub Nasm::X86::Tree::depth($@)                                                  
 
     SetLabel $success;                                                          # Insert completed successfully
     PopR @save;
-   }  [qw(node  depth )];
+   }  [qw(node depth)], name => 'Nasm::X86::Tree::allocBlock';
 
   $s->call(@variables);
  } # depth
@@ -6171,16 +6301,16 @@ sub Nasm::X86::Tree::iterator($)                                                
   my $i = genHash(__PACKAGE__.'::Tree::Iterator',                               # Iterator
     tree  => $b,                                                                # Tree we are iterating over
     node  => $node,                                                             # Current node within tree
-    pos   => V('pos'),                                                          # Current position within node
-    key   => V(key),                                                            # Key at this position
-    data  => V(data),                                                           # Data at this position
-    count => V(count),                                                          # Counter - number of node
-    more  => V(more),                                                           # Iteration not yet finished
+    pos   => G('pos'),                                                          # Current position within node
+    key   => G(key),                                                            # Key at this position
+    data  => G(data),                                                           # Data at this position
+    count => G(count),                                                          # Counter - number of node
+    more  => G(more),                                                           # Iteration not yet finished
    );
 
-  $i->pos  ->copy(V('pos', -1));                                                # Initialize iterator
-  $i->count->copy(V(count,  0));
-  $i->more ->copy(V(more,   1));
+  $i->pos  ->copy(K('pos', -1));                                                # Initialize iterator
+  $i->count->copy(K(count,  0));
+  $i->more ->copy(K(more,   1));
   $i->next;                                                                     # First element if any
  }
 
@@ -6300,7 +6430,8 @@ sub Nasm::X86::Tree::Iterator::next($)                                          
 
     PopR @save;
     SetLabel $success;
-   }  [qw(node  pos  key  data  count  more )];
+   }  [qw(node  pos  key  data  count  more )],
+      name => 'Nasm::X86::Tree::Iterator::next ';
 
   $s->call($iter->node, $iter->pos,   $iter->key,                               # Call with iterator variables
            $iter->data, $iter->count, $iter->more);
@@ -6371,9 +6502,9 @@ sub Link(@)                                                                     
 
 sub Start()                                                                     # Initialize the assembler
  {@bss = @data = @rodata = %rodata = %rodatas = %subroutines = @text =
-    %Keep = %KeepStack = @extern = @link = ();
+    %Keep = %KeepStack = @extern = @link = @VariableStack = ();
   @RegistersAvailable = ({map {$_=>1} @GeneralPurposeRegisters});               # A stack of hashes of registers that are currently free and this can be used without pushing and poping them.
-  @VariableStack = (0);                                                         # Number of variables at each lexical level
+  SubroutineStartStack;                                                         # Number of variables at each lexical level
   $Labels = 0;
  }
 
@@ -6450,6 +6581,7 @@ sub Assemble(%)                                                                 
   my $x = join "\n", map {qq(extern $_)} @extern;
   my $L = join " ",  map {qq(-l$_)}      @link;
   my $N = $VariableStack[0];                                                    # Number of variables needed on the stack
+lll "AAAA", dump("N=$N");
   my $A = <<END;
 section .rodata
   $r
@@ -15107,6 +15239,20 @@ if (1) {                                                                        
   ok Assemble =~ m(Hello World);
  }
 
+if (1) {                                                                        #TPrintOutMemoryNL  #TCstrlen
+  my $s = Rs("Hello World\n\nHello Skye");
+  Mov rax, $s;
+  Cstrlen;
+  Mov rdi, r15;
+  PrintOutMemoryNL;
+
+  ok Assemble(debug => 0, eq => <<END);
+Hello World
+
+Hello Skye
+END
+ }
+
 if (1) {                                                                        #TPrintOutRaxInHex #TPrintOutNL #TPrintOutString
   my $q = Rs('abababab');
   Mov(rax, "[$q]");
@@ -18214,6 +18360,64 @@ if (1) {                                                                        
 
   ok Assemble(debug => 0, eq => <<END);
 g: 0000 0000 0000 0001
+END
+ }
+
+#latest:
+if (1) {                                                                        #TSubroutine
+  my $g = G g, 3;
+  my $s = Subroutine
+   {my ($p, $s) = @_;
+    $g->copy($g - 1);
+    $g->outNL;
+    If ($g > 0,
+    Then
+     {$s->call;
+     });
+   } [], name => 'ref';
+
+  $s->call;
+
+  ok Assemble(debug => 0, eq => <<END);
+g: 0000 0000 0000 0002
+g: 0000 0000 0000 0001
+g: 0000 0000 0000 0000
+END
+ }
+
+latest:
+if (1) {                                                                        #TSubroutine
+  PrintErrRegisterInHex rbp;
+  my $g = G g, 3;
+  my $s = Subroutine
+   {my ($p, $s) = @_;
+    PrintOutTraceBack;
+    my $g = $$p{g};
+    $g->copy($g - 1);
+    If ($g > 0,
+    Then
+     {$s->call($g);                                                             # Recurse
+     });
+   } [qw(g)], name => 'ref';
+
+  $s->call($g);
+
+  ok Assemble(debug => 1, eq => <<END);
+
+Subroutine trace back:
+0000 0000 0000 0003 ref
+
+
+Subroutine trace back:
+0000 0000 0000 0002 ref
+0000 0000 0000 0002 ref
+
+
+Subroutine trace back:
+0000 0000 0000 0001 ref
+0000 0000 0000 0001 ref
+0000 0000 0000 0001 ref
+
 END
  }
 
