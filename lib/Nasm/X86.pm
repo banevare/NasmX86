@@ -4,7 +4,7 @@
 # Philip R Brenan at appaapps dot com, Appa Apps Ltd Inc., 2021
 #-------------------------------------------------------------------------------
 # podDocumentation
-# Time: 25.60s, bytes: 5,388,384, execs: 7,022,503
+# Time: 25.13s, bytes: 4,736,112, execs: 6,944,459
 # tree::print - speed up decision as to whether we are on a tree or not
 package Nasm::X86;
 our $VERSION = "20210816";
@@ -913,11 +913,10 @@ sub Nasm::X86::Sub::call($%)                                                    
     keys %m and confess "Invalid arguments ".dump([sort keys %m]);              # Print misnamed arguments
    }
 
-  PushR (r14, r15);                                                             # Use this register to transfer between the current frame and the next frame
-  Mov r15, $sub->nameString;
-  Mov "[rsp-8]", r15;                                                           # Point to name
-  Mov r15, scalar $sub->parameters->@*;
-  Mov "[rsp-1]", r15b;                                                          # Number of parameters
+  my $w = RegisterSize r15;
+  PushR r15;                                                                    # Use this register to transfer between the current frame and the next frame
+  Mov "dword[rsp-$w*2]", $sub->nameString;                                      # Point to name
+  Mov "byte[rsp-1-$w]", scalar $sub->parameters->@*;                            # Number of parameters to enable traceback with parameters
 
   for my $p(sort keys %p)                                                       # Transfer parameters from current frame to next frame
    {my $P = $p{$p}->label;                                                      # Source in current frame
@@ -930,7 +929,7 @@ sub Nasm::X86::Sub::call($%)                                                    
        }
       my $Q = $q->label;
          $Q =~ s(rbp) (rsp);
-      Mov "[$Q]", r15;
+      Mov "[$Q-$w]", r15;
      }
    }
   PopR;
@@ -19083,6 +19082,9 @@ if (1) {                                                                        
 # Time: 0.63s, bytes: 156,096, execs: 49,043
 # Time: 0.58s, bytes: 150,624, execs: 43,802
 # Time: 0.59s, bytes: 151,008, execs: 43,965
+# Time: 0.62s, bytes: 142,808, execs: 43,763
+# Time: 0.94s, bytes: 138,704, execs: 43,561
+# Time: 0.54s, bytes: 126,400, execs: 43,157
   my $L = V(loop, 45);
 
   my $b = CreateArena;
