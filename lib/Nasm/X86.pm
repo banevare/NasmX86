@@ -6,9 +6,7 @@
 # podDocumentation
 # Time: 24.49s, bytes: 5,157,328, execs: 6,896,739
 # tree::print - speed up decision as to whether we are on a tree or not
-# Automated check comments start with # space Capital;
 # Test multiple arrays with multiple arenas
-# Replace G with S in tree and arena ?
 package Nasm::X86;
 our $VERSION = "20210816";
 use warnings FATAL => qw(all);
@@ -18851,6 +18849,51 @@ key: 0000 0000 0000 0002 data: 0000 0000 0000 0004 depth: 0000 0000 0000 0001
 END
  }
 
+latest:
+if (1) {                                                                        #TNasm::X86::Tree::insertTree
+  my $L = K(loop, 11);
+  my $b = CreateArena;
+  my $B = CreateArena;
+  my $t = $b->CreateTree;
+  my $T = $B->CreateTree;
+
+  $L->for(sub
+   {my ($i, $start, $next, $end) = @_;
+    $t->insert($i, $i);
+    $T->insert($i, $i);
+   });
+
+  $t->print;
+  $T->print;
+
+  ok Assemble(debug => 0, eq => <<END);
+Tree at:  0000 0000 0000 0018
+key: 0000 0000 0000 0000 data: 0000 0000 0000 0000 depth: 0000 0000 0000 0001
+key: 0000 0000 0000 0001 data: 0000 0000 0000 0001 depth: 0000 0000 0000 0001
+key: 0000 0000 0000 0002 data: 0000 0000 0000 0002 depth: 0000 0000 0000 0001
+key: 0000 0000 0000 0003 data: 0000 0000 0000 0003 depth: 0000 0000 0000 0001
+key: 0000 0000 0000 0004 data: 0000 0000 0000 0004 depth: 0000 0000 0000 0001
+key: 0000 0000 0000 0005 data: 0000 0000 0000 0005 depth: 0000 0000 0000 0001
+key: 0000 0000 0000 0006 data: 0000 0000 0000 0006 depth: 0000 0000 0000 0001
+key: 0000 0000 0000 0007 data: 0000 0000 0000 0007 depth: 0000 0000 0000 0001
+key: 0000 0000 0000 0008 data: 0000 0000 0000 0008 depth: 0000 0000 0000 0001
+key: 0000 0000 0000 0009 data: 0000 0000 0000 0009 depth: 0000 0000 0000 0001
+key: 0000 0000 0000 000A data: 0000 0000 0000 000A depth: 0000 0000 0000 0001
+Tree at:  0000 0000 0000 0098
+key: 0000 0000 0000 0000 data: 0000 0000 0000 0000 depth: 0000 0000 0000 0001
+key: 0000 0000 0000 0001 data: 0000 0000 0000 0001 depth: 0000 0000 0000 0001
+key: 0000 0000 0000 0002 data: 0000 0000 0000 0002 depth: 0000 0000 0000 0001
+key: 0000 0000 0000 0003 data: 0000 0000 0000 0003 depth: 0000 0000 0000 0001
+key: 0000 0000 0000 0004 data: 0000 0000 0000 0004 depth: 0000 0000 0000 0001
+key: 0000 0000 0000 0005 data: 0000 0000 0000 0005 depth: 0000 0000 0000 0001
+key: 0000 0000 0000 0006 data: 0000 0000 0000 0006 depth: 0000 0000 0000 0001
+key: 0000 0000 0000 0007 data: 0000 0000 0000 0007 depth: 0000 0000 0000 0001
+key: 0000 0000 0000 0008 data: 0000 0000 0000 0008 depth: 0000 0000 0000 0001
+key: 0000 0000 0000 0009 data: 0000 0000 0000 0009 depth: 0000 0000 0000 0001
+key: 0000 0000 0000 000A data: 0000 0000 0000 000A depth: 0000 0000 0000 0001
+END
+ }
+
 #latest:
 if (1) {                                                                        #TNasm::X86::Tree::print
   my $L = V(loop, 45);
@@ -18949,7 +18992,7 @@ if (0) {
 END
  }
 
-ok 1 for 1..32;
+ok 1 for 2..32;
 
 unlink $_ for qw(hash print2 sde-log.txt sde-ptr-check.out.txt z.txt);          # Remove incidental files
 
