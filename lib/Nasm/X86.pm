@@ -19043,7 +19043,7 @@ Tree at:  0000 0000 0000 0098
 END
  }
 
-latest:
+#latest:
 if (1) {                                                                        # Performance of tree inserts
 # Time: 1.18s, bytes: 156,672, execs: 51,659
 # Time: 0.62s, bytes: 156,240, execs: 49,499
