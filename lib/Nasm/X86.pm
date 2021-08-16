@@ -16,7 +16,7 @@ use Data::Table::Text qw(:all);
 use Asm::C qw(:all);
 use feature qw(say current_sub);
 
-my $debugTrace = 0;                                                             # Trace execution via sde64 if true - slow!
+my $debugTrace = 0;                                                             # Trace execution if true - slow!
 
 my %rodata;                                                                     # Read only data already written
 my %rodatas;                                                                    # Read only string already written
