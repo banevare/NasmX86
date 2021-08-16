@@ -5,6 +5,7 @@
 #-------------------------------------------------------------------------------
 # podDocumentation
 # Time: 25.13s, bytes: 4,736,112, execs: 6,944,459
+# Time: 24.80s, bytes: 4,585,064, execs: 6,917,024 if statement optimization
 # tree::print - speed up decision as to whether we are on a tree or not
 package Nasm::X86;
 our $VERSION = "20210816";
@@ -647,7 +648,7 @@ sub If($$;$)                                                                    
   if (ref($jump))                                                               # Variable reference - non zero then then else else
    {PushR r15;
     Mov r15, $jump->address;
-    Cmp r15,0;
+    Cmp r15, 0;
     PopR r15;
     __SUB__->(q(Jz), $then, $else);
    }
@@ -1376,8 +1377,8 @@ sub Variable($;$%)                                                              
     $label = "rbp-8*($stack)";
 
     if (defined $expr)                                                          # Initialize variable if an initializer was supplied
-     {if ($expr eq r15)                                                         # Expression is ready to go
-       {Mov "[$label]", r15;
+     {if ($Registers{$expr} and $expr =~ m(\Ar))                                # Expression is ready to go
+       {Mov "[$label]", $expr;
        }
       else                                                                      # transfer expression
        {PushR r15;
@@ -2110,9 +2111,57 @@ sub putIntoZmm($*$$)                                                            
   PopR "zmm$zmm";                                                               # Reload zmm
  }
 
-sub getBwdqFromMm($$$;$)                                                        # Get the numbered byte|word|double word|quad word from the numbered zmm register and return it in a variable.
- {my ($size, $mm, $offset, $Transfer) = @_;                                     # Size of get, mm register, offset in bytes either as a constant or as a variable, optional transfer register
-  @_ == 3 or @_ == 4 or confess;
+sub getBwdqFromMm($$$;$$)                                                       # Get the numbered byte|word|double word|quad word from the numbered zmm register and return it in a variable.
+ {my ($size, $mm, $offset, $Transfer, $target) = @_;                            # Size of get, mm register, offset in bytes either as a constant or as a variable, optional transfer register, optional target variable - if none supplied we create a variable
+  @_ == 3 or @_ == 4 or @_ == 5 or confess;
+  my $w = RegisterSize $mm;                                                     # Size of mm register
+  CheckNumberedGeneralPurposeRegister $Transfer if $Transfer;                   # Check that we have a numbered register
+  my $transfer = $Transfer // r15;                                              # Register to use to transfer value to variable
+
+  my $o;                                                                        # The offset into the mm register
+  if (ref($offset))                                                             # The offset is being passed in a variable
+   {my $name = $offset->name;
+    Comment "Get $size at $name in $mm";
+    PushR ($o = r14);
+    $offset->setReg($o);
+   }
+  else                                                                          # The offset is being passed as a register expression
+   {$o = $offset;
+    Comment "Get $size at $offset in $mm";
+    $offset >= 0 && $offset <= RegisterSize $mm or
+      confess "Out of range" if $offset =~ m(\A\d+\Z);                          # Check the offset if it is a number
+    $offset =~ m(r15)
+      and confess "Cannot pass offset: '$offset', in r15, choose another register";
+   }
+
+  PushR $transfer unless $Transfer;
+  Vmovdqu32 "[rsp-$w]", $mm;                                                    # Write below the stack
+
+  if ($size !~ m(q|d))                                                          # Clear the register if necessary
+   {ClearRegisters r15;
+   }
+
+  Mov $transfer."b", "[rsp+$o-$w]" if $size =~ m(b);                            # Load byte register from offset
+  Mov $transfer."w", "[rsp+$o-$w]" if $size =~ m(w);                            # Load word register from offset
+  Mov $transfer."d", "[rsp+$o-$w]" if $size =~ m(d);                            # Load double word register from offset
+  Mov $transfer,     "[rsp+$o-$w]" if $size =~ m(q);                            # Load register from offset
+
+  if ($Transfer and $target)                                                    # Optimized load
+   {$target->getReg($transfer);                                                 # Load variable directly
+    PopR $o if ref($offset);                                                    # The offset is being passed in a variable
+    return $target;                                                             # Return variable
+   }
+  else                                                                          # Unable to optimize load
+   {my $v = V("$size at offset $offset in $mm", $transfer);                     # Create variable
+    PopR $transfer unless $Transfer;
+    PopR $o if ref($offset);                                                    # The offset is being passed in a variable
+    return $v                                                                   # Return variable
+   }
+ }
+
+sub getBwdqFromMm22($$$;$$)                                                     # Get the numbered byte|word|double word|quad word from the numbered zmm register and return it in a variable.
+ {my ($size, $mm, $offset, $Transfer, $target) = @_;                            # Size of get, mm register, offset in bytes either as a constant or as a variable, optional transfer register, optional target variable - if none supplied we create a variable
+  @_ == 3 or @_ == 4 or @_ == 5 or confess;
   my $w = RegisterSize $mm;                                                     # Size of mm register
   CheckNumberedGeneralPurposeRegister $Transfer if $Transfer;                   # Check that we have a numbered register
   my $transfer = $Transfer // r15;                                              # Register to use to transfer value to variable
@@ -2202,10 +2251,16 @@ sub Nasm::X86::Variable::getWFromZmm($$$)                                       
   $variable->copy(getBwdqFromMm('w', "zmm$zmm", $offset))                       # Get the numbered byte|word|double word|quad word from the numbered zmm register and put it in a variable
  }
 
-sub Nasm::X86::Variable::getDFromZmm($$$;$)                                     # Get the double word from the numbered zmm register and put it in a variable.
+sub Nasm::X86::Variable::getDFromZmmUnOPtimized($$$;$)                          # Get the double word from the numbered zmm register and put it in a variable.
  {my ($variable, $zmm, $offset, $transfer) = @_;                                # Variable, numbered zmm, offset in bytes, transfer register
   my $r = getBwdqFromMm 'd', "zmm$zmm", $offset, $transfer;                     # Get the numbered byte|word|double word|quad word from the numbered zmm register and put it in a variable
   $variable->copy($r);                                                          # Copy the result into the designated variable
+  $variable                                                                     # Return input variable so we can assign or chain
+ }
+
+sub Nasm::X86::Variable::getDFromZmm($$$;$)                                     # Get the double word from the numbered zmm register and put it in a variable.
+ {my ($variable, $zmm, $offset, $transfer) = @_;                                # Variable, numbered zmm, offset in bytes, transfer register
+  getBwdqFromMm 'd', "zmm$zmm", $offset, $transfer, $variable;                  # Get the numbered byte|word|double word|quad word from the numbered zmm register and put it in a variable
   $variable                                                                     # Return input variable so we can assign or chain
  }
 
@@ -6534,6 +6589,32 @@ sub getInstructionCount()                                                       
   confess;
  }
 
+sub Optimize(%)                                                                 #P Perform code optimizations
+ {my (%options) = @_;                                                           # Options
+  my %o = map {$_=>1} $options{optimize}->@*;
+  if (1 or $o{if})                                                              # Optimize if statements by looking for the unnecessary reload of the just stored result
+   {for my $i(1..@text-2)                                                       # Each line
+     {my $t = $text[$i];
+      if ($t =~ m(\A\s+push\s+(r\d+)\s*\Z)i)                                    # Push
+       {my $R = $1;                                                             # Register being pushed
+        my $s = $text[$i-1];                                                    # Previous line
+        if ($s =~ m(\A\s+pop\s+$R\s*\Z)i)                                       # Matching push
+         {my $r = $text[$i-2];
+          if ($r =~ m(\A\s+mov\s+\[rbp-8\*\((\d+)\)],\s*$R\s*\Z)i)              # Save to variable
+           {my $n = $1;                                                         # Variable number
+            my $u = $text[$i+1];
+            if ($u =~ m(\A\s+mov\s+$R,\s*\[rbp-8\*\($n\)]\s*\Z)i)               # Reload register
+             {for my $j($i-1..$i+1)
+               {$text[$j] = '; out '. $text[$j];
+               }
+             }
+           }
+         }
+       }
+     }
+   }
+ }
+
 our $assembliesPerformed  = 0;                                                  # Number of assemblies performed
 our $instructionsExecuted = 0;                                                  # Total number of instructions executed
 our $totalBytesAssembled  = 0;                                                  # Total size of the output programs
@@ -6542,6 +6623,8 @@ sub Assemble(%)                                                                 
  {my (%options) = @_;                                                           # Options
   Exit 0 unless @text > 4 and $text[-4] =~ m(Exit code:);                       # Exit with code 0 if an exit was not the last thing coded.
   my $debug = $options{debug}//0;                                               # Debug: 0 - none (minimal output), 1 - normal (debug output and confess of failure), 2 - failures (debug output and no confess on failure) .
+
+  Optimize(%options);                                                           # Perform any optimizations requested
 
   my $k = $options{keep};                                                       # Keep the executable
   my $r = join "\n", map {s/\s+\Z//sr}   @rodata;
@@ -19085,6 +19168,7 @@ if (1) {                                                                        
 # Time: 0.62s, bytes: 142,808, execs: 43,763
 # Time: 0.94s, bytes: 138,704, execs: 43,561
 # Time: 0.54s, bytes: 126,400, execs: 43,157
+# Time: 0.52s, bytes: 123,088, execs: 40,796
   my $L = V(loop, 45);
 
   my $b = CreateArena;
@@ -19100,12 +19184,21 @@ END
  }
 
 #latest:
+if (1) {                                                                        # Performance of tree inserts
+
+  my $d = V(byte)->getDFromZmm(31, 0, r8);
+
+  ok Assemble(debug => 0, eq => <<END);
+END
+ }
+
+#latest:
 if (0) {
   is_deeply Assemble(debug=>1), <<END;
 END
  }
 
-ok 1 for 3..32;
+ok 1 for 4..32;
 
 unlink $_ for qw(hash print2 sde-log.txt sde-ptr-check.out.txt z.txt);          # Remove incidental files
 
