@@ -4671,7 +4671,7 @@ sub Nasm::X86::String::clear($)                                                 
   my $s = Subroutine
    {my ($p) = @_;                                                               # Parameters
 
-    PushR (rax, r14, r15, zmm29, zmm30, zmm31);
+    PushR rax, r14, r15; PushZmm 29..31;
 
     my $first = $$p{first};                                                     # First block
     $String->getBlock($$p{bs}, $$p{first}, 29);                                 # Get the first block
@@ -4708,7 +4708,7 @@ sub Nasm::X86::String::clear($)                                                 
       Mov  "[r14]",   r15;
      });
 
-    PopR;
+    PushZmm; PopR;
    }  [qw(first  bs)], name => 'Nasm::X86::String::clear';
 
   $s->call($String->address, $String->first);
@@ -5589,7 +5589,7 @@ sub Nasm::X86::Tree::findAndSplit($@)                                           
     my $K = $$p{key};                                                           # Key to find
 
     my $tree = V(tree)->copy($F);                                               # Start at the first key block
-    PushR (k6, k7, r8, r9, r14, r15, zmm28, zmm29, zmm30, zmm31);
+    PushR k6, k7, r8, r9, r14, r15; PushZmm 28..31;
     my $zmmKeys = 31; my $zmmData = 30; my $zmmNode = 29; my $zmmTest = 28;
     my $lengthMask = k6; my $testMask = k7;
     my $transfer = r8;                                                          # Use this register to transfer data between zmm blocks and variables
@@ -5651,7 +5651,7 @@ sub Nasm::X86::Tree::findAndSplit($@)                                           
      };
 
     SetLabel $success;                                                          # Insert completed successfully
-    PopR;
+    PopZmm; PopR;
    }  [qw(first key bs compare offset index)],
   name => 'Nasm::X86::Tree::findAndSplit';
 
@@ -5675,7 +5675,7 @@ sub Nasm::X86::Tree::find($$)                                                   
     $$p{subTree}->copy(K(zero, 0));                                             # Not yet a sub tree
 
     my $tree = V(tree)->copy($F);                                               # Start at the first key block
-    PushR (k6, k7, r8, r9, r14, r15, zmm28, zmm29, zmm30, zmm31);
+    PushR k6, k7, r8, r9, r14, r15; PushZmm 28..31;
     my $zmmKeys = 31; my $zmmData = 30; my $zmmNode = 29; my $zmmTest = 28;
     my $lengthMask = k6; my $testMask = k7;
     my $transfer = r8;                                                          # Use this register to transfer data between zmm blocks and variables
@@ -5730,7 +5730,7 @@ sub Nasm::X86::Tree::find($$)                                                   
     Exit(1);
 
     SetLabel $success;                                                          # Insert completed successfully
-    PopR;
+    PopZmm; PopR;
    } [qw(first key data found data subTree)], name => 'Nasm::X86::Tree::find';
 
   $s->call(first => $t->first, key => $key, data => $t->data,
@@ -6045,7 +6045,7 @@ sub Nasm::X86::Tree::leftOrRightMost($$@)                                       
    {my ($p) = @_;                                                               # Parameters
 
     my $F = $$p{node};                                                          # First block
-    PushR (rax, r8, zmm29, zmm30, zmm31);
+    PushR rax, r8; PushZmm 29..31;
 
     K(loopLimit, 9)->for(sub                                                    # Loop a reasonable number of times
      {my ($index, $start, $next, $end) = @_;
@@ -6070,7 +6070,7 @@ sub Nasm::X86::Tree::leftOrRightMost($$@)                                       
     Exit(1);
 
     SetLabel $success;                                                          # Insert completed successfully
-    PopR;
+    PushZmm; PopR;
    } [qw(node  offset )],
    name => $dir==0 ? "Nasm::X86::Tree::leftMost" : "Nasm::X86::Tree::rightMost";
 
@@ -6294,7 +6294,7 @@ sub Nasm::X86::Tree::Iterator::next($)                                          
 
     my $new  = sub                                                              # Load iterator with latest position
      {my ($node, $pos) = @_;                                                    # Parameters
-      PushR (r8, zmm31, zmm30,  zmm29);
+      PushR r8; PushZmm 29..31;
       $$p{node}->copy($node);                                                   # Set current node
       $$p{pos} ->copy($pos);                                                    # Set current position in node
       $iter->tree->getKeysData($node, 31, 30);                                  # Load keys and data
@@ -6302,7 +6302,7 @@ sub Nasm::X86::Tree::Iterator::next($)                                          
       my $offset = $pos * $iter->tree->width;                                   # Load key and data
       $$p{key} ->copy(getDFromZmm 31, $offset, r8);
       $$p{data}->copy(getDFromZmm 30, $offset, r8);
-      PopR;
+      PopZmm; PopR;
      };
 
     my $done = sub                                                              # The tree has been completely traversed
@@ -19075,6 +19075,7 @@ END
 if (1) {                                                                        # Performance of tree inserts
 # Time: 1.18s, bytes: 156,672, execs: 51,659
 # Time: 0.62s, bytes: 156,240, execs: 49,499
+# Time: 0.63s, bytes: 156,096, execs: 49,043
   my $L = V(loop, 45);
 
   my $b = CreateArena;
