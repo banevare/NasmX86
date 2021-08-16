@@ -6,7 +6,6 @@
 # podDocumentation
 # Time: 24.49s, bytes: 5,157,328, execs: 6,896,739
 # tree::print - speed up decision as to whether we are on a tree or not
-# Test multiple arrays with multiple arenas
 package Nasm::X86;
 our $VERSION = "20210816";
 use warnings FATAL => qw(all);
@@ -18,7 +17,6 @@ use Asm::C qw(:all);
 use feature qw(say current_sub);
 
 my $debugTrace = 0;                                                             # Trace execution via sde64 if true - slow!
-makeDieConfess;
 
 my %rodata;                                                                     # Read only data already written
 my %rodatas;                                                                    # Read only string already written
@@ -2471,6 +2469,32 @@ sub PeekR($)                                                                    
   else                                                                          # General purpose 8 byte register
    {Mov $r, "[rsp]";
    }
+ }
+
+my @PushZmm;                                                                    # Zmm pushes
+
+sub PushZmm(@)                                                                  # Push several zmm registers
+ {my (@Z) = @_;                                                                 # Zmm register numbers
+  if (@Z)
+   {my @z = zmm @Z;
+    my $w = RegisterSize zmm0;
+    Sub rsp, @z * $w;
+    for my $i(keys @z)
+     {Vmovdqu64 "[rsp+$w*$i]", $z[$i];
+     }
+    push @PushZmm, [@Z];
+   }
+ }
+
+sub PopZmm                                                                      # Pop zmm registers
+ {@PushZmm or confess "No Zmm registers saved";
+  my $z = pop @PushZmm;
+  my @z = zmm @$z;
+  my $w = RegisterSize zmm0;
+  for my $i(keys @z)
+   {Vmovdqu64 $z[$i], "[rsp+$w*$i]";
+   }
+  Add rsp, @z * $w;
  }
 
 #D2 Declarations                                                                # Declare variables and structures
@@ -5124,7 +5148,8 @@ sub Nasm::X86::Tree::splitNode($$$$@)                                           
     my $k = $$parameters{key};                                                  # Key we are looking for
     my $n = $$parameters{node};                                                 # Node to split
 
-    PushR (r8, r9, zmm 22..31);
+    PushR (r8, r9); PushZmm 22...31;
+
     my $transfer = r8;                                                          # Use this register to transfer data between zmm blocks and variables
     my $work     = r9;                                                          # Work register
 
@@ -5179,6 +5204,7 @@ sub Nasm::X86::Tree::splitNode($$$$@)                                           
      });
 
     SetLabel $success;                                                          # Insert completed successfully
+    PopZmm;
     PopR;
    }  [qw(bs node key)], name => 'Nasm::X86::Tree::splitNode';
 
@@ -5711,7 +5737,7 @@ sub Nasm::X86::Tree::insertDataOrTree($$$$)                                     
     my $K = $$p{key};                                                           # Key  to be inserted
     my $D = $$p{data};                                                          # Data to be inserted
 
-    PushR (k4, k5, k6, k7, r8, r9, r13, r14, r15, zmm 22..31);
+    PushR (k4, k5, k6, k7, r8, r9, r13, r14, r15); PushZmm 22..31;
     my $transfer =  r8;                                                         # Use this register to transfer data between zmm blocks and variables
     my $work     =  r9;                                                         # Work register
     my $point    = r13;                                                         # Insertion indicator
@@ -5851,16 +5877,10 @@ sub Nasm::X86::Tree::insertDataOrTree($$$$)                                     
       $t->putLengthInKeys(31, $length + 1);                                     # Set the new length of the block
       $t->putKeysDataNode($offset, 31, 30, 29, $transfer, $work);               # Rewrite data and keys
       $t->splitNode($B, $offset, $K);                                           # Split if the leaf has got too big
-
-#If ($offset == 0x198,
-#Then
-# {$t->getKeysDataNode(K(offset, 0x18), 31, 30, 29);
-#  PrintErrStringNL "DDDD";
-#  PrintErrRegisterInHex zmm 31,30,29;
-# });
      };
 
     SetLabel $success;                                                          # Insert completed successfully
+    PopZmm;
     PopR;
    } [qw(bs first key data)], name => "Nasm::X86::Tree::insertDataOrTree_$tnd"; # Data either supplies the data or returns the offset of the sub tree
 
@@ -6420,7 +6440,7 @@ sub Link(@)                                                                     
 
 sub Start()                                                                     # Initialize the assembler.
  {@bss = @data = @rodata = %rodata = %rodatas = %subroutines = @text =
-  @PushR = @extern = @link = @VariableStack = ();
+  @PushR = @PushZmm = @extern = @link = @VariableStack = ();
   @RegistersAvailable = ({map {$_=>1} @GeneralPurposeRegisters});               # A stack of hashes of registers that are currently free and this can be used without pushing and popping them.
   SubroutineStartStack;                                                         # Number of variables at each lexical level
   $Labels = 0;
@@ -19023,13 +19043,31 @@ Tree at:  0000 0000 0000 0098
 END
  }
 
+latest:
+if (1) {                                                                        # Performance of tree inserts
+# Time: 1.18s, bytes: 156,672, execs: 51,659
+# Time: 0.62s, bytes: 156,240, execs: 49,499
+  my $L = V(loop, 45);
+
+  my $b = CreateArena;
+  my $t = $b->CreateTree;
+
+  $L->for(sub
+   {my ($i, $start, $next, $end) = @_;
+    $t->insert($i, $i);
+   });
+
+  ok Assemble(debug => 0, eq => <<END);
+END
+ }
+
 #latest:
 if (0) {
   is_deeply Assemble(debug=>1), <<END;
 END
  }
 
-ok 1 for 2..32;
+ok 1 for 3..32;
 
 unlink $_ for qw(hash print2 sde-log.txt sde-ptr-check.out.txt z.txt);          # Remove incidental files
 
