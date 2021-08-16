@@ -3846,11 +3846,12 @@ sub Nasm::X86::Arena::allocZmmBlock($@)                                         
    });
  }
 
-sub Nasm::X86::Arena::allocBlock($)                                             # Allocate a block to hold a zmm register in the specified arena and return the offset of the block in a variable.
- {my ($arena) = @_;                                                             # Arena
-  @_ == 1 or confess;
+sub Nasm::X86::Arena::allocBlock($$)                                            # Allocate a block to hold a zmm register in the specified arena and return the offset of the block in a variable.
+ {my ($arena, $bs) = @_;                                                        # Arena, address of arena
+  @_ == 1 or @_ == 2 or confess;
   $arena->allocZmmBlock                                                         # Allocate a zmm block
-   ($arena->bs, V(size, RegisterSize(zmm0)), my $o = V(offset));
+#  ($arena->bs, V(size, RegisterSize(zmm0)), my $o = V(offset));
+   (bs=>$bs, V(size, RegisterSize(zmm0)), my $o = V(offset));
   $o                                                                            # Offset as a variable
  }
 
@@ -4170,7 +4171,7 @@ sub Nasm::X86::Arena::CreateString($)                                           
     first   => G('first'),                                                      # Variable addressing first block in string
    );
 
-  my $first = $s->allocBlock;                                                   # Allocate first block
+  my $first = $s->allocBlock($arena->bs);                                       # Allocate first block
   $s->first->copy($first);                                                      # Record offset of first block
 
   if (1)                                                                        # Initialize circular list
@@ -4192,11 +4193,11 @@ sub Nasm::X86::String::address($)                                               
   $String->bs->bs;
  }
 
-sub Nasm::X86::String::allocBlock($)                                            #P Allocate a block to hold a zmm register in the specified arena and return the offset of the block in a variable.
- {my ($String) = @_;                                                            # String descriptor
-  @_ == 1 or confess;
+sub Nasm::X86::String::allocBlock($$)                                           #P Allocate a block to hold a zmm register in the specified arena and return the offset of the block in a variable.
+ {my ($String, $arena) = @_;                                                    # String descriptor, arena address
+  @_ == 2 or confess;
 
-  $String->bs->allocBlock;                                                      # Allocate block and return its offset as a variable
+  $String->bs->allocBlock($arena);                                              # Allocate block and return its offset as a variable
  }
 
 sub Nasm::X86::String::getBlockLength($$)                                       #P Get the block length of the numbered zmm and return it in a variable.
@@ -4349,7 +4350,7 @@ sub Nasm::X86::String::concatenate($$)                                          
     ForEver                                                                     # Each block in source string
      {my ($start, $end) = @_;                                                   # Start and end labels
 
-      my $new = $target->allocBlock;                                            # Allocate new block
+      my $new = $target->allocBlock($$p{tBs});                                  # Allocate new block
       Vmovdqu8 zmm29, zmm31;                                                    # Load new target block from source
       my ($next, $prev) = $target->getNextAndPrevBlockOffsetFromZmm(30);        # Linkage from last target block
 
@@ -4423,7 +4424,7 @@ sub Nasm::X86::String::insertChar($@)                                           
           $String->setBlockLengthInZmm($O,          31);                        # New shorter length of original block
           $String->setBlockLengthInZmm($L - $O + 1, 30);                        # Set length of  remainder plus inserted char in the new block
 
-          my $new = $String->allocBlock;                                        # Allocate new block
+          my $new = $String->allocBlock($$p{bs});                               # Allocate new block
           my ($next, $prev) = $String->getNextAndPrevBlockOffsetFromZmm(31);    # Linkage from last block
 
           If ($next == $prev,
@@ -4463,7 +4464,7 @@ sub Nasm::X86::String::insertChar($@)                                           
      };
 
     PopR;
-   } [qw(first character position bs)], name => 'Nasm::X86::String::insertChar';
+   } [qw(bs first character position)], name => 'Nasm::X86::String::insertChar';
 
   $s->call($String->address, first => $String->first, @variables)
  } #insertChar
@@ -4588,7 +4589,7 @@ sub Nasm::X86::String::append($@)                                               
       $source += $toCopy;                                                       # Remaining source
       $size   -= $toCopy;                                                       # Remaining source length
 
-      my $new = $String->allocBlock;                                            # Allocate new block
+      my $new = $String->allocBlock($$p{bs});                                   # Allocate new block
       $String->getBlock  ($B, $new, 30);                                        # Load the new block
       my ($next, $prev) = $String->getNextAndPrevBlockOffsetFromZmm(31);        # Linkage from last block
 
@@ -4683,7 +4684,7 @@ sub Nasm::X86::Arena::CreateArray($)                                            
    );
   $s->slots2 == 16 or confess "Number of slots per block not 16";               # Slots per block
 
-  my $first = $s->allocBlock;                                                   # Allocate first block
+  my $first = $s->allocBlock($arena->bs);                                       # Allocate first block
   $s->first->copy($first);                                                      # Save first block
   $s                                                                            # Description of array
  }
@@ -4695,10 +4696,10 @@ sub Nasm::X86::Array::address($)                                                
  }
 
 sub Nasm::X86::Array::allocBlock($)                                             #P Allocate a block to hold a zmm register in the specified arena and return the offset of the block in a variable.
- {my ($Array) = @_;                                                             # Array descriptor
-  @_ == 1 or confess;
+ {my ($Array, $bs) = @_;                                                        # Array descriptor, arena address
+  @_ == 2 or confess;
 
-  $Array->bs->allocBlock;
+  $Array->bs->allocBlock($bs);
  }
 
 sub Nasm::X86::Array::dump($@)                                                  # Dump a array.
@@ -4789,7 +4790,7 @@ sub Nasm::X86::Array::push($@)                                                  
       Vpcompressd "zmm30{k7}{z}", zmm31;                                        # Compress first block into second block
       ClearRegisters zmm31;                                                     # Clear first block
       ($size+1)->putDIntoZmm(31, 0, $transfer);                                 # Save new size in first block
-      my $new = $b->allocBlock;                                                 # Allocate new block
+      my $new = $b->allocBlock($$p{bs});                                        # Allocate new block
       $new->putDIntoZmm(31, $w, $transfer);                                     # Save offset of second block in first block
       $E  ->putDIntoZmm(30, $W - 1 * $w, $transfer);                            # Place new element
       $b  ->putBlock($B, $new, 30);                                             # Put the second block back into memory
@@ -4803,7 +4804,7 @@ sub Nasm::X86::Array::push($@)                                                  
      {If ($size % $N == 0,
       Then                                                                      # New secondary block needed
        {PushR (rax, zmm30);
-        my $new = $b->allocBlock;                                               # Allocate new block
+        my $new = $b->allocBlock($$p{bs});                                      # Allocate new block
         $E       ->putDIntoZmm(30, 0, $transfer);                               # Place new element last in new second block
         ($size+1)->putDIntoZmm(31, 0, $transfer);                               # Save new size in first block
         $new     ->putDIntoZmm(31, ($size / $N + 1) * $w, $transfer);           # Address new second block from first block
@@ -5061,11 +5062,11 @@ sub Nasm::X86::Arena::CreateTree($)                                             
   my $s = Subroutine
    {my ($p) = @_;
     Comment "Create a block multiway Tree start";
-    my $keys = $t->allocBlock;                                                  # Allocate first keys block
+    my $keys = $t->allocBlock($$p{bs});                                         # Allocate first keys block
     $$p{first}->copy($keys);
     PushR my @save = (r8, r9, zmm31);
     ClearRegisters zmm31;
-    $t->putLoop($t->allocBlock, 31, r8);                                        # Keys loops to data - for the first 7 keys we should store the corresponding data further up in the block rather than creating a new block.
+    $t->putLoop($t->allocBlock($$p{bs}), 31, r8);                               # Keys loops to data - for the first 7 keys we should store the corresponding data further up in the block rather than creating a new block.
     $arena->putBlock($t->address, $keys, 31, r8, r9);                           # Write first keys
     PopR;
 
@@ -6053,10 +6054,10 @@ sub Nasm::X86::Tree::address($)                                                 
   $t->bs->bs;
  }
 
-sub Nasm::X86::Tree::allocBlock($@)                                             #P Allocate a block to hold a zmm register in the specified arena and return the offset of the block in a variable.
- {my ($t, @variables) = @_;                                                     # Tree descriptor, variables
-  @_ == 1 or confess;
-  $t->bs->allocBlock                                                            # Allocate a block and return its offset as a variable
+sub Nasm::X86::Tree::allocBlock($$@)                                            #P Allocate a block to hold a zmm register in the specified arena and return the offset of the block in a variable.
+ {my ($t, $bs) = @_;                                                            # Tree descriptor, variables
+  @_ == 2 or confess;
+  $t->bs->allocBlock($bs);                                                      # Allocate a block and return its offset as a variable
  }
 
 sub Nasm::X86::Tree::depth($@)                                                  # Return the depth of a node within a tree.
@@ -17134,7 +17135,7 @@ END
  }
 
 #latest:;
-if (1) {
+if (1) {                                                                        # Strings doubled
   my $c = Rb(0..255);
   my $S = CreateArena;   my $s = $S->CreateString;
   my $T = CreateArena;   my $t = $T->CreateString;
@@ -17422,15 +17423,16 @@ END
  }
 
 #latest:;
-if (1) {                                                                        #TCreateArray  #TArray::push
+if (1) {                                                                        #TCreateArray  #TArray::push # Arrays in double
   my $c = Rb(0..255);
   my $A = CreateArena;  my $a = $A->CreateArray;
+  my $B = CreateArena;  my $b = $B->CreateArray;
 
-  $a->push(element => V($_, $_)) for 1..15;  $A->dump;
-  $a->push(element => V($_, $_)) for 0xff;   $A->dump;
-  $a->push(element => V($_, $_)) for 17..31; $A->dump;
-  $a->push(element => V($_, $_)) for 0xee;   $A->dump;
-  $a->push(element => V($_, $_)) for 33..36; $A->dump;
+  $a->push(element => V($_, $_)), $b->push(element => V($_, $_)) for 1..15;  $A->dump; $B->dump;
+  $a->push(element => V($_, $_)), $b->push(element => V($_, $_)) for 0xff;   $A->dump; $B->dump;
+  $a->push(element => V($_, $_)), $b->push(element => V($_, $_)) for 17..31; $A->dump; $B->dump;
+  $a->push(element => V($_, $_)), $b->push(element => V($_, $_)) for 0xee;   $A->dump; $B->dump;
+  $a->push(element => V($_, $_)), $b->push(element => V($_, $_)) for 33..36; $A->dump; $B->dump;
 
   ok Assemble(debug => 0, eq => <<END);
 Arena
@@ -17439,6 +17441,20 @@ Arena
 0000: 0010 0000 0000 00005800 0000 0000 00000000 0000 0000 00000F00 0000 0100 00000200 0000 0300 00000400 0000 0500 00000600 0000 0700 00000800 0000 0900 0000
 0040: 0A00 0000 0B00 00000C00 0000 0D00 00000E00 0000 0F00 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
 0080: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+00C0: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+Arena
+  Size: 0000 0000 0000 1000
+  Used: 0000 0000 0000 0058
+0000: 0010 0000 0000 00005800 0000 0000 00000000 0000 0000 00000F00 0000 0100 00000200 0000 0300 00000400 0000 0500 00000600 0000 0700 00000800 0000 0900 0000
+0040: 0A00 0000 0B00 00000C00 0000 0D00 00000E00 0000 0F00 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+0080: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+00C0: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+Arena
+  Size: 0000 0000 0000 1000
+  Used: 0000 0000 0000 0098
+0000: 0010 0000 0000 00009800 0000 0000 00000000 0000 0000 00001000 0000 5800 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+0040: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000100 0000 0200 00000300 0000 0400 00000500 0000 0600 00000700 0000 0800 00000900 0000 0A00 0000
+0080: 0B00 0000 0C00 00000D00 0000 0E00 00000F00 0000 FF00 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
 00C0: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
 Arena
   Size: 0000 0000 0000 1000
@@ -17457,10 +17473,31 @@ Arena
 Arena
   Size: 0000 0000 0000 1000
   Used: 0000 0000 0000 00D8
+0000: 0010 0000 0000 0000D800 0000 0000 00000000 0000 0000 00001F00 0000 5800 00009800 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+0040: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000100 0000 0200 00000300 0000 0400 00000500 0000 0600 00000700 0000 0800 00000900 0000 0A00 0000
+0080: 0B00 0000 0C00 00000D00 0000 0E00 00000F00 0000 FF00 00001100 0000 1200 00001300 0000 1400 00001500 0000 1600 00001700 0000 1800 00001900 0000 1A00 0000
+00C0: 1B00 0000 1C00 00001D00 0000 1E00 00001F00 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+Arena
+  Size: 0000 0000 0000 1000
+  Used: 0000 0000 0000 00D8
 0000: 0010 0000 0000 0000D800 0000 0000 00000000 0000 0000 00002000 0000 5800 00009800 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
 0040: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000100 0000 0200 00000300 0000 0400 00000500 0000 0600 00000700 0000 0800 00000900 0000 0A00 0000
 0080: 0B00 0000 0C00 00000D00 0000 0E00 00000F00 0000 FF00 00001100 0000 1200 00001300 0000 1400 00001500 0000 1600 00001700 0000 1800 00001900 0000 1A00 0000
 00C0: 1B00 0000 1C00 00001D00 0000 1E00 00001F00 0000 EE00 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+Arena
+  Size: 0000 0000 0000 1000
+  Used: 0000 0000 0000 00D8
+0000: 0010 0000 0000 0000D800 0000 0000 00000000 0000 0000 00002000 0000 5800 00009800 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+0040: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000100 0000 0200 00000300 0000 0400 00000500 0000 0600 00000700 0000 0800 00000900 0000 0A00 0000
+0080: 0B00 0000 0C00 00000D00 0000 0E00 00000F00 0000 FF00 00001100 0000 1200 00001300 0000 1400 00001500 0000 1600 00001700 0000 1800 00001900 0000 1A00 0000
+00C0: 1B00 0000 1C00 00001D00 0000 1E00 00001F00 0000 EE00 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+Arena
+  Size: 0000 0000 0000 1000
+  Used: 0000 0000 0000 0118
+0000: 0010 0000 0000 00001801 0000 0000 00000000 0000 0000 00002400 0000 5800 00009800 0000 D800 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+0040: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000100 0000 0200 00000300 0000 0400 00000500 0000 0600 00000700 0000 0800 00000900 0000 0A00 0000
+0080: 0B00 0000 0C00 00000D00 0000 0E00 00000F00 0000 FF00 00001100 0000 1200 00001300 0000 1400 00001500 0000 1600 00001700 0000 1800 00001900 0000 1A00 0000
+00C0: 1B00 0000 1C00 00001D00 0000 1E00 00001F00 0000 EE00 00002100 0000 2200 00002300 0000 2400 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
 Arena
   Size: 0000 0000 0000 1000
   Used: 0000 0000 0000 0118
@@ -17697,10 +17734,10 @@ END
 #latest:;
 if (1) {                                                                        #TNasm::X86::Arena::allocBlock #TNasm::X86::Arena::freeBlock
   my $a = CreateArena; $a->dump;
-  my $b1 = $a->allocBlock;  $a->dump;
-  my $b2 = $a->allocBlock;  $a->dump;
-  $a->freeBlock($b2);       $a->dump;
-  $a->freeBlock($b1);       $a->dump;
+  my $b1 = $a->allocBlock($a->bs); $a->dump;
+  my $b2 = $a->allocBlock($a->bs); $a->dump;
+  $a->freeBlock($b2);              $a->dump;
+  $a->freeBlock($b1);              $a->dump;
 
   ok Assemble(debug => 0, eq => <<END);
 Arena
@@ -17833,7 +17870,7 @@ if (1) {                                                                        
   my $format = Rd(map{4*$_+24} 0..64);
 
   my $b = CreateArena;
-  my $a = $b->allocBlock;
+  my $a = $b->allocBlock($b->bs);
   Vmovdqu8 zmm31, "[$format]";
   $b->putBlock($b->bs, $a, 31);
   my $r = $b->chain($b->bs, V(start, 0x18), 4);       $r->outNL("chain1: ");
@@ -18849,8 +18886,8 @@ key: 0000 0000 0000 0002 data: 0000 0000 0000 0004 depth: 0000 0000 0000 0001
 END
  }
 
-latest:
-if (1) {                                                                        #TNasm::X86::Tree::insertTree
+#latest:
+if (1) {                                                                        #TNasm::X86::Tree::insertTree # Trees doubled
   my $L = K(loop, 11);
   my $b = CreateArena;
   my $B = CreateArena;
@@ -18879,7 +18916,7 @@ key: 0000 0000 0000 0007 data: 0000 0000 0000 0007 depth: 0000 0000 0000 0001
 key: 0000 0000 0000 0008 data: 0000 0000 0000 0008 depth: 0000 0000 0000 0001
 key: 0000 0000 0000 0009 data: 0000 0000 0000 0009 depth: 0000 0000 0000 0001
 key: 0000 0000 0000 000A data: 0000 0000 0000 000A depth: 0000 0000 0000 0001
-Tree at:  0000 0000 0000 0098
+Tree at:  0000 0000 0000 0018
 key: 0000 0000 0000 0000 data: 0000 0000 0000 0000 depth: 0000 0000 0000 0001
 key: 0000 0000 0000 0001 data: 0000 0000 0000 0001 depth: 0000 0000 0000 0001
 key: 0000 0000 0000 0002 data: 0000 0000 0000 0002 depth: 0000 0000 0000 0001
