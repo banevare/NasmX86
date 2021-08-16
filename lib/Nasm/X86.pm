@@ -2497,6 +2497,32 @@ sub PopZmm                                                                      
   Add rsp, @z * $w;
  }
 
+my @PushMask;                                                                    # Mask pushes
+
+sub PushMask(@)                                                                 # Push several Mask registers
+ {my (@M) = @_;                                                                 # Mask register numbers
+  if (@M)
+   {my @m = map {"k$_"} @M;
+    my $w = RegisterSize k0;
+    Sub rsp, @m * $w;
+    for my $i(keys @m)
+     {Kmovq "[rsp+$w*$i]", $m[$i];
+     }
+    push @PushMask, [@M];
+   }
+ }
+
+sub PopMask                                                                     # Pop Mask registers
+ {@PushMask or confess "No Mask registers saved";
+  my $m = pop @PushMask;
+  my @m = map {"k$_"} @$m;
+  my $w = RegisterSize k0;
+  for my $i(keys @m)
+   {Kmovq $m[$i], "[rsp+$w*$i]";
+   }
+  Add rsp, @m * $w;
+ }
+
 #D2 Declarations                                                                # Declare variables and structures
 
 #D3 Structures                                                                  # Declare a structure
@@ -4361,7 +4387,7 @@ sub Nasm::X86::String::concatenate($$)                                          
   my $s = Subroutine
    {my ($p) = @_;                                                               # Parameters
     Comment "Concatenate strings";
-    PushR (zmm29, zmm30, zmm31);
+    PushZmm 29..31;
     my $sb = $$p{sBs};                                                          # The arena underlying the source
     my $sf = $$p{sFirst};                                                       # The first block in the source
     my $tb = $$p{tBs};                                                          # The arena underlying the target
@@ -4398,7 +4424,7 @@ sub Nasm::X86::String::concatenate($$)                                          
       $source->getBlock($sb, $sn, 31);                                          # Next source block
      };
 
-    PopR;
+    PopZmm;
    } [qw(sBs sFirst tBs tFirst)], name => 'Nasm::X86::String::concatenate';
 
   $s->call(sBs => $source->address, sFirst => $source->first,
@@ -4593,7 +4619,7 @@ sub Nasm::X86::String::append($@)                                               
     my $size    = V(size)  ->copy($$p{size});                                   # Size of content
     my $first   = $$p{first};                                                   # First (preallocated) block in string
 
-    PushR (zmm29, zmm30, zmm31);
+    PushZmm 29..31;
     ForEver                                                                     # Append content until source exhausted
      {my ($start, $end) = @_;                                                   # Parameters
 
@@ -4632,7 +4658,7 @@ sub Nasm::X86::String::append($@)                                               
       $String->putBlock($B, $last, 31);                                         # Put the modified last block
       $String->putBlock($B, $new,  30);                                         # Put the modified new block
      };
-    PopR;
+    PopZmm;
    }  [qw(bs first source size)], name => 'Nasm::X86::String::append';
 
   $s->call($String->address, $String->first, @variables);
@@ -5737,7 +5763,7 @@ sub Nasm::X86::Tree::insertDataOrTree($$$$)                                     
     my $K = $$p{key};                                                           # Key  to be inserted
     my $D = $$p{data};                                                          # Data to be inserted
 
-    PushR (k4, k5, k6, k7, r8, r9, r13, r14, r15); PushZmm 22..31;
+    PushMask 4..7; PushR r8, r9, r13, r14, r15; PushZmm 22..31;
     my $transfer =  r8;                                                         # Use this register to transfer data between zmm blocks and variables
     my $work     =  r9;                                                         # Work register
     my $point    = r13;                                                         # Insertion indicator
@@ -5882,6 +5908,7 @@ sub Nasm::X86::Tree::insertDataOrTree($$$$)                                     
     SetLabel $success;                                                          # Insert completed successfully
     PopZmm;
     PopR;
+    PopMask;
    } [qw(bs first key data)], name => "Nasm::X86::Tree::insertDataOrTree_$tnd"; # Data either supplies the data or returns the offset of the sub tree
 
   $s->call($t->address, first => $t->first, key => $key,
@@ -6318,7 +6345,7 @@ sub Nasm::X86::Tree::Iterator::next($)                                          
       my $zmmNK = 31; my $zmmPK = 28; my $zmmTest = 25;
       my $zmmND = 30; my $zmmPD = 27;
       my $zmmNN = 29; my $zmmPN = 26;
-      PushR (k7, r8, r14, r15, map {"zmm$_"} 25..31);
+      PushR k7, r8, r14, r15; PushZmm 25..31;
       my $t = $iter->tree;
 
       ForEver                                                                   # Up through the tree
@@ -6344,11 +6371,12 @@ sub Nasm::X86::Tree::Iterator::next($)                                          
        };
       &$done;                                                                   # No nodes not visited
       SetLabel $top;
+      PopZmm;
       PopR;
      };
 
     $$p{pos}->copy(my $i = $$p{pos} + 1);                                       # Next position in block being scanned
-    PushR (r8, zmm31, zmm30, zmm29);
+    PushR r8; PushZmm 29..31;
     $iter->tree->getKeysDataNode($C,    31, 30, 29);                            # Load keys and data
     my $l = $iter->tree->getLengthInKeys(31);                                   # Length of keys
     my $n = getDFromZmm 29, 0, r8;                                              # First node will ne zero if on a leaf
@@ -6368,7 +6396,7 @@ sub Nasm::X86::Tree::Iterator::next($)                                          
       &$new($l, K(zero, 0));
      });
 
-    PopR;
+    PopZmm; PopR;
     SetLabel $success;
    }  [qw(node pos key data count more)],
       name => 'Nasm::X86::Tree::Iterator::next ';
@@ -6440,7 +6468,7 @@ sub Link(@)                                                                     
 
 sub Start()                                                                     # Initialize the assembler.
  {@bss = @data = @rodata = %rodata = %rodatas = %subroutines = @text =
-  @PushR = @PushZmm = @extern = @link = @VariableStack = ();
+  @PushR = @PushZmm = @PushMask = @extern = @link = @VariableStack = ();
   @RegistersAvailable = ({map {$_=>1} @GeneralPurposeRegisters});               # A stack of hashes of registers that are currently free and this can be used without pushing and popping them.
   SubroutineStartStack;                                                         # Number of variables at each lexical level
   $Labels = 0;
