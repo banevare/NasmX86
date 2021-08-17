@@ -6451,9 +6451,18 @@ sub Nasm::X86::Tree::Iterator::next($)                                          
     If ($$p{pos} == -1,
     Then                                                                        # Initial descent
      {my $t = $iter->tree;
+      my $end = Label;
 
       PushR r8, r9; PushZmm 29..31;
       $t->getKeysDataNode($B, $C, 31, 30, 29, r8, r9);                          # Load keys and data
+
+      my $l = $t->getLengthInKeys(31);                                          # Length of the block
+      If ($l == 0,                                                              # Check for  empty tree.
+      Then                                                                      # Empty tree
+       {&$done;
+        Jmp $end;
+       });
+
       my $nodes = $t->getLoop(30, r8);                                          # Nodes
 
       If ($nodes,
@@ -6471,6 +6480,8 @@ sub Nasm::X86::Tree::Iterator::next($)                                          
          {&$done;
          });
        });
+
+      SetLabel $end;
       PopZmm; PopR;
       Jmp $success;                                                             # Return with iterator loaded
      });
@@ -20710,6 +20721,20 @@ END
  }
 
 #latest:
+if (1) {                                                                        # Print empty tree
+  my $b = CreateArena;
+  my $t = $b->CreateTree;
+  $t->dump();
+
+  ok Assemble(debug => 0, eq => <<END);
+Tree at:  0000 0000 0000 0018
+ zmm31: 0000 0058 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+ zmm30: 0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+ zmm29: 0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+END
+ }
+
+#latest:
 if (1) {                                                                        # Performance of tree inserts
   my $L = V(loop, 45);
 
@@ -20757,7 +20782,7 @@ if (0) {
 END
  }
 
-ok 1 for 8..32;
+ok 1 for 9..32;
 
 #unlink $_ for qw(hash print2 sde-log.txt sde-ptr-check.out.txt z.txt);         # Remove incidental files
 unlink $_ for qw(hash print2);                                                  # Remove incidental files
