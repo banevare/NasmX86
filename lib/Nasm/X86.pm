@@ -7,6 +7,7 @@
 # Time: 25.13s, bytes: 4,736,112, execs: 6,944,459
 # Time: 24.80s, bytes: 4,585,064, execs: 6,917,024 if statement optimization
 # tree::print - speed up decision as to whether we are on a tree or not
+# Remove @variables and replace with actual references to the required variables
 package Nasm::X86;
 our $VERSION = "20210816";
 use warnings FATAL => qw(all);
@@ -920,7 +921,8 @@ sub Nasm::X86::Sub::call($%)                                                    
   Mov "byte[rsp-1-$w]", scalar $sub->parameters->@*;                            # Number of parameters to enable traceback with parameters
 
   for my $p(sort keys %p)                                                       # Transfer parameters from current frame to next frame
-   {my $P = $p{$p}->label;                                                      # Source in current frame
+   {!ref($p{$p}) or ref($p{$p}) =~ m(variable)i or confess "Variable required";
+    my $P = $p{$p}->label;                                                      # Source in current frame
     if (my $q = $sub->variables->{$p})                                          # Target in new frame
      {if ($p{$p}->reference)                                                    # Source is a reference
        {Mov r15, "[$P]";
@@ -5162,9 +5164,9 @@ sub Nasm::X86::Arena::DescribeTree($)                                           
    );
  }
 
-sub Nasm::X86::Arena::CreateTree($)                                             # Create a tree in an arena.
- {my ($arena) = @_;                                                             # Arena description
-  @_ == 1 or confess;
+sub Nasm::X86::Arena::CreateTree($;$)                                           # Create a tree in an arena.
+ {my ($arena, $bs) = @_;                                                        # Arena description, optional arena address
+  @_ == 1 or @_ == 2 or confess "1 or 2 parameters";
 
   my $t = $arena->DescribeTree;                                                 # Return a descriptor for a tree at the specified offset in the specified arena
 
@@ -5176,13 +5178,13 @@ sub Nasm::X86::Arena::CreateTree($)                                             
     PushR my @save = (r8, r9, zmm31);
     ClearRegisters zmm31;
     $t->putLoop($t->allocBlock($$p{bs}), 31, r8);                               # Keys loops to data - for the first 7 keys we should store the corresponding data further up in the block rather than creating a new block.
-    $arena->putBlock($t->address, $keys, 31, r8, r9);                           # Write first keys
+    $arena->putBlock($$p{bs}, $keys, 31, r8, r9);                               # Write first keys
     PopR;
 
     Comment "Create a block multiway Tree end";
    } [qw(bs first)], name => 'Nasm::X86::Arena::CreateTree';
 
-  $s->call(bs => $t->address, first => $t->first);
+  $s->call(bs => ($bs//$t->address), first => $t->first);
 
   $t                                                                            # Description of array
  }
@@ -5197,14 +5199,14 @@ sub Nasm::X86::Tree::Clone($)                                                   
   $t
  }
 
-sub Nasm::X86::Tree::allocKeysDataNode($$$$@)                                   #P Allocate a keys/data/node block and place it in the numbered zmm registers.
- {my ($t, $K, $D, $N, @variables) = @_;                                         # Tree descriptor, numbered zmm for keys, numbered zmm for data, numbered zmm for children, variables
-  @_ >= 4 or confess;
+sub Nasm::X86::Tree::allocKeysDataNode($$$$$)                                   #P Allocate a keys/data/node block and place it in the numbered zmm registers.
+ {my ($t, $bs, $K, $D, $N) = @_;                                                # Tree descriptor, arena address, numbered zmm for keys, numbered zmm for data, numbered zmm for children, variables
+  @_ == 5 or confess "5 parameters";
 
   my $s = Subroutine
-   {my ($parameters) = @_;                                                      # Parameters
+   {my ($p) = @_;                                                               # Parameters
 
-    my $B = $$parameters{bs};                                                   # Arena
+    my $B = $$p{bs};                                                            # Arena
     $t->bs->allocZmmBlock($B, my $k = V(offset));                               # Keys
     $t->bs->allocZmmBlock($B, my $d = V(offset));                               # Data
     $t->bs->allocZmmBlock($B, my $n = V(offset));                               # Children
@@ -5214,9 +5216,9 @@ sub Nasm::X86::Tree::allocKeysDataNode($$$$@)                                   
     $t->putLoop($n, $D, r8);                                                    # Set the link from data to node
     $t->putLoop($k, $N, r8);                                                    # Set the link from node  to key
     PopR r8;
-   } [qw(bs)], name=>qq(Nasm::X86::Tree::allocKeysDataNode::${K}::${D}::${N});  # Create a subroutine for each combination of registers encountered
+   } [qw(bs)], name => qq(Nasm::X86::Tree::allocKeysDataNode::${K}::${D}::${N});# Create a subroutine for each combination of registers encountered
 
-  $s->call($t->address, @variables);
+  $s->call($bs);
  } # allocKeysDataNode
 
 sub Nasm::X86::Tree::splitNode($$$$@)                                           #P Split a non root node given its offset in an arena retaining the key being inserted in the node being split while putting the remainder to the left or right.
@@ -5229,7 +5231,7 @@ sub Nasm::X86::Tree::splitNode($$$$@)                                           
    {my ($parameters) = @_;                                                      # Parameters
     my $success = Label;                                                        # Short circuit if ladders by jumping directly to the end after a successful push
 
-    my $b = $$parameters{bs};                                                   # Arena
+    my $B = $$parameters{bs};                                                   # Arena
     my $k = $$parameters{key};                                                  # Key we are looking for
     my $n = $$parameters{node};                                                 # Node to split
 
@@ -5238,7 +5240,7 @@ sub Nasm::X86::Tree::splitNode($$$$@)                                           
     my $transfer = r8;                                                          # Use this register to transfer data between zmm blocks and variables
     my $work     = r9;                                                          # Work register
 
-    $t->getKeysDataNode($n, $K, $D, $N, $transfer, $work);                      # Load node
+    $t->getKeysDataNode($B, $n, $K, $D, $N, $transfer, $work);                  # Load node
 
     If ($t->getLengthInKeys($K) != $t->maxKeys,
     Then                                                                        # Only split full blocks
@@ -5254,38 +5256,38 @@ sub Nasm::X86::Tree::splitNode($$$$@)                                           
        {Vmovdqu64 zmm28, zmm31;                                                 # Load left node
         Vmovdqu64 zmm27, zmm30;
         Vmovdqu64 zmm26, zmm29;
-        $t->allocKeysDataNode(25, 24, 23);                                      # Create new right node
+        $t->allocKeysDataNode($B, 25, 24, 23);                                  # Create new right node
 
-        $t->getKeysDataNode($p, $K, $D, $N, $transfer, $work);                  # Load parent
+        $t->getKeysDataNode($B, $p, $K, $D, $N, $transfer, $work);              # Load parent
         $t->splitFullLeftNode;
-        $t->putKeysDataNode($p, $K, $D, $N, $transfer, $work);                  # Save parent
-        $t->putKeysDataNode($n, 28, 27, 26, $transfer, $work);                  # Save left
+        $t->putKeysDataNode($B, $p, $K, $D, $N, $transfer, $work);              # Save parent
+        $t->putKeysDataNode($B, $n, 28, 27, 26, $transfer, $work);              # Save left
         my $r = $t->getLoop    (23, $transfer);                                 # Offset of right keys
         $t->putUpIntoData  ($p, 24, $transfer);                                 # Reparent new block
-        $t->putKeysDataNode($r, 25, 24, 23, $transfer, $work)                   # Save right back into node we just split
+        $t->putKeysDataNode($B, $r, 25, 24, 23, $transfer, $work)               # Save right back into node we just split
        },
       Else                                                                      # Split right node pushing remainder left  so that we keep the key we are looking for in the right node
        {Vmovdqu64 zmm25, zmm31;                                                 # Load right node
         Vmovdqu64 zmm24, zmm30;
         Vmovdqu64 zmm23, zmm29;
-        $t->allocKeysDataNode(28, 27, 26);                                      # Create new left node
+        $t->allocKeysDataNode($B, 28, 27, 26);                                  # Create new left node
 
-        $t->getKeysDataNode($p, $K, $D, $N, $transfer, $work);                  # Load parent
+        $t->getKeysDataNode($B, $p, $K, $D, $N, $transfer, $work);              # Load parent
         $t->splitFullRightNode;
-        $t->putKeysDataNode($p, $K, $D, $N, $transfer, $work);                  # Save parent
+        $t->putKeysDataNode($B, $p, $K, $D, $N, $transfer, $work);              # Save parent
         my $l = $t->getLoop    (26, $transfer);                                 # Offset of left keys
         $t->putUpIntoData  ($p, 27, $transfer);                                 # Reparent new block
-        $t->putKeysDataNode($l, 28, 27, 26, $transfer, $work);                  # Save left
-        $t->putKeysDataNode($n, 25, 24, 23, $transfer, $work);                  # Save right back into node we just split
+        $t->putKeysDataNode($B, $l, 28, 27, 26, $transfer, $work);              # Save left
+        $t->putKeysDataNode($B, $n, 25, 24, 23, $transfer, $work);              # Save right back into node we just split
        });
      },
     Else
-     {$t->splitFullRoot;                                                        # Root
+     {$t->splitFullRoot($B);                                                    # Root
       my $l = getDFromZmm $N, 0,          $transfer;
       my $r = getDFromZmm $N, $t->width,  $transfer;
-      $t->putKeysDataNode($n, $K, $D, $N, $transfer, $work);                    # Save root
-      $t->putKeysDataNode($l, 28, 27, 26, $transfer, $work);                    # Save left
-      $t->putKeysDataNode($r, 25, 24, 23, $transfer, $work);                    # Save right
+      $t->putKeysDataNode($B, $n, $K, $D, $N, $transfer, $work);                # Save root
+      $t->putKeysDataNode($B, $l, 28, 27, 26, $transfer, $work);                # Save left
+      $t->putKeysDataNode($B, $r, 25, 24, 23, $transfer, $work);                # Save right
      });
 
     SetLabel $success;                                                          # Insert completed successfully
@@ -5300,11 +5302,11 @@ sub Nasm::X86::Tree::splitNode($$$$@)                                           
 sub Nasm::X86::Tree::reParent($$$$$@)                                           #P Reparent the children of a node held in registers. The children are in the backing arena not registers.
  {my ($t, $bs, $PK, $PD, $PN, @variables) = @_;                                 # Tree descriptor, backing arena, numbered zmm key node, numbered zmm data node, numbered zmm child node, variables
   @_ >= 5 or confess;
-  my $b = $t->bs;                                                               # Underlying arena
 
   my $s = Subroutine
    {my ($parameters) = @_;                                                      # Parameters
     PushR (r8);
+
     my $B = $$parameters{bs};                                                   # Arena
     my $L = $t->getLengthInKeys($PK) + 1;                                       # Number of children
     my $p = $t->getUpFromData  ($PD, r8);                                       # Parent node offset as a variable
@@ -5319,7 +5321,7 @@ sub Nasm::X86::Tree::reParent($$$$$@)                                           
        {my ($index, $start, $next, $end) = @_;
         &PopEax;                                                                # The nodes are double words but we cannot pop a double word from the stack in 64 bit long mode using pop
         $s->getReg(rax);
-        $b->putChain($B, $s, $p, $l, $u);
+        $t->bs->putChain($B, $s, $p, $l, $u);
        });
 
       Mov rsp, rdi;                                                             # Level stack
@@ -5332,66 +5334,66 @@ sub Nasm::X86::Tree::reParent($$$$$@)                                           
  } # reParent
 
 sub Nasm::X86::Tree::transferTreeBitsFromParent($$$$)                           #P Transfer tree bits when splitting a full node.
- {my ($b, $parent, $left, $right) = @_;                                         # Tree descriptor, numbered parent zmm, numbered left zmm, numbered right zmm
+ {my ($t, $parent, $left, $right) = @_;                                         # Tree descriptor, numbered parent zmm, numbered left zmm, numbered right zmm
 
   PushR my @save = my ($whole, $half)  = (r15, r14);
-  $b->getTreeBits($parent, $whole);                                             # Transfer Tree bits
+  $t->getTreeBits($parent, $whole);                                             # Transfer Tree bits
   Cmp $whole, 0;
   IfNz                                                                          # Action required iff there are some tree bits
   Then
    {Mov $half, $whole;                                                          # Left tree bits
-    And $half, ((1 << $b->leftLength) - 1);                                     # Isolate left bits
-    $b->putTreeBits($left, $half);                                              # Save left tree bits
+    And $half, ((1 << $t->leftLength) - 1);                                     # Isolate left bits
+    $t->putTreeBits($left, $half);                                              # Save left tree bits
 
     Mov $half, $whole;                                                          # Right tree bits
-    Shr $half, $b->leftLength + 1;                                              # Isolate right bits
-    And  $half, ((1 << $b->rightLength) - 1);                                   # Remove any bits above
-    $b->putTreeBits($right, $half);                                             # Save right tree bits
+    Shr $half, $t->leftLength + 1;                                              # Isolate right bits
+    And  $half, ((1 << $t->rightLength) - 1);                                   # Remove any bits above
+    $t->putTreeBits($right, $half);                                             # Save right tree bits
 
     Mov $half, $whole;                                                          # Right tree bits
-    Shr $half, $b->leftLength;                                                  # Parent bit
+    Shr $half, $t->leftLength;                                                  # Parent bit
     And $half, 1;                                                               # Only one bit
-    $b->putTreeBits($parent, $half);                                            # Save parent tree bits
+    $t->putTreeBits($parent, $half);                                            # Save parent tree bits
    };
   PopR;
  }
 
 sub Nasm::X86::Tree::transferTreeBitsFromLeftOrRight($$$$$$)                    #P Transfer tree bits when splitting a full left or right node.
- {my ($b, $rnl, $point, $parent, $left, $right) = @_;                           # Tree descriptor, 0 - left 1 - right, register indicating point of left in parent, numbered parent zmm, numbered left zmm, numbered right zmm
+ {my ($t, $rnl, $point, $parent, $left, $right) = @_;                           # Tree descriptor, 0 - left 1 - right, register indicating point of left in parent, numbered parent zmm, numbered left zmm, numbered right zmm
 
   PushR my @save = my ($whole, $half, $bits) = ChooseRegisters(3, $point);
-  $b->getTreeBits($rnl ? $right : $left, $whole);                               # Tree bits
+  $t->getTreeBits($rnl ? $right : $left, $whole);                               # Tree bits
 
   Mov $half, $whole;                                                            # Right bits
-  Shr $half, $b->leftLength + 1;                                                # Isolate right bits
-  $b->putTreeBits($right, $half);                                               # Save right bits
+  Shr $half, $t->leftLength + 1;                                                # Isolate right bits
+  $t->putTreeBits($right, $half);                                               # Save right bits
 
-  $b->getTreeBits($parent, $bits);                                              # Parent bits
+  $t->getTreeBits($parent, $bits);                                              # Parent bits
   InsertZeroIntoRegisterAtPoint($point, $bits);
   Mov $half, $whole;                                                            # Tree bit of key being moved into parent from left
-  Shr $half, $b->leftLength+1;                                                  # Tree bit to move into parent is now in carry flag
+  Shr $half, $t->leftLength+1;                                                  # Tree bit to move into parent is now in carry flag
   IfC Then {Or $bits, $point};                                                  # One parent bit
-  $b->putTreeBits($parent, $bits);                                              # Put parent tree bits
+  $t->putTreeBits($parent, $bits);                                              # Put parent tree bits
 
   Mov $half, $whole;                                                            # Left bits
-  And $half, ((1 << $b->leftLength) - 1);                                       # Remove any bits above
-  $b->putTreeBits($left, $half);                                                # Save left bits
+  And $half, ((1 << $t->leftLength) - 1);                                       # Remove any bits above
+  $t->putTreeBits($left, $half);                                                # Save left bits
   PopR;
  }
 
 sub Nasm::X86::Tree::transferTreeBitsFromLeft($$$$$)                            #P Transfer tree bits when splitting a full left node.
- {my ($b, $point, $parent, $left, $right) = @_;                                 # Tree descriptor, register indicating point of left in parent, numbered parent zmm, numbered left zmm, numbered right zmm
-  $b->transferTreeBitsFromLeftOrRight(0, $point, $parent, $left, $right);
+ {my ($t, $point, $parent, $left, $right) = @_;                                 # Tree descriptor, register indicating point of left in parent, numbered parent zmm, numbered left zmm, numbered right zmm
+  $t->transferTreeBitsFromLeftOrRight(0, $point, $parent, $left, $right);
  }
 
 sub Nasm::X86::Tree::transferTreeBitsFromRight($$$$$)                           #P Transfer tree bits when splitting a full right node.
- {my ($b, $point, $parent, $left, $right) = @_;                                 # Tree descriptor, register indicating point of right in parent, numbered parent zmm, numbered left zmm, numbered right zmm
-  $b->transferTreeBitsFromLeftOrRight(1, $point, $parent, $left, $right);
+ {my ($t, $point, $parent, $left, $right) = @_;                                 # Tree descriptor, register indicating point of right in parent, numbered parent zmm, numbered left zmm, numbered right zmm
+  $t->transferTreeBitsFromLeftOrRight(1, $point, $parent, $left, $right);
  }
 
-sub Nasm::X86::Tree::splitFullRoot($)                                           #P Split a full root block held in 31..29 and place the left block in 28..26 and the right block in 25..23. The left and right blocks should have their loop offsets set so they can be inserted into the root.
- {my ($t) = @_;                                                                 # Tree descriptor
-  @_ == 1 or confess;
+sub Nasm::X86::Tree::splitFullRoot($$)                                          #P Split a full root block held in 31..29 and place the left block in 28..26 and the right block in 25..23. The left and right blocks should have their loop offsets set so they can be inserted into the root.
+ {my ($t, $bs) = @_;                                                            # Tree descriptor, arena address
+  @_ == 2 or confess "2 parameters";
 
   my $length = $t->maxKeys;                                                     # Length of block to split
   my $ll = $t->leftLength;                                                      # Left split point
@@ -5413,14 +5415,14 @@ sub Nasm::X86::Tree::splitFullRoot($)                                           
 
     If ($t->getLengthInKeys($TK) != $t->maxKeys, sub {Jmp $success});           # Only split full blocks
 
-    $t->allocKeysDataNode(  28, 27, 26);                                        # Allocate immediate children of the root
-    my $l = $t->getLoop(            26, $transfer);
-    $t->putKeysDataNode($l, 28, 27, 26, $transfer, $work);
-    $t->allocKeysDataNode  (25, 24, 23);
-    my $r = $t->getLoop            (23, $transfer);
-    $t->putKeysDataNode($l, 25, 24, 23, $transfer, $work);
-    $t->reParent       ($B, 28, 27, 26);                                        # Reparent grandchildren
-    $t->reParent       ($B, 25, 24, 23);
+    $t->allocKeysDataNode($B,     28, 27, 26);                                  # Allocate immediate children of the root
+    my $l = $t->getLoop(          26,         $transfer);
+    $t->putKeysDataNode  ($B, $l, 28, 27, 26, $transfer, $work);
+    $t->allocKeysDataNode($B,     25, 24, 23);
+    my $r = $t->getLoop            (23,       $transfer);
+    $t->putKeysDataNode  ($B, $l, 25, 24, 23, $transfer, $work);
+    $t->reParent         ($B,     28, 27, 26);                                  # Reparent grandchildren
+    $t->reParent         ($B,     25, 24, 23);
 
     my $n  = $t->getLoop($TD, $transfer);                                       # Offset of node block or zero if there is no node block
     my $to = $t->getLoop($TN, $transfer);                                       # Offset of root block
@@ -5494,7 +5496,7 @@ sub Nasm::X86::Tree::splitFullRoot($)                                           
     PopR;
    } [qw(bs)], name => 'Nasm::X86::Tree::splitFullRoot';
 
-  $s->call (bs => $t->address);
+  $s->call (bs => $bs);
  } # splitFullRoot
 
 sub Nasm::X86::Tree::splitFullLeftOrRightNode($$)                               #P Split a full a full left node (held in 28..26) or a full right node (held in 25..23) whose parent is in 31..29.
@@ -5634,9 +5636,9 @@ sub Nasm::X86::Tree::splitFullRightNode($)                                      
   $t->splitFullLeftOrRightNode(1);
  }
 
-sub Nasm::X86::Tree::findAndSplit($@)                                           #P Find a key in a tree which is known to contain at least one key splitting full nodes along the path to the key.
- {my ($t, @variables) = @_;                                                     # Tree descriptor, variables
-  @_ >= 3 or confess;
+sub Nasm::X86::Tree::findAndSplit($$$$$$$)                                      #P Find a key in a tree which is known to contain at least one key splitting full nodes along the path to the key.
+ {my ($t, $bs, $first, $key, $compare, $offset, $index) = @_;                   # Tree descriptor, arena address, start node, key to find, last comparison result variable, offset of last node found, index within last node found
+  @_ == 7 or confess "7 parameters";
   my $W = $t->width;                                                            # Width of keys and data
 
   my $s = Subroutine
@@ -5661,7 +5663,8 @@ sub Nasm::X86::Tree::findAndSplit($@)                                           
 
     ForEver                                                                     # Step down through tree
      {my ($start, $end) = @_;                                                   # Parameters
-      $t->getKeysDataNode($tree, $zmmKeys, $zmmData, $zmmNode, $transfer,$work);# Get the keys/data/nodes block
+      $t->getKeysDataNode($B, $tree, $zmmKeys, $zmmData, $zmmNode,              # Get the keys/data/nodes block
+                          $transfer, $work);
       my $node = getDFromZmm $zmmNode, 0, $transfer;                            # First element of node block, which will be zero if we are on a leaf
 
       my $l = $t->getLengthInKeys($zmmKeys);                                    # Length of the block
@@ -5711,21 +5714,23 @@ sub Nasm::X86::Tree::findAndSplit($@)                                           
 
     SetLabel $success;                                                          # Insert completed successfully
     PopZmm; PopR;
-   }  [qw(first key bs compare offset index)],
+   }  [qw(bs first key compare offset index)],
   name => 'Nasm::X86::Tree::findAndSplit';
 
-  $s->call($t->address, first => $t->first, @variables);
+  $s->call($bs, first => $first, key => $key, compare => $compare,
+    offset => $offset, index => $index);
  } # findAndSplit
 
-sub Nasm::X86::Tree::find($$)                                                   # Find a key in a tree and test whether the found data is a sub tree.  The results are held in the variables "found", "data", "subTree" addressed by the tree descriptor.
- {my ($t, $key) = @_;                                                           # Tree descriptor, key field to search for
-  @_ == 2 or confess;
+sub Nasm::X86::Tree::find($$;$$)                                                # Find a key in a tree and test whether the found data is a sub tree.  The results are held in the variables "found", "data", "subTree" addressed by the tree descriptor.
+ {my ($t, $key, $bs, $first) = @_;                                              # Tree descriptor, key field to search for, optional arena address, optional start node
+  @_ == 2 or @_ == 4 or confess "2 or 4 parameters";
   my $W = $t->width;                                                            # Width of keys and data
 
   my $s = Subroutine
    {my ($p) = @_;                                                               # Parameters
     my $success = Label;                                                        # Short circuit if ladders by jumping directly to the end after a successful push
 
+    my $B = $$p{bs};                                                            # First keys block
     my $F = $$p{first};                                                         # First keys block
     my $K = $$p{key};                                                           # Key to find
 
@@ -5746,7 +5751,9 @@ sub Nasm::X86::Tree::find($$)                                                   
     K(loop, 99)->for(sub                                                        # Step down through tree
      {my ($index, $start, $next, $end) = @_;
 
-      $t->getKeysDataNode($tree, $zmmKeys, $zmmData, $zmmNode, $transfer,$work);# Get the keys block
+      $t->getKeysDataNode($B, $tree, $zmmKeys, $zmmData, $zmmNode,              # Get the keys block
+        $transfer, $work);
+
       my $l = $t->getLengthInKeys($zmmKeys);                                    # Length of the block
       If ($l == 0,
       Then                                                                      # Empty tree so we have not found the key
@@ -5790,10 +5797,11 @@ sub Nasm::X86::Tree::find($$)                                                   
 
     SetLabel $success;                                                          # Insert completed successfully
     PopZmm; PopR;
-   } [qw(first key data found data subTree)], name => 'Nasm::X86::Tree::find';
+   } [qw(bs first key data found data subTree)], name => 'Nasm::X86::Tree::find';
 
-  $s->call(first => $t->first, key => $key, data => $t->data,
-           found => $t->found, subTree => $t->subTree);
+  $s->call(bs => ($bs // $t->address), first => ($first // $t->first),
+    key   => $key,      data    => $t->data,
+    found => $t->found, subTree => $t->subTree);
  } # find
 
 sub Nasm::X86::Tree::findAndClone($$)                                           # Find a key in the specified tree and clone it is it is a sub tree.
@@ -5810,7 +5818,6 @@ sub Nasm::X86::Tree::findAndClone($$)                                           
 sub Nasm::X86::Tree::insertDataOrTree($$$$)                                     # Insert either a key, data pair into the tree or create a sub tree at the specified key (if it does not already exist) and return the offset of the first block of the sub tree in the data variable.
  {my ($t, $tnd, $key, $data) = @_;                                              # Tree descriptor, 0 - data or 1 - tree, key as a dword, data as a dword
   @_ >= 2 or confess;
-  my $b = $t->bs;                                                               # Underlying arena
   my $W = RegisterSize zmm0;                                                    # The size of a block
 
   my $s = Subroutine
@@ -5826,8 +5833,7 @@ sub Nasm::X86::Tree::insertDataOrTree($$$$)                                     
     my $transfer =  r8;                                                         # Use this register to transfer data between zmm blocks and variables
     my $work     =  r9;                                                         # Work register
     my $point    = r13;                                                         # Insertion indicator
-
-    $t->getKeysDataNode($F, 31, 30, 29, $transfer, $work);                      # Get the first block
+    $t->getKeysDataNode($B, $F, 31, 30, 29, $transfer, $work);                  # Get the first block
 
     my $l = $t->getLengthInKeys(31);                                            # Length of the block
     If ($l == 0,                                                                # Check for  empty tree.
@@ -5835,12 +5841,12 @@ sub Nasm::X86::Tree::insertDataOrTree($$$$)                                     
      {$K->putDIntoZmm    (31, 0, $transfer);                                    # Write key
       $t->putLengthInKeys(31, K(one, 1));                                       # Set the length of the block
       if ($tnd)                                                                 # Create and mark key as addressing a sub tree
-       {$D->copy($t->bs->CreateTree->first) if $tnd == 1;                       # Create sub tree in the same arena as parent tree if requested
+       {$D->copy($t->bs->CreateTree($B)->first) if $tnd == 1;                   # Create sub tree
         Mov r15, 1;                                                             # Indicate first position
         $t->setTree(r15,  31);                                                  # Mark this key as addressing a sub tree from the existing tree
        }
       $D->putDIntoZmm    (30,  0, $transfer);                                   # Write data
-      $t->putKeysData($F, 31, 30, $transfer, $work);                            # Write the data block back into the underlying arena
+      $t->putKeysData($B, $F, 31, 30, $transfer, $work);                        # Write the data block back into the underlying arena
       Jmp $success;                                                             # Insert completed successfully
      });
 
@@ -5870,7 +5876,7 @@ sub Nasm::X86::Tree::insertDataOrTree($$$$)                                     
          }
         $D->setReg(r14);                                                        # Key to search for
         Vpbroadcastd "zmm30{k6}", r14d;                                         # Load data
-        $t->putKeysData($F, 31, 30, $transfer, $work);                          # Write the data block back into the underlying arena
+        $t->putKeysData($B, $F, 31, 30, $transfer, $work);                      # Write the data block back into the underlying arena
         Jmp $success;                                                           # Insert completed successfully
        };
 
@@ -5911,7 +5917,7 @@ sub Nasm::X86::Tree::insertDataOrTree($$$$)                                     
         $t->putLoop($F, 29, $transfer);                                         # Set the link from node to key
        };
 
-      $t->putKeysDataNode($F, 31, 30, 29, $transfer, $work);                    # Write the data block back into the underlying arena
+      $t->putKeysDataNode($B, $F, 31, 30, 29, $transfer, $work);                # Write the data block back into the underlying arena
       $t->splitNode($B, $F, $K);                                                # Split if the leaf has got too big
       Jmp $success;                                                             # Insert completed successfully
      });
@@ -5920,15 +5926,16 @@ sub Nasm::X86::Tree::insertDataOrTree($$$$)                                     
     my $offset  = V(offset);                                                    # Offset of result
     my $index   = V('index');                                                   # Index of result
 
-    $t->findAndSplit($K, $compare, $offset, $index);                            # Find block that should contain key
-    $t->getKeysDataNode($offset, 31, 30, 29, $transfer, $work);
+    $t->findAndSplit($B, $F, $K, $compare, $offset, $index);                    # Find block that should contain key
+
+    $t->getKeysDataNode($B, $offset, 31, 30, 29, $transfer, $work);
     Mov $point, 0;
     $index->setBit($point);                                                     # Set point at the index
 
     If $compare == 0,                                                           # Duplicate key
     Then                                                                        # Found an equal key so update the data
      {$D->putDIntoZmm(30, $index * $t->width, $transfer);                       # Update data at key
-      $t->putKeysDataNode($offset, 31, 30, 29, $transfer, $work);               # Rewrite data and keys
+      $t->putKeysDataNode($B, $offset, 31, 30, 29, $transfer, $work);           # Rewrite data and keys
       $t->setOrClearTree($tnd, $point, 31);                                     # Set or clear tree bit as necessary
      },
     Else                                                                        # We have room for the insert because each block has been split to make it non full
@@ -5960,7 +5967,7 @@ sub Nasm::X86::Tree::insertDataOrTree($$$$)                                     
       $D->setReg(r14);                                                          # Corresponding data
       Vpbroadcastd "zmm30{k7}", r14d;                                           # Load data
       $t->putLengthInKeys(31, $length + 1);                                     # Set the new length of the block
-      $t->putKeysDataNode($offset, 31, 30, 29, $transfer, $work);               # Rewrite data and keys
+      $t->putKeysDataNode($B, $offset, 31, 30, 29, $transfer, $work);           # Rewrite data and keys
       $t->splitNode($B, $offset, $K);                                           # Split if the leaf has got too big
      };
 
@@ -6007,51 +6014,51 @@ sub Nasm::X86::Tree::insertTreeAndClone($$)                                     
   $t->first->copy($t->data);                                                    # Copy the data variable to the first variable without checking whether it is valid
  }
 
-sub Nasm::X86::Tree::getKeysData($$$$;$$)                                       #P Load the keys and data blocks for a node.
- {my ($t, $offset, $zmmKeys, $zmmData, $work1, $work2) = @_;                    # Tree descriptor, offset as a variable, numbered zmm for keys, numbered data for keys, optional first work register, optional second work register
-  @_ == 4 or @_ == 6 or confess;
-  $t->bs->getBlock($t->address, $offset, $zmmKeys, $work1, $work2);             # Get the keys block
-  my $data = $t->getLoop($zmmKeys, $work1);                                     # Get the offset of the corresponding data block
-  $t->bs->getBlock($t->address, $data,   $zmmData, $work1, $work2);             # Get the data block
- }
-
-sub Nasm::X86::Tree::putKeysData($$$$;$$)                                       #P Save the key and data blocks for a node.
- {my ($t, $offset, $zmmKeys, $zmmData, $work1, $work2) = @_;                    # Tree descriptor, offset as a variable, numbered zmm for keys, numbered data for keys, optional first work register, optional second work register
-  @_ == 4 or @_ == 6 or confess;
-  $t->bs->putBlock($t->address, $offset, $zmmKeys, $work1, $work2);             # Put the keys block
-  my $data = $t->getLoop($zmmKeys, $work1);                                     # Get the offset of the corresponding data block
-  $t->bs->putBlock($t->address, $data, $zmmData, $work1, $work2);               # Put the data block
- }
-
-sub Nasm::X86::Tree::getKeysDataNode($$$$$;$$)                                  #P Load the keys, data and child nodes for a node.
- {my ($t, $offset, $zmmKeys, $zmmData, $zmmNode, $work1, $work2) = @_;          # Tree descriptor, offset as a variable, numbered zmm for keys, numbered data for keys, numbered numbered for keys, optional first work register, optional second work register
+sub Nasm::X86::Tree::getKeysData($$$$$;$$)                                      #P Load the keys and data blocks for a node.
+ {my ($t, $bs, $offset, $zmmKeys, $zmmData, $work1, $work2) = @_;               # Tree descriptor, offset as a variable, numbered zmm for keys, numbered data for keys, optional first work register, optional second work register
   @_ == 5 or @_ == 7 or confess;
+  $t->bs->getBlock($bs, $offset, $zmmKeys, $work1, $work2);                     # Get the keys block
+  my $data = $t->getLoop($zmmKeys, $work1);                                     # Get the offset of the corresponding data block
+  $t->bs->getBlock($bs, $data,   $zmmData, $work1, $work2);                     # Get the data block
+ }
+
+sub Nasm::X86::Tree::putKeysData($$$$$;$$)                                      #P Save the key and data blocks for a node.
+ {my ($t, $bs, $offset, $zmmKeys, $zmmData, $work1, $work2) = @_;               # Tree descriptor, arena address,  offset as a variable, numbered zmm for keys, numbered data for keys, optional first work register, optional second work register
+  @_ == 4 or @_ == 7 or confess "5 or 7 parameters";
+  $t->bs->putBlock($bs, $offset, $zmmKeys, $work1, $work2);                     # Put the keys block
+  my $data = $t->getLoop($zmmKeys, $work1);                                     # Get the offset of the corresponding data block
+  $t->bs->putBlock($bs, $data,   $zmmData, $work1, $work2);                     # Put the data block
+ }
+
+sub Nasm::X86::Tree::getKeysDataNode($$$$$$;$$)                                 #P Load the keys, data and child nodes for a node.
+ {my ($t, $bs, $offset, $zmmKeys, $zmmData, $zmmNode, $work1, $work2) = @_;     # Tree descriptor, arena address, offset as a variable, numbered zmm for keys, numbered data for keys, numbered numbered for keys, optional first work register, optional second work register
+  @_ == 6 or @_ == 8 or confess;
   ref($offset) && ref($offset) =~ m(variable)i or
     confess "Variable required for offset";
   my $b = $t->bs;                                                               # Underlying arena
 
-  $b->getBlock($b->bs, $offset, $zmmKeys, $work1, $work2);                      # Get the keys block
+  $b->getBlock($bs, $offset, $zmmKeys, $work1, $work2);                         # Get the keys block
   my $data = $t->getLoop($zmmKeys, $work1, $work2);                             # Get the offset of the corresponding data block
-  $b->getBlock($b->bs, $data, $zmmData, $work1, $work2);                        # Get the data block
+  $b->getBlock($bs, $data, $zmmData, $work1, $work2);                           # Get the data block
 
   my $node = $t->getLoop($zmmData, $work1, $work2);                             # Get the offset of the corresponding node block
   If ($node,
   Then                                                                          # Check for optional node block
-   {$b->getBlock($b->bs, $node, $zmmNode, $work1, $work2);                      # Get the node block
+   {$b->getBlock($bs, $node, $zmmNode, $work1, $work2);                         # Get the node block
    },
   Else                                                                          # No children
    {ClearRegisters zmm $zmmNode;                                                # Clear the child block to signal that there was not one - if there were it would have child nodes in it which would be none zero
    });
  }
 
-sub Nasm::X86::Tree::putKeysDataNode($$$$$;$$)                                  #P Save the keys, data and child nodes for a node.
- {my ($t, $offset, $zmmKeys, $zmmData, $zmmNode, $work1, $work2) = @_;          # Tree descriptor, offset as a variable, numbered zmm for keys, numbered data for keys, numbered numbered for keys, optional first work register, optional second work register
-  @_ == 5 or @_ == 7 or confess;
-  $t->putKeysData($offset, $zmmKeys, $zmmData, $work1, $work2);                 # Put keys and data
+sub Nasm::X86::Tree::putKeysDataNode($$$$$$;$$)                                 #P Save the keys, data and child nodes for a node.
+ {my ($t, $bs, $offset, $zmmKeys, $zmmData, $zmmNode, $work1, $work2) = @_;     # Tree descriptor, arena address, offset as a variable, numbered zmm for keys, numbered data for keys, numbered numbered for keys, optional first work register, optional second work register
+  @_ == 6 or @_ == 8 or confess " 6 or 8 parameters";
+  $t->putKeysData($bs, $offset, $zmmKeys, $zmmData, $work1, $work2);            # Put keys and data
   my $node = $t->getLoop($zmmData, $work1);                                     # Get the offset of the corresponding node block
   If ($node,
   Then                                                                          # Check for optional node block
-   {$t->bs->putBlock($t->address, $node, $zmmNode, $work1, $work2);             # Put the node block
+   {$t->bs->putBlock($bs, $node, $zmmNode, $work1, $work2);                     # Put the node block
    });
  }
 
@@ -6094,21 +6101,21 @@ sub Nasm::X86::Tree::putLoop($$$;$)                                             
   $value->putDIntoZmm($zmm, $t->loop, $transfer);                               # Put loop field as a variable
  }
 
-sub Nasm::X86::Tree::leftOrRightMost($$@)                                       # Return the left most or right most node.
- {my ($t, $dir, @variables) = @_;                                               # Tree descriptor, direction: left = 0 or right = 1, variables
-  @_ >= 1 or confess;
-  my $success = Label;                                                          # Short circuit if ladders by jumping directly to the end after a successful push
-  my $b = $t->bs;                                                               # Underlying arena
+sub Nasm::X86::Tree::leftOrRightMost($$$$$)                                      # Return the offset of the left most or right most node.
+ {my ($t, $dir, $bs, $node, $offset) = @_;                                               # Tree descriptor, direction: left = 0 or right = 1, arena address, start node
+  @_ == 5 or confess;
 
   my $s = Subroutine
    {my ($p) = @_;                                                               # Parameters
+    my $success = Label;                                                        # Short circuit if ladders by jumping directly to the end after a successful push
 
+    my $B = $$p{bs};                                                            # Arena address
     my $F = $$p{node};                                                          # First block
     PushR rax, r8, r9; PushZmm 29..31;
 
     K(loopLimit, 9)->for(sub                                                    # Loop a reasonable number of times
      {my ($index, $start, $next, $end) = @_;
-      $t->getKeysDataNode($F, 31, 30, 29, r8, r9);                              # Get the first keys block
+      $t->getKeysDataNode($B, $F, 31, 30, 29, r8, r9);                          # Get the first keys block
       my $n = getDFromZmm 29, 0, r8;                                            # Get the node block offset from the data block loop
       If ($n == 0,
       Then                                                                      # Reached the end so return the containing block
@@ -6130,20 +6137,21 @@ sub Nasm::X86::Tree::leftOrRightMost($$@)                                       
 
     SetLabel $success;                                                          # Insert completed successfully
     PushZmm; PopR;
-   } [qw(node  offset )],
+   } [qw(bs node offset )],
    name => $dir==0 ? "Nasm::X86::Tree::leftMost" : "Nasm::X86::Tree::rightMost";
 
-  $s->call(@variables);
+  $s->call($bs, node => $node, offset=>$offset);
  }
 
-sub Nasm::X86::Tree::leftMost($@)                                               # Return the left most node.
- {my ($t, @variables) = @_;                                                     # Tree descriptor, variables
-  $t->leftOrRightMost(0, @variables)                                            # Return the left most node
+sub Nasm::X86::Tree::leftMost($$$$)                                             # Return the offset of the left most node from the specified node.
+ {my ($t, $bs, $node, $offset) = @_;                                            # Tree descriptor, arena address, start node, returned offset
+  @_ == 4 or confess;
+  $t->leftOrRightMost(0, $bs, $node, $offset)                                   # Return the left most node
  }
 
-sub Nasm::X86::Tree::rightMost($@)                                              # Return the right most node.
- {my ($t,  @variables) = @_;                                                    # Tree descriptor, variables
-  $t->leftOrRightMost(1, @variables)                                            # Return the right most node
+sub Nasm::X86::Tree::rightMost($$$$)                                            # Return the offset of the left most node from the specified node.
+ {my ($t, $bs, $node, $offset) = @_;                                            # Tree descriptor, arena address, start node, returned offset
+  $t->leftOrRightMost(1, $bs, $node, $offset)                                   # Return the right most node
  }
 
 sub Nasm::X86::Tree::nodeFromData($$$)                                          #P Load the the node block into the numbered zmm corresponding to the data block held in the numbered zmm.
@@ -6166,38 +6174,39 @@ sub Nasm::X86::Tree::allocBlock($$@)                                            
   $t->bs->allocBlock($bs);                                                      # Allocate a block and return its offset as a variable
  }
 
-sub Nasm::X86::Tree::depth($@)                                                  # Return the depth of a node within a tree.
- {my ($t, @variables) = @_;                                                     # Tree descriptor, variables
-  @_ >= 2 or confess;
+sub Nasm::X86::Tree::depth($$$$)                                                # Return the depth of a node within a tree.
+ {my ($t, $bs, $node, $depth) = @_;                                             # Tree descriptor, arena address, node, return depth
+  @_ == 4 or confess "4 parameters required";
 
   my $s = Subroutine
-   {my ($parameters) = @_;                                                      # Parameters
+   {my ($p) = @_;                                                               # Parameters
     my $success = Label;                                                        # Short circuit if ladders by jumping directly to the end after a successful push
 
-    my $N = $$parameters{node};                                                 # Starting node
+    my $B = $$p{bs};                                                            # Arena address
+    my $N = $$p{node};                                                          # Starting node
 
     PushR r8, r9, r14, r15, zmm30, zmm31;
     my $tree = V(tree)->copy($N);                                               # Start at the specified node
 
     K(loop, 9)->for(sub                                                         # Step up through tree
      {my ($index, $start, $next, $end) = @_;
-      $t->getKeysData($tree, 31, 30, r8, r9);                                   # Get the keys block
-      my $p = $t->getUpFromData(30, r8);                                        # Parent
-      If ($p == 0,
+      $t->getKeysData($B, $tree, 31, 30, r8, r9);                               # Get the keys block
+      my $P = $t->getUpFromData(30, r8);                                        # Parent
+      If ($P == 0,
       Then                                                                      # Empty tree so we have not found the key
-       {$$parameters{depth}->copy($index+1);                                    # Key not found
+       {$$p{depth}->copy($index+1);                                             # Key not found
         Jmp $success;                                                           # Return
        });
-      $tree->copy($p);                                                          # Up to next level
+      $tree->copy($P);                                                          # Up to next level
      });
     PrintErrStringNL "Stuck in depth";                                          # We seem to be looping endlessly
     Exit(1);
 
     SetLabel $success;                                                          # Insert completed successfully
     PopR;
-   }  [qw(node depth)], name => 'Nasm::X86::Tree::allocBlock';
+   }  [qw(bs node depth)], name => 'Nasm::X86::Tree::allocBlock';
 
-  $s->call(@variables);
+  $s->call($t->address, node => $node, depth => $depth);
  } # depth
 
 #D2 Sub trees                                                                   # Construct trees of trees.
@@ -6298,7 +6307,7 @@ sub Nasm::X86::Tree::print($)                                                   
 
     $t->by(sub                                                                  # Iterate through the tree
      {my ($iter, $end) = @_;
-      $iter->tree->depth($iter->node, my $D = V(depth));
+      $iter->tree->depth($$p{bs}, $iter->node, my $D = V(depth));
       $iter->key ->out('key: ');
       $iter->data->out(' data: ');
       $D   ->outNL    (' depth: ');
@@ -6307,7 +6316,22 @@ sub Nasm::X86::Tree::print($)                                                   
       Then
        {$s->call($$p{bs}, first => $t->data);
        });
-     }, $$p{first});
+     }, $$p{bs}, $$p{first});
+   } [qw(bs first)], name => "Nasm::X86::Tree::print";
+
+  $s->call($t->address, $t->first);
+ }
+
+sub Nasm::X86::Tree::dump($)                                                    # Dump a tree.
+ {my ($t) = @_;                                                                 # Tree
+  @_ == 1 or confess;
+
+  my $s = Subroutine                                                            # Print a tree
+   {my ($p, $s) = @_;                                                           # Parameters, sub definition
+
+    PushZmm 29..31; PushR r14, r15;
+    PrintOutString "Tree at: "; $$p{first}->outNL(' ');
+#    $t->getKeysDataNode
 
    } [qw(bs first)], name => "Nasm::X86::Tree::print";
 
@@ -6316,16 +6340,16 @@ sub Nasm::X86::Tree::print($)                                                   
 
 #D2 Iteration                                                                   # Iterate through a tree non recursively
 
-sub Nasm::X86::Tree::iterator($;$)                                              # Iterate through a multi way tree starting either at the specified node or the first node of the specified tree.
- {my ($t, $first) = @_;                                                         # Tree, optionally the node to start at else the first node of the supplied tree will be used
-  @_ == 1 or @_ == 2 or confess;
+sub Nasm::X86::Tree::iterator($;$$)                                             # Iterate through a multi way tree starting either at the specified node or the first node of the specified tree.
+ {my ($t, $bs, $first) = @_;                                                    # Tree, optionally the node to start at else the first node of the supplied tree will be used
+  @_ == 1 or @_ == 3 or confess "1 or 3 parameters";
   Comment "Nasm::X86::Tree::iterator";
 
-  my $node = V(node)->copy($first // $t->first);                                # Start at the specified node or else the first node in the tree
 
   my $i = genHash(__PACKAGE__.'::Tree::Iterator',                               # Iterator
     tree  => $t,                                                                # Tree we are iterating over
-    node  => $node,                                                             # Current node within tree
+    bs    => V(bs),                                                             # Arena containing tree
+    node  => V(node),                                                           # Current node within tree
     pos   => V('pos'),                                                          # Current position within node
     key   => V(key),                                                            # Key at this position
     data  => V(data),                                                           # Data at this position
@@ -6333,6 +6357,8 @@ sub Nasm::X86::Tree::iterator($;$)                                              
     more  => V(more),                                                           # Iteration not yet finished
    );
 
+  $i->bs   ->copy($bs // $t->address);                                          # Arena containing nodes of tree
+  $i->node ->copy($first // $t->first);                                         # Start at the specified node or else the first node in the tree
   $i->pos  ->copy(K('pos', -1));                                                # Initialize iterator
   $i->count->copy(K(count,  0));
   $i->more ->copy(K(more,   1));
@@ -6348,6 +6374,7 @@ sub Nasm::X86::Tree::Iterator::next($)                                          
    {my ($p) = @_;                                                               # Parameters
     my $success = Label;                                                        # Short circuit if ladders by jumping directly to the end after a successful push
 
+    my $B = $$p{bs};                                                            # Arena address
     my $C = $$p{node};                                                          # Current node required
     $$p{count} = $$p{count} + 1;                                                # Count the calls to the iterator
 
@@ -6356,7 +6383,7 @@ sub Nasm::X86::Tree::Iterator::next($)                                          
       PushR r8, r9; PushZmm 29..31;
       $$p{node}->copy($node);                                                   # Set current node
       $$p{pos} ->copy($pos);                                                    # Set current position in node
-      $iter->tree->getKeysData($node, 31, 30, r8, r9);                          # Load keys and data
+      $iter->tree->getKeysData($B, $node, 31, 30, r8, r9);                      # Load keys and data
 
       my $offset = $pos * $iter->tree->width;                                   # Load key and data
       $$p{key} ->copy(getDFromZmm 31, $offset, r8);
@@ -6376,12 +6403,12 @@ sub Nasm::X86::Tree::Iterator::next($)                                          
      {my $t = $iter->tree;
 
       PushR r8, r9; PushZmm 29..31;
-      $t->getKeysDataNode($C, 31, 30, 29, r8, r9);                              # Load keys and data
+      $t->getKeysDataNode($B, $C, 31, 30, 29, r8, r9);                          # Load keys and data
       my $nodes = $t->getLoop(30, r8);                                          # Nodes
 
       If ($nodes,
       Then                                                                      # Go left if there are child nodes
-       {$t->leftMost($C, my $l = V(offset));
+       {$t->leftMost($B, $C, my $l = V(offset));
         &$new($l, K(zero, 0));
        },
       Else
@@ -6409,10 +6436,10 @@ sub Nasm::X86::Tree::Iterator::next($)                                          
 
       ForEver                                                                   # Up through the tree
        {my ($start, $end) = @_;                                                 # Parameters
-        $t->getKeysData($n, $zmmNK, $zmmND, r8, r9);                            # Load keys and data for current node
+        $t->getKeysData($B, $n, $zmmNK, $zmmND, r8, r9);                        # Load keys and data for current node
         my $p = $t->getUpFromData($zmmND, r8);
         If ($p == 0, sub{Jmp $end});                                            # Jump to the end if we have reached the top of the tree
-        $t->getKeysDataNode($p, $zmmPK, $zmmPD, $zmmPN, r8, r9);                # Load keys, data and children nodes for parent which must have children
+        $t->getKeysDataNode($B, $p, $zmmPK, $zmmPD, $zmmPN, r8, r9);            # Load keys, data and children nodes for parent which must have children
         $n->setReg(r15);                                                        # Offset of child
         Vpbroadcastd "zmm".$zmmTest, r15d;                                      # Current node broadcasted
         Vpcmpud k7, "zmm".$zmmPN, "zmm".$zmmTest, 0;                            # Check for equal offset - one of them will match to create the single insertion point in k6
@@ -6436,8 +6463,9 @@ sub Nasm::X86::Tree::Iterator::next($)                                          
 
     $$p{pos}->copy(my $i = $$p{pos} + 1);                                       # Next position in block being scanned
     PushR r8, r9; PushZmm 29..31;
-    $iter->tree->getKeysDataNode($C, 31, 30, 29, r8, r9);                       # Load keys and data
-    my $l = $iter->tree->getLengthInKeys(31);                                   # Length of keys
+    my $t = $iter->tree;
+    $t->getKeysDataNode($B, $C, 31, 30, 29, r8, r9);                            # Load keys and data
+    my $l = $t->getLengthInKeys(31);                                            # Length of keys
     my $n = getDFromZmm 29, 0, r8;                                              # First node will ne zero if on a leaf
     If ($n == 0,
     Then                                                                        # Leaf
@@ -6451,25 +6479,26 @@ sub Nasm::X86::Tree::Iterator::next($)                                          
      },
     Then                                                                        # Node
      {my $offsetAtI = getDFromZmm 29, $i * $iter->tree->width, r8;
-      $iter->tree->leftMost(node=>$offsetAtI, my $l = V(offset));
+      $iter->tree->leftMost($B, $offsetAtI, my $l = V(offset));
       &$new($l, K(zero, 0));
      });
 
     PopZmm; PopR;
     SetLabel $success;
-   }  [qw(node pos key data count more)],
+   }  [qw(bs node pos key data count more)],
       name => 'Nasm::X86::Tree::Iterator::next ';
 
-  $s->call($iter->node, $iter->pos,   $iter->key,                               # Call with iterator variables
+  $s->call($iter->bs,
+           $iter->node, $iter->pos,   $iter->key,                               # Call with iterator variables
            $iter->data, $iter->count, $iter->more);
   $iter                                                                         # Return the iterator
  }
 
-sub Nasm::X86::Tree::by($&;$)                                                   # Call the specified body with each (key, data) from the specified tree in order.
- {my ($t, $body, $first) = @_;                                                  # Tree descriptor, body to execute, first node offset if not the root of the tree provided
-  @_ == 2 or  @_ == 3 or confess;
+sub Nasm::X86::Tree::by($&;$$)                                                  # Call the specified body with each (key, data) from the specified tree in order.
+ {my ($t, $body, $bs, $first) = @_;                                             # Tree descriptor, body to execute, arena address if not the one associated with the tree descriptor, first node offset if not the root of the tree provided
+  @_ == 2 or  @_ == 4 or confess "2 or 4 parameters";
 
-  my $iter = $t->iterator($first);                                              # Create an iterator
+  my $iter = $t->iterator($bs, $first);                                         # Create an iterator
   my $start = SetLabel Label; my $end = Label;                                  # Start and end of loop
   If ($iter->more == 0, sub {Jmp $end});                                        # Jump to end if there are no more elements to process
   &$body($iter, $end);                                                          # Perform the body parameterized by the iterator and the end label
@@ -18588,19 +18617,19 @@ if (1) {
     $t->insert($k, $d);
    });
 
-  $t->getKeysDataNode($t->first, 31, 30, 29);
+  $t->getKeysDataNode($b->bs, $t->first, 31, 30, 29);
   PrintOutStringNL "Root"; $t->first->outNL('First: ');
   PrintOutRegisterInHex zmm31, zmm30, zmm29;
 
-  $t->getKeysDataNode(V(offset, 0xd8), 28,27,26);
+  $t->getKeysDataNode($b->bs, V(offset, 0xd8), 28,27,26);
   PrintOutStringNL "Left";
   PrintOutRegisterInHex zmm28, zmm27, zmm26;
 
-  $t->getKeysDataNode(V(offset, 0x258), 28,27,26);
+  $t->getKeysDataNode($b->bs, V(offset, 0x258), 28,27,26);
   PrintOutStringNL "Left";
   PrintOutRegisterInHex zmm28, zmm27, zmm26;
 
-  $t->getKeysDataNode(V(offset, 0x198), 28,27,26);
+  $t->getKeysDataNode($b->bs, V(offset, 0x198), 28,27,26);
   PrintOutStringNL "Left";
   PrintOutRegisterInHex zmm28, zmm27, zmm26;
 
@@ -18846,27 +18875,27 @@ if (1) {
      }
    });
 
-  $t->getKeysDataNode($t->first, 31, 30, 29);
+  $t->getKeysDataNode($b->bs, $t->first, 31, 30, 29);
   PrintOutStringNL "Root"; $t->first->outNL('First: ');
   PrintOutRegisterInHex zmm31, zmm30, zmm29;
 
-  $t->getKeysDataNode(V(offset, 0x258), 28,27,26);
+  $t->getKeysDataNode($b->bs, V(offset, 0x258), 28,27,26);
   PrintOutStringNL "Left";
   PrintOutRegisterInHex zmm28, zmm27, zmm26;
 
-  $t->getKeysDataNode(V(offset, 0x3d8), 28,27,26);
+  $t->getKeysDataNode($b->bs, V(offset, 0x3d8), 28,27,26);
   PrintOutStringNL "Left";
   PrintOutRegisterInHex zmm28, zmm27, zmm26;
 
-  $t->getKeysDataNode(V(offset, 0x318), 28,27,26);
+  $t->getKeysDataNode($b->bs, V(offset, 0x318), 28,27,26);
   PrintOutStringNL "Left";
   PrintOutRegisterInHex zmm28, zmm27, zmm26;
 
-  $t->getKeysDataNode(V(offset, 0xd8), 28,27,26);
+  $t->getKeysDataNode($b->bs, V(offset, 0xd8), 28,27,26);
   PrintOutStringNL "Left";
   PrintOutRegisterInHex zmm28, zmm27, zmm26;
 
-  $t->getKeysDataNode(V(offset, 0x198), 28,27,26);
+  $t->getKeysDataNode($b->bs, V(offset, 0x198), 28,27,26);
   PrintOutStringNL "Left";
   PrintOutRegisterInHex zmm28, zmm27, zmm26;
 
@@ -18921,7 +18950,8 @@ if (1) {                                                                        
    {my ($iter, $end) = @_;
     $iter->key ->out('key: ');
     $iter->data->out(' data: ');
-    $iter->tree->depth($iter->node, my $D = V(depth));
+    my $D = V(depth);
+    $iter->tree->depth($t->address, $iter->node, $D);
 
     $t->find($iter->key);
     $t->found->out(' found: '); $t->data->out(' data: '); $D->outNL(' depth: ');
@@ -19031,38 +19061,55 @@ if (1) {                                                                        
 
   $L->for(sub
    {my ($i, $start, $next, $end) = @_;
-    $t->insert($i, $i);
-    $T->insert($i, $i);
+    $t->insert($i+0x11, K(data, 0xFF));
+    $T->insert($i+0x22, K(data, 0xDD));
    });
+
+  $b->dump;
+  $B->dump;
 
   $t->print;
   $T->print;
 
   ok Assemble(debug => 0, eq => <<END);
+Arena
+  Size: 0000 0000 0000 1000
+  Used: 0000 0000 0000 0098
+0000: 0010 0000 0000 00009800 0000 0000 00000000 0000 0000 00001100 0000 1200 00001300 0000 1400 00001500 0000 1600 00001700 0000 1800 00001900 0000 1A00 0000
+0040: 1B00 0000 0000 00000000 0000 0000 00000B00 0000 5800 0000FF00 0000 FF00 0000FF00 0000 FF00 0000FF00 0000 FF00 0000FF00 0000 FF00 0000FF00 0000 FF00 0000
+0080: FF00 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+00C0: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+Arena
+  Size: 0000 0000 0000 1000
+  Used: 0000 0000 0000 0098
+0000: 0010 0000 0000 00009800 0000 0000 00000000 0000 0000 00002200 0000 2300 00002400 0000 2500 00002600 0000 2700 00002800 0000 2900 00002A00 0000 2B00 0000
+0040: 2C00 0000 0000 00000000 0000 0000 00000B00 0000 5800 0000DD00 0000 DD00 0000DD00 0000 DD00 0000DD00 0000 DD00 0000DD00 0000 DD00 0000DD00 0000 DD00 0000
+0080: DD00 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+00C0: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
 Tree at:  0000 0000 0000 0018
-key: 0000 0000 0000 0000 data: 0000 0000 0000 0000 depth: 0000 0000 0000 0001
-key: 0000 0000 0000 0001 data: 0000 0000 0000 0001 depth: 0000 0000 0000 0001
-key: 0000 0000 0000 0002 data: 0000 0000 0000 0002 depth: 0000 0000 0000 0001
-key: 0000 0000 0000 0003 data: 0000 0000 0000 0003 depth: 0000 0000 0000 0001
-key: 0000 0000 0000 0004 data: 0000 0000 0000 0004 depth: 0000 0000 0000 0001
-key: 0000 0000 0000 0005 data: 0000 0000 0000 0005 depth: 0000 0000 0000 0001
-key: 0000 0000 0000 0006 data: 0000 0000 0000 0006 depth: 0000 0000 0000 0001
-key: 0000 0000 0000 0007 data: 0000 0000 0000 0007 depth: 0000 0000 0000 0001
-key: 0000 0000 0000 0008 data: 0000 0000 0000 0008 depth: 0000 0000 0000 0001
-key: 0000 0000 0000 0009 data: 0000 0000 0000 0009 depth: 0000 0000 0000 0001
-key: 0000 0000 0000 000A data: 0000 0000 0000 000A depth: 0000 0000 0000 0001
+key: 0000 0000 0000 0011 data: 0000 0000 0000 00FF depth: 0000 0000 0000 0001
+key: 0000 0000 0000 0012 data: 0000 0000 0000 00FF depth: 0000 0000 0000 0001
+key: 0000 0000 0000 0013 data: 0000 0000 0000 00FF depth: 0000 0000 0000 0001
+key: 0000 0000 0000 0014 data: 0000 0000 0000 00FF depth: 0000 0000 0000 0001
+key: 0000 0000 0000 0015 data: 0000 0000 0000 00FF depth: 0000 0000 0000 0001
+key: 0000 0000 0000 0016 data: 0000 0000 0000 00FF depth: 0000 0000 0000 0001
+key: 0000 0000 0000 0017 data: 0000 0000 0000 00FF depth: 0000 0000 0000 0001
+key: 0000 0000 0000 0018 data: 0000 0000 0000 00FF depth: 0000 0000 0000 0001
+key: 0000 0000 0000 0019 data: 0000 0000 0000 00FF depth: 0000 0000 0000 0001
+key: 0000 0000 0000 001A data: 0000 0000 0000 00FF depth: 0000 0000 0000 0001
+key: 0000 0000 0000 001B data: 0000 0000 0000 00FF depth: 0000 0000 0000 0001
 Tree at:  0000 0000 0000 0018
-key: 0000 0000 0000 0000 data: 0000 0000 0000 0000 depth: 0000 0000 0000 0001
-key: 0000 0000 0000 0001 data: 0000 0000 0000 0001 depth: 0000 0000 0000 0001
-key: 0000 0000 0000 0002 data: 0000 0000 0000 0002 depth: 0000 0000 0000 0001
-key: 0000 0000 0000 0003 data: 0000 0000 0000 0003 depth: 0000 0000 0000 0001
-key: 0000 0000 0000 0004 data: 0000 0000 0000 0004 depth: 0000 0000 0000 0001
-key: 0000 0000 0000 0005 data: 0000 0000 0000 0005 depth: 0000 0000 0000 0001
-key: 0000 0000 0000 0006 data: 0000 0000 0000 0006 depth: 0000 0000 0000 0001
-key: 0000 0000 0000 0007 data: 0000 0000 0000 0007 depth: 0000 0000 0000 0001
-key: 0000 0000 0000 0008 data: 0000 0000 0000 0008 depth: 0000 0000 0000 0001
-key: 0000 0000 0000 0009 data: 0000 0000 0000 0009 depth: 0000 0000 0000 0001
-key: 0000 0000 0000 000A data: 0000 0000 0000 000A depth: 0000 0000 0000 0001
+key: 0000 0000 0000 0022 data: 0000 0000 0000 00DD depth: 0000 0000 0000 0001
+key: 0000 0000 0000 0023 data: 0000 0000 0000 00DD depth: 0000 0000 0000 0001
+key: 0000 0000 0000 0024 data: 0000 0000 0000 00DD depth: 0000 0000 0000 0001
+key: 0000 0000 0000 0025 data: 0000 0000 0000 00DD depth: 0000 0000 0000 0001
+key: 0000 0000 0000 0026 data: 0000 0000 0000 00DD depth: 0000 0000 0000 0001
+key: 0000 0000 0000 0027 data: 0000 0000 0000 00DD depth: 0000 0000 0000 0001
+key: 0000 0000 0000 0028 data: 0000 0000 0000 00DD depth: 0000 0000 0000 0001
+key: 0000 0000 0000 0029 data: 0000 0000 0000 00DD depth: 0000 0000 0000 0001
+key: 0000 0000 0000 002A data: 0000 0000 0000 00DD depth: 0000 0000 0000 0001
+key: 0000 0000 0000 002B data: 0000 0000 0000 00DD depth: 0000 0000 0000 0001
+key: 0000 0000 0000 002C data: 0000 0000 0000 00DD depth: 0000 0000 0000 0001
 END
  }
 
@@ -19159,6 +19206,14 @@ END
  }
 
 #latest:
+if (1) {                                                                        # Performance
+  my $d = V(byte)->getDFromZmm(31, 0, r8);
+
+  ok Assemble(debug => 0, eq => <<END);
+END
+ }
+
+#latest:
 if (1) {                                                                        # Performance of tree inserts
 # Time: 1.18s, bytes: 156,672, execs: 51,659
 # Time: 0.62s, bytes: 156,240, execs: 49,499
@@ -19169,6 +19224,7 @@ if (1) {                                                                        
 # Time: 0.94s, bytes: 138,704, execs: 43,561
 # Time: 0.54s, bytes: 126,400, execs: 43,157
 # Time: 0.52s, bytes: 123,088, execs: 40,796
+# Time: 0.51s, bytes: 120,160, execs: 37,761
   my $L = V(loop, 45);
 
   my $b = CreateArena;
@@ -19178,15 +19234,6 @@ if (1) {                                                                        
    {my ($i, $start, $next, $end) = @_;
     $t->insert($i, $i);
    });
-
-  ok Assemble(debug => 0, eq => <<END);
-END
- }
-
-#latest:
-if (1) {                                                                        # Performance of tree inserts
-
-  my $d = V(byte)->getDFromZmm(31, 0, r8);
 
   ok Assemble(debug => 0, eq => <<END);
 END
@@ -19204,4 +19251,4 @@ unlink $_ for qw(hash print2 sde-log.txt sde-ptr-check.out.txt z.txt);          
 
 say STDERR sprintf("# Time: %.2fs, bytes: %s, execs: %s",
   time - $start,
-   map {numberWithCommas $_} totalBytesAssembled, $instructionsExecuted);
+  map {numberWithCommas $_} totalBytesAssembled, $instructionsExecuted);
