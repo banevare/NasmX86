@@ -4414,9 +4414,9 @@ sub Nasm::X86::String::dump($)                                                  
   $s->call($String->address, $String->first);
  }
 
-sub Nasm::X86::String::len($$)                                                  # Find the length of a string.
- {my ($String, $size) = @_;                                                     # String descriptor, size variable
-  @_ == 2 or confess;
+sub Nasm::X86::String::len($;$$)                                                # Find the length of a string.
+ {my ($String, $bs, $first) = @_;                                               # String descriptor, optional arena address, offset of first block
+  @_ == 1 or @_ == 3 or confess "1 or 3 parameters";
 
   my $s = Subroutine
    {my ($p) = @_;                                                               # Parameters
@@ -4437,7 +4437,10 @@ sub Nasm::X86::String::len($$)                                                  
     PopR;
    } [qw(first bs size)], name => 'Nasm::X86::String::len';
 
-  $s->call($String->address, $String->first, $size);
+  $s->call(($bs//$String->address), ($first//$String->first),
+    my $size = V(size));
+
+  $size
  }
 
 sub Nasm::X86::String::concatenate($$)                                          # Concatenate two strings by appending a copy of the source to the target string.
@@ -5027,6 +5030,32 @@ sub Nasm::X86::Array::pop($@)                                                   
    }  [qw(bs first element)], name => 'Nasm::X86::Array::pop';
 
   $s->call($Array->address, $Array->first, @variables);
+ }
+
+sub Nasm::X86::Array::size($;$$)                                                # Return the size of an array as a variable
+ {my ($Array, $bs, $first) = @_;                                                # Array descriptor, optional arena address, optional first block
+  @_ == 1 or @_ == 3 or confess "1 or 3 parameters";
+
+  my $s = Subroutine
+   {my ($p) = @_;                                                               # Parameters
+    my $success = Label;                                                        # Short circuit if ladders by jumping directly to the end after a successful push
+
+    my $B = $$p{bs};                                                            # Arena
+    my $F = $$p{first};                                                         # First block
+
+    PushR (r8, zmm31);
+    my $transfer = r8;                                                          # Transfer data from zmm to variable via this register
+    $Array->bs->getBlock($B, $F, 31);                                           # Get the first block
+    $$p{size}->copy(getDFromZmm(31, 0, $transfer));                             # Size of array
+
+    SetLabel $success;
+    PopR;
+   }  [qw(bs first size)], name => 'Nasm::X86::Array::size';
+
+  $s->call(bs    => ($bs//$Array->address),                                     # Get the size of the array
+           first => ($first//$Array->first), my $size = V(size));
+
+  $size                                                                         # Return size as a variable
  }
 
 sub Nasm::X86::Array::get($@)                                                   # Get an element from the array.
@@ -6873,14 +6902,15 @@ Nasm::X86 - Generate X86 assembler code using Perl as a macro pre-processor.
 
 =head1 Synopsis
 
-Write and execute x64 instructions using Perl as a macro assembler as shown in
-the following examples.
+Write and execute B<x64> B<Avx512> assembler code from Perl using Perl as a
+macro assembler.  The generated code can be run under the Intel emulator to
+obtain execution trace and instruction counts.
 
 =head2 Examples
 
 =head3 Avx512 instructions
 
-Use B<Avx512> instructions to perform B<64> comparisons in parallel:
+Use B<Avx512> instructions to perform B<64> comparisons in parallel.
 
   my $P = "2F";                                                                 # Value to test for
   my $l = Rb 0;  Rb $_ for 1..RegisterSize zmm0;                                # 0..63
@@ -6915,25 +6945,23 @@ Use B<Avx512> instructions to perform B<64> comparisons in parallel:
    rax: 0000 0000 0000 002F
 END
 
-=head3 Dynamic string held in an arena
+With the print statements removed, the Intel Emulator indicates that 26
+instructions were executed:
 
-Create a dynamic arena, add some content to it, write the arena to
-stdout:
+  CALL_NEAR                                                              1
+  ENTER                                                                  2
+  JMP                                                                    1
+  KMOVQ                                                                  1
+  MOV                                                                    5
+  POP                                                                    1
+  PUSH                                                                   3
+  SYSCALL                                                                1
+  TZCNT                                                                  1
+  VMOVDQU8                                                               1
+  VPBROADCASTB                                                           1
+  VPCMPUB                                                                8
 
-  my $a = CreateArena;                                                     # Create a string
-  my $b = CreateArena;                                                     # Create a string
-  $a->q('aa');
-  $b->q('bb');
-  $a->q('AA');
-  $b->q('BB');
-  $a->q('aa');
-  $b->q('bb');
-  $a->out;
-  $b->out;
-  PrintOutNL;
-  is_deeply Assemble, <<END;                                                    # Assemble and execute
-aaAAaabbBBbb
-END
+  *total                                                                26
 
 =head3 Process management
 
@@ -7001,7 +7029,98 @@ Call B<C> functions by naming them as external and including their library:
 Hello World
 END
 
-=head3 Create a multi way tree using SIMD instructions
+=head3 Dynamic arena
+
+Arenas are resizeable, relocatable blocks of memory that hold other dynamic
+data structures. Arenas can be transferred between processes and relocated as
+needed as all addressing is relative to the start of the block of memory
+containing eacharena.
+
+Create two dynamic arenas, add some content to them, write each arena to
+stdout:
+
+  my $a = CreateArena;
+
+  my $b = CreateArena;
+  $a->q('aa');
+  $b->q('bb');
+  $a->q('AA');
+  $b->q('BB');
+  $a->q('aa');
+  $b->q('bb');
+
+  $a->out;
+  $b->out;
+
+  PrintOutNL;
+
+  is_deeply Assemble, <<END;
+aaAAaabbBBbb
+END
+
+=head4 Dynamic string held in an arena
+
+Create a dynamic string within an arena and add some content to it:
+
+  my $s = Rb(0..255);
+  my $A = CreateArena;
+  my $S = $A->CreateString;
+
+  $S->append(V(source, $s), K(size, 256));
+  $S->len->outNL;
+  $S->clear;
+
+  $S->append(V(source, $s), K(size,  16));
+  $S->len->outNL;
+  $S->dump;
+
+  ok Assemble(debug => 0, eq => <<END);
+size: 0000 0000 0000 0100
+size: 0000 0000 0000 0010
+string Dump
+Offset: 0000 0000 0000 0018   Length: 0000 0000 0000 0010
+ zmm31: 0000 0018 0000 0018   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 000F   0E0D 0C0B 0A09 0807   0605 0403 0201 0010
+
+END
+
+=head4 Dynamic array held in an arena
+
+Create a dynamic array within an arena, push some content on to it then pop it
+off again:
+
+  my $N = 15;
+  my $A = CreateArena;
+  my $a = $A->CreateArray;
+
+  $a->push(V(element, $_)) for 1..$N;
+
+  K(loop, $N)->for(sub
+   {my ($start, $end, $next) = @_;
+    my $l = $a->size;
+    If $l == 0, Then {Jmp $end};
+    $a->pop(my $e = V(element));
+    $e->outNL;
+   });
+
+  ok Assemble(debug => 0, eq => <<END);
+element: 0000 0000 0000 000F
+element: 0000 0000 0000 000E
+element: 0000 0000 0000 000D
+element: 0000 0000 0000 000C
+element: 0000 0000 0000 000B
+element: 0000 0000 0000 000A
+element: 0000 0000 0000 0009
+element: 0000 0000 0000 0008
+element: 0000 0000 0000 0007
+element: 0000 0000 0000 0006
+element: 0000 0000 0000 0005
+element: 0000 0000 0000 0004
+element: 0000 0000 0000 0003
+element: 0000 0000 0000 0002
+element: 0000 0000 0000 0001
+END
+
+=head4 Create a multi way tree in an arena using SIMD instructions
 
 Create a multiway tree as in L<Tree::Multi> using B<Avx512> instructions and
 iterate through it:
@@ -7063,6 +7182,63 @@ key: 0000 0000 0000 0018 data: 0000 0000 0000 020C found: 0000 0000 0000 0001 da
 Found: 0000 0000 0000 0000
 Found: 0000 0000 0000 0001
 Data : 0000 0000 0000 0201
+END
+
+=head3 Recursion with stack and parameter tracing
+
+Call a subroutine recursively and get a trace back showing the procedure calls
+and parameters passed to each call. Parameters are passed by reference not
+value.
+
+  my $d = V depth, 3;                           # Create a variable on the stack
+
+  my $s = Subroutine
+   {my ($p, $s) = @_;                           # Parameters, subroutine descriptor
+    PrintOutTraceBack;
+
+    my $d = $$p{depth}->copy($$p{depth} - 1);   # Modify the variable referenced by the parameter
+
+    If ($d > 0,
+    Then
+     {$s->call($d);                             # Recurse
+     });
+
+    PrintOutTraceBack;
+   } [qw(depth)], name => 'ref';
+
+  $s->call($d);                                 # Call the subroutine
+
+  ok Assemble(debug => 0, eq => <<END);
+
+Subroutine trace back, depth: 0000 0000 0000 0001
+0000 0000 0000 0003    ref
+
+
+Subroutine trace back, depth: 0000 0000 0000 0002
+0000 0000 0000 0002    ref
+0000 0000 0000 0002    ref
+
+
+Subroutine trace back, depth: 0000 0000 0000 0003
+0000 0000 0000 0001    ref
+0000 0000 0000 0001    ref
+0000 0000 0000 0001    ref
+
+
+Subroutine trace back, depth: 0000 0000 0000 0003
+0000 0000 0000 0000    ref
+0000 0000 0000 0000    ref
+0000 0000 0000 0000    ref
+
+
+Subroutine trace back, depth: 0000 0000 0000 0002
+0000 0000 0000 0000    ref
+0000 0000 0000 0000    ref
+
+
+Subroutine trace back, depth: 0000 0000 0000 0001
+0000 0000 0000 0000    ref
+
 END
 
 
@@ -16657,21 +16833,24 @@ g: 0000 0000 0000 0000
 END
  }
 
-#latest:
-if (1) {                                                                        #TSubroutine
-  my $g = G g, 3;
-  my $s = Subroutine
-   {my ($p, $s) = @_;
-    PrintOutTraceBack;
-    my $g = $$p{g};
-    $g->copy($g - 1);
-    If ($g > 0,
-    Then
-     {$s->call($g);                                                             # Recurse
-     });
-   } [qw(g)], name => 'ref';
+if (1) {                                                                        #TPrintOutTraceBack
+  my $d = V depth, 3;                                                           # Create a variable on the stack
 
-  $s->call($g);
+  my $s = Subroutine
+   {my ($p, $s) = @_;                                                           # Parameters, subroutine descriptor
+    PrintOutTraceBack;
+
+    my $d = $$p{depth}->copy($$p{depth} - 1);                                   # Modify the variable referenced by the parameter
+
+    If ($d > 0,
+    Then
+     {$s->call($d);                                                             # Recurse
+     });
+
+    PrintOutTraceBack;
+   } [qw(depth)], name => 'ref';
+
+  $s->call($d);                                                                 # Call the subroutine
 
   ok Assemble(debug => 0, eq => <<END);
 
@@ -16689,6 +16868,21 @@ Subroutine trace back, depth: 0000 0000 0000 0003
 0000 0000 0000 0001    ref
 0000 0000 0000 0001    ref
 
+
+Subroutine trace back, depth: 0000 0000 0000 0003
+0000 0000 0000 0000    ref
+0000 0000 0000 0000    ref
+0000 0000 0000 0000    ref
+
+
+Subroutine trace back, depth: 0000 0000 0000 0002
+0000 0000 0000 0000    ref
+0000 0000 0000 0000    ref
+
+
+Subroutine trace back, depth: 0000 0000 0000 0001
+0000 0000 0000 0000    ref
+
 END
  }
 
@@ -16703,11 +16897,11 @@ if (1) {                                                                        
    } [qw(g)], name => 'uuuu';
   my $t = Subroutine
    {my ($p, $s) = @_;
-    $u->call($$p{g});                                                           # Recurse
+    $u->call($$p{g});
    } [qw(g)], name => 'tttt';
   my $s = Subroutine
    {my ($p, $s) = @_;
-    $t->call($$p{g});                                                           # Recurse
+    $t->call($$p{g});
    } [qw(g)], name => 'ssss';
 
   $g->outNL;
@@ -16827,6 +17021,7 @@ if (1) {                                                                        
 END
  }
 
+#latest:;
 if (1) {
   my $P = "2F";                                                                 # Value to test for
   my $l = Rb 0;  Rb $_ for 1..RegisterSize zmm0;                                # The numbers 0..63
@@ -16861,6 +17056,27 @@ if (1) {
    rax: 0000 0000 0000 00$P
 END
 #   0 eq    1 lt    2 le    4 ne    5 ge    6 gt   comparisons
+ }
+
+#latest:;
+if (1) {
+  my $P = "2F";                                                                 # Value to test for
+  my $l = Rb 0;  Rb $_ for 1..RegisterSize zmm0;                                # The numbers 0..63
+  Vmovdqu8 zmm0, "[$l]";                                                        # Load data to test
+
+  Mov rax, "0x$P";                                                              # Broadcast the value to be tested
+  Vpbroadcastb zmm1, rax;
+
+  for my $c(0..7)                                                               # Each possible test
+   {my $m = "k$c";
+    Vpcmpub $m, zmm1, zmm0, $c;
+   }
+
+  Kmovq rax, k0;                                                                # Count the number of trailing zeros in k0
+  Tzcnt rax, rax;
+
+  is_deeply [split //, Assemble], [split //, <<END];                            # Assemble and test
+END
  }
 
 if (1) {                                                                        #TStringLength
@@ -17273,27 +17489,27 @@ Offset: 0000 0000 0000 0158   Length: 0000 0000 0000 002E
 END
  }
 
+#latest:;
 if (1) {
   my $s = Rb(0..255);
-  my $B = CreateArena;
-  my $b = $B->CreateString;
+  my $A = CreateArena;
+  my $S = $A->CreateString;
 
-  $b->append(source=>V(source, $s), V(size, 256));
-  $b->len(my $size = V(size));
-  $size->outNL;
-  $b->clear;
+  $S->append(V(source, $s), K(size, 256));
+  $S->len->outNL;
+  $S->clear;
 
-  $b->append(V(source, $s), size => V(size,  16)); $b->dump;
-  $b->len(my $size2 = V(size));
-  $size2->outNL;
+  $S->append(V(source, $s), K(size,  16));
+  $S->len->outNL;
+  $S->dump;
 
-  is_deeply Assemble, <<END;
+  ok Assemble(debug => 0, eq => <<END);
 size: 0000 0000 0000 0100
+size: 0000 0000 0000 0010
 string Dump
 Offset: 0000 0000 0000 0018   Length: 0000 0000 0000 0010
  zmm31: 0000 0018 0000 0018   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 000F   0E0D 0C0B 0A09 0807   0605 0403 0201 0010
 
-size: 0000 0000 0000 0010
 END
  }
 
@@ -17363,7 +17579,8 @@ END
 #latest:;
 if (1) {                                                                        # Insert char in a one string
   my $c = Rb(0..255);
-  my $S = CreateArena;   my $s = $S->CreateString;
+  my $S = CreateArena;
+  my $s = $S->CreateString;
 
   $s->append(source=>V(source, $c), V(size, 3));
   $s->dump;
@@ -17431,7 +17648,7 @@ END
  }
 
 #latest:;
-if (1) {                                                                        #TString::insertChar
+if (1) {                                                                        #TNasm::X86::String::insertChar
   my $c = Rb(0..255);
   my $S = CreateArena;
   my $s = $S->CreateString;
@@ -17522,7 +17739,7 @@ if (1) {
   $s->append(source=>V(source, $c),  V(size, 3));      $s->dump;
   $s->insertChar(V(character, 0xFF), V(position, 64)); $s->dump;
   $s->insertChar(V(character, 0xEE), V(position, 64)); $s->dump;
-  $s->len(my $size = V(size));                         $size->outNL;
+  $s->len->outNL;
 
   ok Assemble(debug => 0, eq => <<END);
 string Dump
@@ -17542,13 +17759,13 @@ END
  }
 
 #latest:;
-if (1) {                                                                        #TString::deleteChar #TString::len
+if (1) {                                                                        #TNasm::X86::String::deleteChar #TNasm::X86::String::len
   my $c = Rb(0..255);
   my $S = CreateArena;   my $s = $S->CreateString;
 
   $s->append(source=>V(source, $c),  V(size, 165)); $s->dump;
   $s->deleteChar(V(position, 0x44));                $s->dump;
-  $s->len(my $size = V(size));                      $size->outNL;
+  $s->len->outNL;
 
   ok Assemble(debug => 0, eq => <<END);
 string Dump
@@ -17573,7 +17790,7 @@ END
 
 #latest:;
 
-if (1) {                                                                        #TString::getChar
+if (1) {                                                                        #TNasm::X86::String::getChar
   my $c = Rb(0..255);
   my $S = CreateArena;   my $s = $S->CreateString;
 
@@ -17621,7 +17838,42 @@ END
  }
 
 #latest:;
-if (1) {                                                                        #TCreateArray  #TArray::push # Arrays doubled
+if (1) {                                                                        #TNasm::X86::Array::size
+  my $N = 15;
+  my $A = CreateArena;
+  my $a = $A->CreateArray;
+
+  $a->push(V(element, $_)) for 1..$N;
+
+  K(loop, $N)->for(sub
+   {my ($start, $end, $next) = @_;
+    my $l = $a->size;
+    If $l == 0, Then {Jmp $end};
+    $a->pop(my $e = V(element));
+    $e->outNL;
+   });
+
+  ok Assemble(debug => 0, eq => <<END);
+element: 0000 0000 0000 000F
+element: 0000 0000 0000 000E
+element: 0000 0000 0000 000D
+element: 0000 0000 0000 000C
+element: 0000 0000 0000 000B
+element: 0000 0000 0000 000A
+element: 0000 0000 0000 0009
+element: 0000 0000 0000 0008
+element: 0000 0000 0000 0007
+element: 0000 0000 0000 0006
+element: 0000 0000 0000 0005
+element: 0000 0000 0000 0004
+element: 0000 0000 0000 0003
+element: 0000 0000 0000 0002
+element: 0000 0000 0000 0001
+END
+ }
+
+#latest:;
+if (1) {                                                                        # Arrays doubled
   my $A = CreateArena;  my $a = $A->CreateArray;
   my $B = CreateArena;  my $b = $B->CreateArray;
 
@@ -17653,7 +17905,7 @@ END
  }
 
 #latest:;
-if (1) {                                                                        #TCreateArray  #TArray::push #TArray::pop #TArray::put #TArray::get
+if (1) {                                                                        #TNasm::X86::Array::push #TNasm::X86::Array::pop #TNasm::X86::Array::put #TNasm::X86::Array::get
   my $c = Rb(0..255);
   my $A = CreateArena;  my $a = $A->CreateArray;
   my $l = V(limit, 15);
@@ -17924,7 +18176,7 @@ END
 
 #latest:;
 
-if (1) {                                                                        #TCreateArray  #TArray::push
+if (1) {                                                                        #TNasm::X86::Array::push
   my $c = Rb(0..255);
   my $A = CreateArena;  my $a = $A->CreateArray;
 
@@ -19225,7 +19477,7 @@ if (0) {
 END
  }
 
-ok 1 for 5..32;
+ok 1 for 7..32;
 
 unlink $_ for qw(hash print2 sde-log.txt sde-ptr-check.out.txt z.txt);          # Remove incidental files
 
