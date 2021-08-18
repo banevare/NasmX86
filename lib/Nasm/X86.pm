@@ -7,6 +7,8 @@
 # Time: 24.72s, bytes: 4,642,640, execs: 1,756,654
 # tree::print - speed up decision as to whether we are on a tree or not
 # Remove @variables and replace with actual references to the required variables
+# Remove as much variable arithmetic as possible as it is slower and bigger than register arithmetic
+# Rewrite Boolean arithmetic to set the zero flag so that if can jump on that result rather than evaluating a Boolean variable which is slower
 package Nasm::X86;
 our $VERSION = "20210816";
 use warnings FATAL => qw(all);
@@ -17,7 +19,7 @@ use Data::Table::Text qw(:all);
 use Asm::C qw(:all);
 use feature qw(say current_sub);
 
-my $debugTrace = 0;                                                             # Trace execution if true - slow!
+my $debugTrace = 1;                                                             # Trace execution if true - slow!
 
 my %rodata;                                                                     # Read only data already written
 my %rodatas;                                                                    # Read only string already written
@@ -645,7 +647,7 @@ sub If($$;$)                                                                    
   ref($jump) or $jump =~ m(\AJ(c|e|g|ge|gt|h|l|le|nc|ne|nz|z)\Z)
              or confess "Invalid jump: $jump";
 
-  if (ref($jump))                                                               # Variable reference - non zero then then else else
+  if (ref($jump))                                                               # Variable expression,  if it is non zero perform the then body else the else body
    {PushR r15;
     Mov r15, $jump->address;
     Cmp r15, 0;
@@ -870,17 +872,18 @@ sub Subroutine(&$%)                                                             
   my $E = @text;                                                                # Code entry that will contain the Enter instruction
   Enter 0, 0;
   &$body({%p}, $s);                                                             # Code with parameters
-  Leave;
-  Ret;
-  SetLabel $end;
 
   my $V = pop @VariableStack;                                                   # Number of variables
   my $P = @$parameters;                                                         # Number of parameters supplied
   my $N = $P + $V;                                                              # Size of stack frame
-  $text[$E] = <<END;                                                            # Rewrite enter instruction now that we know how much stack space we need
+
+  Leave if $N;                                                                  # Remove frame if there was one
+
+  Ret;
+  SetLabel $end;
+  $text[$E] = $N ? <<END : '';                                                  # Rewrite enter instruction now that we know how much stack space we need
   Enter $N*8, 0
 END
-
   $s                                                                            # Subroutine definition
  }
 
@@ -1665,7 +1668,7 @@ sub Nasm::X86::Variable::arithmetic($$$$)                                       
   my $l = $left ->address;
   my $r = ref($right) ? $right->address : $right;                               # Right can be either a variable reference or a constant
 
-  Comment "Arithmetic";
+  Comment "Arithmetic Start";
   PushR (r14, r15);
   Mov r15, $l;
   if ($left->reference)                                                         # Dereference left if necessary
@@ -1678,6 +1681,8 @@ sub Nasm::X86::Variable::arithmetic($$$$)                                       
   &$op(r15, r14);
   my $v = V(join(' ', '('.$left->name, $name, (ref($right) ? $right->name : $right).')'), r15);
   PopR;
+  Comment "Arithmetic End";
+
   return $v;
  }
 
@@ -1728,6 +1733,7 @@ sub Nasm::X86::Variable::boolean($$$$)                                          
   !ref($right) or ref($right) =~ m(Variable) or confess "Variable expected";
   my $r = ref($right) ? $right->address : $right;                               # Right can be either a variable reference or a constant
 
+  Comment "Boolean Arithmetic Start";
   PushR r15;
 
   Mov r15, $left ->address;
@@ -1752,6 +1758,7 @@ sub Nasm::X86::Variable::boolean($$$$)                                          
   my $v = V(join(' ', '('.$left->name, $op, (ref($right) ? $right->name : '').')'), r15);
 
   PopR r15;
+  Comment "Boolean Arithmetic end";
 
   $v
  }
@@ -4013,21 +4020,24 @@ sub Nasm::X86::Arena::getBlock($$$$;$$)                                         
   defined($block)    or confess;
   ref($block) =~ m(variable)i or confess;
 
-  If ($block < $arena->data,
+  my $a = $work1 // r14;                                                        # Work registers
+  my $o = $work2 // r15;
+  PushR my @save = ($a, $o) unless @_ == 6;
+
+  $address->setReg($a);                                                         # Arena address
+  $block  ->setReg($o);                                                         # Offset of block in arena
+
+  Cmp $o, $arena->data;
+  IfLt                                                                          # We could have done this using variable arithmetic, but such arithmetic is expensive and so it is better to use register arithmetic if we can.
   Then
    {PrintErrStringNL "Attempt to get block before start of arena";
     $block->errNL("Attempt to get block: ");
     PrintErrTraceBack;
     Exit(1);
-   });
+   };
 
-  my $a = $work1 // r14;                                                        # Work registers
-  my $o = $work2 // r15;
-  PushR my @save = ($a, $o) unless @_ == 6;
-  $address->setReg($a);                                                         # Arena address
-  $block  ->setReg($o);                                                         # Offset of block in arena
   Vmovdqu64 "zmm$zmm", "[$a+$o]";                                               # Read from memory
-  PopR @save unless @_ == 6;                                                    # Restore registers
+  PopR unless @_ == 6;                                                          # Restore registers
  }
 
 sub Nasm::X86::Arena::putBlock($$$$;$$)                                         #P Write the numbered zmm to the block at the specified offset in the specified arena.
@@ -4036,20 +4046,24 @@ sub Nasm::X86::Arena::putBlock($$$$;$$)                                         
   defined($address) or confess "Arena not set";
   defined($block)   or confess;
 
-  If ($block < $arena->data,
+  my $a = $work1 // r14;                                                        # Work registers
+  my $o = $work2 // r15;
+  PushR my @save = ($a, $o) unless @_ == 6;
+
+  $address->setReg($a);                                                         # Arena address
+  $block  ->setReg($o);                                                         # Offset of block in arena
+
+  Cmp $o, $arena->data;
+  IfLt                                                                          # We could have done this using variable arithmetic, but such arithmetic is expensive and so it is better to use register arithmetic if we can.
   Then
    {PrintErrStringNL "Attempt to put block before start of arena";
     $block->errNL("Attempt to put block: ");
     PrintErrTraceBack;
     Exit(1);
-   });
-  my $a = $work1 // r14;                                                        # Work registers
-  my $o = $work2 // r15;
-  PushR my @save = ($a, $o) unless @_ == 6;
-  $address->setReg($a);                                                         # Arena address
-  $block  ->setReg($o);                                                         # Offset of block in arena
+   };
+
   Vmovdqu64 "[$a+$o]", "zmm$zmm";                                               # Read from memory
-  PopR @save unless @_ == 6;                                                    # Restore registers
+  PopR unless @_ == 6;                                                          # Restore registers
  }
 
 sub Nasm::X86::Arena::m($@)                                                     # Append the content with length rdi addressed by rsi to the arena addressed by rax.
@@ -5170,8 +5184,8 @@ sub Nasm::X86::Arena::DescribeTree($)                                           
   my $length = $b / $o - 2;                                                     # Length of block to split
   my $split  = $length / 2  * $o;                                               # Offset of splitting key
 
-  confess "Maximum keys must be 14" unless $b / $o - 2 == 14;                   # Maximum number of keys is expected to be 14
-  confess "Splitting key offset must be 28" unless $split == 28;                # Splitting key offset
+  confess "Maximum keys must be 14"         unless $length == 14;               # Maximum number of keys is expected to be 14
+  confess "Splitting key offset must be 28" unless $split  == 28;               # Splitting key offset
 
   genHash(__PACKAGE__."::Tree",                                                 # Tree.
     bs           => $arena,                                                     # Arena definition.
@@ -6066,10 +6080,10 @@ sub Nasm::X86::Tree::getKeysDataNode($$$$$$;$$)                                 
   my $b = $t->bs;                                                               # Underlying arena
 
   $b->getBlock($bs, $offset, $zmmKeys, $work1, $work2);                         # Get the keys block
-  my $data = $t->getLoop($zmmKeys, $work1, $work2);                             # Get the offset of the corresponding data block
-  $b->getBlock($bs, $data, $zmmData, $work1, $work2);                           # Get the data block
+  my $data = $t->getLoop    ($zmmKeys, $work1, $work2);                         # Get the offset of the corresponding data block
+  $b->getBlock($bs, $data,   $zmmData, $work1, $work2);                         # Get the data block
 
-  my $node = $t->getLoop($zmmData, $work1, $work2);                             # Get the offset of the corresponding node block
+  my $node = $t->getLoop    ($zmmData, $work1, $work2);                         # Get the offset of the corresponding node block
   If ($node,
   Then                                                                          # Check for optional node block
    {$b->getBlock($bs, $node, $zmmNode, $work1, $work2);                         # Get the node block
@@ -6240,18 +6254,26 @@ sub Nasm::X86::Tree::depth($$$$)                                                
 
 #D2 Sub trees                                                                   # Construct trees of trees.
 
+sub Nasm::X86::Tree::testTree($$$)                                              #P Set the Zero Flag to oppose the tree bit indexed bythe specified variable in the numbered zmm register holding the keys of a node to indicate whether the data element indicated by the specified register is an offset to a sub tree in the containing arena or not.
+{my ($t, $position, $zmm) = @_;                                                 # Tree descriptor, variable holding index of position to test, numbered zmm register holding the keys for a node in the tree
+  @_ == 3 or confess "3 parameters";
+  PushR rax, rcx;
+  Mov rax, 1;                                                                   # Place a single 1 at the position to test
+  $position->setReg(rcx);                                                       # Position
+  Shl rax, cl;                                                                  # Move into position
+  $t->isTree(rax, $zmm);                                                        # Test position
+  PopR;
+ } # isTree
+
 sub Nasm::X86::Tree::isTree($$$)                                                #P Set the Zero Flag to oppose the tree bit in the numbered zmm register holding the keys of a node to indicate whether the data element indicated by the specified register is an offset to a sub tree in the containing arena or not.
 {my ($t, $register, $zmm) = @_;                                                 # Tree descriptor, word register holding a bit shifted into the position to test, numbered zmm register holding the keys for a node in the tree
   @_ == 3 or confess "3 parameters";
 
-  my $b = RegisterSize zmm0;                                                    # Size of a block == size of a zmm register
-  my $o = $b - $$t{treeBits};                                                   # Bytes from tree bits to end of zmm
-  PushR $register;
-  And $register, $t->treeBitsMask;                                              # Mask tree bits to prevent tests outside the permitted area
-  PushRR "zmm$zmm";                                                             # Put the keys on the stack
-  Add rsp, RegisterSize zmm0;                                                   # Restore stack
-  And $register, "[rsp-$o]";                                                    # Test the tree bits - done here to avoid the effect on the zero flag of add
-  PopR $register;
+  my $z = "zmm$zmm";                                                            # Full name of zmm register
+  my $o = $$t{treeBits};                                                        # Bytes from tree bits to end of zmm
+  my $w = RegisterSize  $z;                                                     # Size of zmm register
+  Vmovdqu64 "[rsp-$w]", $z;                                                     # Write beyond stack
+  Test $register, "[rsp-$w+$o]";                                                # Test the tree bits
  } # isTree
 
 sub Nasm::X86::Tree::setOrClearTree($$$$)                                       #P Set or clear the tree bit in the numbered zmm register holding the keys of a node to indicate that the data element indicated by the specified register is an offset to a sub tree in the containing arena.
@@ -6265,7 +6287,7 @@ sub Nasm::X86::Tree::setOrClearTree($$$$)                                       
   PushR ($register, $z);
   if ($set)                                                                     # Set the indexed bit
    {And $register, $t->treeBitsMask;                                            # Mask tree bits to prevent operations outside the permitted area
-    Or "[rsp+$o]", $register;
+    Or "[rsp+$o]", $register;                                                   # Set tree bit in zmm
    }
   else                                                                          # Clear the indexed bit
    {And $register, $t->treeBitsMask;                                            # Mask tree bits to prevent operations outside the permitted area
@@ -6350,13 +6372,13 @@ sub Nasm::X86::Tree::print($)                                                   
       Then
        {$s->call($$p{bs}, first => $t->data);
        });
-     }, $$p{bs}, $$p{first});
+     }, $$p{bs}, $$p{first}+0);
    } [qw(bs first)], name => "Nasm::X86::Tree::print";
 
   $s->call($t->address, $t->first);
  }
 
-sub Nasm::X86::Tree::dump($)                                                    # Dump a tree.
+sub Nasm::X86::Tree::dump($)                                                    # Dump a tree and all its sub trees.
  {my ($t) = @_;                                                                 # Tree
   @_ == 1 or confess;
 
@@ -6366,22 +6388,65 @@ sub Nasm::X86::Tree::dump($)                                                    
     my $B = $$p{bs};
     my $F = $$p{first};
 
-    PushZmm 29..31; PushR r8, r9, r14, r15;
-    PrintOutString "Tree at: "; $$p{first}->outNL(' ');
+    PushZmm 29..31; PushR r8, r9, r10, r14, r15;
 
-    $t->getKeysDataNode($B, $F, 31, 30, 29, r8, r9);
-    my $l = $t->getLengthInKeys(31) + 1;
+Comment "AAAAA  Start";
+    $t->getKeysDataNode($B, $F, 31, 30, 29, r8, r9);                            # Load node
+Comment "AAAAA  End";
+    $t->getTreeBits(31, r8);                                                    # Tree bits for this node
+    my $l = $t->getLengthInKeys(31);                                            # Number of nodes
+
+    PrintOutString "Tree at: "; $$p{first}->out(' '); $l->outNL('  length: ');  # Position and length
     PrintOutRegisterInHex zmm 31, 30, 29;
 
-    $l->for(sub
+    Mov r9, 1;                                                                  # Check each tree bit position
+    $l->for(sub                                                                 # Print keys and data
      {my ($index, $start, $next, $end) = @_;
-      my $o = getDFromZmm(29, $index * 4, r8);
-      If ($o > 0,
+      my $i = $index * $t->width;                                               # Key/Data offset
+      my $k = getDFromZmm(31, $i, r10);                                         # Key
+      my $d = getDFromZmm(30, $i, r10);                                         # Data
+      $index->out(' index: ');
+      $k->out('   key: ');
+      $d->out('   data: ');
+      Test r8, r9;                                                              # Check for a tree bit
+      IfNz
+      Then                                                                      # This key indexes a sub tree
+       {PrintOutStringNL(" subTree");
+       },
+      Else
+       {PrintOutNL;
+       };
+      Shl r9, 1;                                                                # Next tree bit position
+     });
+
+    Cmp r8, 0;                                                                  # Any tree bit sets?
+    IfNe
+    Then                                                                        # Tree bits present
+     {Mov r9, 1;                                                                # Check each tree bit position
+      K(loop, $t->maxKeys)->for(sub
+       {my ($index, $start, $next, $end) = @_;
+        Test r8, r9;                                                            # Check for a tree bit
+        IfNz
+        Then                                                                    # This key indexes a sub tree
+         {my $i = $index * $t->width;                                           # Key/data offset
+          my $d = getDFromZmm(30, $i, r10);                                     # Data
+          $s->call($B, first => $d);                                            # Print sub tree referenced by data field
+         };
+        Shl r9, 1;                                                              # Next tree bit position
+       });
+     };
+
+    ($l+1)->for(sub                                                             # Print sub nodes
+     {my ($index, $start, $next, $end) = @_;
+      my $i = $index * $t->width;                                               # Key/Data offset
+      my $d = getDFromZmm(29, $i, r10);                                         # Data
+      If ($d > 0,                                                               # Print any sub nodes
       Then
-       {$s->call($B, first => $o);
+       {$s->call($B, first => $d);
        });
      });
 
+    PrintOutNL;                                                                 # Separate sub tree dumps
     PopR; PopZmm;
    } [qw(bs first)], name => "Nasm::X86::Tree::dump";
 
@@ -6394,7 +6459,6 @@ sub Nasm::X86::Tree::iterator($;$$)                                             
  {my ($t, $bs, $first) = @_;                                                    # Tree, optionally the node to start at else the first node of the supplied tree will be used
   @_ == 1 or @_ == 3 or confess "1 or 3 parameters";
   Comment "Nasm::X86::Tree::iterator";
-
 
   my $i = genHash(__PACKAGE__.'::Tree::Iterator',                               # Iterator
     tree  => $t,                                                                # Tree we are iterating over
@@ -6559,7 +6623,7 @@ sub Nasm::X86::Tree::by($&;$$)                                                  
  {my ($t, $body, $bs, $first) = @_;                                             # Tree descriptor, body to execute, arena address if not the one associated with the tree descriptor, first node offset if not the root of the tree provided
   @_ == 2 or  @_ == 4 or confess "2 or 4 parameters";
 
-  my $iter = $t->iterator($bs, $first);                                         # Create an iterator
+  my $iter  = $t->iterator($bs, $first);                                        # Create an iterator
   my $start = SetLabel Label; my $end = Label;                                  # Start and end of loop
   If ($iter->more == 0, sub {Jmp $end});                                        # Jump to end if there are no more elements to process
   &$body($iter, $end);                                                          # Perform the body parameterized by the iterator and the end label
@@ -6793,6 +6857,7 @@ END
      {unlink $f if $f =~ m(sde-mix-out);
      }
    }
+  unlink qw(sde-ptr-check.out.txt sde-mix-out.txt sde-debugtrace-out.txt);
 
   my $I = @link ? $interpreter : '';                                            # Interpreter only required if calling C
   my $cmd = trim(<<END);
@@ -6815,12 +6880,15 @@ END
    {my $instructions       = getInstructionCount;                               # Instructions executed under emulator
     $instructionsExecuted += $instructions;                                     # Count instructions executed
     $assembliesPerformed++;                                                     # Count assemblies
+    my $bytes = fileSize $e;                                                    # Estimate the size of the output program
+    $totalBytesAssembled += $bytes;                                             # Estimate total of all programs assembled
 
     my (undef, $file, $line) = caller();
                                                                                 # Line in caller
-    say STDERR sprintf("%4d    %12s    %12s  at $file line $line",
+    say STDERR sprintf("%4d    %12s    %12s    %12s    %12s  at $file line $line",
       $assembliesPerformed,
-      map {numberWithCommas $_} $instructions,  $instructionsExecuted);
+      map {numberWithCommas $_} $instructions,         $bytes,
+                                $instructionsExecuted, $totalBytesAssembled);
    }
 
   if (!$k and $debug == 0)                                                      # Print errors if not debugging
@@ -6837,8 +6905,6 @@ END
   if (!$k and $debug < 2 and -e $o2 and readFile($o2) =~ m(SDE ERROR:)s)        # Emulator detected an error
    {confess "SDE ERROR\n".readFile($o2);
    }
-
-  $totalBytesAssembled += fileSize $e;                                          # Estimate the size of the output program
 
   unlink $o;                                                                    # Delete files
   unlink $e unless $k;                                                          # Delete executable unless asked to keep it
@@ -19917,21 +19983,6 @@ END
  }
 
 #latest:
-if (1) {
-  my $b = CreateArena;
-  my $t = $b->CreateTree;
-  my $k = V(key,  15);
-
-  $t->insertTree($k);  $t->data->outNL;
-  $t->insertTree($k);  $t->data->outNL;                                         # Retrieve the sub tree rather than creating a new new sub tree
-
-  ok Assemble(debug => 0, eq => <<END);
-data: 0000 0000 0000 0098
-data: 0000 0000 0000 0098
-END
- }
-
-#latest:
 if (1) {                                                                        # Replace a scalar with a tree in the first node
   my $b = CreateArena;
   my $t = $b->CreateTree;
@@ -19984,7 +20035,7 @@ END
  }
 
 #latest:
-if (1) {                                                                        #TsetOrClearTreeBits
+if (1) {                                                                        #TNasm::X86::Tree::setOrClearTreeBits
   ClearRegisters zmm0;
   my $b = CreateArena;
   my $t = $b->CreateTree;
@@ -20227,7 +20278,7 @@ END
  }
 
 #latest:
-if (1) {                                                                        #TTree
+if (1) {
   my $N = 45; my $M = 0;
      $N % 2 == 1 or confess "Must be odd";
   my $b = CreateArena;
@@ -20514,7 +20565,7 @@ END
  }
 
 #latest:
-if (1) {                                                                        #TNasm::X86::Tree::insertTree
+if (1) {                                                                              #TNasm::X86::Tree::insertTree
   my $b = CreateArena;
   my $t = $b->CreateTree;
   my $T = $b->CreateTree;
@@ -20727,10 +20778,11 @@ if (1) {                                                                        
   $t->dump();
 
   ok Assemble(debug => 0, eq => <<END);
-Tree at:  0000 0000 0000 0018
+Tree at:  0000 0000 0000 0018  length: 0000 0000 0000 0000
  zmm31: 0000 0058 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
  zmm30: 0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
  zmm29: 0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+
 END
  }
 
@@ -20749,30 +20801,170 @@ if (1) {                                                                        
   $t->dump();
 
   ok Assemble(debug => 0, eq => <<END);
-Tree at:  0000 0000 0000 0018
+Tree at:  0000 0000 0000 0018  length: 0000 0000 0000 0004
  zmm31: 0000 0058 0000 0004   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 001F 0000 0017   0000 000F 0000 0007
  zmm30: 0000 0098 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 001F 0000 0017   0000 000F 0000 0007
  zmm29: 0000 0018 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0198   0000 03D8 0000 0318   0000 0258 0000 00D8
-Tree at:  0000 0000 0000 00D8
+ index: 0000 0000 0000 0000   key: 0000 0000 0000 0007   data: 0000 0000 0000 0007
+ index: 0000 0000 0000 0001   key: 0000 0000 0000 000F   data: 0000 0000 0000 000F
+ index: 0000 0000 0000 0002   key: 0000 0000 0000 0017   data: 0000 0000 0000 0017
+ index: 0000 0000 0000 0003   key: 0000 0000 0000 001F   data: 0000 0000 0000 001F
+Tree at:  0000 0000 0000 00D8  length: 0000 0000 0000 0007
  zmm31: 0000 0118 0000 0007   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0006   0000 0005 0000 0004   0000 0003 0000 0002   0000 0001 0000 0000
  zmm30: 0000 0158 0000 0018   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0006   0000 0005 0000 0004   0000 0003 0000 0002   0000 0001 0000 0000
  zmm29: 0000 00D8 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
-Tree at:  0000 0000 0000 0258
+ index: 0000 0000 0000 0000   key: 0000 0000 0000 0000   data: 0000 0000 0000 0000
+ index: 0000 0000 0000 0001   key: 0000 0000 0000 0001   data: 0000 0000 0000 0001
+ index: 0000 0000 0000 0002   key: 0000 0000 0000 0002   data: 0000 0000 0000 0002
+ index: 0000 0000 0000 0003   key: 0000 0000 0000 0003   data: 0000 0000 0000 0003
+ index: 0000 0000 0000 0004   key: 0000 0000 0000 0004   data: 0000 0000 0000 0004
+ index: 0000 0000 0000 0005   key: 0000 0000 0000 0005   data: 0000 0000 0000 0005
+ index: 0000 0000 0000 0006   key: 0000 0000 0000 0006   data: 0000 0000 0000 0006
+
+Tree at:  0000 0000 0000 0258  length: 0000 0000 0000 0007
  zmm31: 0000 0298 0000 0007   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 000E   0000 000D 0000 000C   0000 000B 0000 000A   0000 0009 0000 0008
  zmm30: 0000 02D8 0000 0018   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 000E   0000 000D 0000 000C   0000 000B 0000 000A   0000 0009 0000 0008
  zmm29: 0000 0258 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
-Tree at:  0000 0000 0000 0318
+ index: 0000 0000 0000 0000   key: 0000 0000 0000 0008   data: 0000 0000 0000 0008
+ index: 0000 0000 0000 0001   key: 0000 0000 0000 0009   data: 0000 0000 0000 0009
+ index: 0000 0000 0000 0002   key: 0000 0000 0000 000A   data: 0000 0000 0000 000A
+ index: 0000 0000 0000 0003   key: 0000 0000 0000 000B   data: 0000 0000 0000 000B
+ index: 0000 0000 0000 0004   key: 0000 0000 0000 000C   data: 0000 0000 0000 000C
+ index: 0000 0000 0000 0005   key: 0000 0000 0000 000D   data: 0000 0000 0000 000D
+ index: 0000 0000 0000 0006   key: 0000 0000 0000 000E   data: 0000 0000 0000 000E
+
+Tree at:  0000 0000 0000 0318  length: 0000 0000 0000 0007
  zmm31: 0000 0358 0000 0007   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0016   0000 0015 0000 0014   0000 0013 0000 0012   0000 0011 0000 0010
  zmm30: 0000 0398 0000 0018   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0016   0000 0015 0000 0014   0000 0013 0000 0012   0000 0011 0000 0010
  zmm29: 0000 0318 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
-Tree at:  0000 0000 0000 03D8
+ index: 0000 0000 0000 0000   key: 0000 0000 0000 0010   data: 0000 0000 0000 0010
+ index: 0000 0000 0000 0001   key: 0000 0000 0000 0011   data: 0000 0000 0000 0011
+ index: 0000 0000 0000 0002   key: 0000 0000 0000 0012   data: 0000 0000 0000 0012
+ index: 0000 0000 0000 0003   key: 0000 0000 0000 0013   data: 0000 0000 0000 0013
+ index: 0000 0000 0000 0004   key: 0000 0000 0000 0014   data: 0000 0000 0000 0014
+ index: 0000 0000 0000 0005   key: 0000 0000 0000 0015   data: 0000 0000 0000 0015
+ index: 0000 0000 0000 0006   key: 0000 0000 0000 0016   data: 0000 0000 0000 0016
+
+Tree at:  0000 0000 0000 03D8  length: 0000 0000 0000 0007
  zmm31: 0000 0418 0000 0007   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 001E   0000 001D 0000 001C   0000 001B 0000 001A   0000 0019 0000 0018
  zmm30: 0000 0458 0000 0018   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 001E   0000 001D 0000 001C   0000 001B 0000 001A   0000 0019 0000 0018
  zmm29: 0000 03D8 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
-Tree at:  0000 0000 0000 0198
+ index: 0000 0000 0000 0000   key: 0000 0000 0000 0018   data: 0000 0000 0000 0018
+ index: 0000 0000 0000 0001   key: 0000 0000 0000 0019   data: 0000 0000 0000 0019
+ index: 0000 0000 0000 0002   key: 0000 0000 0000 001A   data: 0000 0000 0000 001A
+ index: 0000 0000 0000 0003   key: 0000 0000 0000 001B   data: 0000 0000 0000 001B
+ index: 0000 0000 0000 0004   key: 0000 0000 0000 001C   data: 0000 0000 0000 001C
+ index: 0000 0000 0000 0005   key: 0000 0000 0000 001D   data: 0000 0000 0000 001D
+ index: 0000 0000 0000 0006   key: 0000 0000 0000 001E   data: 0000 0000 0000 001E
+
+Tree at:  0000 0000 0000 0198  length: 0000 0000 0000 000D
  zmm31: 0000 01D8 0000 000D   0000 0000 0000 002C   0000 002B 0000 002A   0000 0029 0000 0028   0000 0027 0000 0026   0000 0025 0000 0024   0000 0023 0000 0022   0000 0021 0000 0020
  zmm30: 0000 0218 0000 0018   0000 0000 0000 002C   0000 002B 0000 002A   0000 0029 0000 0028   0000 0027 0000 0026   0000 0025 0000 0024   0000 0023 0000 0022   0000 0021 0000 0020
  zmm29: 0000 0198 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+ index: 0000 0000 0000 0000   key: 0000 0000 0000 0020   data: 0000 0000 0000 0020
+ index: 0000 0000 0000 0001   key: 0000 0000 0000 0021   data: 0000 0000 0000 0021
+ index: 0000 0000 0000 0002   key: 0000 0000 0000 0022   data: 0000 0000 0000 0022
+ index: 0000 0000 0000 0003   key: 0000 0000 0000 0023   data: 0000 0000 0000 0023
+ index: 0000 0000 0000 0004   key: 0000 0000 0000 0024   data: 0000 0000 0000 0024
+ index: 0000 0000 0000 0005   key: 0000 0000 0000 0025   data: 0000 0000 0000 0025
+ index: 0000 0000 0000 0006   key: 0000 0000 0000 0026   data: 0000 0000 0000 0026
+ index: 0000 0000 0000 0007   key: 0000 0000 0000 0027   data: 0000 0000 0000 0027
+ index: 0000 0000 0000 0008   key: 0000 0000 0000 0028   data: 0000 0000 0000 0028
+ index: 0000 0000 0000 0009   key: 0000 0000 0000 0029   data: 0000 0000 0000 0029
+ index: 0000 0000 0000 000A   key: 0000 0000 0000 002A   data: 0000 0000 0000 002A
+ index: 0000 0000 0000 000B   key: 0000 0000 0000 002B   data: 0000 0000 0000 002B
+ index: 0000 0000 0000 000C   key: 0000 0000 0000 002C   data: 0000 0000 0000 002C
+
+
+END
+ }
+
+#latest:
+if (1) {                                                                        #TNasm::X86::Tree::dump
+  my $L = V(loop, 15);
+
+  my $b = CreateArena;
+  my $t = $b->CreateTree;
+
+  $L->for(sub
+   {my ($i, $start, $next, $end) = @_;
+    If ($i % 2 == 0,
+    Then
+     {$t->insert    ($i, $i);
+     },
+    Else
+     {$t->insertTree($i);
+     });
+   });
+
+  $t->dump();
+
+  ok Assemble(debug => 0, eq => <<END);
+Tree at:  0000 0000 0000 0018  length: 0000 0000 0000 0001
+ zmm31: 0000 0058 0001 0001   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0007
+ zmm30: 0000 0418 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0218
+ zmm29: 0000 0018 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0518 0000 0458
+ index: 0000 0000 0000 0000   key: 0000 0000 0000 0007   data: 0000 0000 0000 0218 subTree
+Tree at:  0000 0000 0000 0218  length: 0000 0000 0000 0000
+ zmm31: 0000 0258 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+ zmm30: 0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+ zmm29: 0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+
+Tree at:  0000 0000 0000 0458  length: 0000 0000 0000 0007
+ zmm31: 0000 0498 002A 0007   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0006   0000 0005 0000 0004   0000 0003 0000 0002   0000 0001 0000 0000
+ zmm30: 0000 04D8 0000 0018   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0006   0000 0198 0000 0004   0000 0118 0000 0002   0000 0098 0000 0000
+ zmm29: 0000 0458 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+ index: 0000 0000 0000 0000   key: 0000 0000 0000 0000   data: 0000 0000 0000 0000
+ index: 0000 0000 0000 0001   key: 0000 0000 0000 0001   data: 0000 0000 0000 0098 subTree
+ index: 0000 0000 0000 0002   key: 0000 0000 0000 0002   data: 0000 0000 0000 0002
+ index: 0000 0000 0000 0003   key: 0000 0000 0000 0003   data: 0000 0000 0000 0118 subTree
+ index: 0000 0000 0000 0004   key: 0000 0000 0000 0004   data: 0000 0000 0000 0004
+ index: 0000 0000 0000 0005   key: 0000 0000 0000 0005   data: 0000 0000 0000 0198 subTree
+ index: 0000 0000 0000 0006   key: 0000 0000 0000 0006   data: 0000 0000 0000 0006
+Tree at:  0000 0000 0000 0098  length: 0000 0000 0000 0000
+ zmm31: 0000 00D8 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+ zmm30: 0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+ zmm29: 0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+
+Tree at:  0000 0000 0000 0118  length: 0000 0000 0000 0000
+ zmm31: 0000 0158 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+ zmm30: 0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+ zmm29: 0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+
+Tree at:  0000 0000 0000 0198  length: 0000 0000 0000 0000
+ zmm31: 0000 01D8 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+ zmm30: 0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+ zmm29: 0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+
+
+Tree at:  0000 0000 0000 0518  length: 0000 0000 0000 0007
+ zmm31: 0000 0558 002A 0007   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 000E   0000 000D 0000 000C   0000 000B 0000 000A   0000 0009 0000 0008
+ zmm30: 0000 0598 0000 0018   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 000E   0000 0398 0000 000C   0000 0318 0000 000A   0000 0298 0000 0008
+ zmm29: 0000 0518 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+ index: 0000 0000 0000 0000   key: 0000 0000 0000 0008   data: 0000 0000 0000 0008
+ index: 0000 0000 0000 0001   key: 0000 0000 0000 0009   data: 0000 0000 0000 0298 subTree
+ index: 0000 0000 0000 0002   key: 0000 0000 0000 000A   data: 0000 0000 0000 000A
+ index: 0000 0000 0000 0003   key: 0000 0000 0000 000B   data: 0000 0000 0000 0318 subTree
+ index: 0000 0000 0000 0004   key: 0000 0000 0000 000C   data: 0000 0000 0000 000C
+ index: 0000 0000 0000 0005   key: 0000 0000 0000 000D   data: 0000 0000 0000 0398 subTree
+ index: 0000 0000 0000 0006   key: 0000 0000 0000 000E   data: 0000 0000 0000 000E
+Tree at:  0000 0000 0000 0298  length: 0000 0000 0000 0000
+ zmm31: 0000 02D8 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+ zmm30: 0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+ zmm29: 0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+
+Tree at:  0000 0000 0000 0318  length: 0000 0000 0000 0000
+ zmm31: 0000 0358 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+ zmm30: 0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+ zmm29: 0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+
+Tree at:  0000 0000 0000 0398  length: 0000 0000 0000 0000
+ zmm31: 0000 03D8 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+ zmm30: 0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+ zmm29: 0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+
+
+
 END
  }
 
