@@ -4,7 +4,7 @@
 # Philip R Brenan at appaapps dot com, Appa Apps Ltd Inc., 2021
 #-------------------------------------------------------------------------------
 # podDocumentation
-# Time: 24.72s, bytes: 4,642,640, execs: 1,756,654
+# Time: 39.37s, bytes: 3,615,792, execs: 1,844,146
 # tree::print - speed up decision as to whether we are on a tree or not
 # Remove @variables and replace with actual references to the required variables
 # Remove as much variable arithmetic as possible as it is slower and bigger than register arithmetic
@@ -19,7 +19,7 @@ use Data::Table::Text qw(:all);
 use Asm::C qw(:all);
 use feature qw(say current_sub);
 
-my $debugTrace = 1;                                                             # Trace execution if true - slow!
+my $debugTrace = 0;                                                             # Trace execution if true - slow!
 
 my %rodata;                                                                     # Read only data already written
 my %rodatas;                                                                    # Read only string already written
@@ -648,11 +648,11 @@ sub If($$;$)                                                                    
              or confess "Invalid jump: $jump";
 
   if (ref($jump))                                                               # Variable expression,  if it is non zero perform the then body else the else body
-   {PushR r15;
-    Mov r15, $jump->address;
-    Cmp r15, 0;
-    PopR r15;
-    __SUB__->(q(Jz), $then, $else);
+   {#PushR r15;
+    #Mov r15, $jump->address;
+    #Cmp r15, 0;
+    #PopR r15;
+    __SUB__->(q(Jnz), $then, $else);
    }
   elsif (!$else)                                                                # No else
    {my $end = Label;
@@ -1500,8 +1500,8 @@ if (1)                                                                          
    '++'  => \&inc,
    '--'  => \&dec,
    '""'  => \&str,
-   '&'   => \&and,
-   '|'   => \&or,
+#  '&'   => \&and,                                                              # We use the zero flag as the bit returned by a Boolean operation so we cannot implement & or | which were inuse becuase && and || an "and" and "or" are all disallowed in overloading.
+#  '|'   => \&or,
    '+='  => \&plusAssign,
    '-='  => \&minusAssign,
    '='   => \&equals,
@@ -1763,6 +1763,41 @@ sub Nasm::X86::Variable::boolean($$$$)                                          
   $v
  }
 
+sub Nasm::X86::Variable::booleanZF($$$$)                                        # Combine the left hand variable with the right hand variable via a boolean operator and indicate the result by setting the zero flag if the result is true.
+ {my ($sub, $op, $left, $right) = @_;                                           # Operator, operator name, Left variable,  right variable
+
+  !ref($right) or ref($right) =~ m(Variable) or confess "Variable expected";
+  my $r = ref($right) ? $right->address : $right;                               # Right can be either a variable reference or a constant
+
+  Comment "Boolean ZF Arithmetic Start";
+  PushR r15;
+
+  Mov r15, $left ->address;
+  if ($left->reference)                                                         # Dereference left if necessary
+   {Mov r15, "[r15]";
+   }
+  if (ref($right) and $right->reference)                                        # Dereference on right if necessary
+   {PushR r14;
+    Mov r14, $right ->address;
+    Mov r14, "[r14]";
+    Cmp r15, r14;
+    PopR r14;
+   }
+  elsif (ref($right))                                                           # Variable but not a reference on the right
+   {Cmp r15, $right->address;
+   }
+  else                                                                          # Constant on the right
+   {Cmp r15, $right;
+   }
+
+  &$sub(sub {Cmp rsp, rsp}, sub {Test rsp, rsp});
+
+  PopR r15;
+  Comment "Boolean ZF Arithmetic end";
+
+  V(empty);                                                                     # Return an empty variable so that If regenerates the follow on code
+ }
+
 sub Nasm::X86::Variable::booleanC($$$$)                                         # Combine the left hand variable with the right hand variable via a boolean operator using a conditional move instruction.
  {my ($cmov, $op, $left, $right) = @_;                                          # Conditional move instruction name, operator name, Left variable,  right variable
 
@@ -1801,32 +1836,32 @@ sub Nasm::X86::Variable::booleanC($$$$)                                         
 
 sub Nasm::X86::Variable::eq($$)                                                 # Check whether the left hand variable is equal to the right hand variable.
  {my ($left, $right) = @_;                                                      # Left variable,  right variable
-  Nasm::X86::Variable::booleanC(\&Cmove, q(eq), $left, $right);
+  Nasm::X86::Variable::booleanZF(\&IfEq, q(eq), $left, $right);
  }
 
 sub Nasm::X86::Variable::ne($$)                                                 # Check whether the left hand variable is not equal to the right hand variable.
  {my ($left, $right) = @_;                                                      # Left variable,  right variable
-  Nasm::X86::Variable::boolean(\&IfNe, q(ne), $left, $right);
+  Nasm::X86::Variable::booleanZF(\&IfNe, q(ne), $left, $right);
  }
 
 sub Nasm::X86::Variable::ge($$)                                                 # Check whether the left hand variable is greater than or equal to the right hand variable.
  {my ($left, $right) = @_;                                                      # Left variable,  right variable
-  Nasm::X86::Variable::booleanC(\&Cmovge, q(ge), $left, $right);
+  Nasm::X86::Variable::booleanZF(\&IfGe, q(ge), $left, $right);
  }
 
 sub Nasm::X86::Variable::gt($$)                                                 # Check whether the left hand variable is greater than the right hand variable.
  {my ($left, $right) = @_;                                                      # Left variable,  right variable
-  Nasm::X86::Variable::booleanC(\&Cmovg, q(gt), $left, $right);
+  Nasm::X86::Variable::booleanZF(\&IfGt, q(gt), $left, $right);
  }
 
 sub Nasm::X86::Variable::le($$)                                                 # Check whether the left hand variable is less than or equal to the right hand variable.
  {my ($left, $right) = @_;                                                      # Left variable,  right variable
-  Nasm::X86::Variable::booleanC(\&Cmovle, q(le), $left, $right);
+  Nasm::X86::Variable::booleanZF(\&IfLe, q(le), $left, $right);
  }
 
 sub Nasm::X86::Variable::lt($$)                                                 # Check whether the left hand variable is less than the right hand variable.
  {my ($left, $right) = @_;                                                      # Left variable,  right variable
-  Nasm::X86::Variable::booleanC(\&Cmovl, q(lt), $left, $right);
+  Nasm::X86::Variable::booleanZF(\&IfLt, q(lt), $left, $right);
  }
 
 sub Nasm::X86::Variable::isRef($)                                               # Check whether the specified  variable is a reference to another variable.
@@ -3473,7 +3508,7 @@ sub ConvertUtf8ToUtf32(@)                                                       
      {my ($start, $end) = @_;
       my @p = my ($out, $size, $fail) = (V(out), V(size), V('fail'));
       GetNextUtf8CharAsUtf32 V(in, r14), @p;                                    # Get next utf 8 character and convert it to utf32
-      If ($fail,
+      If ($fail > 0,
       Then
        {PrintErrStringNL "Invalid utf8 character at index:";
         PrintErrRegisterInHex r12;
@@ -4530,46 +4565,49 @@ sub Nasm::X86::String::insertChar($@)                                           
     ForEver                                                                     # Each block in source string
      {my ($start, $end) = @_;                                                   # Start and end labels
 
-      If ((($P >= $C) & ($P <= $C + $L)),
+      If ($P >= $C,
       Then                                                                      # Position is in current block
-       {my $O = $P - $C;                                                        # Offset in current block
+       {If ($P <= $C + $L,
+        Then                                                                    # Position is in current block
+         {my $O = $P - $C;                                                      # Offset in current block
 
-        PushR zmm31;                                                            # Stack block
-        $O->setReg(r14);                                                        # Offset of character in block
-        $c->setReg(r15);                                                        # Character to insert
-        Mov "[rsp+r14]", r15b;                                                  # Place character after skipping length field
+          PushR zmm31;                                                          # Stack block
+          $O->setReg(r14);                                                      # Offset of character in block
+          $c->setReg(r15);                                                      # Character to insert
+          Mov "[rsp+r14]", r15b;                                                # Place character after skipping length field
 
-        If ($L < $M,
-        Then                                                                    # Current block has space
-         {($P+1-$C)->setMask($C + $L - $P + 1, k7);                             # Set mask for reload
-          Vmovdqu8 "zmm31{k7}", "[rsp-1]";                                      # Reload
-          $String->setBlockLengthInZmm($L + 1, 31);                             # Length of block
-         },
-        Else                                                                    # In the current block but no space so split the block
-         {$One->setMask($C + $L - $P + 2, k7);                                  # Set mask for reload
-          Vmovdqu8 "zmm30{k7}", "[rsp+r14-1]";                                  # Reload
-          $String->setBlockLengthInZmm($O,          31);                        # New shorter length of original block
-          $String->setBlockLengthInZmm($L - $O + 1, 30);                        # Set length of  remainder plus inserted char in the new block
-
-          my $new = $String->allocBlock($$p{bs});                               # Allocate new block
-          my ($next, $prev) = $String->getNextAndPrevBlockOffsetFromZmm(31);    # Linkage from last block
-
-          If ($next == $prev,
-          Then                                                                  # The existing string has one block, add new as the second block
-           {$String->putNextandPrevBlockOffsetIntoZmm(31, $new,  $new);
-            $String->putNextandPrevBlockOffsetIntoZmm(30, $next, $prev);
+          If ($L < $M,
+          Then                                                                  # Current block has space
+           {($P+1-$C)->setMask($C + $L - $P + 1, k7);                           # Set mask for reload
+            Vmovdqu8 "zmm31{k7}", "[rsp-1]";                                    # Reload
+            $String->setBlockLengthInZmm($L + 1, 31);                           # Length of block
            },
-          Else                                                                  # The existing string has two or more blocks
-           {$String->putNextandPrevBlockOffsetIntoZmm(31, $new,  $prev);        # From last block
-            $String->putNextandPrevBlockOffsetIntoZmm(30, $next, $current);     # From new block
+          Else                                                                  # In the current block but no space so split the block
+           {$One->setMask($C + $L - $P + 2, k7);                                # Set mask for reload
+            Vmovdqu8 "zmm30{k7}", "[rsp+r14-1]";                                # Reload
+            $String->setBlockLengthInZmm($O,          31);                      # New shorter length of original block
+            $String->setBlockLengthInZmm($L - $O + 1, 30);                      # Set length of  remainder plus inserted char in the new block
+
+            my $new = $String->allocBlock($$p{bs});                             # Allocate new block
+            my ($next, $prev) = $String->getNextAndPrevBlockOffsetFromZmm(31);  # Linkage from last block
+
+            If ($next == $prev,
+            Then                                                                # The existing string has one block, add new as the second block
+             {$String->putNextandPrevBlockOffsetIntoZmm(31, $new,  $new);
+              $String->putNextandPrevBlockOffsetIntoZmm(30, $next, $prev);
+             },
+            Else                                                                # The existing string has two or more blocks
+             {$String->putNextandPrevBlockOffsetIntoZmm(31, $new,  $prev);      # From last block
+              $String->putNextandPrevBlockOffsetIntoZmm(30, $next, $current);   # From new block
+             });
+
+            $String->putBlock($B, $new, 30);                                    # Save the modified block
            });
 
-          $String->putBlock($B, $new, 30);                                      # Save the modified block
+          $String->putBlock($B, $current, 31);                                  # Save the modified block
+          PopR zmm31;                                                           # Restore stack
+          Jmp $end;                                                             # Character successfully inserted
          });
-
-        $String->putBlock($B, $current, 31);                                    # Save the modified block
-        PopR zmm31;                                                             # Restore stack
-        Jmp $end;                                                               # Character successfully inserted
        });
 
       my ($next, $prev) = $String->getNextAndPrevBlockOffsetFromZmm(31);        # Get links from current source block
@@ -4615,16 +4653,19 @@ sub Nasm::X86::String::deleteChar($@)                                           
     ForEver                                                                     # Each block in source string
      {my ($start, $end) = @_;                                                   # Start and end labels
 
-      If ((($P >= $C) & ($P <= $C + $L)),
+      If ($P >= $C,
       Then                                                                      # Position is in current block
-       {my $O = $P - $C;                                                        # Offset in current block
-        PushR zmm31;                                                            # Stack block
-        ($O+1)->setMask($L - $O, k7);                                           # Set mask for reload
-        Vmovdqu8 "zmm31{k7}", "[rsp+1]";                                        # Reload
-        $String->setBlockLengthInZmm($L-1, 31);                                 # Length of block
-        $String->putBlock($B, $current, 31);                                    # Save the modified block
-        PopR zmm31;                                                             # Stack block
-        Jmp $end;                                                               # Character successfully inserted
+       {If ($P <= $C + $L,
+        Then                                                                    # Position is in current block
+         {my $O = $P - $C;                                                      # Offset in current block
+          PushR zmm31;                                                          # Stack block
+          ($O+1)->setMask($L - $O, k7);                                         # Set mask for reload
+          Vmovdqu8 "zmm31{k7}", "[rsp+1]";                                      # Reload
+          $String->setBlockLengthInZmm($L-1, 31);                               # Length of block
+          $String->putBlock($B, $current, 31);                                  # Save the modified block
+          PopR zmm31;                                                           # Stack block
+          Jmp $end;                                                             # Character successfully inserted
+         });
        });
 
       my ($next, $prev) = $String->getNextAndPrevBlockOffsetFromZmm(31);        # Get links from current source block
@@ -4658,15 +4699,18 @@ sub Nasm::X86::String::getCharacter($@)                                         
     ForEver                                                                     # Each block in source string
      {my ($start, $end) = @_;                                                   # Start and end labels
 
-      If ((($P >= $C) & ($P <= $C + $L)),
+      If ($P >= $C,
       Then                                                                      # Position is in current block
-       {my $O = $P - $C;                                                        # Offset in current block
-        PushR zmm31;                                                            # Stack block
-        ($O+1)  ->setReg(r15);                                                  # Character to get
-        Mov r15b, "[rsp+r15]";                                                  # Reload
-        $$p{out}->getReg(r15);                                                  # Save character
-        PopR zmm31;                                                             # Stack block
-        Jmp $end;                                                               # Character successfully inserted
+       {If ($P <= $C + $L,
+        Then                                                                    # Position is in current block
+         {my $O = $P - $C;                                                      # Offset in current block
+          PushR zmm31;                                                          # Stack block
+          ($O+1)  ->setReg(r15);                                                # Character to get
+          Mov r15b, "[rsp+r15]";                                                # Reload
+          $$p{out}->getReg(r15);                                                # Save character
+          PopR zmm31;                                                           # Stack block
+          Jmp $end;                                                             # Character successfully inserted
+         });
        });
 
       my ($next, $prev) = $String->getNextAndPrevBlockOffsetFromZmm(31);        # Get links from current source block
@@ -4864,7 +4908,7 @@ sub Nasm::X86::Array::dump($@)                                                  
        });
 
       my $lastBlockCount = $size % $N;                                          # Number of elements in the last block
-      If ($lastBlockCount, sub                                                  # Print non empty last block
+      If ($lastBlockCount > 0, sub                                              # Print non empty last block
        {my $S = getDFromZmm(31, ($T + 1) * $w, r8);                             # Address secondary block from first block
         $b->getBlock($B, $S, 30);                                               # Get the secondary block
         $S->out("Last: ", "  ");
@@ -5290,7 +5334,7 @@ sub Nasm::X86::Tree::splitNode($$$$@)                                           
      });
 
     my $p = $t->getUpFromData($D, $transfer);                                   # Parent
-    If ($p,
+    If ($p > 0,
     Then                                                                        # Not the root
      {my $s = getDFromZmm $K, $t->splittingKey, $transfer;                      # Splitting key
       If ($k < $s,
@@ -5353,7 +5397,7 @@ sub Nasm::X86::Tree::reParent($$$$$@)                                           
     my $L = $t->getLengthInKeys($PK) + 1;                                       # Number of children
     my $p = $t->getUpFromData  ($PD, r8);                                       # Parent node offset as a variable
 
-    If ($t->getLoop($PD, r8), sub                                               # Not a leaf
+    If ($t->getLoop($PD, r8) > 0, sub                                               # Not a leaf
      {PushR (rax, rdi);
       Mov rdi, rsp;                                                             # Save stack base
       PushRR "zmm$PN";                                                          # Child nodes on stack
@@ -5484,7 +5528,7 @@ sub Nasm::X86::Tree::splitFullRoot($$)                                          
     LoadBitsIntoMaskRegister(k7, $transfer, "",  +$ll);                         # Constant mask up to the split point
     &Vmovdqu32   (zmm $LK."{k7}",      $TK);                                    # Split keys left
     &Vmovdqu32   (zmm $LD."{k7}",      $TD);                                    # Split data left
-    If ($n, sub  {&Vmovdqu32 (zmm $LN."{k7}", $TN)});                           # Split nodes left
+    If ($n > 0, sub  {&Vmovdqu32 (zmm $LN."{k7}", $TN)});                           # Split nodes left
 
     LoadBitsIntoMaskRegister(k6, $transfer, '',  +$rl, -($ll+1));               # Constant mask from one beyond split point to end of keys
     Kshiftrq k7, k6, $ll+1;                                                     # Constant mask for compressed right keys
@@ -5497,7 +5541,7 @@ sub Nasm::X86::Tree::splitFullRoot($$)                                          
     &Vpcompressd (zmm $Test."{k6}",    $Test);                                  # Compress right data
     &Vmovdqu32   (zmm $RD.  "{k7}",    $Test);                                  # Save right data
 
-    If ($n,
+    If ($n > 0,
     Then                                                                        # Split nodes right
      {&Vmovdqu32   (zmm $Test."{k6}{z}", $TN);                                  # Split right nodes
       &Vpcompressd (zmm $Test."{k6}",    $Test);                                # Compress right node
@@ -5516,7 +5560,7 @@ sub Nasm::X86::Tree::splitFullRoot($$)                                          
     &Vmovdqu32 (zmm $TK."{k7}{z}",  $TK);                                       # Clear unused keys in root
     &Vmovdqu32 (zmm $TD."{k7}{z}",  $TD);                                       # Clear unused data in root
 
-    If ($n,
+    If ($n > 0,
     Then
      {LoadBitsIntoMaskRegister(k7, $transfer, "1", -$length, 1);                # Unused fields
       &Vmovdqu32 (zmm $TN."{k7}{z}",  $TN);                                     # Clear unused node in root
@@ -5590,7 +5634,7 @@ sub Nasm::X86::Tree::splitFullLeftOrRightNode($$)                               
     &Vpcompressd (zmm $Test."{k6}",    $Test);                                  # Compress right data
     &Vmovdqu32   (zmm $RD.  "{k7}",    $Test);                                  # Save right data
 
-    If ($n,
+    If ($n > 0,
     Then                                                                        # Split nodes right
      {&Vmovdqu32   (zmm $Test."{k6}{z}", $LN);                                  # Split right nodes
       &Vpcompressd (zmm $Test."{k6}",    $Test);                                # Compress right node
@@ -5604,7 +5648,7 @@ sub Nasm::X86::Tree::splitFullLeftOrRightNode($$)                               
       &Vmovdqu32   (zmm $RK."{k7}{z}",   $RK);                                  # Remove unused keys on right
       &Vmovdqu32   (zmm $RD."{k7}{z}",   $RD);                                  # Remove unused data on right
 
-      If ($n,
+      If ($n > 0,
       Then                                                                      # Split nodes left
        {LoadBitsIntoMaskRegister(k7, $transfer, '10', -($rl+2), +($ll-1));
         &Vmovdqu32 (zmm $RN."{k7}{z}",   $RN);
@@ -5613,7 +5657,7 @@ sub Nasm::X86::Tree::splitFullLeftOrRightNode($$)                               
       &Vmovdqu32   (zmm $LK."{k6}{z}",   $LK);                                  # Remove unused keys on left
       &Vmovdqu32   (zmm $LD."{k6}{z}",   $LD);                                  # Remove unused data on left
 
-      If ($n,
+      If ($n > 0,
       Then                                                                      # Split nodes left
        {LoadBitsIntoMaskRegister(k6, $transfer, '10', -($rl+1), +$ll);
         &Vmovdqu32 (zmm $LN."{k6}{z}",   $LN);
@@ -5624,7 +5668,7 @@ sub Nasm::X86::Tree::splitFullLeftOrRightNode($$)                               
 
       &Vmovdqu32   (zmm $LK."{k7}{z}",   $LK);                                  # Remove unused keys
       &Vmovdqu32   (zmm $LD."{k7}{z}",   $LD);                                  # Split data left
-      If ($n,
+      If ($n > 0,
       Then                                                                      # Split nodes left
        {LoadBitsIntoMaskRegister(k7, $transfer, '10', -($rl+1), +$ll);
         &Vmovdqu32 (zmm $LN."{k7}{z}",   $LN);
@@ -5645,7 +5689,7 @@ sub Nasm::X86::Tree::splitFullLeftOrRightNode($$)                               
     Kmovq r15, k6;                                                              # Point at which to insert in parent
     $t->transferTreeBitsFromLeftOrRight($right, r15, $PK, $LK, $RK);
 
-    If ($n,
+    If ($n > 0,
     Then                                                                        # Insert new left node offset into parent nodes
      {Kshiftlq k6, k6, 1 unless $right;                                         # Node insertion point
       Kandnq k5, k6, k7;                                                        # Expansion mask
@@ -5851,7 +5895,7 @@ sub Nasm::X86::Tree::findAndClone($$)                                           
   @_ == 2 or confess;
   Comment "Nasm::X86::Tree::findAndClone";
   $t->find($key);
-  If ($t->found,
+  If ($t->found > 0,
   Then
    {$t->first->copy($t->data);                                                  # Copy the data variable to the first variable without checking whether it is valid
    });
@@ -5893,75 +5937,78 @@ sub Nasm::X86::Tree::insertDataOrTree($$$$)                                     
      });
 
     my $n = $t->getLoop(30, $transfer);                                         # Get the offset of the node block
-    If (($n == 0) & ($l < $t->maxKeys),
+    If ($n == 0,
     Then                                                                        # Node is root with no children and space for more keys
-     {$l->setMaskFirst(k7);                                                     # Set the compare bits
-      $K->setReg(r15);                                                          # Key to search for
-      Vpbroadcastd zmm22, r15d;                                                 # Load key
-      Vpcmpud "k6{k7}", zmm22, zmm31, 0;                                        # Check for equal key
-      Ktestd k6, k6;                                                            # Check whether a matching key was found - the operation clears the zero flag if the register is not zero
-      IfNz                                                                      # Found the key so we just update the data field
-      Then
-       {if ($tnd)                                                               # Insert sub tree if requested
-         {Kmovq r15, k6;                                                        # Position of key just found
-          $t->isTree(r15, 31);                                                  # Set the zero flag to indicate whether the existing data element is in fact a tree
-          IfNz                                                                  # If the data element is already a tree then get its value and return it in the data variable
-          Then
-           {Tzcnt r14, r15;                                                     # Trailing zeros
-            $D->copy(getDFromZmm 30, "r14*$$t{width}", $transfer);              # Data associated with the key
-            Jmp $success;                                                       # Return offset of sub tree
-           },
-          Else                                                                  # The existing element is not a tree so we mark it as such using the single bit in r15/k6
-           {$t->setTree(r15, 31);
-           };
-          $D->copy($t->bs->CreateTree->first) if $tnd == 1;                     # Create tree and copy offset of first  block
+     {If ($l < $t->maxKeys,
+      Then                                                                      # Node is root with no children and space for more keys
+       {$l->setMaskFirst(k7);                                                   # Set the compare bits
+        $K->setReg(r15);                                                        # Key to search for
+        Vpbroadcastd zmm22, r15d;                                               # Load key
+        Vpcmpud "k6{k7}", zmm22, zmm31, 0;                                      # Check for equal key
+        Ktestd k6, k6;                                                          # Check whether a matching key was found - the operation clears the zero flag if the register is not zero
+        IfNz                                                                    # Found the key so we just update the data field
+        Then
+         {if ($tnd)                                                             # Insert sub tree if requested
+           {Kmovq r15, k6;                                                      # Position of key just found
+            $t->isTree(r15, 31);                                                # Set the zero flag to indicate whether the existing data element is in fact a tree
+            IfNz                                                                # If the data element is already a tree then get its value and return it in the data variable
+            Then
+             {Tzcnt r14, r15;                                                   # Trailing zeros
+              $D->copy(getDFromZmm 30, "r14*$$t{width}", $transfer);            # Data associated with the key
+              Jmp $success;                                                     # Return offset of sub tree
+             },
+            Else                                                                # The existing element is not a tree so we mark it as such using the single bit in r15/k6
+             {$t->setTree(r15, 31);
+             };
+            $D->copy($t->bs->CreateTree->first) if $tnd == 1;                   # Create tree and copy offset of first  block
+           }
+          $D->setReg(r14);                                                      # Key to search for
+          Vpbroadcastd "zmm30{k6}", r14d;                                       # Load data
+          $t->putKeysData($B, $F, 31, 30, $transfer, $work);                    # Write the data block back into the underlying arena
+          Jmp $success;                                                         # Insert completed successfully
+         };
+
+        Vpcmpud "k6{k7}", zmm22, zmm31, 1;                                      # Check for elements that are greater than an existing element
+        Ktestw   k6, k6;
+        IfEq (sub                                                               # K6 zero implies the latest key goes at the end
+         {Kshiftlw k6, k7, 1;                                                   # Reach next empty field
+          Kandnw   k6, k7, k6;                                                  # Remove back fill to leave a single bit at the next empty field
+         },
+        sub
+         {Kandw    k5, k6, k7;                                                  # Tested at: # Insert key for Tree but we could simplify by using a mask for the valid area
+          Kandnw   k4, k5, k7;
+          Kshiftlw k5, k5, 1;
+          Korw     k5, k4, k5;                                                  # Broadcast mask
+          Kandnw   k6, k5, k7;                                                  # Expand mask
+          Vpexpandd  "zmm31{k5}", zmm31;                                        # Shift up keys
+          Vpexpandd  "zmm30{k5}", zmm30;                                        # Shift up data
+         });
+
+        Vpbroadcastd "zmm31{k6}", r15d;                                         # Load key
+
+        if ($tnd)                                                               # Insert new sub tree
+         {$D->copy($t->bs->CreateTree->first) if $tnd == 1;                     # Create tree and copy offset of first block
          }
-        $D->setReg(r14);                                                        # Key to search for
+        if (1)                                                                  # Expand tree bits to match
+         {Kmovq $point, k6;                                                     # Position of key just found
+          $t->expandTreeBitsWithZeroOrOne($tnd, 31, $point);                    # Mark new entry as a sub tree
+         }
+
+        $D->setReg(r14);                                                        # Corresponding data
         Vpbroadcastd "zmm30{k6}", r14d;                                         # Load data
-        $t->putKeysData($B, $F, 31, 30, $transfer, $work);                      # Write the data block back into the underlying arena
+        $t->putLengthInKeys( 31, $l + 1);                                       # Set the length of the block
+
+        If $l + 1 == $t->maxKeys,
+        Then                                                                    # Root is now full: allocate the node block for it and chain it in
+         {$t->bs->allocZmmBlock($B, my $n = V(offset));                         # Children
+          $t->putLoop($n, 30, $transfer);                                       # Set the link from data to node
+          $t->putLoop($F, 29, $transfer);                                       # Set the link from node to key
+         };
+
+        $t->putKeysDataNode($B, $F, 31, 30, 29, $transfer, $work);              # Write the data block back into the underlying arena
+        $t->splitNode($B, $F, $K);                                              # Split if the leaf has got too big
         Jmp $success;                                                           # Insert completed successfully
-       };
-
-      Vpcmpud "k6{k7}", zmm22, zmm31, 1;                                        # Check for elements that are greater than an existing element
-      Ktestw   k6, k6;
-      IfEq (sub                                                                 # K6 zero implies the latest key goes at the end
-       {Kshiftlw k6, k7, 1;                                                     # Reach next empty field
-        Kandnw   k6, k7, k6;                                                    # Remove back fill to leave a single bit at the next empty field
-       },
-      sub
-       {Kandw    k5, k6, k7;                                                    # Tested at: # Insert key for Tree but we could simplify by using a mask for the valid area
-        Kandnw   k4, k5, k7;
-        Kshiftlw k5, k5, 1;
-        Korw     k5, k4, k5;                                                    # Broadcast mask
-        Kandnw   k6, k5, k7;                                                    # Expand mask
-        Vpexpandd  "zmm31{k5}", zmm31;                                          # Shift up keys
-        Vpexpandd  "zmm30{k5}", zmm30;                                          # Shift up data
        });
-
-      Vpbroadcastd "zmm31{k6}", r15d;                                           # Load key
-
-      if ($tnd)                                                                 # Insert new sub tree
-       {$D->copy($t->bs->CreateTree->first) if $tnd == 1;                       # Create tree and copy offset of first block
-       }
-      if (1)                                                                    # Expand tree bits to match
-       {Kmovq $point, k6;                                                       # Position of key just found
-        $t->expandTreeBitsWithZeroOrOne($tnd, 31, $point);                      # Mark new entry as a sub tree
-       }
-
-      $D->setReg(r14);                                                          # Corresponding data
-      Vpbroadcastd "zmm30{k6}", r14d;                                           # Load data
-      $t->putLengthInKeys( 31, $l + 1);                                         # Set the length of the block
-
-      If $l + 1 == $t->maxKeys,
-      Then                                                                      # Root is now full: allocate the node block for it and chain it in
-       {$t->bs->allocZmmBlock($B, my $n = V(offset));                           # Children
-        $t->putLoop($n, 30, $transfer);                                         # Set the link from data to node
-        $t->putLoop($F, 29, $transfer);                                         # Set the link from node to key
-       };
-
-      $t->putKeysDataNode($B, $F, 31, 30, 29, $transfer, $work);                # Write the data block back into the underlying arena
-      $t->splitNode($B, $F, $K);                                                # Split if the leaf has got too big
-      Jmp $success;                                                             # Insert completed successfully
      });
 
     my $compare = V(compare);                                                   # Comparison result
@@ -6084,7 +6131,7 @@ sub Nasm::X86::Tree::getKeysDataNode($$$$$$;$$)                                 
   $b->getBlock($bs, $data,   $zmmData, $work1, $work2);                         # Get the data block
 
   my $node = $t->getLoop    ($zmmData, $work1, $work2);                         # Get the offset of the corresponding node block
-  If ($node,
+  If ($node > 0,
   Then                                                                          # Check for optional node block
    {$b->getBlock($bs, $node, $zmmNode, $work1, $work2);                         # Get the node block
    },
@@ -6098,7 +6145,7 @@ sub Nasm::X86::Tree::putKeysDataNode($$$$$$;$$)                                 
   @_ == 6 or @_ == 8 or confess " 6 or 8 parameters";
   $t->putKeysData($bs, $offset, $zmmKeys, $zmmData, $work1, $work2);            # Put keys and data
   my $node = $t->getLoop($zmmData, $work1);                                     # Get the offset of the corresponding node block
-  If ($node,
+  If ($node > 0,
   Then                                                                          # Check for optional node block
    {$t->bs->putBlock($bs, $node, $zmmNode, $work1, $work2);                     # Put the node block
    });
@@ -6368,7 +6415,7 @@ sub Nasm::X86::Tree::print($)                                                   
       $iter->data->out(' data: ');
       $D   ->outNL    (' depth: ');
       $t->find($iter->key);                                                     # Slow way to find out if this is a subtree
-      If ($t->subTree,
+      If ($t->subTree > 0,
       Then
        {$s->call($$p{bs}, first => $t->data);
        });
@@ -6529,14 +6576,14 @@ sub Nasm::X86::Tree::Iterator::next($)                                          
 
       my $nodes = $t->getLoop(30, r8);                                          # Nodes
 
-      If ($nodes,
+      If ($nodes > 0,
       Then                                                                      # Go left if there are child nodes
        {$t->leftMost($B, $C, my $l = V(offset));
         &$new($l, K(zero, 0));
        },
       Else
        {my $l = $t->getLengthInKeys(31);                                        # Number of keys
-        If ($l,
+        If ($l > 0,
         Then                                                                    # Start with the current node as it is a leaf
          {&$new($C, K(zero, 0));
          },
@@ -6880,7 +6927,7 @@ END
    {my $instructions       = getInstructionCount;                               # Instructions executed under emulator
     $instructionsExecuted += $instructions;                                     # Count instructions executed
     $assembliesPerformed++;                                                     # Count assemblies
-    my $bytes = fileSize $e;                                                    # Estimate the size of the output program
+    my $bytes = fileSize($e) - 9512 + 64;                                       # Estimate the size of the output program
     $totalBytesAssembled += $bytes;                                             # Estimate total of all programs assembled
 
     my (undef, $file, $line) = caller();
@@ -17483,6 +17530,22 @@ if (1) {                                                                        
   is_deeply \@s, \@S;
  }
 
+#latest:
+if (1) {                                                                        #TIf
+  my $c = K(one,1);
+  If ($c == 0,
+  Then
+   {PrintOutStringNL "1 == 0";
+   },
+  Else
+   {PrintOutStringNL "1 != 0";
+   });
+
+  ok Assemble(debug => 0, eq => <<END);
+1 != 0
+END
+ }
+
 if (1) {                                                                        #TIfNz
   Mov rax, 0;
   Test rax,rax;
@@ -18485,7 +18548,7 @@ if (1) {                                                                        
   ok Assemble =~ m(xmm0: 0000 0000 0000 0000   0000 0000 0000 0000);
  }
 
-if (1) {                                                                        #TIf #TIfEq #TIfNe #TIfLe #TIfLt #TIfGe #TIfGt
+if (1) {                                                                        #TIfEq #TIfNe #TIfLe #TIfLt #TIfGe #TIfGt
   my $cmp = sub
    {my ($a, $b) = @_;
 
@@ -18552,8 +18615,6 @@ if (1) {                                                                        
   my $b = K(b, 2);  $b->outNL;
   my $c = $a +  $b; $c->outNL;
   my $d = $c -  $a; $d->outNL;
-  my $e = $d == $b; $e->outNL;
-  my $f = $d != $b; $f->outNL;
   my $g = $a *  $b; $g->outNL;
   my $h = $g /  $b; $h->outNL;
   my $i = $a %  $b; $i->outNL;
@@ -18574,8 +18635,6 @@ a: 0000 0000 0000 0003
 b: 0000 0000 0000 0002
 (a add b): 0000 0000 0000 0005
 ((a add b) sub a): 0000 0000 0000 0002
-(((a add b) sub a) eq b): 0000 0000 0000 0001
-(((a add b) sub a) ne b): 0000 0000 0000 0000
 (a times b): 0000 0000 0000 0006
 ((a times b) / b): 0000 0000 0000 0003
 (a % b): 0000 0000 0000 0001
@@ -19270,14 +19329,10 @@ if (1) {                                                                        
     get(19);
    }
 
-  $a->dump;
   ($l+$L+1)->for(sub
    {my ($i, $start, $next, $end) = @_;
     $a->pop(my $e = V(element));
     $e->outNL;
-    If (($e == 33)|($e == 32)|($e == 17)|($e == 16)|($e == 15)|($e == 14)|($e == 1)|($e == 0), sub
-     {$a->dump;
-     });
    });
 
   V(limit, 38)->for(sub                                                         # Push using a loop and reusing the freed space
@@ -19285,8 +19340,6 @@ if (1) {                                                                        
     $a->push(element=>$index*2);
    });
 
-  $a->dump;
-
   V(limit, 38)->for(sub                                                         # Push using a loop and reusing the freed space
    {my ($index, $start, $next, $end) = @_;
     $a->pop(my $e = V(element));
@@ -19294,7 +19347,7 @@ if (1) {                                                                        
    });
 
   $a->dump;
-next1:;
+
   ok Assemble(debug => 0, eq => <<END);
 index: 0000 0000 0000 0000  element: 0000 0000 0000 0001
 index: 0000 0000 0000 0001  element: 0000 0000 0000 0002
@@ -19334,24 +19387,11 @@ index: 0000 0000 0000 0022  element: 0000 0000 0000 0023
 index: 0000 0000 0000 0023  element: 0000 0000 0000 0024
 index: 0000 0000 0000 0009  element: 0000 0000 0000 FFF9
 index: 0000 0000 0000 0013  element: 0000 0000 0000 EEE9
-array
-Size: 0000 0000 0000 0024   zmm31: 0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 00D8 0000 0098   0000 0058 0000 0024
-Full: 0000 0000 0000 0058   zmm30: 0000 0010 0000 000F   0000 000E 0000 000D   0000 000C 0000 000B   0000 FFF9 0000 0009   0000 0008 0000 0007   0000 0006 0000 0005   0000 0004 0000 0003   0000 0002 0000 0001
-Full: 0000 0000 0000 0098   zmm30: 0000 0020 0000 001F   0000 001E 0000 001D   0000 001C 0000 001B   0000 001A 0000 0019   0000 0018 0000 0017   0000 0016 0000 0015   0000 EEE9 0000 0013   0000 0012 0000 0011
-Last: 0000 0000 0000 00D8   zmm30: 0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0024 0000 0023   0000 0022 0000 0021
 element: 0000 0000 0000 0024
 element: 0000 0000 0000 0023
 element: 0000 0000 0000 0022
 element: 0000 0000 0000 0021
-array
-Size: 0000 0000 0000 0020   zmm31: 0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0098   0000 0058 0000 0020
-Full: 0000 0000 0000 0058   zmm30: 0000 0010 0000 000F   0000 000E 0000 000D   0000 000C 0000 000B   0000 FFF9 0000 0009   0000 0008 0000 0007   0000 0006 0000 0005   0000 0004 0000 0003   0000 0002 0000 0001
-Full: 0000 0000 0000 0098   zmm30: 0000 0020 0000 001F   0000 001E 0000 001D   0000 001C 0000 001B   0000 001A 0000 0019   0000 0018 0000 0017   0000 0016 0000 0015   0000 EEE9 0000 0013   0000 0012 0000 0011
 element: 0000 0000 0000 0020
-array
-Size: 0000 0000 0000 001F   zmm31: 0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0098   0000 0058 0000 001F
-Full: 0000 0000 0000 0058   zmm30: 0000 0010 0000 000F   0000 000E 0000 000D   0000 000C 0000 000B   0000 FFF9 0000 0009   0000 0008 0000 0007   0000 0006 0000 0005   0000 0004 0000 0003   0000 0002 0000 0001
-Last: 0000 0000 0000 0098   zmm30: 0000 0020 0000 001F   0000 001E 0000 001D   0000 001C 0000 001B   0000 001A 0000 0019   0000 0018 0000 0017   0000 0016 0000 0015   0000 EEE9 0000 0013   0000 0012 0000 0011
 element: 0000 0000 0000 001F
 element: 0000 0000 0000 001E
 element: 0000 0000 0000 001D
@@ -19367,18 +19407,9 @@ element: 0000 0000 0000 EEE9
 element: 0000 0000 0000 0013
 element: 0000 0000 0000 0012
 element: 0000 0000 0000 0011
-array
-Size: 0000 0000 0000 0010   zmm31: 0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0058 0000 0010
-Full: 0000 0000 0000 0058   zmm30: 0000 0010 0000 000F   0000 000E 0000 000D   0000 000C 0000 000B   0000 FFF9 0000 0009   0000 0008 0000 0007   0000 0006 0000 0005   0000 0004 0000 0003   0000 0002 0000 0001
 element: 0000 0000 0000 0010
-array
-Size: 0000 0000 0000 000F   zmm31: 0000 000F 0000 000E   0000 000D 0000 000C   0000 000B 0000 FFF9   0000 0009 0000 0008   0000 0007 0000 0006   0000 0005 0000 0004   0000 0003 0000 0002   0000 0001 0000 000F
 element: 0000 0000 0000 000F
-array
-Size: 0000 0000 0000 000E   zmm31: 0000 000F 0000 000E   0000 000D 0000 000C   0000 000B 0000 FFF9   0000 0009 0000 0008   0000 0007 0000 0006   0000 0005 0000 0004   0000 0003 0000 0002   0000 0001 0000 000E
 element: 0000 0000 0000 000E
-array
-Size: 0000 0000 0000 000D   zmm31: 0000 000F 0000 000E   0000 000D 0000 000C   0000 000B 0000 FFF9   0000 0009 0000 0008   0000 0007 0000 0006   0000 0005 0000 0004   0000 0003 0000 0002   0000 0001 0000 000D
 element: 0000 0000 0000 000D
 element: 0000 0000 0000 000C
 element: 0000 0000 0000 000B
@@ -19392,13 +19423,6 @@ element: 0000 0000 0000 0004
 element: 0000 0000 0000 0003
 element: 0000 0000 0000 0002
 element: 0000 0000 0000 0001
-array
-Size: 0000 0000 0000 0000   zmm31: 0000 000F 0000 000E   0000 000D 0000 000C   0000 000B 0000 FFF9   0000 0009 0000 0008   0000 0007 0000 0006   0000 0005 0000 0004   0000 0003 0000 0002   0000 0001 0000 0000
-array
-Size: 0000 0000 0000 0026   zmm31: 0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 00D8 0000 0098   0000 0058 0000 0026
-Full: 0000 0000 0000 0058   zmm30: 0000 001E 0000 001C   0000 001A 0000 0018   0000 0016 0000 0014   0000 0012 0000 0010   0000 000E 0000 000C   0000 000A 0000 0008   0000 0006 0000 0004   0000 0002 0000 0000
-Full: 0000 0000 0000 0098   zmm30: 0000 003E 0000 003C   0000 003A 0000 0038   0000 0036 0000 0034   0000 0032 0000 0030   0000 002E 0000 002C   0000 002A 0000 0028   0000 0026 0000 0024   0000 0022 0000 0020
-Last: 0000 0000 0000 00D8   zmm30: 0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 004A 0000 0048   0000 0046 0000 0044   0000 0042 0000 0040
 element: 0000 0000 0000 004A
 element: 0000 0000 0000 0048
 element: 0000 0000 0000 0046
@@ -19781,7 +19805,7 @@ if (1) {                                                                        
   Vmovdqu8 zmm24, "[$rd]";
   Vmovdqu8 zmm23, "[$rn]";
 
-   $t->splitFullLeftNode;
+  $t->splitFullLeftNode;
 
   PrintOutRegisterInHex reverse zmm(23..31);
 
@@ -19799,7 +19823,7 @@ END
  }
 
 #latest:
-if (1) {                                                                        # Concatenate at end rather than insert in middle
+if (1) {                                                                        #TNasm::X86::Tree::splitFullLeftNode
   my $tk = Rd(1, (0) x 13, 1, 0xC1);
   my $td = Rd(1, (0) x 14,    0xC2);
   my $tn = Rd(1, 0xAA, (0) x 13, 0xCC);
@@ -20491,7 +20515,7 @@ if (1) {                                                                        
 
   $t->find(K(key, 0xffff));  $t->found->outNL('Found: ');                       # Find some entries
   $t->find(K(key, 0xd));     $t->found->outNL('Found: ');
-  If ($t->found,
+  If ($t->found > 0,
   Then
    {$t->data->outNL("Data : ");
    });
@@ -20746,32 +20770,6 @@ END
  }
 
 #latest:
-if (1) {                                                                        # Performance of tree inserts
-# Time: 1.18s, bytes: 156,672, execs: 51,659
-# Time: 0.62s, bytes: 156,240, execs: 49,499
-# Time: 0.63s, bytes: 156,096, execs: 49,043
-# Time: 0.58s, bytes: 150,624, execs: 43,802
-# Time: 0.59s, bytes: 151,008, execs: 43,965
-# Time: 0.62s, bytes: 142,808, execs: 43,763
-# Time: 0.94s, bytes: 138,704, execs: 43,561
-# Time: 0.54s, bytes: 126,400, execs: 43,157
-# Time: 0.52s, bytes: 123,088, execs: 40,796
-# Time: 0.51s, bytes: 120,160, execs: 37,761
-  my $L = V(loop, 45);
-
-  my $b = CreateArena;
-  my $t = $b->CreateTree;
-
-  $L->for(sub
-   {my ($i, $start, $next, $end) = @_;
-    $t->insert($i, $i);
-   });
-
-  ok Assemble(debug => 0, eq => <<END);
-END
- }
-
-#latest:
 if (1) {                                                                        # Print empty tree
   my $b = CreateArena;
   my $t = $b->CreateTree;
@@ -20968,13 +20966,41 @@ Tree at:  0000 0000 0000 0398  length: 0000 0000 0000 0000
 END
  }
 
+latest:
+if (1) {                                                                        # Performance of tree inserts
+# Time: 1.18s, bytes: 156,672, execs: 51,659
+# Time: 0.62s, bytes: 156,240, execs: 49,499
+# Time: 0.63s, bytes: 156,096, execs: 49,043
+# Time: 0.58s, bytes: 150,624, execs: 43,802
+# Time: 0.59s, bytes: 151,008, execs: 43,965
+# Time: 0.62s, bytes: 142,808, execs: 43,763
+# Time: 0.94s, bytes: 138,704, execs: 43,561
+# Time: 0.54s, bytes: 126,400, execs: 43,157
+# Time: 0.52s, bytes: 123,088, execs: 40,796
+# Time: 0.51s, bytes: 120,160, execs: 37,761
+# Time: 0.49s, bytes: 108,264, execs: 31,014
+# Time: 0.50s, bytes: 102,560, execs: 29,496
+  my $L = V(loop, 45);
+
+  my $b = CreateArena;
+  my $t = $b->CreateTree;
+
+  $L->for(sub
+   {my ($i, $start, $next, $end) = @_;
+    $t->insert($i, $i);
+   });
+
+  ok Assemble(debug => 0, eq => <<END);
+END
+ }
+
 #latest:
 if (0) {
   is_deeply Assemble(debug=>1), <<END;
 END
  }
 
-ok 1 for 9..32;
+ok 1 for 10..32;
 
 #unlink $_ for qw(hash print2 sde-log.txt sde-ptr-check.out.txt z.txt);         # Remove incidental files
 unlink $_ for qw(hash print2);                                                  # Remove incidental files
