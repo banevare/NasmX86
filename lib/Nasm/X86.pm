@@ -6826,7 +6826,7 @@ sub Assemble(%)                                                                 
   Exit 0 unless @text > 4 and $text[-4] =~ m(Exit code:);                       # Exit with code 0 if an exit was not the last thing coded.
   my $debug = $options{debug}//0;                                               # Debug: 0 - none (minimal output), 1 - normal (debug output and confess of failure), 2 - failures (debug output and no confess on failure) .
 
-  Optimize(%options);                                                           # Perform any optimizations requested
+# Optimize(%options);                                                           # Perform any optimizations requested
 
   my $k = $options{keep};                                                       # Keep the executable
   my $r = join "\n", map {s/\s+\Z//sr}   @rodata;
