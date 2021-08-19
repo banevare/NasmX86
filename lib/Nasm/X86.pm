@@ -21056,11 +21056,11 @@ if (1) {
     Comment "TTTT";
 #    K(one,-1)->errNL;
     Comment("AAAA crash start");
-    $$p{in}->setReg(r15);
+#   $$p{in}->setReg(r15);
     Comment("BBBB crash end");
 lll "AAAA", dump($$p{in});
     my $a = V(in)->copy($$p{in});
-       $a->outNL();
+       $a->errNL();
     Comment("CCCC crash end");
     PrintErrRegisterInHex r15;
 #   K(two,-2)->errNL;
