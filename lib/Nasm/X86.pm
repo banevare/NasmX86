@@ -21050,43 +21050,23 @@ if (1) {
       PrintErrRegisterInHex r14;
    } [qw(in)], name => 'sss';
 
-  Comment "TTTT";
   my $t = Subroutine
    {my ($p) = @_;
-    Comment "TTTT";
-#    K(one,-1)->errNL;
-    Comment("AAAA crash start");
-#   $$p{in}->setReg(r15);
-    Comment("BBBB crash end");
-lll "AAAA", dump($$p{in});
-    my $a = V(in)->copy($$p{in});
-       $a->errNL();
-    Comment("CCCC crash end");
-    PrintErrRegisterInHex r15;
-#   K(two,-2)->errNL;
-#   $v->out;
+    $$p{in}->errNL;
    } [qw(in)], name => 'ttt';
 
-  Comment "CCCC";
   my $c = Subroutine
    {my ($p) = @_;
-    Comment "Via call start";
     $s->via($$p{call}, $$p{in});
-    Comment "Via call end";
    } [qw(call in)], name => 'ccc';
 
-  Comment "DDDD";
   my $S = $s->V;
   my $T = $t->V;
 
-  Comment "EEEE";
-# my $C = Rs("CCCCCCCC");
-#  PrintErrRegisterInHex rbp;
-  Comment "First call start";
   $c->call(call => $T, V(in, 42));
-  Comment "First call end";
 
   ok Assemble(debug => 0, eq => <<END);
+in: 0000 0000 0000 002A
 END
  }
 
