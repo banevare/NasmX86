@@ -919,8 +919,8 @@ sub Nasm::X86::Sub::callTo($$$@)                                                
 
   my $w = RegisterSize r15;
   PushR r15;                                                                    # Use this register to transfer between the current frame and the next frame
-  Mov "dword[rsp-$w*2]", $sub->nameString;                                      # Point to name
-  Mov "byte[rsp-1-$w]", scalar $sub->parameters->@*;                            # Number of parameters to enable traceback with parameters
+  Mov "dword[rsp  -$w*3]", $sub->nameString;                                    # Point to name
+  Mov "byte [rsp-1-$w*2]", scalar $sub->parameters->@*;                         # Number of parameters to enable traceback with parameters
 
   for my $p(sort keys %p)                                                       # Transfer parameters from current frame to next frame
    {!ref($p{$p}) or ref($p{$p}) =~ m(variable)i or confess "Variable required";
@@ -934,19 +934,19 @@ sub Nasm::X86::Sub::callTo($$$@)                                                
        }
       my $Q = $q->label;
          $Q =~ s(rbp) (rsp);
-      Mov "[$Q-$w]", r15;
+      Mov "[$Q-$w*2]", r15;
      }
    }
-  PopR;  # THis might be a problemm
 
-  if ($mode)
+  if ($mode)                                                                    # Dereference and call
    {Mov r15, $label;
     Mov r15, "[r15]";
     Call r15;
    }
-  else
-   {Call $label;                                                                # Call the sub routine
+  else                                                                          # Call via label
+   {Call $label;
    }
+  PopR;
  }
 
 sub Nasm::X86::Sub::call($@)                                                    # Call a sub passing it some parameters.
@@ -956,7 +956,9 @@ sub Nasm::X86::Sub::call($@)                                                    
 
 sub Nasm::X86::Sub::via($$@)                                                    # Call a sub by reference passing it some parameters.
  {my ($sub, $ref, @parameters) = @_;                                            # Subroutine descriptor, label of sub, parameter variables
+  PushR r15;
   $sub->callTo(1, "[$$ref{label}]", @parameters);                               # Call the subroutine
+  PopR;
  }
 
 sub Nasm::X86::Sub::V($)                                                        # Put the address of a subroutine into a stack variable so that it can be passed as a parameter.
@@ -21011,48 +21013,16 @@ END
  }
 
 #latest:
-if (1) {
-  my $s = Subroutine
-   {my ($p) = @_;
-    PrintOutStringNL   "SSS";
-    $$p{in}->out;
-   } [qw(in)], name => 'sss';
-
-  my $t = Subroutine
-   {my ($p) = @_;
-    PrintOutStringNL   "TTT";
-    $$p{in}->out;
-   } [qw(in)], name => 'ttt';
-
-  my $c = Subroutine
-   {my ($p) = @_;
-#   $s->via($$p{call}, $$p{in});
-    $s->via($$p{call}, in => K(one, 1));
-    $$p{in}->out;
-   } [qw(call in)], name => 'ccc';
-
-  my $S = $s->V;
-  my $T = $t->V;
-
-  my $C = Rs("CCCCCCCC");
-  $c->call(call => $T, V(in, "[$C]"));
-
-  ok Assemble(debug => 0, eq => <<END);
-END
- }
-
-latest:
-if (1) {
+if (1) {                                                                        # Passing a procedure reference
   Comment "SSSS";
   my $s = Subroutine
    {my ($p) = @_;
-#    $$p{in}->out;
-      PrintErrRegisterInHex r14;
+    $$p{in}->outNL;
    } [qw(in)], name => 'sss';
 
   my $t = Subroutine
    {my ($p) = @_;
-    $$p{in}->errNL;
+    $s->call($$p{in});
    } [qw(in)], name => 'ttt';
 
   my $c = Subroutine
@@ -21076,7 +21046,7 @@ if (0) {
 END
  }
 
-ok 1 for 10..32;
+ok 1 for 10..30;
 
 #unlink $_ for qw(hash print2 sde-log.txt sde-ptr-check.out.txt z.txt);         # Remove incidental files
 unlink $_ for qw(hash print2);                                                  # Remove incidental files
