@@ -8,6 +8,7 @@
 # tree::print - speed up decision as to whether we are on a tree or not
 # Remove @variables and replace with actual references to the required variables
 # Remove as much variable arithmetic as possible as it is slower and bigger than register arithmetic
+# Replace empty in boolean arithmetic with boolean and then check it in If to confirm that we are testing a boolean value
 package Nasm::X86;
 our $VERSION = "20210818";
 use warnings FATAL => qw(all);
@@ -18,7 +19,7 @@ use Data::Table::Text qw(:all);
 use Asm::C qw(:all);
 use feature qw(say current_sub);
 
-my $debugTrace = 0;                                                             # Trace execution if true - slow!
+my $debugTrace = 1;                                                             # Trace execution if true - slow!
 
 my %rodata;                                                                     # Read only data already written
 my %rodatas;                                                                    # Read only string already written
@@ -886,8 +887,8 @@ END
   $s                                                                            # Subroutine definition
  }
 
-sub Nasm::X86::Sub::callTo($$%)                                                 #P Call a sub passing it some parameters.
- {my ($sub, $label, @parameters) = @_;                                          # Subroutine descriptor, label of sub, parameter variables
+sub Nasm::X86::Sub::callTo($$$@)                                                #P Call a sub passing it some parameters.
+ {my ($sub, $mode, $label, @parameters) = @_;                                   # Subroutine descriptor, mode 0 - direct call or 1 - indirect call, label of sub, parameter variables
 
   my %p;
   while(@parameters)                                                            # Copy parameters supplied by the caller
@@ -938,12 +939,32 @@ sub Nasm::X86::Sub::callTo($$%)                                                 
    }
   PopR;
 
-  Call $label;                                                                  # Call the sub routine
+  if ($mode)
+   {PushR r15;
+    Mov r15, $label;
+    Mov r15, "[r15]";
+    &PrintErrRegisterInHex(r15);
+    Call r15;
+    PopR;
+   }
+  else
+   {Call $label;                                                                  # Call the sub routine
+   }
  }
 
-sub Nasm::X86::Sub::call($%)                                                    # Call a sub passing it some parameters.
+sub Nasm::X86::Sub::call($@)                                                    # Call a sub passing it some parameters.
  {my ($sub, @parameters) = @_;                                                  # Subroutine descriptor, parameter variables
-  $sub->callTo($$sub{start}, @parameters);                                      # Call the sub routine
+  $sub->callTo(0, $$sub{start}, @parameters);                                      # Call the subroutine
+ }
+
+sub Nasm::X86::Sub::via($$@)                                                    # Call a sub by reference passing it some parameters.
+ {my ($sub, $ref, @parameters) = @_;                                            # Subroutine descriptor, label of sub, parameter variables
+  $sub->callTo(1, "[$$ref{label}]", @parameters);                                  # Call the subroutine
+ }
+
+sub Nasm::X86::Sub::V($)                                                        # Put the address of a subroutine into a stack variable so that it can be passed as a parameter.
+ {my ($sub) = @_;                                                               # Subroutine descriptor, parameter variables
+  V('sub', $$sub{start});                                                       # Address subroutine via a stack variable
  }
 
 sub PrintTraceBack($)                                                           # Trace the call stack.
@@ -6922,7 +6943,7 @@ END
   my $out  = $k ? '' : "1>$o1";
   my $err  = $k ? '' : "2>$o2";
   my $opt =  qq($sde -mix -ptr-check);                                          # Emulator options
-     $opt =  qq($sde -mix -ptr-check -debugtrace) if $debugTrace;               # Emulator options
+     $opt =  qq($sde -mix -ptr-check -debugtrace -footprint) if $debugTrace;    # Emulator options
   my $exec = $emulator ? qq($opt -- ./$e $err $out) : qq(./$e $err $out);       # Execute with or without the emulator
 
   $cmd .= qq( && $exec) unless $k;                                              # Execute automatically unless suppressed by user
@@ -20987,6 +21008,74 @@ if (1) {                                                                        
    {my ($i, $start, $next, $end) = @_;
     $t->insert($i, $i);
    });
+
+  ok Assemble(debug => 0, eq => <<END);
+END
+ }
+
+#latest:
+if (1) {
+  my $s = Subroutine
+   {my ($p) = @_;
+    PrintOutStringNL   "SSS";
+    $$p{in}->out;
+   } [qw(in)], name => 'sss';
+
+  my $t = Subroutine
+   {my ($p) = @_;
+    PrintOutStringNL   "TTT";
+    $$p{in}->out;
+   } [qw(in)], name => 'ttt';
+
+  my $c = Subroutine
+   {my ($p) = @_;
+#   $s->via($$p{call}, $$p{in});
+    $s->via($$p{call}, in => K(one, 1));
+    $$p{in}->out;
+   } [qw(call in)], name => 'ccc';
+
+  my $S = $s->V;
+  my $T = $t->V;
+
+  my $C = Rs("CCCCCCCC");
+  $c->call(call => $T, V(in, "[$C]"));
+
+  ok Assemble(debug => 0, eq => <<END);
+END
+ }
+
+latest:
+if (1) {
+  Comment "SSSS";
+  my $s = Subroutine
+   {my ($p) = @_;
+#    $$p{in}->out;
+      PrintErrRegisterInHex r14;
+   } [qw(in)], name => 'sss';
+
+  Comment "TTTT";
+  my $t = Subroutine
+   {my ($p) = @_;
+    PrintErrRegisterInHex rbp;
+    lll "AAAA", dump($$p{in});
+    K(one,-1)->out;
+    $$p{in}->out;
+   } [qw(in)], name => 'ttt';
+
+  Comment "CCCC";
+  my $c = Subroutine
+   {my ($p) = @_;
+    $s->via($$p{call}, $$p{in});
+   } [qw(call in)], name => 'ccc';
+
+  Comment "DDDD";
+  my $S = $s->V;
+  my $T = $t->V;
+
+  Comment "EEEE";
+  my $C = Rs("CCCCCCCC");
+  PrintErrRegisterInHex rbp;
+  $c->call(call => $T, V(in, "[$C]"));
 
   ok Assemble(debug => 0, eq => <<END);
 END
