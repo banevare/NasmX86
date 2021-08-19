@@ -937,29 +937,26 @@ sub Nasm::X86::Sub::callTo($$$@)                                                
       Mov "[$Q-$w]", r15;
      }
    }
-  PopR;
+  PopR;  # THis might be a problemm
 
   if ($mode)
-   {PushR r15;
-    Mov r15, $label;
+   {Mov r15, $label;
     Mov r15, "[r15]";
-    &PrintErrRegisterInHex(r15);
     Call r15;
-    PopR;
    }
   else
-   {Call $label;                                                                  # Call the sub routine
+   {Call $label;                                                                # Call the sub routine
    }
  }
 
 sub Nasm::X86::Sub::call($@)                                                    # Call a sub passing it some parameters.
  {my ($sub, @parameters) = @_;                                                  # Subroutine descriptor, parameter variables
-  $sub->callTo(0, $$sub{start}, @parameters);                                      # Call the subroutine
+  $sub->callTo(0, $$sub{start}, @parameters);                                   # Call the subroutine
  }
 
 sub Nasm::X86::Sub::via($$@)                                                    # Call a sub by reference passing it some parameters.
  {my ($sub, $ref, @parameters) = @_;                                            # Subroutine descriptor, label of sub, parameter variables
-  $sub->callTo(1, "[$$ref{label}]", @parameters);                                  # Call the subroutine
+  $sub->callTo(1, "[$$ref{label}]", @parameters);                               # Call the subroutine
  }
 
 sub Nasm::X86::Sub::V($)                                                        # Put the address of a subroutine into a stack variable so that it can be passed as a parameter.
@@ -21056,16 +21053,26 @@ if (1) {
   Comment "TTTT";
   my $t = Subroutine
    {my ($p) = @_;
-    PrintErrRegisterInHex rbp;
-    lll "AAAA", dump($$p{in});
-    K(one,-1)->out;
-    $$p{in}->out;
+    Comment "TTTT";
+#    K(one,-1)->errNL;
+    Comment("AAAA crash start");
+    $$p{in}->setReg(r15);
+    Comment("BBBB crash end");
+lll "AAAA", dump($$p{in});
+    my $a = V(in)->copy($$p{in});
+       $a->outNL();
+    Comment("CCCC crash end");
+    PrintErrRegisterInHex r15;
+#   K(two,-2)->errNL;
+#   $v->out;
    } [qw(in)], name => 'ttt';
 
   Comment "CCCC";
   my $c = Subroutine
    {my ($p) = @_;
+    Comment "Via call start";
     $s->via($$p{call}, $$p{in});
+    Comment "Via call end";
    } [qw(call in)], name => 'ccc';
 
   Comment "DDDD";
@@ -21073,9 +21080,11 @@ if (1) {
   my $T = $t->V;
 
   Comment "EEEE";
-  my $C = Rs("CCCCCCCC");
-  PrintErrRegisterInHex rbp;
-  $c->call(call => $T, V(in, "[$C]"));
+# my $C = Rs("CCCCCCCC");
+#  PrintErrRegisterInHex rbp;
+  Comment "First call start";
+  $c->call(call => $T, V(in, 42));
+  Comment "First call end";
 
   ok Assemble(debug => 0, eq => <<END);
 END
