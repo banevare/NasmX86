@@ -857,7 +857,7 @@ sub Subroutine(&$%)                                                             
 
   my $s = $subroutines{$name} = genHash(__PACKAGE__."::Sub",                    # Subroutine definition
     start     => $start,                                                        # Start label for this subroutine
-    end       => $start,                                                        # Start label for this subroutine
+    end       => $start,                                                        # End label for this subroutine
     name      => $name,                                                         # Name of the subroutine from which the entry label is located
     args      => {map {$_=>1} @$parameters},                                    # Hash of {argument name, argument variable}
     variables => {%p},                                                          # Argument variables
@@ -886,8 +886,8 @@ END
   $s                                                                            # Subroutine definition
  }
 
-sub Nasm::X86::Sub::call($%)                                                    # Call a sub passing it some parameters.
- {my ($sub, @parameters) = @_;                                                  # Subroutine descriptor, parameter variables
+sub Nasm::X86::Sub::callTo($$%)                                                 #P Call a sub passing it some parameters.
+ {my ($sub, $label, @parameters) = @_;                                          # Subroutine descriptor, label of sub, parameter variables
 
   my %p;
   while(@parameters)                                                            # Copy parameters supplied by the caller
@@ -938,7 +938,12 @@ sub Nasm::X86::Sub::call($%)                                                    
    }
   PopR;
 
-  Call $$sub{start};                                                            # Call the sub routine
+  Call $label;                                                                  # Call the sub routine
+ }
+
+sub Nasm::X86::Sub::call($%)                                                    # Call a sub passing it some parameters.
+ {my ($sub, @parameters) = @_;                                                  # Subroutine descriptor, parameter variables
+  $sub->callTo($$sub{start}, @parameters);                                      # Call the sub routine
  }
 
 sub PrintTraceBack($)                                                           # Trace the call stack.
@@ -20957,6 +20962,22 @@ if (1) {                                                                        
 # Time: 0.51s, bytes: 120,160, execs: 37,761
 # Time: 0.49s, bytes: 108,264, execs: 31,014
 # Time: 0.50s, bytes: 102,560, execs: 29,496
+  my $L = V(loop, 45);
+
+  my $b = CreateArena;
+  my $t = $b->CreateTree;
+
+  $L->for(sub
+   {my ($i, $start, $next, $end) = @_;
+    $t->insert($i, $i);
+   });
+
+  ok Assemble(debug => 0, eq => <<END);
+END
+ }
+
+#latest:
+if (1) {                                                                        # Performance of tree inserts
   my $L = V(loop, 45);
 
   my $b = CreateArena;
