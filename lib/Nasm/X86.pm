@@ -21061,13 +21061,13 @@ in: 0000 0000 0000 002A
 END
  }
 
-#latest:
+latest:
 if (0) {                                                                        # Signal
   my $end   = Label;
   Jmp $end;
   my $start = SetLabel;
   Enter 0, 0;
-  PrintErrTraceBack;
+# PrintErrTraceBack;
   PrintErrStringNL "AAAA";
   Leave;
   Ret;
@@ -21082,11 +21082,9 @@ if (0) {                                                                        
   Mov r15, $start;
   Mov "[rsp]", r15;
 
-  PrintOutMemoryInHexNL;
-
   Mov rsi, rax;                                                                 # Sigaction structure on stack
-  Mov rax, 13;                                                                  # sigaction from doc
-  Mov rdi, 2;                                                                   # Confirmed
+  Mov rax, 13;                                                                  # sigaction from doc confirmed by tracing
+  Mov rdi, 2;                                                                   # Confirmed SIGINT from kill -l and tracing
   Mov rdx, 0;                                                                   # Confirmed by trace
   Mov r10, 8;                                                                   # Found by tracing signal.c with sde64
   Syscall;
@@ -21099,6 +21097,7 @@ if (0) {                                                                        
      });
    });
 
+# /var/isde/sde64 -mix -ptr-check -debugtrace  -- ./signal
   ok Assemble(debug => 0, keep=> 'signal');
 END
  }
