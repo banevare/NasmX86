@@ -1258,16 +1258,20 @@ sub PrintRegisterInHex($@)                                                      
   @_ >= 2 or confess;
 
   for my $r(@r)                                                                 # Each register to print
-   {if   ($r =~ m(\Ar))                                                           # General purpose register
-     {if ($r =~ m(\Arax\Z))
+   {if   ($r =~ m(\Ar))                                                         # General purpose register
+     {PrintString($channel,  sprintf("%6s: ", $r));                             # Register name
+      if ($r =~ m(\Arax\Z))
        {PrintRaxInHex($channel);
        }
       else
        {PushR rax;
+Comment "AAAAA";
         Mov rax, $r;
+Comment "BBBBB";
         PrintRaxInHex($channel);
         PopR rax;
        }
+      PrintNL($channel);
       next;
      }
 
@@ -21197,11 +21201,11 @@ END
  }
 
 latest:
-if (1) {                                                                        # An example of using sigaction in x86 and x64 assembler code.  Linux on x86 requires not only a signal handler but a signal trampoline.  The following code shows how to set up a signal and its associated trampoline using sigaction or rt_sigaction.
+if (0) {                                                                        # An example of using sigaction in x86 and x64 assembler code.  Linux on x86 requires not only a signal handler but a signal trampoline.  The following code shows how to set up a signal and its associated trampoline using sigaction or rt_sigaction.
   Mov r11, 42;
   PrintErrRegisterInHex r11;
 
-  ok Assemble(debug => 1, keep2 => 'clear', emulator => 0, eq => <<END);        # Cannot use the emulator because it does not understand signals
+  ok Assemble(debug => 1, keep => 'clear', emulator => 0, eq => <<END);        # Cannot use the emulator because it does not understand signals
 END
  }
 
