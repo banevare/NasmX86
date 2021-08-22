@@ -974,10 +974,9 @@ sub PrintTraceBack($)                                                           
     my $count     = r14;
     my $index     = r13;
     my $parameter = r12;                                                        # Number of parameters
-    my $maxCount  = r8;                                                         # Maximum number of parameters
+    my $maxCount  = r8;                                                         # Maximum number of parameters - should be r11 when we have found out why r11 does not print correctly.
     my $depth     = r10;                                                        # Depth of trace back
     ClearRegisters @save;
-&PrintErrRegisterInHex($maxCount);
 
     Mov $stack, rbp;                                                            # Current stack frame
     Block                                                                       # Each level
