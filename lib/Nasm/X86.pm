@@ -275,8 +275,9 @@ sub Syscall();                                                                  
 #D1 Data                                                                        # Layout data
 
 my $Labels = 0;
-sub Label                                                                       #P Create a unique label.
- {"l".++$Labels;                                                                # Generate a label
+sub Label(;$)                                                                   #P Create a unique label or reuse the one supplied
+ {return "l".++$Labels unless @_;                                               # Generate a label
+  $_[0];                                                                        # Use supplied label
  }
 
 sub SetLabel(;$)                                                                # Create (if necessary) and set a label in the code section returning the label so set.
@@ -1056,6 +1057,42 @@ sub PrintOutTraceBack()                                                         
  {PrintTraceBack($stdout);
  }
 
+sub OnSegv()                                                                    # Request a trace back followed by exit on a segv signal.
+ {my $s = Subroutine                                                            # Subroutine that will cause an error to occur to force a trace back to be printed
+   {my $end = Label;
+    Jmp $end;                                                                   # Jump over subroutine definition
+    my $start = SetLabel;
+    Enter 0, 0;                                                                 # Inline code of signal handler
+    Mov r15, rbp;                                                               # Preserve the new stack frame
+    Mov rbp, "[rbp]";                                                           # Restore our last stack frame
+    PrintOutTraceBack;                                                          # Print our trace back
+    Mov rbp, r15;                                                               # Restore supplied stack frame
+    Exit(0);                                                                    # Exit so we do not trampoline. Exit with code zero to show that the program is functioning correctly, else L<Assemble> will report an error.
+    Leave;
+    Ret;
+    SetLabel $end;
+
+    Mov r15, 0;                                                                 # Push sufficient zeros onto the stack to make a struct sigaction as described in: https://www.man7.org/linux/man-pages/man2/sigaction.2.html
+    Push r15 for 1..16;
+
+    Mov r15, $start;                                                            # Actual signal handler
+    Mov "[rsp]", r15;                                                           # Show as signal handler
+    Mov "[rsp+0x10]", r15;                                                      # Add as trampoline as well - which is fine because we exit in the handler so this will never be called
+    Mov r15, 0x4000000;                                                         # Mask to show we have a trampoline which is, apparently, required on x86
+    Mov "[rsp+0x8]", r15;                                                       # Confirm we have a trampoline
+
+    Mov rax, 13;                                                                # Sigaction from "kill -l"
+    Mov rdi, 11;                                                                # Confirmed SIGSEGV = 11 from kill -l and tracing with sde64
+    Mov rsi, rsp;                                                               # Sigaction structure on stack
+    Mov rdx, 0;                                                                 # Confirmed by trace
+    Mov r10, 8;                                                                 # Found by tracing "signal.c" with sde64 it is the width of the signal set and mask. "signal.c" is reproduced below.
+    Syscall;
+    Add rsp, 128;
+   } [], name=>"on segv";
+
+  $s->call;
+ }
+
 sub cr(&@)                                                                      # Call a subroutine with a reordering of the registers.
  {my ($body, @registers) = @_;                                                  # Code to execute with reordered registers, registers to reorder
   ReorderSyscallRegisters   @registers;
@@ -1265,9 +1302,7 @@ sub PrintRegisterInHex($@)                                                      
        }
       else
        {PushR rax;
-Comment "AAAAA";
         Mov rax, $r;
-Comment "BBBBB";
         PrintRaxInHex($channel);
         PopR rax;
        }
@@ -2920,7 +2955,7 @@ sub PrintOutMemoryInHexNL                                                       
   PrintNL($stdout);
  }
 
-sub PrintMemory                                                                 # Print the memory addressed by rax for a length of rdi on the specified channel.
+sub PrintMemory($)                                                              # Print the memory addressed by rax for a length of rdi on the specified channel.
  {my ($channel) = @_;                                                           # Channel
   @_ == 1 or confess;
 
@@ -21161,7 +21196,7 @@ if (1) {                                                                        
   Syscall;
   Add rsp, 128;
 
-  my $s = Subroutine                                                            # Subrotuine that will cause an error to occur to force a trace back to be printed
+  my $s = Subroutine                                                            # Subroutine that will cause an error to occur to force a trace back to be printed
    {Mov r15, 0;
     Mov r15, "[r15]";                                                           # Try to read an unmapped memory location
    } [qw(in)], name => 'sub that causes a segv';                                # The name that will appear in the trace back
@@ -21197,15 +21232,43 @@ END
 # }
 #
 # gcc -finput-charset=UTF-8 -fmax-errors=7 -rdynamic -Wall -Wextra -Wno-unused-function -o signal signal.c  && /var/isde/sde64 -mix -ptr-check -debugtrace  -- ./signal; echo $?;
-
  }
 
-latest:
-if (0) {                                                                        # An example of using sigaction in x86 and x64 assembler code.  Linux on x86 requires not only a signal handler but a signal trampoline.  The following code shows how to set up a signal and its associated trampoline using sigaction or rt_sigaction.
-  Mov r11, 42;
-  PrintErrRegisterInHex r11;
+#latest:
+if (1) {                                                                        #TOnSegv
+  OnSegv();                                                                     # Request a trace back followed by exit on a segv signal.
 
-  ok Assemble(debug => 1, keep => 'clear', emulator => 0, eq => <<END);        # Cannot use the emulator because it does not understand signals
+  my $t = Subroutine                                                            # Subroutine that will cause an error to occur to force a trace back to be printed
+   {Mov r15, 0;
+    Mov r15, "[r15]";                                                           # Try to read an unmapped memory location
+   } [qw(in)], name => 'sub that causes a segv';                                # The name that will appear in the trace back
+
+  $t->call(K(in, 42));
+
+  ok Assemble(debug => 0, keep2 => 'signal', emulator=>0, eq => <<END);         # Cannot use the emulator because it does not understand signals
+
+Subroutine trace back, depth: 0000 0000 0000 0001
+0000 0000 0000 002A    sub that causes a segv
+
+END
+ }
+
+#latest:
+if (1) {                                                                        # r11 being disturded by syscall 1
+  Mov  r10, 0x0a61;
+  Push r10;
+  SetLabel Label q(before);
+  Mov  rax, rsp;
+  Mov  rdx, 2;
+  Mov  rsi, rsp;
+  Mov  rax, 1;
+  Mov  rdi, 1;
+  Mov  r11, 0;
+  Syscall;
+  SetLabel Label q(after);
+  Exit(0);
+  ok Assemble(debug => 1, keep2 => 'clear', emulator => 0, eq => <<END);        # Cannot use the emulator because it does not understand signals
+a
 END
  }
 
@@ -21215,7 +21278,7 @@ if (0) {
 END
  }
 
-ok 1 for 12..30;
+ok 1 for 2..18;
 
 #unlink $_ for qw(hash print2 sde-log.txt sde-ptr-check.out.txt z.txt);         # Remove incidental files
 unlink $_ for qw(hash print2);                                                  # Remove incidental files
