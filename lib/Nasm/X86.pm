@@ -1258,20 +1258,33 @@ sub PrintRegisterInHex($@)                                                      
   @_ >= 2 or confess;
 
   for my $r(@r)                                                                 # Each register to print
-   {Call Macro
+   {if   ($r =~ m(\Ar))                                                           # General purpose register
+     {if ($r =~ m(\Arax\Z))
+       {PrintRaxInHex($channel);
+       }
+      else
+       {PushR rax;
+        Mov rax, $r;
+        PrintRaxInHex($channel);
+        PopR rax;
+       }
+      next;
+     }
+
+    Call Macro                                                                  # Print non general purpose registers
      {PrintString($channel,  sprintf("%6s: ", $r));                             # Register name
 
       my sub printReg(@)                                                        # Print the contents of a register
        {my (@regs) = @_;                                                        # Size in bytes, work registers
         my $s = RegisterSize $r;                                                # Size of the register
-        PushR  @regs;                                                           # Save work registers
+        PushRR @regs;                                                           # Save work registers
         PushRR $r;                                                              # Place register contents on stack - might be a x|y|z - without tracking
-        PopR  @regs;                                                            # Load work registers without tracking
+        PopRR  @regs;                                                           # Load work registers without tracking
         for my $i(keys @regs)                                                   # Print work registers to print input register
          {my $R = $regs[$i];
           if ($R !~ m(\Arax))
            {PrintString($channel, "  ");                                        # Separate blocks of bytes with a space
-            Mov rax, $R
+            Mov rax, $R;
            }
           PrintRaxInHex($channel);                                              # Print work register
           PrintString($channel, " ") unless $i == $#regs;
@@ -21112,7 +21125,7 @@ in: 0000 0000 0000 002A
 END
  }
 
-latest:
+#latest:
 if (1) {                                                                        # An example of using sigaction in x86 and x64 assembler code.  Linux on x86 requires not only a signal handler but a signal trampoline.  The following code shows how to set up a signal and its associated trampoline using sigaction or rt_sigaction.
   my $end   = Label;
   Jmp $end;                                                                     # Jump over subroutine definition
@@ -21184,12 +21197,11 @@ END
  }
 
 latest:
-if (0) {                                                                        # An example of using sigaction in x86 and x64 assembler code.  Linux on x86 requires not only a signal handler but a signal trampoline.  The following code shows how to set up a signal and its associated trampoline using sigaction or rt_sigaction.
+if (1) {                                                                        # An example of using sigaction in x86 and x64 assembler code.  Linux on x86 requires not only a signal handler but a signal trampoline.  The following code shows how to set up a signal and its associated trampoline using sigaction or rt_sigaction.
   Mov r11, 42;
-  Mov r10, r11;
-  PrintErrRegisterInHex r10, r11, r10;
+  PrintErrRegisterInHex r11;
 
-  ok Assemble(debug => 1, keep2 => 'clear', emulator=>0, eq => <<END);         # Cannot use the emulator because it does not understand signals
+  ok Assemble(debug => 1, keep2 => 'clear', emulator => 0, eq => <<END);        # Cannot use the emulator because it does not understand signals
 END
  }
 
