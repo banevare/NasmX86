@@ -21254,7 +21254,7 @@ END
  }
 
 #latest:
-if (1) {                                                                        # r11 being disturded by syscall 1
+if (1) {                                                                        # r11 being disturbed by syscall 1
   Mov  r10, 0x0a61;
   Push r10;
   SetLabel Label q(before);
