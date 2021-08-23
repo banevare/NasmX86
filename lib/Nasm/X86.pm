@@ -324,7 +324,7 @@ sub Rutf8(@)                                                                    
   my $d = join '', @_;
   my @e;
   for my $e(split //, $d)
-   {my $o  = ord $e;
+   {my $o  = ord $e;                                                            # Effectively the utf32 encoding of each character
     my $u  = convertUtf32ToUtf8($o);
     my $x = sprintf("%08x", $u);
     my $o1 = substr($x, 0, 2);
@@ -1976,7 +1976,21 @@ sub Nasm::X86::Variable::getReg($$@)                                            
    }
  }
 
-sub Nasm::X86::Variable::getConst($$)                                           # Load the variable from a constant in effect setting a variable to a specified value.
+sub Nasm::X86::Variable::getConst($$;$)                                         # Load the variable from a constant in effect setting a variable to a specified value.
+ {my ($variable, $constant, $transfer) = @_;                                    # Variable, constant to load, optional transfer register
+  if ($transfer)
+   {Mov $transfer, $constant;
+    $variable->getReg($transfer);
+   }
+  else
+   {PushR r15;
+    Mov r15, $constant;
+    $variable->getReg(r15);
+    PopR;
+   }
+ }
+
+sub Nasm::X86::Variable::getConst22($$)                                           # Load the variable from a constant in effect setting a variable to a specified value.
  {my ($variable, $constant) = @_;                                               # Variable, constant to load
   PushR (r14, r15);
   Comment "Load constant $constant into variable: ".$variable->name;
