@@ -924,7 +924,8 @@ sub Nasm::X86::Sub::callTo($$$@)                                                
   Mov "byte [rsp-1-$w*2]", scalar $sub->parameters->@*;                         # Number of parameters to enable traceback with parameters
 
   for my $p(sort keys %p)                                                       # Transfer parameters from current frame to next frame
-   {!ref($p{$p}) or ref($p{$p}) =~ m(variable)i or confess "Variable required";
+   {!ref($p{$p}) or ref($p{$p}) =~ m(variable)i or
+      confess "Variable required, not: ".ref($p{$p});
     my $P = $p{$p}->label;                                                      # Source in current frame
     if (my $q = $sub->variables->{$p})                                          # Target in new frame
      {if ($p{$p}->reference)                                                    # Source is a reference
@@ -1174,15 +1175,13 @@ sub PrintString($@)                                                             
   my $a = Rs($c);
 
   my $s = Subroutine
-   {Comment "Write start to channel  $channel, the string: ".dump($c);
-    SaveFirstFour;
+   {SaveFirstFour;
     Mov rax, 1;
     Mov rdi, $channel;
     Mov rsi, $a;
     Mov rdx, $l;
     Syscall;
     RestoreFirstFour();
-    Comment "Write end to channel  $channel, the string: ".dump($c);
    } [], name => "PrintString_${channel}_${c}";
 
   $s->call;
@@ -1290,14 +1289,13 @@ sub PrintOutRaxInReverseInHex                                                   
   Pop rax;
  }
 
-sub PrintRegisterInHex($@)                                                      # Print the named registers as hex strings.
- {my ($channel, @r) = @_;                                                       # Channel to print on, names of the registers to print
-  @_ >= 2 or confess;
+sub PrintOneRegisterInHex($$)                                                   # Print the named register as a hex strings.
+ {my ($channel, $r) = @_;                                                       # Channel to print on, register to print
+  @_ == 2 or confess;
 
-  for my $r(@r)                                                                 # Each register to print
+  Call Macro                                                                    # Print non general purpose registers
    {if   ($r =~ m(\Ar))                                                         # General purpose register
-     {PrintString($channel,  sprintf("%6s: ", $r));                             # Register name
-      if ($r =~ m(\Arax\Z))
+     {if ($r =~ m(\Arax\Z))
        {PrintRaxInHex($channel);
        }
       else
@@ -1306,14 +1304,9 @@ sub PrintRegisterInHex($@)                                                      
         PrintRaxInHex($channel);
         PopR rax;
        }
-      PrintNL($channel);
-      next;
      }
-
-    Call Macro                                                                  # Print non general purpose registers
-     {PrintString($channel,  sprintf("%6s: ", $r));                             # Register name
-
-      my sub printReg(@)                                                        # Print the contents of a register
+    else
+     {my sub printReg(@)                                                        # Print the contents of a register
        {my (@regs) = @_;                                                        # Size in bytes, work registers
         my $s = RegisterSize $r;                                                # Size of the register
         PushRR @regs;                                                           # Save work registers
@@ -1334,9 +1327,18 @@ sub PrintRegisterInHex($@)                                                      
       elsif ($r =~ m(\Ax))    {printReg qw(rax rbx)}                            # Xmm*
       elsif ($r =~ m(\Ay))    {printReg qw(rax rbx rcx rdx)}                    # Ymm*
       elsif ($r =~ m(\Az))    {printReg qw(rax rbx rcx rdx r8 r9 r10 r11)}      # Zmm*
+     }
+   } name => "PrintOneRegister${r}InHexOn$channel";                             # One routine per register printed
+ }
 
-      PrintNL($channel);
-     } name => "PrintOutRegister${r}InHexOn$channel";                           # One routine per register printed
+sub PrintRegisterInHex($@)                                                      # Print the named registers as hex strings.
+ {my ($channel, @r) = @_;                                                       # Channel to print on, names of the registers to print
+  @_ >= 2 or confess;
+
+  for my $r(@r)                                                                 # Each register to print
+   {PrintString($channel,  sprintf("%6s: ", $r));                               # Register name
+    PrintOneRegisterInHex $channel, $r;
+    PrintNL($channel);
    }
  }
 
@@ -2230,7 +2232,7 @@ sub loadFromZmm($*$$)                                                           
   Add rsp, RegisterSize "zmm$zmm";                                              # Pop source register
  }
 
-sub putIntoZmm($*$$)                                                            # Put the specified register into the numbered zmm at the from the offset located in the numbered zmm.
+sub putIntoZmm($*$$)                                                            # Put the specified register into the numbered zmm at the specified offset in the zmm.
  {my ($register, $size, $zmm, $offset) = @_;                                    # Register to load, bwdq for size, numbered zmm register to load from, constant offset in bytes
   @_ == 4 or confess;
   $offset >= 0 && $offset <= RegisterSize zmm0 or confess "Out of range";
@@ -6521,33 +6523,48 @@ sub Nasm::X86::Tree::dump($;$$)                                                 
  {my ($t, $first, $bs) = @_;                                                    # Tree, optional offset to first node, optional arena address
   @_ >= 1 && @_ <= 3 or confess;
 
+  PushR r12;
+  my ($depthR) = (r12);
+
+  my $b = Subroutine                                                            # Print the spacing blanks to offset sub trees
+   {V(loop, $depthR)->for(sub
+     {PrintOutString "  ";
+     });
+   } [], name => "Nasm::X86::Tree::dump::spaces";
+
   my $s = Subroutine                                                            # Print a tree
    {my ($p, $s) = @_;                                                           # Parameters, sub definition
 
     my $B = $$p{bs};
     my $F = $$p{first};
 
-    PushZmm 29..31; PushR r8, r9, r10, r14, r15;
+    PushZmm 29..31; PushR r8, r9, r10;
+    my ($treeBitsR, $treeBitsIndexR, $transfer) = (r8, r9, r10);
 
-Comment "AAAAA  Start";
-    $t->getKeysDataNode($B, $F, 31, 30, 29, r8, r9);                            # Load node
-Comment "AAAAA  End";
-    $t->getTreeBits(31, r8);                                                    # Tree bits for this node
+    $t->getKeysDataNode($B, $F, 31, 30, 29, $treeBitsR, $treeBitsIndexR);       # Load node
+    $t->getTreeBits(31, $treeBitsR);                                            # Tree bits for this node
     my $l = $t->getLengthInKeys(31);                                            # Number of nodes
 
+    $b->call;
     PrintOutString "Tree at: "; $$p{first}->out(' '); $l->outNL('  length: ');  # Position and length
-    PrintOutRegisterInHex zmm 31, 30, 29;
 
-    Mov r9, 1;                                                                  # Check each tree bit position
+    Inc $depthR;                                                                # Indent sub tree
+
+    for my $z(0..2)                                                             # Tree node description
+     {$b->call; PrintOneRegisterInHex $stdout, zmm 29+$z; PrintOutNL;
+     }
+
+    Mov $treeBitsIndexR, 1;                                                     # Check each tree bit position
     $l->for(sub                                                                 # Print keys and data
      {my ($index, $start, $next, $end) = @_;
       my $i = $index * $t->width;                                               # Key/Data offset
-      my $k = getDFromZmm(31, $i, r10);                                         # Key
-      my $d = getDFromZmm(30, $i, r10);                                         # Data
-      $index->out(' index: ');
+      my $k = getDFromZmm(31, $i, $transfer);                                   # Key
+      my $d = getDFromZmm(30, $i, $transfer);                                   # Data
+      $b->call;
+      $index->out('  index: ');
       $k->out('   key: ');
       $d->out('   data: ');
-      Test r8, r9;                                                              # Check for a tree bit
+      Test $treeBitsR, $treeBitsIndexR;                                         # Check for a tree bit
       IfNz
       Then                                                                      # This key indexes a sub tree
        {PrintOutStringNL(" subTree");
@@ -6555,41 +6572,47 @@ Comment "AAAAA  End";
       Else
        {PrintOutNL;
        };
-      Shl r9, 1;                                                                # Next tree bit position
+      Shl $treeBitsIndexR, 1;                                                   # Next tree bit position
      });
 
-    Cmp r8, 0;                                                                  # Any tree bit sets?
+    Cmp $treeBitsR, 0;                                                          # Any tree bit sets?
     IfNe
     Then                                                                        # Tree bits present
-     {Mov r9, 1;                                                                # Check each tree bit position
+     {Mov $treeBitsIndexR, 1;                                                   # Check each tree bit position
       K(loop, $t->maxKeys)->for(sub
        {my ($index, $start, $next, $end) = @_;
-        Test r8, r9;                                                            # Check for a tree bit
+        Test $treeBitsR, $treeBitsIndexR;                                       # Check for a tree bit
         IfNz
         Then                                                                    # This key indexes a sub tree
          {my $i = $index * $t->width;                                           # Key/data offset
-          my $d = getDFromZmm(30, $i, r10);                                     # Data
+          my $d = getDFromZmm(30, $i, $transfer);                               # Data
           $s->call($B, first => $d);                                            # Print sub tree referenced by data field
          };
-        Shl r9, 1;                                                              # Next tree bit position
+        Shl $treeBitsIndexR, 1;                                                 # Next tree bit position
        });
      };
+
+    Dec $depthR;                                                                # Reset indent
 
     ($l+1)->for(sub                                                             # Print sub nodes
      {my ($index, $start, $next, $end) = @_;
       my $i = $index * $t->width;                                               # Key/Data offset
-      my $d = getDFromZmm(29, $i, r10);                                         # Data
+      my $d = getDFromZmm(29, $i, $transfer);                                   # Data
       If ($d > 0,                                                               # Print any sub nodes
       Then
        {$s->call($B, first => $d);
        });
      });
-
-    PrintOutNL;                                                                 # Separate sub tree dumps
+    $b->call; PrintOutStringNL "end";                                           # Separate sub tree dumps
     PopR; PopZmm;
    } [qw(bs first)], name => "Nasm::X86::Tree::dump";
 
+  PushR  $depthR;
+  ClearRegisters $depthR;                                                       # Depth starts at zero
+
   $s->call(bs => ($bs//$t->address), first => ($first//$t->first));
+
+  PopR;
  }
 
 #D2 Iteration                                                                   # Iterate through a tree non recursively
@@ -17841,7 +17864,7 @@ if (1) {                                                                        
   PrintOutRegisterInHex rax;
   PrintOutRegisterInHex rbx;
 
-  is_deeply Assemble,<<END;
+  is_deeply Assemble, <<END;
    rax: 0000 0000 1111 1111
    rbx: 0000 0000 2222 2222
 END
@@ -20909,7 +20932,7 @@ if (1) {                                                                        
 END
  }
 
-#latest:
+latest:                                                                         # 120
 if (1) {                                                                        # Print empty tree
   my $b = CreateArena;
   my $t = $b->CreateTree;
