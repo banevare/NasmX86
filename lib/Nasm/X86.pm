@@ -10,7 +10,7 @@
 # Remove as much variable arithmetic as possible as it is slower and bigger than register arithmetic
 # Replace empty in boolean arithmetic with boolean and then check it in If to confirm that we are testing a boolean value
 package Nasm::X86;
-our $VERSION = "20210818";
+our $VERSION = "20210825";
 use warnings FATAL => qw(all);
 use strict;
 use Carp qw(confess cluck);
@@ -275,6 +275,7 @@ sub Syscall();                                                                  
 #D1 Data                                                                        # Layout data
 
 my $Labels = 0;
+
 sub Label(;$)                                                                   #P Create a unique label or reuse the one supplied
  {return "l".++$Labels unless @_;                                               # Generate a label
   $_[0];                                                                        # Use supplied label
@@ -1058,7 +1059,7 @@ sub PrintOutTraceBack()                                                         
  {PrintTraceBack($stdout);
  }
 
-sub OnSegv()                                                                    # Request a trace back followed by exit on a segv signal.
+sub OnSegv()                                                                    # Request a trace back followed by exit on a B<segv> signal.
  {my $s = Subroutine                                                            # Subroutine that will cause an error to occur to force a trace back to be printed
    {my $end = Label;
     Jmp $end;                                                                   # Jump over subroutine definition
@@ -1073,7 +1074,7 @@ sub OnSegv()                                                                    
     Ret;
     SetLabel $end;
 
-    Mov r15, 0;                                                                 # Push sufficient zeros onto the stack to make a struct sigaction as described in: https://www.man7.org/linux/man-pages/man2/sigaction.2.html
+    Mov r15, 0;                                                                 # Push sufficient zeros onto the stack to make a structure B<sigaction> as described in: https://www.man7.org/linux/man-pages/man2/sigaction.2.html
     Push r15 for 1..16;
 
     Mov r15, $start;                                                            # Actual signal handler
@@ -1082,11 +1083,11 @@ sub OnSegv()                                                                    
     Mov r15, 0x4000000;                                                         # Mask to show we have a trampoline which is, apparently, required on x86
     Mov "[rsp+0x8]", r15;                                                       # Confirm we have a trampoline
 
-    Mov rax, 13;                                                                # Sigaction from "kill -l"
-    Mov rdi, 11;                                                                # Confirmed SIGSEGV = 11 from kill -l and tracing with sde64
-    Mov rsi, rsp;                                                               # Sigaction structure on stack
+    Mov rax, 13;                                                                # B<Sigaction> from B<kill -l>
+    Mov rdi, 11;                                                                # Confirmed B<SIGSEGV = 11> from B<kill -l> and tracing with B<sde64>
+    Mov rsi, rsp;                                                               # Structure B<sigaction> structure on stack
     Mov rdx, 0;                                                                 # Confirmed by trace
-    Mov r10, 8;                                                                 # Found by tracing "signal.c" with sde64 it is the width of the signal set and mask. "signal.c" is reproduced below.
+    Mov r10, 8;                                                                 # Found by tracing B<signal.c> with B<sde64> it is the width of the signal set and mask. B<signal.c> is reproduced below.
     Syscall;
     Add rsp, 128;
    } [], name=>"on segv";
@@ -1992,7 +1993,7 @@ sub Nasm::X86::Variable::getConst($$;$)                                         
    }
  }
 
-sub Nasm::X86::Variable::getConst22($$)                                           # Load the variable from a constant in effect setting a variable to a specified value.
+sub Nasm::X86::Variable::getConst22($$)                                         # Load the variable from a constant in effect setting a variable to a specified value.
  {my ($variable, $constant) = @_;                                               # Variable, constant to load
   PushR (r14, r15);
   Comment "Load constant $constant into variable: ".$variable->name;
@@ -7603,7 +7604,7 @@ present. If the test fails we continue rather than calling L<Carp::confess>.
 Generate X86 assembler code using Perl as a macro pre-processor.
 
 
-Version "20210818".
+Version "20210825".
 
 
 The following sections describe the methods in each functional area of this
@@ -10186,6 +10187,33 @@ B<Example:>
   END
 
 
+=head3 OnSegv()
+
+Request a trace back followed by exit on a B<segv> signal.
+
+
+B<Example:>
+
+
+
+    OnSegv();                                                                     # Request a trace back followed by exit on a segv signal.  # 𝗘𝘅𝗮𝗺𝗽𝗹𝗲
+
+
+    my $t = Subroutine                                                            # Subroutine that will cause an error to occur to force a trace back to be printed
+     {Mov r15, 0;
+      Mov r15, "[r15]";                                                           # Try to read an unmapped memory location
+     } [qw(in)], name => 'sub that causes a segv';                                # The name that will appear in the trace back
+
+    $t->call(K(in, 42));
+
+    ok Assemble(debug => 0, keep2 => 'signal', emulator=>0, eq => <<END);         # Cannot use the emulator because it does not understand signals
+
+  Subroutine trace back, depth: 0000 0000 0000 0001
+  0000 0000 0000 002A    sub that causes a segv
+
+  END
+
+
 =head3 cr($body, @registers)
 
 Call a subroutine with a reordering of the registers.
@@ -10483,6 +10511,14 @@ B<Example:>
   0010 0000 0000 0000
   END
 
+
+=head2 PrintOneRegisterInHex($channel, $r)
+
+Print the named register as a hex strings.
+
+     Parameter  Description
+  1  $channel   Channel to print on
+  2  $r         Register to print
 
 =head2 PrintRegisterInHex($channel, @r)
 
@@ -11212,7 +11248,16 @@ Load the variable from the named registers.
   2  $register   Register to load
   3  @registers  Optional further registers to load from
 
-=head3 Nasm::X86::Variable::getConst($variable, $constant)
+=head3 Nasm::X86::Variable::getConst($variable, $constant, $transfer)
+
+Load the variable from a constant in effect setting a variable to a specified value.
+
+     Parameter  Description
+  1  $variable  Variable
+  2  $constant  Constant to load
+  3  $transfer  Optional transfer register
+
+=head3 Nasm::X86::Variable::getConst22($variable, $constant)
 
 Load the variable from a constant in effect setting a variable to a specified value.
 
@@ -11463,7 +11508,7 @@ Load the specified register from the offset located in the numbered zmm.
 
 =head3 putIntoZmm($register, $size, $zmm, $offset)
 
-Put the specified register into the numbered zmm at the from the offset located in the numbered zmm.
+Put the specified register into the numbered zmm at the specified offset in the zmm.
 
      Parameter  Description
   1  $register  Register to load
@@ -11913,7 +11958,7 @@ B<Example:>
     PrintOutRegisterInHex rax;
     PrintOutRegisterInHex rbx;
 
-    is_deeply Assemble,<<END;
+    is_deeply Assemble, <<END;
      rax: 0000 0000 1111 1111
      rbx: 0000 0000 2222 2222
   END
@@ -12441,10 +12486,12 @@ B<Example:>
   END
 
 
-=head3 PrintMemory()
+=head3 PrintMemory($channel)
 
 Print the memory addressed by rax for a length of rdi on the specified channel.
 
+     Parameter  Description
+  1  $channel   Channel
 
 B<Example:>
 
@@ -15084,72 +15131,72 @@ B<Example:>
 
     $t->dump();
 
-    ok Assemble(debug => 0, eq => <<END);
+    ok Assemble(debug => 0, eq => <<END, number => 121);
   Tree at:  0000 0000 0000 0018  length: 0000 0000 0000 0001
-   zmm31: 0000 0058 0001 0001   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0007
-   zmm30: 0000 0418 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0218
-   zmm29: 0000 0018 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0518 0000 0458
-   index: 0000 0000 0000 0000   key: 0000 0000 0000 0007   data: 0000 0000 0000 0218 subTree
-  Tree at:  0000 0000 0000 0218  length: 0000 0000 0000 0000
-   zmm31: 0000 0258 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
-   zmm30: 0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
-   zmm29: 0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
-
-  Tree at:  0000 0000 0000 0458  length: 0000 0000 0000 0007
-   zmm31: 0000 0498 002A 0007   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0006   0000 0005 0000 0004   0000 0003 0000 0002   0000 0001 0000 0000
-   zmm30: 0000 04D8 0000 0018   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0006   0000 0198 0000 0004   0000 0118 0000 0002   0000 0098 0000 0000
-   zmm29: 0000 0458 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
-   index: 0000 0000 0000 0000   key: 0000 0000 0000 0000   data: 0000 0000 0000 0000
-   index: 0000 0000 0000 0001   key: 0000 0000 0000 0001   data: 0000 0000 0000 0098 subTree
-   index: 0000 0000 0000 0002   key: 0000 0000 0000 0002   data: 0000 0000 0000 0002
-   index: 0000 0000 0000 0003   key: 0000 0000 0000 0003   data: 0000 0000 0000 0118 subTree
-   index: 0000 0000 0000 0004   key: 0000 0000 0000 0004   data: 0000 0000 0000 0004
-   index: 0000 0000 0000 0005   key: 0000 0000 0000 0005   data: 0000 0000 0000 0198 subTree
-   index: 0000 0000 0000 0006   key: 0000 0000 0000 0006   data: 0000 0000 0000 0006
-  Tree at:  0000 0000 0000 0098  length: 0000 0000 0000 0000
-   zmm31: 0000 00D8 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
-   zmm30: 0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
-   zmm29: 0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
-
-  Tree at:  0000 0000 0000 0118  length: 0000 0000 0000 0000
-   zmm31: 0000 0158 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
-   zmm30: 0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
-   zmm29: 0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
-
-  Tree at:  0000 0000 0000 0198  length: 0000 0000 0000 0000
-   zmm31: 0000 01D8 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
-   zmm30: 0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
-   zmm29: 0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
-
-
-  Tree at:  0000 0000 0000 0518  length: 0000 0000 0000 0007
-   zmm31: 0000 0558 002A 0007   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 000E   0000 000D 0000 000C   0000 000B 0000 000A   0000 0009 0000 0008
-   zmm30: 0000 0598 0000 0018   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 000E   0000 0398 0000 000C   0000 0318 0000 000A   0000 0298 0000 0008
-   zmm29: 0000 0518 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
-   index: 0000 0000 0000 0000   key: 0000 0000 0000 0008   data: 0000 0000 0000 0008
-   index: 0000 0000 0000 0001   key: 0000 0000 0000 0009   data: 0000 0000 0000 0298 subTree
-   index: 0000 0000 0000 0002   key: 0000 0000 0000 000A   data: 0000 0000 0000 000A
-   index: 0000 0000 0000 0003   key: 0000 0000 0000 000B   data: 0000 0000 0000 0318 subTree
-   index: 0000 0000 0000 0004   key: 0000 0000 0000 000C   data: 0000 0000 0000 000C
-   index: 0000 0000 0000 0005   key: 0000 0000 0000 000D   data: 0000 0000 0000 0398 subTree
-   index: 0000 0000 0000 0006   key: 0000 0000 0000 000E   data: 0000 0000 0000 000E
-  Tree at:  0000 0000 0000 0298  length: 0000 0000 0000 0000
-   zmm31: 0000 02D8 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
-   zmm30: 0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
-   zmm29: 0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
-
-  Tree at:  0000 0000 0000 0318  length: 0000 0000 0000 0000
-   zmm31: 0000 0358 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
-   zmm30: 0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
-   zmm29: 0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
-
-  Tree at:  0000 0000 0000 0398  length: 0000 0000 0000 0000
-   zmm31: 0000 03D8 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
-   zmm30: 0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
-   zmm29: 0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
-
-
-
+    0000 0018 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0518 0000 0458
+    0000 0418 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0218
+    0000 0058 0001 0001   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0007
+      index: 0000 0000 0000 0000   key: 0000 0000 0000 0007   data: 0000 0000 0000 0218 subTree
+    Tree at:  0000 0000 0000 0218  length: 0000 0000 0000 0000
+      0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+      0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+      0000 0258 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+    end
+    Tree at:  0000 0000 0000 0458  length: 0000 0000 0000 0007
+      0000 0458 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+      0000 04D8 0000 0018   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0006   0000 0198 0000 0004   0000 0118 0000 0002   0000 0098 0000 0000
+      0000 0498 002A 0007   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0006   0000 0005 0000 0004   0000 0003 0000 0002   0000 0001 0000 0000
+        index: 0000 0000 0000 0000   key: 0000 0000 0000 0000   data: 0000 0000 0000 0000
+        index: 0000 0000 0000 0001   key: 0000 0000 0000 0001   data: 0000 0000 0000 0098 subTree
+        index: 0000 0000 0000 0002   key: 0000 0000 0000 0002   data: 0000 0000 0000 0002
+        index: 0000 0000 0000 0003   key: 0000 0000 0000 0003   data: 0000 0000 0000 0118 subTree
+        index: 0000 0000 0000 0004   key: 0000 0000 0000 0004   data: 0000 0000 0000 0004
+        index: 0000 0000 0000 0005   key: 0000 0000 0000 0005   data: 0000 0000 0000 0198 subTree
+        index: 0000 0000 0000 0006   key: 0000 0000 0000 0006   data: 0000 0000 0000 0006
+      Tree at:  0000 0000 0000 0098  length: 0000 0000 0000 0000
+        0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+        0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+        0000 00D8 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+      end
+      Tree at:  0000 0000 0000 0118  length: 0000 0000 0000 0000
+        0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+        0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+        0000 0158 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+      end
+      Tree at:  0000 0000 0000 0198  length: 0000 0000 0000 0000
+        0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+        0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+        0000 01D8 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+      end
+    end
+    Tree at:  0000 0000 0000 0518  length: 0000 0000 0000 0007
+      0000 0518 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+      0000 0598 0000 0018   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 000E   0000 0398 0000 000C   0000 0318 0000 000A   0000 0298 0000 0008
+      0000 0558 002A 0007   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 000E   0000 000D 0000 000C   0000 000B 0000 000A   0000 0009 0000 0008
+        index: 0000 0000 0000 0000   key: 0000 0000 0000 0008   data: 0000 0000 0000 0008
+        index: 0000 0000 0000 0001   key: 0000 0000 0000 0009   data: 0000 0000 0000 0298 subTree
+        index: 0000 0000 0000 0002   key: 0000 0000 0000 000A   data: 0000 0000 0000 000A
+        index: 0000 0000 0000 0003   key: 0000 0000 0000 000B   data: 0000 0000 0000 0318 subTree
+        index: 0000 0000 0000 0004   key: 0000 0000 0000 000C   data: 0000 0000 0000 000C
+        index: 0000 0000 0000 0005   key: 0000 0000 0000 000D   data: 0000 0000 0000 0398 subTree
+        index: 0000 0000 0000 0006   key: 0000 0000 0000 000E   data: 0000 0000 0000 000E
+      Tree at:  0000 0000 0000 0298  length: 0000 0000 0000 0000
+        0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+        0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+        0000 02D8 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+      end
+      Tree at:  0000 0000 0000 0318  length: 0000 0000 0000 0000
+        0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+        0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+        0000 0358 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+      end
+      Tree at:  0000 0000 0000 0398  length: 0000 0000 0000 0000
+        0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+        0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+        0000 03D8 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
+      end
+    end
+  end
   END
 
 
@@ -15563,10 +15610,12 @@ Pi as a 64 bit float.
 
 =head1 Private Methods
 
-=head2 Label()
+=head2 Label({return "l".++$Labels unless @_;)
 
-Create a unique label.
+Create a unique label or reuse the one supplied
 
+     Parameter                         Description
+  1  {return "l".++$Labels unless @_;  Generate a label
 
 =head2 Dbwdq($s, @d)
 
@@ -15683,7 +15732,7 @@ B<Example:>
     PrintOutRegisterInHex rax;
     PrintOutRegisterInHex rbx;
 
-    is_deeply Assemble,<<END;
+    is_deeply Assemble, <<END;
      rax: 0000 0000 1111 1111
      rbx: 0000 0000 2222 2222
   END
@@ -16811,7 +16860,7 @@ Total size in bytes of all files assembled during testing.
 
 76 L<K|/K> - Define a constant variable.
 
-77 L<Label|/Label> - Create a unique label.
+77 L<Label|/Label> - Create a unique label or reuse the one supplied
 
 78 L<Link|/Link> - Libraries to link with.
 
@@ -17135,289 +17184,295 @@ Total size in bytes of all files assembled during testing.
 
 238 L<Nasm::X86::Variable::getConst|/Nasm::X86::Variable::getConst> - Load the variable from a constant in effect setting a variable to a specified value.
 
-239 L<Nasm::X86::Variable::getDFromZmm|/Nasm::X86::Variable::getDFromZmm> - Get the double word from the numbered zmm register and put it in a variable.
+239 L<Nasm::X86::Variable::getConst22|/Nasm::X86::Variable::getConst22> - Load the variable from a constant in effect setting a variable to a specified value.
 
-240 L<Nasm::X86::Variable::getDFromZmmUnOPtimized|/Nasm::X86::Variable::getDFromZmmUnOPtimized> - Get the double word from the numbered zmm register and put it in a variable.
+240 L<Nasm::X86::Variable::getDFromZmm|/Nasm::X86::Variable::getDFromZmm> - Get the double word from the numbered zmm register and put it in a variable.
 
-241 L<Nasm::X86::Variable::getQFromZmm|/Nasm::X86::Variable::getQFromZmm> - Get the quad word from the numbered zmm register and put it in a variable.
+241 L<Nasm::X86::Variable::getDFromZmmUnOPtimized|/Nasm::X86::Variable::getDFromZmmUnOPtimized> - Get the double word from the numbered zmm register and put it in a variable.
 
-242 L<Nasm::X86::Variable::getReg|/Nasm::X86::Variable::getReg> - Load the variable from the named registers.
+242 L<Nasm::X86::Variable::getQFromZmm|/Nasm::X86::Variable::getQFromZmm> - Get the quad word from the numbered zmm register and put it in a variable.
 
-243 L<Nasm::X86::Variable::getWFromZmm|/Nasm::X86::Variable::getWFromZmm> - Get the word from the numbered zmm register and put it in a variable.
+243 L<Nasm::X86::Variable::getReg|/Nasm::X86::Variable::getReg> - Load the variable from the named registers.
 
-244 L<Nasm::X86::Variable::gt|/Nasm::X86::Variable::gt> - Check whether the left hand variable is greater than the right hand variable.
+244 L<Nasm::X86::Variable::getWFromZmm|/Nasm::X86::Variable::getWFromZmm> - Get the word from the numbered zmm register and put it in a variable.
 
-245 L<Nasm::X86::Variable::inc|/Nasm::X86::Variable::inc> - Increment a variable.
+245 L<Nasm::X86::Variable::gt|/Nasm::X86::Variable::gt> - Check whether the left hand variable is greater than the right hand variable.
 
-246 L<Nasm::X86::Variable::incDec|/Nasm::X86::Variable::incDec> - Increment or decrement a variable.
+246 L<Nasm::X86::Variable::inc|/Nasm::X86::Variable::inc> - Increment a variable.
 
-247 L<Nasm::X86::Variable::isRef|/Nasm::X86::Variable::isRef> - Check whether the specified  variable is a reference to another variable.
+247 L<Nasm::X86::Variable::incDec|/Nasm::X86::Variable::incDec> - Increment or decrement a variable.
 
-248 L<Nasm::X86::Variable::le|/Nasm::X86::Variable::le> - Check whether the left hand variable is less than or equal to the right hand variable.
+248 L<Nasm::X86::Variable::isRef|/Nasm::X86::Variable::isRef> - Check whether the specified  variable is a reference to another variable.
 
-249 L<Nasm::X86::Variable::loadZmm|/Nasm::X86::Variable::loadZmm> - Load bytes from the memory addressed by the specified source variable into the numbered zmm register.
+249 L<Nasm::X86::Variable::le|/Nasm::X86::Variable::le> - Check whether the left hand variable is less than or equal to the right hand variable.
 
-250 L<Nasm::X86::Variable::lt|/Nasm::X86::Variable::lt> - Check whether the left hand variable is less than the right hand variable.
+250 L<Nasm::X86::Variable::loadZmm|/Nasm::X86::Variable::loadZmm> - Load bytes from the memory addressed by the specified source variable into the numbered zmm register.
 
-251 L<Nasm::X86::Variable::max|/Nasm::X86::Variable::max> - Maximum of two variables.
+251 L<Nasm::X86::Variable::lt|/Nasm::X86::Variable::lt> - Check whether the left hand variable is less than the right hand variable.
 
-252 L<Nasm::X86::Variable::min|/Nasm::X86::Variable::min> - Minimum of two variables.
+252 L<Nasm::X86::Variable::max|/Nasm::X86::Variable::max> - Maximum of two variables.
 
-253 L<Nasm::X86::Variable::minusAssign|/Nasm::X86::Variable::minusAssign> - Implement minus and assign.
+253 L<Nasm::X86::Variable::min|/Nasm::X86::Variable::min> - Minimum of two variables.
 
-254 L<Nasm::X86::Variable::mod|/Nasm::X86::Variable::mod> - Divide the left hand variable by the right hand variable and return the remainder as a new variable.
+254 L<Nasm::X86::Variable::minusAssign|/Nasm::X86::Variable::minusAssign> - Implement minus and assign.
 
-255 L<Nasm::X86::Variable::ne|/Nasm::X86::Variable::ne> - Check whether the left hand variable is not equal to the right hand variable.
+255 L<Nasm::X86::Variable::mod|/Nasm::X86::Variable::mod> - Divide the left hand variable by the right hand variable and return the remainder as a new variable.
 
-256 L<Nasm::X86::Variable::or|/Nasm::X86::Variable::or> - Or two variables.
+256 L<Nasm::X86::Variable::ne|/Nasm::X86::Variable::ne> - Check whether the left hand variable is not equal to the right hand variable.
 
-257 L<Nasm::X86::Variable::out|/Nasm::X86::Variable::out> - Dump the value of a variable on stdout.
+257 L<Nasm::X86::Variable::or|/Nasm::X86::Variable::or> - Or two variables.
 
-258 L<Nasm::X86::Variable::outNL|/Nasm::X86::Variable::outNL> - Dump the value of a variable on stdout and append a new line.
+258 L<Nasm::X86::Variable::out|/Nasm::X86::Variable::out> - Dump the value of a variable on stdout.
 
-259 L<Nasm::X86::Variable::plusAssign|/Nasm::X86::Variable::plusAssign> - Implement plus and assign.
+259 L<Nasm::X86::Variable::outNL|/Nasm::X86::Variable::outNL> - Dump the value of a variable on stdout and append a new line.
 
-260 L<Nasm::X86::Variable::pop|/Nasm::X86::Variable::pop> - Pop a variable from the stack.
+260 L<Nasm::X86::Variable::plusAssign|/Nasm::X86::Variable::plusAssign> - Implement plus and assign.
 
-261 L<Nasm::X86::Variable::printErrMemoryInHexNL|/Nasm::X86::Variable::printErrMemoryInHexNL> - Write the memory addressed by a variable to stderr.
+261 L<Nasm::X86::Variable::pop|/Nasm::X86::Variable::pop> - Pop a variable from the stack.
 
-262 L<Nasm::X86::Variable::printMemoryInHexNL|/Nasm::X86::Variable::printMemoryInHexNL> - Write the memory addressed by a variable to stdout or stderr.
+262 L<Nasm::X86::Variable::printErrMemoryInHexNL|/Nasm::X86::Variable::printErrMemoryInHexNL> - Write the memory addressed by a variable to stderr.
 
-263 L<Nasm::X86::Variable::printOutMemoryInHexNL|/Nasm::X86::Variable::printOutMemoryInHexNL> - Write the memory addressed by a variable to stdout.
+263 L<Nasm::X86::Variable::printMemoryInHexNL|/Nasm::X86::Variable::printMemoryInHexNL> - Write the memory addressed by a variable to stdout or stderr.
 
-264 L<Nasm::X86::Variable::push|/Nasm::X86::Variable::push> - Push a variable onto the stack.
+264 L<Nasm::X86::Variable::printOutMemoryInHexNL|/Nasm::X86::Variable::printOutMemoryInHexNL> - Write the memory addressed by a variable to stdout.
 
-265 L<Nasm::X86::Variable::putBIntoXmm|/Nasm::X86::Variable::putBIntoXmm> - Place the value of the content variable at the byte in the numbered xmm register.
+265 L<Nasm::X86::Variable::push|/Nasm::X86::Variable::push> - Push a variable onto the stack.
 
-266 L<Nasm::X86::Variable::putBIntoZmm|/Nasm::X86::Variable::putBIntoZmm> - Place the value of the content variable at the byte in the numbered zmm register.
+266 L<Nasm::X86::Variable::putBIntoXmm|/Nasm::X86::Variable::putBIntoXmm> - Place the value of the content variable at the byte in the numbered xmm register.
 
-267 L<Nasm::X86::Variable::putBwdqIntoMm|/Nasm::X86::Variable::putBwdqIntoMm> - Place the value of the content variable at the byte|word|double word|quad word in the numbered zmm register.
+267 L<Nasm::X86::Variable::putBIntoZmm|/Nasm::X86::Variable::putBIntoZmm> - Place the value of the content variable at the byte in the numbered zmm register.
 
-268 L<Nasm::X86::Variable::putDIntoXmm|/Nasm::X86::Variable::putDIntoXmm> - Place the value of the content variable at the double word in the numbered xmm register.
+268 L<Nasm::X86::Variable::putBwdqIntoMm|/Nasm::X86::Variable::putBwdqIntoMm> - Place the value of the content variable at the byte|word|double word|quad word in the numbered zmm register.
 
-269 L<Nasm::X86::Variable::putDIntoZmm|/Nasm::X86::Variable::putDIntoZmm> - Place the value of the content variable at the double word in the numbered zmm register.
+269 L<Nasm::X86::Variable::putDIntoXmm|/Nasm::X86::Variable::putDIntoXmm> - Place the value of the content variable at the double word in the numbered xmm register.
 
-270 L<Nasm::X86::Variable::putQIntoXmm|/Nasm::X86::Variable::putQIntoXmm> - Place the value of the content variable at the quad word in the numbered xmm register.
+270 L<Nasm::X86::Variable::putDIntoZmm|/Nasm::X86::Variable::putDIntoZmm> - Place the value of the content variable at the double word in the numbered zmm register.
 
-271 L<Nasm::X86::Variable::putQIntoZmm|/Nasm::X86::Variable::putQIntoZmm> - Place the value of the content variable at the quad word in the numbered zmm register.
+271 L<Nasm::X86::Variable::putQIntoXmm|/Nasm::X86::Variable::putQIntoXmm> - Place the value of the content variable at the quad word in the numbered xmm register.
 
-272 L<Nasm::X86::Variable::putWIntoXmm|/Nasm::X86::Variable::putWIntoXmm> - Place the value of the content variable at the word in the numbered xmm register.
+272 L<Nasm::X86::Variable::putQIntoZmm|/Nasm::X86::Variable::putQIntoZmm> - Place the value of the content variable at the quad word in the numbered zmm register.
 
-273 L<Nasm::X86::Variable::putWIntoZmm|/Nasm::X86::Variable::putWIntoZmm> - Place the value of the content variable at the word in the numbered zmm register.
+273 L<Nasm::X86::Variable::putWIntoXmm|/Nasm::X86::Variable::putWIntoXmm> - Place the value of the content variable at the word in the numbered xmm register.
 
-274 L<Nasm::X86::Variable::setBit|/Nasm::X86::Variable::setBit> - Set a bit in the specified register retaining the other bits.
+274 L<Nasm::X86::Variable::putWIntoZmm|/Nasm::X86::Variable::putWIntoZmm> - Place the value of the content variable at the word in the numbered zmm register.
 
-275 L<Nasm::X86::Variable::setMask|/Nasm::X86::Variable::setMask> - Set the mask register to ones starting at the specified position for the specified length and zeroes elsewhere.
+275 L<Nasm::X86::Variable::setBit|/Nasm::X86::Variable::setBit> - Set a bit in the specified register retaining the other bits.
 
-276 L<Nasm::X86::Variable::setMaskBit|/Nasm::X86::Variable::setMaskBit> - Set a bit in the specified mask register retaining the other bits.
+276 L<Nasm::X86::Variable::setMask|/Nasm::X86::Variable::setMask> - Set the mask register to ones starting at the specified position for the specified length and zeroes elsewhere.
 
-277 L<Nasm::X86::Variable::setMaskFirst|/Nasm::X86::Variable::setMaskFirst> - Set the first bits in the specified mask register.
+277 L<Nasm::X86::Variable::setMaskBit|/Nasm::X86::Variable::setMaskBit> - Set a bit in the specified mask register retaining the other bits.
 
-278 L<Nasm::X86::Variable::setReg|/Nasm::X86::Variable::setReg> - Set the named registers from the content of the variable.
+278 L<Nasm::X86::Variable::setMaskFirst|/Nasm::X86::Variable::setMaskFirst> - Set the first bits in the specified mask register.
 
-279 L<Nasm::X86::Variable::setZmm|/Nasm::X86::Variable::setZmm> - Load bytes from the memory addressed by specified source variable into the numbered zmm register at the offset in the specified offset moving the number of bytes in the specified variable.
+279 L<Nasm::X86::Variable::setReg|/Nasm::X86::Variable::setReg> - Set the named registers from the content of the variable.
 
-280 L<Nasm::X86::Variable::str|/Nasm::X86::Variable::str> - The name of the variable.
+280 L<Nasm::X86::Variable::setZmm|/Nasm::X86::Variable::setZmm> - Load bytes from the memory addressed by specified source variable into the numbered zmm register at the offset in the specified offset moving the number of bytes in the specified variable.
 
-281 L<Nasm::X86::Variable::sub|/Nasm::X86::Variable::sub> - Subtract the right hand variable from the left hand variable and return the result as a new variable.
+281 L<Nasm::X86::Variable::str|/Nasm::X86::Variable::str> - The name of the variable.
 
-282 L<Nasm::X86::Variable::times|/Nasm::X86::Variable::times> - Multiply the left hand variable by the right hand variable and return the result as a new variable.
+282 L<Nasm::X86::Variable::sub|/Nasm::X86::Variable::sub> - Subtract the right hand variable from the left hand variable and return the result as a new variable.
 
-283 L<Nasm::X86::Variable::zBroadCastD|/Nasm::X86::Variable::zBroadCastD> - Broadcast a double word in a variable into the numbered zmm.
+283 L<Nasm::X86::Variable::times|/Nasm::X86::Variable::times> - Multiply the left hand variable by the right hand variable and return the result as a new variable.
 
-284 L<OpenRead|/OpenRead> - Open a file, whose name is addressed by rax, for read and return the file descriptor in rax.
+284 L<Nasm::X86::Variable::zBroadCastD|/Nasm::X86::Variable::zBroadCastD> - Broadcast a double word in a variable into the numbered zmm.
 
-285 L<OpenWrite|/OpenWrite> - Create the file named by the terminated string addressed by rax for write.
+285 L<OnSegv|/OnSegv> - Request a trace back followed by exit on a B<segv> signal.
 
-286 L<Optimize|/Optimize> - Perform code optimizations.
+286 L<OpenRead|/OpenRead> - Open a file, whose name is addressed by rax, for read and return the file descriptor in rax.
 
-287 L<PeekR|/PeekR> - Peek at register on stack.
+287 L<OpenWrite|/OpenWrite> - Create the file named by the terminated string addressed by rax for write.
 
-288 L<PopEax|/PopEax> - We cannot pop a double word from the stack in 64 bit long mode using pop so we improvise.
+288 L<Optimize|/Optimize> - Perform code optimizations.
 
-289 L<PopMask|/PopMask> - Pop Mask registers.
+289 L<PeekR|/PeekR> - Peek at register on stack.
 
-290 L<PopR|/PopR> - Pop registers from the stack.
+290 L<PopEax|/PopEax> - We cannot pop a double word from the stack in 64 bit long mode using pop so we improvise.
 
-291 L<PopRR|/PopRR> - Pop registers from the stack without tracking.
+291 L<PopMask|/PopMask> - Pop Mask registers.
 
-292 L<PopZmm|/PopZmm> - Pop zmm registers.
+292 L<PopR|/PopR> - Pop registers from the stack.
 
-293 L<PrintErrMemory|/PrintErrMemory> - Print the memory addressed by rax for a length of rdi on stderr.
+293 L<PopRR|/PopRR> - Pop registers from the stack without tracking.
 
-294 L<PrintErrMemoryInHex|/PrintErrMemoryInHex> - Dump memory from the address in rax for the length in rdi on stderr.
+294 L<PopZmm|/PopZmm> - Pop zmm registers.
 
-295 L<PrintErrMemoryInHexNL|/PrintErrMemoryInHexNL> - Dump memory from the address in rax for the length in rdi and then print a new line.
+295 L<PrintErrMemory|/PrintErrMemory> - Print the memory addressed by rax for a length of rdi on stderr.
 
-296 L<PrintErrMemoryNL|/PrintErrMemoryNL> - Print the memory addressed by rax for a length of rdi followed by a new line on stderr.
+296 L<PrintErrMemoryInHex|/PrintErrMemoryInHex> - Dump memory from the address in rax for the length in rdi on stderr.
 
-297 L<PrintErrNL|/PrintErrNL> - Print a new line to stderr.
+297 L<PrintErrMemoryInHexNL|/PrintErrMemoryInHexNL> - Dump memory from the address in rax for the length in rdi and then print a new line.
 
-298 L<PrintErrRaxInHex|/PrintErrRaxInHex> - Write the content of register rax in hexadecimal in big endian notation to stderr.
+298 L<PrintErrMemoryNL|/PrintErrMemoryNL> - Print the memory addressed by rax for a length of rdi followed by a new line on stderr.
 
-299 L<PrintErrRegisterInHex|/PrintErrRegisterInHex> - Print the named registers as hex strings on stderr.
+299 L<PrintErrNL|/PrintErrNL> - Print a new line to stderr.
 
-300 L<PrintErrSpace|/PrintErrSpace> - Print one or more spaces to stderr.
+300 L<PrintErrRaxInHex|/PrintErrRaxInHex> - Write the content of register rax in hexadecimal in big endian notation to stderr.
 
-301 L<PrintErrString|/PrintErrString> - Print a constant string to stderr.
+301 L<PrintErrRegisterInHex|/PrintErrRegisterInHex> - Print the named registers as hex strings on stderr.
 
-302 L<PrintErrStringNL|/PrintErrStringNL> - Print a constant string followed by a new line to stderr.
+302 L<PrintErrSpace|/PrintErrSpace> - Print one or more spaces to stderr.
 
-303 L<PrintErrTraceBack|/PrintErrTraceBack> - Print sub routine track back on stderr.
+303 L<PrintErrString|/PrintErrString> - Print a constant string to stderr.
 
-304 L<PrintErrZF|/PrintErrZF> - Print the zero flag without disturbing it on stderr.
+304 L<PrintErrStringNL|/PrintErrStringNL> - Print a constant string followed by a new line to stderr.
 
-305 L<PrintMemory|/PrintMemory> - Print the memory addressed by rax for a length of rdi on the specified channel.
+305 L<PrintErrTraceBack|/PrintErrTraceBack> - Print sub routine track back on stderr.
 
-306 L<PrintMemoryInHex|/PrintMemoryInHex> - Dump memory from the address in rax for the length in rdi on the specified channel.
+306 L<PrintErrZF|/PrintErrZF> - Print the zero flag without disturbing it on stderr.
 
-307 L<PrintMemoryNL|/PrintMemoryNL> - Print the memory addressed by rax for a length of rdi on the specified channel followed by a new line.
+307 L<PrintMemory|/PrintMemory> - Print the memory addressed by rax for a length of rdi on the specified channel.
 
-308 L<PrintNL|/PrintNL> - Print a new line to stdout  or stderr.
+308 L<PrintMemoryInHex|/PrintMemoryInHex> - Dump memory from the address in rax for the length in rdi on the specified channel.
 
-309 L<PrintOutMemory|/PrintOutMemory> - Print the memory addressed by rax for a length of rdi on stdout.
+309 L<PrintMemoryNL|/PrintMemoryNL> - Print the memory addressed by rax for a length of rdi on the specified channel followed by a new line.
 
-310 L<PrintOutMemoryInHex|/PrintOutMemoryInHex> - Dump memory from the address in rax for the length in rdi on stdout.
+310 L<PrintNL|/PrintNL> - Print a new line to stdout  or stderr.
 
-311 L<PrintOutMemoryInHexNL|/PrintOutMemoryInHexNL> - Dump memory from the address in rax for the length in rdi and then print a new line.
+311 L<PrintOneRegisterInHex|/PrintOneRegisterInHex> - Print the named register as a hex strings.
 
-312 L<PrintOutMemoryNL|/PrintOutMemoryNL> - Print the memory addressed by rax for a length of rdi followed by a new line on stdout.
+312 L<PrintOutMemory|/PrintOutMemory> - Print the memory addressed by rax for a length of rdi on stdout.
 
-313 L<PrintOutNL|/PrintOutNL> - Print a new line to stderr.
+313 L<PrintOutMemoryInHex|/PrintOutMemoryInHex> - Dump memory from the address in rax for the length in rdi on stdout.
 
-314 L<PrintOutRaxInHex|/PrintOutRaxInHex> - Write the content of register rax in hexadecimal in big endian notation to stderr.
+314 L<PrintOutMemoryInHexNL|/PrintOutMemoryInHexNL> - Dump memory from the address in rax for the length in rdi and then print a new line.
 
-315 L<PrintOutRaxInReverseInHex|/PrintOutRaxInReverseInHex> - Write the content of register rax to stderr in hexadecimal in little endian notation.
+315 L<PrintOutMemoryNL|/PrintOutMemoryNL> - Print the memory addressed by rax for a length of rdi followed by a new line on stdout.
 
-316 L<PrintOutRegisterInHex|/PrintOutRegisterInHex> - Print the named registers as hex strings on stdout.
+316 L<PrintOutNL|/PrintOutNL> - Print a new line to stderr.
 
-317 L<PrintOutRegistersInHex|/PrintOutRegistersInHex> - Print the general purpose registers in hex.
+317 L<PrintOutRaxInHex|/PrintOutRaxInHex> - Write the content of register rax in hexadecimal in big endian notation to stderr.
 
-318 L<PrintOutRflagsInHex|/PrintOutRflagsInHex> - Print the flags register in hex.
+318 L<PrintOutRaxInReverseInHex|/PrintOutRaxInReverseInHex> - Write the content of register rax to stderr in hexadecimal in little endian notation.
 
-319 L<PrintOutRipInHex|/PrintOutRipInHex> - Print the instruction pointer in hex.
+319 L<PrintOutRegisterInHex|/PrintOutRegisterInHex> - Print the named registers as hex strings on stdout.
 
-320 L<PrintOutSpace|/PrintOutSpace> - Print one or more spaces to stdout.
+320 L<PrintOutRegistersInHex|/PrintOutRegistersInHex> - Print the general purpose registers in hex.
 
-321 L<PrintOutString|/PrintOutString> - Print a constant string to stdout.
+321 L<PrintOutRflagsInHex|/PrintOutRflagsInHex> - Print the flags register in hex.
 
-322 L<PrintOutStringNL|/PrintOutStringNL> - Print a constant string followed by a new line to stdout.
+322 L<PrintOutRipInHex|/PrintOutRipInHex> - Print the instruction pointer in hex.
 
-323 L<PrintOutTraceBack|/PrintOutTraceBack> - Print sub routine track back on stdout.
+323 L<PrintOutSpace|/PrintOutSpace> - Print one or more spaces to stdout.
 
-324 L<PrintOutZF|/PrintOutZF> - Print the zero flag without disturbing it on stdout.
+324 L<PrintOutString|/PrintOutString> - Print a constant string to stdout.
 
-325 L<PrintRaxInHex|/PrintRaxInHex> - Write the content of register rax in hexadecimal in big endian notation to the specified channel.
+325 L<PrintOutStringNL|/PrintOutStringNL> - Print a constant string followed by a new line to stdout.
 
-326 L<PrintRegisterInHex|/PrintRegisterInHex> - Print the named registers as hex strings.
+326 L<PrintOutTraceBack|/PrintOutTraceBack> - Print sub routine track back on stdout.
 
-327 L<PrintSpace|/PrintSpace> - Print one or more spaces to the specified channel.
+327 L<PrintOutZF|/PrintOutZF> - Print the zero flag without disturbing it on stdout.
 
-328 L<PrintString|/PrintString> - Print a constant string to the specified channel.
+328 L<PrintRaxInHex|/PrintRaxInHex> - Write the content of register rax in hexadecimal in big endian notation to the specified channel.
 
-329 L<PrintStringNL|/PrintStringNL> - Print a constant string to the specified channel followed by a new line.
+329 L<PrintRegisterInHex|/PrintRegisterInHex> - Print the named registers as hex strings.
 
-330 L<PrintTraceBack|/PrintTraceBack> - Trace the call stack.
+330 L<PrintSpace|/PrintSpace> - Print one or more spaces to the specified channel.
 
-331 L<PrintUtf32|/PrintUtf32> - Print the specified number of utf32 characters at the specified address.
+331 L<PrintString|/PrintString> - Print a constant string to the specified channel.
 
-332 L<PushMask|/PushMask> - Push several Mask registers.
+332 L<PrintStringNL|/PrintStringNL> - Print a constant string to the specified channel followed by a new line.
 
-333 L<PushR|/PushR> - Push registers onto the stack.
+333 L<PrintTraceBack|/PrintTraceBack> - Trace the call stack.
 
-334 L<PushRR|/PushRR> - Push registers onto the stack without tracking.
+334 L<PrintUtf32|/PrintUtf32> - Print the specified number of utf32 characters at the specified address.
 
-335 L<PushZmm|/PushZmm> - Push several zmm registers.
+335 L<PushMask|/PushMask> - Push several Mask registers.
 
-336 L<putIntoZmm|/putIntoZmm> - Put the specified register into the numbered zmm at the from the offset located in the numbered zmm.
+336 L<PushR|/PushR> - Push registers onto the stack.
 
-337 L<R|/R> - Define a reference variable.
+337 L<PushRR|/PushRR> - Push registers onto the stack without tracking.
 
-338 L<Rb|/Rb> - Layout bytes in the data segment and return their label.
+338 L<PushZmm|/PushZmm> - Push several zmm registers.
 
-339 L<Rbwdq|/Rbwdq> - Layout data.
+339 L<putIntoZmm|/putIntoZmm> - Put the specified register into the numbered zmm at the specified offset in the zmm.
 
-340 L<RComment|/RComment> - Insert a comment into the read only data segment.
+340 L<R|/R> - Define a reference variable.
 
-341 L<Rd|/Rd> - Layout double words in the data segment and return their label.
+341 L<Rb|/Rb> - Layout bytes in the data segment and return their label.
 
-342 L<ReadFile|/ReadFile> - Read a file whose name is addressed by rax into memory.
+342 L<Rbwdq|/Rbwdq> - Layout data.
 
-343 L<ReadTimeStampCounter|/ReadTimeStampCounter> - Read the time stamp counter and return the time in nanoseconds in rax.
+343 L<RComment|/RComment> - Insert a comment into the read only data segment.
 
-344 L<RegistersAvailable|/RegistersAvailable> - Add a new set of registers that are available.
+344 L<Rd|/Rd> - Layout double words in the data segment and return their label.
 
-345 L<RegistersFree|/RegistersFree> - Remove the current set of registers known to be free.
+345 L<ReadFile|/ReadFile> - Read a file whose name is addressed by rax into memory.
 
-346 L<RegisterSize|/RegisterSize> - Return the size of a register.
+346 L<ReadTimeStampCounter|/ReadTimeStampCounter> - Read the time stamp counter and return the time in nanoseconds in rax.
 
-347 L<removeNonAsciiChars|/removeNonAsciiChars> - Return a copy of the specified string with all the non ascii characters removed.
+347 L<RegistersAvailable|/RegistersAvailable> - Add a new set of registers that are available.
 
-348 L<ReorderSyscallRegisters|/ReorderSyscallRegisters> - Map the list of registers provided to the 64 bit system call sequence.
+348 L<RegistersFree|/RegistersFree> - Remove the current set of registers known to be free.
 
-349 L<RestoreFirstFour|/RestoreFirstFour> - Restore the first 4 parameter registers.
+349 L<RegisterSize|/RegisterSize> - Return the size of a register.
 
-350 L<RestoreFirstFourExceptRax|/RestoreFirstFourExceptRax> - Restore the first 4 parameter registers except rax so it can return its value.
+350 L<removeNonAsciiChars|/removeNonAsciiChars> - Return a copy of the specified string with all the non ascii characters removed.
 
-351 L<RestoreFirstFourExceptRaxAndRdi|/RestoreFirstFourExceptRaxAndRdi> - Restore the first 4 parameter registers except rax  and rdi so we can return a pair of values.
+351 L<ReorderSyscallRegisters|/ReorderSyscallRegisters> - Map the list of registers provided to the 64 bit system call sequence.
 
-352 L<RestoreFirstSeven|/RestoreFirstSeven> - Restore the first 7 parameter registers.
+352 L<RestoreFirstFour|/RestoreFirstFour> - Restore the first 4 parameter registers.
 
-353 L<RestoreFirstSevenExceptRax|/RestoreFirstSevenExceptRax> - Restore the first 7 parameter registers except rax which is being used to return the result.
+353 L<RestoreFirstFourExceptRax|/RestoreFirstFourExceptRax> - Restore the first 4 parameter registers except rax so it can return its value.
 
-354 L<RestoreFirstSevenExceptRaxAndRdi|/RestoreFirstSevenExceptRaxAndRdi> - Restore the first 7 parameter registers except rax and rdi which are being used to return the results.
+354 L<RestoreFirstFourExceptRaxAndRdi|/RestoreFirstFourExceptRaxAndRdi> - Restore the first 4 parameter registers except rax  and rdi so we can return a pair of values.
 
-355 L<Rq|/Rq> - Layout quad words in the data segment and return their label.
+355 L<RestoreFirstSeven|/RestoreFirstSeven> - Restore the first 7 parameter registers.
 
-356 L<Rs|/Rs> - Layout bytes in read only memory and return their label.
+356 L<RestoreFirstSevenExceptRax|/RestoreFirstSevenExceptRax> - Restore the first 7 parameter registers except rax which is being used to return the result.
 
-357 L<Rutf8|/Rutf8> - Layout a utf8 encoded string as bytes in read only memory and return their label.
+357 L<RestoreFirstSevenExceptRaxAndRdi|/RestoreFirstSevenExceptRaxAndRdi> - Restore the first 7 parameter registers except rax and rdi which are being used to return the results.
 
-358 L<Rw|/Rw> - Layout words in the data segment and return their label.
+358 L<Rq|/Rq> - Layout quad words in the data segment and return their label.
 
-359 L<SaveFirstFour|/SaveFirstFour> - Save the first 4 parameter registers making any parameter registers read only.
+359 L<Rs|/Rs> - Layout bytes in read only memory and return their label.
 
-360 L<SaveFirstSeven|/SaveFirstSeven> - Save the first 7 parameter registers.
+360 L<Rutf8|/Rutf8> - Layout a utf8 encoded string as bytes in read only memory and return their label.
 
-361 L<SetLabel|/SetLabel> - Create (if necessary) and set a label in the code section returning the label so set.
+361 L<Rw|/Rw> - Layout words in the data segment and return their label.
 
-362 L<SetLengthOfShortString|/SetLengthOfShortString> - Set the length of the short string held in the numbered zmm register into the specified register.
+362 L<SaveFirstFour|/SaveFirstFour> - Save the first 4 parameter registers making any parameter registers read only.
 
-363 L<SetMaskRegister|/SetMaskRegister> - Set the mask register to ones starting at the specified position for the specified length and zeroes elsewhere.
+363 L<SaveFirstSeven|/SaveFirstSeven> - Save the first 7 parameter registers.
 
-364 L<SetZF|/SetZF> - Set the zero flag.
+364 L<SetLabel|/SetLabel> - Create (if necessary) and set a label in the code section returning the label so set.
 
-365 L<Start|/Start> - Initialize the assembler.
+365 L<SetLengthOfShortString|/SetLengthOfShortString> - Set the length of the short string held in the numbered zmm register into the specified register.
 
-366 L<StatSize|/StatSize> - Stat a file whose name is addressed by rax to get its size in rax.
+366 L<SetMaskRegister|/SetMaskRegister> - Set the mask register to ones starting at the specified position for the specified length and zeroes elsewhere.
 
-367 L<StringLength|/StringLength> - Length of a zero terminated string.
+367 L<SetZF|/SetZF> - Set the zero flag.
 
-368 L<Structure|/Structure> - Create a structure addressed by a register.
+368 L<Start|/Start> - Initialize the assembler.
 
-369 L<Subroutine|/Subroutine> - Create a subroutine that can be called in assembler code.
+369 L<StatSize|/StatSize> - Stat a file whose name is addressed by rax to get its size in rax.
 
-370 L<SubroutineStartStack|/SubroutineStartStack> - Initialize a new stack frame.
+370 L<StringLength|/StringLength> - Length of a zero terminated string.
 
-371 L<Then|/Then> - Then body for an If statement.
+371 L<Structure|/Structure> - Create a structure addressed by a register.
 
-372 L<totalBytesAssembled|/totalBytesAssembled> - Total size in bytes of all files assembled during testing.
+372 L<Subroutine|/Subroutine> - Create a subroutine that can be called in assembler code.
 
-373 L<unlinkFile|/unlinkFile> - Unlink the named file.
+373 L<SubroutineStartStack|/SubroutineStartStack> - Initialize a new stack frame.
 
-374 L<UnReorderSyscallRegisters|/UnReorderSyscallRegisters> - Recover the initial values in registers that were reordered.
+374 L<Then|/Then> - Then body for an If statement.
 
-375 L<V|/V> - Define a variable.
+375 L<totalBytesAssembled|/totalBytesAssembled> - Total size in bytes of all files assembled during testing.
 
-376 L<Variable|/Variable> - Create a new variable with the specified name initialized via an optional expression.
+376 L<unlinkFile|/unlinkFile> - Unlink the named file.
 
-377 L<WaitPid|/WaitPid> - Wait for the pid in rax to complete.
+377 L<UnReorderSyscallRegisters|/UnReorderSyscallRegisters> - Recover the initial values in registers that were reordered.
 
-378 L<xmm|/xmm> - Add xmm to the front of a list of register expressions.
+378 L<V|/V> - Define a variable.
 
-379 L<ymm|/ymm> - Add ymm to the front of a list of register expressions.
+379 L<Variable|/Variable> - Create a new variable with the specified name initialized via an optional expression.
 
-380 L<zmm|/zmm> - Add zmm to the front of a list of register expressions.
+380 L<WaitPid|/WaitPid> - Wait for the pid in rax to complete.
+
+381 L<xmm|/xmm> - Add xmm to the front of a list of register expressions.
+
+382 L<ymm|/ymm> - Add ymm to the front of a list of register expressions.
+
+383 L<zmm|/zmm> - Add zmm to the front of a list of register expressions.
 
 =head1 Installation
 
