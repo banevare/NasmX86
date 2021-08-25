@@ -6523,8 +6523,7 @@ sub Nasm::X86::Tree::dump($;$$)                                                 
  {my ($t, $first, $bs) = @_;                                                    # Tree, optional offset to first node, optional arena address
   @_ >= 1 && @_ <= 3 or confess;
 
-  PushR r12;
-  my ($depthR) = (r12);
+  PushR my ($depthR) = (r12);
 
   my $b = Subroutine                                                            # Print the spacing blanks to offset sub trees
    {V(loop, $depthR)->for(sub
