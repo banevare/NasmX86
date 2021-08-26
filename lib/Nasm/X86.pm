@@ -18,6 +18,7 @@ use Data::Dump qw(dump);
 use Data::Table::Text qw(:all);
 use Asm::C qw(:all);
 use feature qw(say current_sub);
+use utf8;
 
 my $debugTrace = 1;                                                             # Trace execution if true - slow!
 
@@ -19939,6 +19940,7 @@ END
 
 #latest:
 if (1) {                                                                        #TConvertUtf8ToUtf32
+  no utf8;
   my @p = my ($out, $size, $fail) = (V(out), V(size), V('fail'));
 
   my $Chars = Rb(0x24, 0xc2, 0xa2, 0xc9, 0x91, 0xE2, 0x82, 0xAC, 0xF0, 0x90, 0x8D, 0x88);
@@ -21369,8 +21371,8 @@ a
 END
  }
 
-latest:
-if (1) {                                                                        # Count number of chars in a string
+#latest:
+if (1) {                                                                        # Print the utf8 string corresponding to a lexical item
   PushR zmm0, zmm1, rax, r14, r15;
   Sub rsp, RegisterSize xmm0;;
   Mov "dword[rsp+0*4]", 0x0600001A;
@@ -21392,42 +21394,37 @@ if (1) {                                                                        
   Kmovq r15, k2;
   Not r15;                                                                      # Swap zeroes and ones
   Tzcnt r14, r15;                                                               # Trailing zero count is a factor two too big
-  Shr r14, 1;                                                                   # Normalized count
+  Shr r14, 1;                                                                   # Normalized count of number of characters int name
 
-  Mov r15, 0xffff;
+  Mov r15, 0xffff;                                                              # Zero out lexical type
   Vpbroadcastd zmm1, r15d;                                                      # Broadcast
   Vpandd zmm1, zmm0, zmm1;                                                      # Remove lexical type to leave index into alphabet
-  PrintOutRegisterInHex rax, r14, xmm1;
 
-  my $va = Rutf8 "\x{1D5D4}\x{1D5D5}\x{1D5D6}\x{1D5D7}\x{1D5D8}\x{1D5D9}\x{1D5DA}\x{1D5DB}\x{1D5DC}\x{1D5DD}\x{1D5DE}\x{1D5DF}\x{1D5E0}\x{1D5E1}\x{1D5E2}\x{1D5E3}\x{1D5E4}\x{1D5E5}\x{1D5E6}\x{1D5E7}\x{1D5E8}\x{1D5E9}\x{1D5EA}\x{1D5EB}\x{1D5EC}\x{1D5ED}\x{1D5EE}\x{1D5EF}\x{1D5F0}\x{1D5F1}\x{1D5F2}\x{1D5F3}\x{1D5F4}\x{1D5F5}\x{1D5F6}\x{1D5F7}\x{1D5F8}\x{1D5F9}\x{1D5FA}\x{1D5FB}\x{1D5FC}\x{1D5FD}\x{1D5FE}\x{1D5FF}\x{1D600}\x{1D601}\x{1D602}\x{1D603}\x{1D604}\x{1D605}\x{1D606}\x{1D607}\x{1D756}\x{1D757}\x{1D758}\x{1D759}\x{1D75A}\x{1D75B}\x{1D75C}\x{1D75D}\x{1D75E}\x{1D75F}\x{1D760}\x{1D761}\x{1D762}\x{1D763}\x{1D764}\x{1D765}\x{1D766}\x{1D767}\x{1D768}\x{1D769}\x{1D76A}\x{1D76B}\x{1D76C}\x{1D76D}\x{1D76E}\x{1D76F}\x{1D770}\x{1D771}\x{1D772}\x{1D773}\x{1D774}\x{1D775}\x{1D776}\x{1D777}\x{1D778}\x{1D779}\x{1D77A}\x{1D77B}\x{1D77C}\x{1D77D}\x{1D77E}\x{1D77F}\x{1D780}\x{1D781}\x{1D782}\x{1D783}\x{1D784}\x{1D785}\x{1D786}\x{1D787}\x{1D788}\x{1D789}\x{1D78A}\x{1D78B}\x{1D78C}\x{1D78D}\x{1D78E}\x{1D78F}";
-  PushR zmm1;
-PrintErrRegisterInHex rax;
-  V(loop)->getReg(r14)->for(sub                                                 # Write each letter out
-   {my ($index, $start, $next, $end) = @_;                                      # Execute body
-    $index->setReg(r14);                                                        # Index stack
-    ClearRegisters r15;
-    Mov r15b, "[rsp+4*r14]";                                                    # Load alphabet offset from stack
-    Mov r14, r15;
-    Shl r14, 1;
-    Add r15, r14;                                                               # R15 has the offset into the alpabet
-    Mov r14, $va;
-    Mov r14d, "[r14+r15]";
-PrintErrStringNL "AAAA";
-PrintErrRegisterInHex r14, r15;
-Exit(0);
-    Push r14;                                                                   # utf8 is on the stack and it is 3 bytes wide
-    Mov rax, rsp;
-    Mov rdi, 4;
-    PrintErrMemory;
-   });
+  Cmp rax, 6;                                                                   # Test for variable
+  IfEq
+  Then
+   {my $va = Rutf8 "\x{1D5D4}\x{1D5D5}\x{1D5D6}\x{1D5D7}\x{1D5D8}\x{1D5D9}\x{1D5DA}\x{1D5DB}\x{1D5DC}\x{1D5DD}\x{1D5DE}\x{1D5DF}\x{1D5E0}\x{1D5E1}\x{1D5E2}\x{1D5E3}\x{1D5E4}\x{1D5E5}\x{1D5E6}\x{1D5E7}\x{1D5E8}\x{1D5E9}\x{1D5EA}\x{1D5EB}\x{1D5EC}\x{1D5ED}\x{1D5EE}\x{1D5EF}\x{1D5F0}\x{1D5F1}\x{1D5F2}\x{1D5F3}\x{1D5F4}\x{1D5F5}\x{1D5F6}\x{1D5F7}\x{1D5F8}\x{1D5F9}\x{1D5FA}\x{1D5FB}\x{1D5FC}\x{1D5FD}\x{1D5FE}\x{1D5FF}\x{1D600}\x{1D601}\x{1D602}\x{1D603}\x{1D604}\x{1D605}\x{1D606}\x{1D607}\x{1D756}\x{1D757}\x{1D758}\x{1D759}\x{1D75A}\x{1D75B}\x{1D75C}\x{1D75D}\x{1D75E}\x{1D75F}\x{1D760}\x{1D761}\x{1D762}\x{1D763}\x{1D764}\x{1D765}\x{1D766}\x{1D767}\x{1D768}\x{1D769}\x{1D76A}\x{1D76B}\x{1D76C}\x{1D76D}\x{1D76E}\x{1D76F}\x{1D770}\x{1D771}\x{1D772}\x{1D773}\x{1D774}\x{1D775}\x{1D776}\x{1D777}\x{1D778}\x{1D779}\x{1D77A}\x{1D77B}\x{1D77C}\x{1D77D}\x{1D77E}\x{1D77F}\x{1D780}\x{1D781}\x{1D782}\x{1D783}\x{1D784}\x{1D785}\x{1D786}\x{1D787}\x{1D788}\x{1D789}\x{1D78A}\x{1D78B}\x{1D78C}\x{1D78D}\x{1D78E}\x{1D78F}";
+    PushR zmm1;
+    V(loop)->getReg(r14)->for(sub                                               # Write each letter out from its position on the stack
+     {my ($index, $start, $next, $end) = @_;                                    # Execute body
+      $index->setReg(r14);                                                      # Index stack
+      ClearRegisters r15;
+      Mov r15b, "[rsp+4*r14]";                                                  # Load alphabet offset from stack
+      Shl r15, 2;                                                               # Each letter is 4 bytes wide in utf8
+      Mov r14, $va;                                                             # Alphabet address
+      Mov r14d, "[r14+r15]";                                                    # Alphabet letter as utf8
+      PushR r14;                                                                # utf8 is on the stack and it is 4 bytes wide
+      Mov rax, rsp;
+      Mov rdi, 4;
+      PrintOutMemory;                                                           # Print letter from stack
+      PopR;
+     });
+    PrintOutNL;
+   };
 
   PopR;
 
-  ok Assemble(debug => 1, number => 128, eq => <<END);
-   rax: 0000 0000 0000 0006
-   r14: 0000 0000 0000 0002
-  xmm1: 0000 001B 0000 0001   0000 001A 0000 001A
-END
+  ok Assemble(debug => 1, number => 128, eq => "𝗮𝗯\n");
  }
 
 #latest:
@@ -21436,7 +21433,7 @@ if (0) {
 END
  }
 
-ok 1 for 2..18;
+ok 1 for 3..18;
 
 #unlink $_ for qw(hash print2 sde-log.txt sde-ptr-check.out.txt z.txt);         # Remove incidental files
 unlink $_ for qw(hash print2);                                                  # Remove incidental files
