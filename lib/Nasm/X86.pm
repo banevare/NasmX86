@@ -90,7 +90,7 @@ imul
 kmov knot kortest ktest lea lzcnt mov movdqa
 or popcnt shl shr sub test tzcnt
 vcvtudq2pd vcvtuqq2pd vcvtudq2ps vmovdqu vmovdqu32 vmovdqu64 vmovdqu8
-vpcompressd vpcompressq vpexpandd vpexpandq vpxorq xchg xor
+vpcompressd vpcompressq vpexpandd vpexpandq xchg xor
 vmovd vmovq
 mulpd
 pslldq psrldq
@@ -116,7 +116,7 @@ vmulpd vaddpd
 END
 
   my @i3qdwb =  split /\s+/, <<END;                                             # Triple operand instructions which have qdwb versions
-pinsr pextr vpcmpeq vpinsr vpextr vpadd vpsub vpmull
+pinsr pextr vpand vpandn vpcmpeq vpor vpxor vptest vporvpcmpeq vpinsr vpextr vpadd vpsub vpmull
 END
 
   my @i4 =  split /\s+/, <<END;                                                 # Quadruple operand instructions
@@ -327,7 +327,7 @@ sub Rutf8(@)                                                                    
   for my $e(split //, $d)
    {my $o  = ord $e;                                                            # Effectively the utf32 encoding of each character
     my $u  = convertUtf32ToUtf8($o);
-    my $x = sprintf("%08x", $u);
+    my $x  = sprintf("%08x", $u);
     my $o1 = substr($x, 0, 2);
     my $o2 = substr($x, 2, 2);
     my $o3 = substr($x, 4, 2);
@@ -564,7 +564,7 @@ sub ClearRegisters(@)                                                           
    {my $size = RegisterSize $r;
     Xor    $r, $r     if $size == 8 and $r !~ m(\Ak);
     Kxorq  $r, $r, $r if $size == 8 and $r =~ m(\Ak);
-    Vpxorq $r, $r     if $size  > 8;
+    Vpxorq $r, $r, $r if $size  > 8;
    }
  }
 
@@ -1977,6 +1977,7 @@ sub Nasm::X86::Variable::getReg($$@)                                            
   else                                                                          # Move to this variable
    {Mov $variable->address, $register;
    }
+  $variable                                                                     # Chain
  }
 
 sub Nasm::X86::Variable::getConst($$;$)                                         # Load the variable from a constant in effect setting a variable to a specified value.
@@ -21351,20 +21352,81 @@ END
 
 #latest:
 if (1) {                                                                        # r11 being disturbed by syscall 1
-  Mov  r10, 0x0a61;
-  Push r10;
-  SetLabel Label q(before);
+  Push 0x0a61;                                                                  # A followed by new line on the stack
   Mov  rax, rsp;
-  Mov  rdx, 2;
-  Mov  rsi, rsp;
-  Mov  rax, 1;
-  Mov  rdi, 1;
-  Mov  r11, 0;
+  Mov  rdx, 2;                                                                  # Length of string
+  Mov  rsi, rsp;                                                                # Address of string
+  Mov  rax, 1;                                                                  # Write
+  Mov  rdi, 1;                                                                  # File descriptor
   Syscall;
-  SetLabel Label q(after);
-  Exit(0);
-  ok Assemble(debug => 1, number => 127,  emulator => 0, eq => <<END);          # Cannot use the emulator because it does not understand signals
+  Pushfq;
+  Pop rax;
+  PrintOutRegisterInHex rax, r11;
+  ok Assemble(debug => 0, keep2=>'z', number => 127,  emulator => 0, eq => <<END);
 a
+   rax: 0000 0000 0000 0202
+   r11: 0000 0000 0000 0202
+END
+ }
+
+latest:
+if (1) {                                                                        # Count number of chars in a string
+  PushR zmm0, zmm1, rax, r14, r15;
+  Sub rsp, RegisterSize xmm0;;
+  Mov "dword[rsp+0*4]", 0x0600001A;
+  Mov "dword[rsp+1*4]", 0x0600001B;
+  Mov "dword[rsp+2*4]", 0x05000001;
+  Mov "dword[rsp+3*4]", 0x0600001B;
+  Vmovdqu8 zmm0, "[rsp]";
+  Add rsp, RegisterSize zmm0;
+
+  Pextrw rax,  xmm0, 1;                                                         # Extract lexical type of first element
+  Vpbroadcastw zmm1, ax;                                                        # Broadcast
+  Vpcmpeqw k0, zmm0, zmm1;                                                      # Check extent of first lexical item up to 16
+  Shr rax, 8;                                                                   # Lexical type in lowest byte
+
+  Mov r15, 0x55555555;                                                          # Set odd positions to one where we know the match will fail
+  Kmovq k1, r15;
+  Korq k2, k0, k1;                                                              # Fill in odd positions
+
+  Kmovq r15, k2;
+  Not r15;                                                                      # Swap zeroes and ones
+  Tzcnt r14, r15;                                                               # Trailing zero count is a factor two too big
+  Shr r14, 1;                                                                   # Normalized count
+
+  Mov r15, 0xffff;
+  Vpbroadcastd zmm1, r15d;                                                      # Broadcast
+  Vpandd zmm1, zmm0, zmm1;                                                      # Remove lexical type to leave index into alphabet
+  PrintOutRegisterInHex rax, r14, xmm1;
+
+  my $va = Rutf8 "\x{1D5D4}\x{1D5D5}\x{1D5D6}\x{1D5D7}\x{1D5D8}\x{1D5D9}\x{1D5DA}\x{1D5DB}\x{1D5DC}\x{1D5DD}\x{1D5DE}\x{1D5DF}\x{1D5E0}\x{1D5E1}\x{1D5E2}\x{1D5E3}\x{1D5E4}\x{1D5E5}\x{1D5E6}\x{1D5E7}\x{1D5E8}\x{1D5E9}\x{1D5EA}\x{1D5EB}\x{1D5EC}\x{1D5ED}\x{1D5EE}\x{1D5EF}\x{1D5F0}\x{1D5F1}\x{1D5F2}\x{1D5F3}\x{1D5F4}\x{1D5F5}\x{1D5F6}\x{1D5F7}\x{1D5F8}\x{1D5F9}\x{1D5FA}\x{1D5FB}\x{1D5FC}\x{1D5FD}\x{1D5FE}\x{1D5FF}\x{1D600}\x{1D601}\x{1D602}\x{1D603}\x{1D604}\x{1D605}\x{1D606}\x{1D607}\x{1D756}\x{1D757}\x{1D758}\x{1D759}\x{1D75A}\x{1D75B}\x{1D75C}\x{1D75D}\x{1D75E}\x{1D75F}\x{1D760}\x{1D761}\x{1D762}\x{1D763}\x{1D764}\x{1D765}\x{1D766}\x{1D767}\x{1D768}\x{1D769}\x{1D76A}\x{1D76B}\x{1D76C}\x{1D76D}\x{1D76E}\x{1D76F}\x{1D770}\x{1D771}\x{1D772}\x{1D773}\x{1D774}\x{1D775}\x{1D776}\x{1D777}\x{1D778}\x{1D779}\x{1D77A}\x{1D77B}\x{1D77C}\x{1D77D}\x{1D77E}\x{1D77F}\x{1D780}\x{1D781}\x{1D782}\x{1D783}\x{1D784}\x{1D785}\x{1D786}\x{1D787}\x{1D788}\x{1D789}\x{1D78A}\x{1D78B}\x{1D78C}\x{1D78D}\x{1D78E}\x{1D78F}";
+  PushR zmm1;
+PrintErrRegisterInHex rax;
+  V(loop)->getReg(r14)->for(sub                                                 # Write each letter out
+   {my ($index, $start, $next, $end) = @_;                                      # Execute body
+    $index->setReg(r14);                                                        # Index stack
+    ClearRegisters r15;
+    Mov r15b, "[rsp+4*r14]";                                                    # Load alphabet offset from stack
+    Mov r14, r15;
+    Shl r14, 1;
+    Add r15, r14;                                                               # R15 has the offset into the alpabet
+    Mov r14, $va;
+    Mov r14d, "[r14+r15]";
+PrintErrStringNL "AAAA";
+PrintErrRegisterInHex r14, r15;
+Exit(0);
+    Push r14;                                                                   # utf8 is on the stack and it is 3 bytes wide
+    Mov rax, rsp;
+    Mov rdi, 4;
+    PrintErrMemory;
+   });
+
+  PopR;
+
+  ok Assemble(debug => 1, number => 128, eq => <<END);
+   rax: 0000 0000 0000 0006
+   r14: 0000 0000 0000 0002
+  xmm1: 0000 001B 0000 0001   0000 001A 0000 001A
 END
  }
 
