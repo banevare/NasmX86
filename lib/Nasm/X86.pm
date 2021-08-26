@@ -7047,7 +7047,7 @@ END
     $instructionsExecuted += $instructions;                                     # Count instructions executed
     my $p = $assembliesPerformed++;                                             # Count assemblies
     my $n = $options{number};
-    !$n or $n == $p or cluck "Assembly $p versus number => $n";
+    !$n or $n == $p or warn "Assembly $p versus number => $n";
 
     my $bytes = fileSize($e) - 9512 + 64;                                       # Estimate the size of the output program
     $totalBytesAssembled += $bytes;                                             # Estimate total of all programs assembled
@@ -19940,7 +19940,6 @@ END
 
 #latest:
 if (1) {                                                                        #TConvertUtf8ToUtf32
-  no utf8;
   my @p = my ($out, $size, $fail) = (V(out), V(size), V('fail'));
 
   my $Chars = Rb(0x24, 0xc2, 0xa2, 0xc9, 0x91, 0xE2, 0x82, 0xAC, 0xF0, 0x90, 0x8D, 0x88);
@@ -19963,8 +19962,8 @@ if (1) {                                                                        
 
   my $statement = qq(𝖺\n 𝑎𝑠𝑠𝑖𝑔𝑛 【【𝖻 𝐩𝐥𝐮𝐬 𝖼】】\nAAAAAAAA);                        # A sample sentence to parse
 
-  my $s = K(statement, Rs($statement));
-  my $l = K(size,  length($statement));
+  my $s = K(statement, Rutf8($statement));
+  my $l = StringLength string => $s;
 
   AllocateMemory($l, my $address = V(address));                                 # Allocate enough memory for a copy of the string
   CopyMemory(source => $s, target => $address, $l);
@@ -19986,7 +19985,7 @@ if (1) {                                                                        
 
   $address->printOutMemoryInHexNL($l);
 
-  ok Assemble(debug => 0, eq => <<END);
+  ok Assemble(debug => 0, eq => <<END, number => 96);
 out1 : 0000 0000 0000 0024 size : 0000 0000 0000 0001
 out2 : 0000 0000 0000 00A2 size : 0000 0000 0000 0002
 out3 : 0000 0000 0000 0251 size : 0000 0000 0000 0002
