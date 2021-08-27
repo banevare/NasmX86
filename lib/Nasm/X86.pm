@@ -9,6 +9,7 @@
 # Remove @variables and replace with actual references to the required variables
 # Remove as much variable arithmetic as possible as it is slower and bigger than register arithmetic
 # Replace empty in boolean arithmetic with boolean and then check it in If to confirm that we are testing a boolean value
+# M: optimize PushR, would the print routines work better off the stack?
 package Nasm::X86;
 our $VERSION = "20210826";
 use warnings FATAL => qw(all);
@@ -379,7 +380,7 @@ sub Dq(@)                                                                       
 
 sub Rbwdq($@)                                                                   #P Layout data.
  {my ($s, @d) = @_;                                                             # Element size, data to be laid out
-  my $d = join ', ', @d;                                                        # Data to be laid out
+  my $d = join ', ', map {$_ =~ m(\A\d+\Z) ? sprintf "0x%x", $_ : $_} @d;       # Data to be laid out
   if (my $c = $rodata{$s}{$d})                                                  # Data already exists so return it
    {return $c
    }
@@ -21423,7 +21424,7 @@ if (1) {                                                                        
 
   PopR;
 
-  ok Assemble(debug => 1, number => 128, eq => "𝗮𝗯\n");
+  ok Assemble(debug => 0, number => 128, eq => "𝗮𝗯\n");
  }
 
 #latest:
