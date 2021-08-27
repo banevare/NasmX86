@@ -11,7 +11,7 @@
 # Replace empty in boolean arithmetic with boolean and then check it in If to confirm that we are testing a boolean value
 # M: optimize PushR, would the print routines work better off the stack?
 package Nasm::X86;
-our $VERSION = "20210826";
+our $VERSION = "20210827";
 use warnings FATAL => qw(all);
 use strict;
 use Carp qw(confess cluck);
@@ -278,7 +278,7 @@ sub Syscall();                                                                  
 
 my $Labels = 0;
 
-sub Label(;$)                                                                   #P Create a unique label or reuse the one supplied
+sub Label(;$)                                                                   #P Create a unique label or reuse the one supplied.
  {return "l".++$Labels unless @_;                                               # Generate a label
   $_[0];                                                                        # Use supplied label
  }
@@ -3084,7 +3084,7 @@ sub FreeMemory(@)                                                               
   $s->call(@variables);
  }
 
-sub ClearMemory(@)                                                              # Clear memory
+sub ClearMemory(@)                                                              # Clear memory.
  {my (@variables) = @_;                                                         # Variables
   @_ >= 2 or confess;
   Comment "Clear memory";
@@ -7607,7 +7607,7 @@ present. If the test fails we continue rather than calling L<Carp::confess>.
 Generate X86 assembler code using Perl as a macro pre-processor.
 
 
-Version "20210825".
+Version "20210827".
 
 
 The following sections describe the methods in each functional area of this
@@ -13088,8 +13088,8 @@ B<Example:>
  𝑎𝑠𝑠𝑖𝑔𝑛 【【𝖻 𝐩𝐥𝐮𝐬 𝖼】】
 AAAAAAAA);                        # A sample sentence to parse
 
-    my $s = K(statement, Rs($statement));
-    my $l = K(size,  length($statement));
+    my $s = K(statement, Rutf8($statement));
+    my $l = StringLength string => $s;
 
     AllocateMemory($l, my $address = V(address));                                 # Allocate enough memory for a copy of the string
     CopyMemory(source => $s, target => $address, $l);
@@ -13111,7 +13111,7 @@ AAAAAAAA);                        # A sample sentence to parse
 
     $address->printOutMemoryInHexNL($l);
 
-    ok Assemble(debug => 0, eq => <<END);
+    ok Assemble(debug => 0, eq => <<END, number => 96);
   out1 : 0000 0000 0000 0024 size : 0000 0000 0000 0001
   out2 : 0000 0000 0000 00A2 size : 0000 0000 0000 0002
   out3 : 0000 0000 0000 0251 size : 0000 0000 0000 0002
@@ -21353,7 +21353,7 @@ END
  }
 
 #latest:
-if (1) {                                                                        # r11 being disturbed by syscall 1
+if (1) {                                                                        # R11 being disturbed by syscall 1
   Push 0x0a61;                                                                  # A followed by new line on the stack
   Mov  rax, rsp;
   Mov  rdx, 2;                                                                  # Length of string
@@ -21413,7 +21413,7 @@ if (1) {                                                                        
       Shl r15, 2;                                                               # Each letter is 4 bytes wide in utf8
       Mov r14, $va;                                                             # Alphabet address
       Mov r14d, "[r14+r15]";                                                    # Alphabet letter as utf8
-      PushR r14;                                                                # utf8 is on the stack and it is 4 bytes wide
+      PushR r14;                                                                # Utf8 is on the stack and it is 4 bytes wide
       Mov rax, rsp;
       Mov rdi, 4;
       PrintOutMemory;                                                           # Print letter from stack
