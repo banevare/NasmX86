@@ -21,8 +21,6 @@ use Asm::C qw(:all);
 use feature qw(say current_sub);
 use utf8;
 
-my $debugTrace = 1;                                                             # Trace execution if true - slow!
-
 my %rodata;                                                                     # Read only data already written
 my %rodatas;                                                                    # Read only string already written
 my %subroutines;                                                                # Subroutines generated
@@ -1464,6 +1462,24 @@ sub PrintOutZF                                                                  
   Pushfq;
   IfNz Then {PrintOutStringNL "ZF=0"}, Else {PrintOutStringNL "ZF=1"};
   Popfq;
+ }
+
+sub PrintUtf8Char($)                                                            # Print the utf 8 character addressed by rax to the specified channel. The character must be in little endian forma.
+ {my ($channel) = @_;                                                           # Channel
+
+  my $s = Subroutine
+   {my ($p, $s) = @_;                                                           # Parameters
+    PushR rax, rdi, r15;
+    Mov r15d, "[rax]";                                                          # Load character - this assumes that each utf8 character sits by itself, right adjusted, in a block of 4 bytes
+    Lzcnt r15, r15;                                                             # Find width of utf 8 character
+    Shr r15, 3;                                                                 # From bits to bytes
+    Mov rdi, RegisterSize r15;                                                  # Maximum number of bytes
+    Sub rdi, r15;                                                               # Width in bytes
+    PrintMemory($channel);                                                      # Print letter from stack
+    PopR;
+   } [], name => qq(Unisyn::Parse::printLexicalChar_$channel);
+
+  $s->call();
  }
 
 #D1 Variables                                                                   # Variable definitions and operations
@@ -6974,7 +6990,8 @@ our $totalBytesAssembled  = 0;                                                  
 sub Assemble(%)                                                                 # Assemble the generated code.
  {my (%options) = @_;                                                           # Options
   Exit 0 unless @text > 4 and $text[-4] =~ m(Exit code:);                       # Exit with code 0 if an exit was not the last thing coded.
-  my $debug = $options{debug}//0;                                               # Debug: 0 - none (minimal output), 1 - normal (debug output and confess of failure), 2 - failures (debug output and no confess on failure) .
+  my $debug      = $options{debug}//0;                                          # Debug: 0 - none (minimal output), 1 - normal (debug output and confess of failure), 2 - failures (debug output and no confess on failure) .
+  my $debugTrace = $options{trace}//0;                                          # Trace: 0 - none (minimal output), 1 - trace with sde64
 
 # Optimize(%options);                                                           # Perform any optimizations requested
 
@@ -7188,7 +7205,7 @@ use vars qw(@ISA @EXPORT @EXPORT_OK %EXPORT_TAGS);
 
 @ISA          = qw(Exporter);
 @EXPORT       = qw();
-@EXPORT_OK    = qw(Add All8Structure AllocateAll8OnStack AllocateMemory And Andn Assemble AndBlock OrBlock Bswap Bt Btc Btr Bts Bzhi Call CallC CheckGeneralPurposeRegister CheckMaskRegister CheckNumberedGeneralPurposeRegister ChooseRegisters ClassifyInRange ClassifyRange ClassifyWithInRange ClassifyWithInRangeAndSaveOffset ClearMemory ClearRegisters ClearZF CloseFile Cmova Cmovae Cmovb Cmovbe Cmovc Cmove Cmovg Cmovge Cmovl Cmovle Cmovna Cmovnae Cmovnb Cmp Comment CommentWithTraceBack ConcatenateShortStrings ConvertUtf8ToUtf32 CopyMemory Cpuid CreateArena Cstrlen DComment Db Dbwdq Dd Dec Dq Ds Dw Else Enter Exit Extern For ForEver ForIn Fork FreeMemory G GetLengthOfShortString GetNextUtf8CharAsUtf32 GetPPid GetPid GetPidInHex GetUid Hash ISA Idiv If IfC IfEq IfGe IfGt IfLe IfLt IfNc IfNe IfNz IfZ Imul Inc InsertOneIntoRegisterAtPoint InsertZeroIntoRegisterAtPoint Ja Jae Jb Jbe Jc Jcxz Je Jecxz Jg Jge Jl Jle Jmp Jna Jnae Jnb Jnbe Jnc Jne Jng Jnge Jnl Jnle Jno Jnp Jns Jnz Jo Jp Jpe Jpo Jrcxz Js Jz K Kaddb Kaddd Kaddq Kaddw Kandb Kandd Kandnb Kandnd Kandnq Kandnw Kandq Kandw Kmovb Kmovd Kmovq Kmovw Knotb Knotd Knotq Knotw Korb Kord Korq Kortestb Kortestd Kortestq Kortestw Korw Kshiftlb Kshiftld Kshiftlq Kshiftlw Kshiftrb Kshiftrd Kshiftrq Kshiftrw Ktestb Ktestd Ktestq Ktestw Kunpckb Kunpckd Kunpckq Kunpckw Kxnorb Kxnord Kxnorq Kxnorw Kxorb Kxord Kxorq Kxorw Label Lahf Lea Leave Link LoadBitsIntoMaskRegister LoadConstantIntoMaskRegister LoadShortStringFromMemoryToZmm LoadZmm LocalData LocateIntelEmulator Loop Lzcnt Macro MaskMemory22 MaskMemoryInRange4_22 Mov Movdqa Mulpd Neg Not OnSegv OpenRead OpenWrite Optimize Or PeekR Pextrb Pextrd Pextrq Pextrw Pi32 Pi64 Pinsrb Pinsrd Pinsrq Pinsrw Pop PopEax PopMask PopR PopRR PopZmm Popcnt Popfq PrintErrMemory PrintErrMemoryInHex PrintErrMemoryInHexNL PrintErrMemoryNL PrintErrNL PrintErrRaxInHex PrintErrRegisterInHex PrintErrSpace PrintErrString PrintErrStringNL PrintErrTraceBack PrintErrZF PrintMemory PrintMemoryInHex PrintMemoryNL PrintNL PrintOneRegisterInHex PrintOutMemory PrintOutMemoryInHex PrintOutMemoryInHexNL PrintOutMemoryNL PrintOutNL PrintOutRaxInHex PrintOutRaxInReverseInHex PrintOutRegisterInHex PrintOutRegistersInHex PrintOutRflagsInHex PrintOutRipInHex PrintOutSpace PrintOutString PrintOutStringNL PrintOutTraceBack PrintOutZF PrintRaxInHex PrintRegisterInHex PrintSpace PrintString PrintStringNL PrintTraceBack PrintUtf32 Pslldq Psrldq Push PushMask PushR PushRR PushZmm Pushfq R RComment Rb Rbwdq Rd Rdtsc ReadFile ReadTimeStampCounter RegisterSize RegistersAvailable RegistersFree ReorderSyscallRegisters RestoreFirstFour RestoreFirstFourExceptRax RestoreFirstFourExceptRaxAndRdi RestoreFirstSeven RestoreFirstSevenExceptRax RestoreFirstSevenExceptRaxAndRdi Ret Rq Rs Rutf8 Rw SaveFirstFour SaveFirstSeven SetLabel SetLengthOfShortString SetMaskRegister SetZF Seta Setae Setb Setbe Setc Sete Setg Setge Setl Setle Setna Setnae Setnb Setnbe Setnc Setne Setng Setnge Setnl Setno Setnp Setns Setnz Seto Setp Setpe Setpo Sets Setz Shl Shr Start StatSize StringLength Structure Sub Subroutine SubroutineStartStack Syscall Test Then Tzcnt UnReorderSyscallRegisters V VERSION Vaddd Vaddpd Variable Vcvtudq2pd Vcvtudq2ps Vcvtuqq2pd Vdpps Vgetmantps Vmovd Vmovdqa32 Vmovdqa64 Vmovdqu Vmovdqu32 Vmovdqu64 Vmovdqu8 Vmovq Vmulpd Vpandb Vpandd Vpandnb Vpandnd Vpandnq Vpandnw Vpandq Vpandw Vpbroadcastb Vpbroadcastd Vpbroadcastq Vpbroadcastw Vpcmpeqb Vpcmpeqd Vpcmpeqq Vpcmpeqw Vpcmpub Vpcmpud Vpcmpuq Vpcmpuw Vpcompressd Vpcompressq Vpexpandd Vpexpandq Vpextrb Vpextrd Vpextrq Vpextrw Vpinsrb Vpinsrd Vpinsrq Vpinsrw Vpmullb Vpmulld Vpmullq Vpmullw Vporb Vpord Vporq Vporvpcmpeqb Vporvpcmpeqd Vporvpcmpeqq Vporvpcmpeqw Vporw Vprolq Vpsubb Vpsubd Vpsubq Vpsubw Vptestb Vptestd Vptestq Vptestw Vpxorb Vpxord Vpxorq Vpxorw Vsqrtpd WaitPid Xchg Xor ah al ax bh bl bp bpl bx ch cl cs cx dh di dil dl ds dx eax ebp ebx ecx edi edx es esi esp fs gs k0 k1 k2 k3 k4 k5 k6 k7 mm0 mm1 mm2 mm3 mm4 mm5 mm6 mm7 r10 r10b r10d r10l r10w r11 r11b r11d r11l r11w r12 r12b r12d r12l r12w r13 r13b r13d r13l r13w r14 r14b r14d r14l r14w r15 r15b r15d r15l r15w r8 r8b r8d r8l r8w r9 r9b r9d r9l r9w rax rbp rbx rcx rdi rdx rflags rip rsi rsp si sil sp spl ss st0 st1 st2 st3 st4 st5 st6 st7 xmm0 xmm1 xmm10 xmm11 xmm12 xmm13 xmm14 xmm15 xmm16 xmm17 xmm18 xmm19 xmm2 xmm20 xmm21 xmm22 xmm23 xmm24 xmm25 xmm26 xmm27 xmm28 xmm29 xmm3 xmm30 xmm31 xmm4 xmm5 xmm6 xmm7 xmm8 xmm9 ymm0 ymm1 ymm10 ymm11 ymm12 ymm13 ymm14 ymm15 ymm16 ymm17 ymm18 ymm19 ymm2 ymm20 ymm21 ymm22 ymm23 ymm24 ymm25 ymm26 ymm27 ymm28 ymm29 ymm3 ymm30 ymm31 ymm4 ymm5 ymm6 ymm7 ymm8 ymm9 zmm0 zmm1 zmm10 zmm11 zmm12 zmm13 zmm14 zmm15 zmm16 zmm17 zmm18 zmm19 zmm2 zmm20 zmm21 zmm22 zmm23 zmm24 zmm25 zmm26 zmm27 zmm28 zmm29 zmm3 zmm30 zmm31 zmm4 zmm5 zmm6 zmm7 zmm8 zmm9);
+@EXPORT_OK    = qw(Add All8Structure AllocateAll8OnStack AllocateMemory And AndBlock Andn Assemble Bswap Bt Btc Btr Bts Bzhi Call CallC CheckGeneralPurposeRegister CheckMaskRegister CheckNumberedGeneralPurposeRegister ChooseRegisters ClassifyInRange ClassifyRange ClassifyWithInRange ClassifyWithInRangeAndSaveOffset ClearMemory ClearRegisters ClearZF CloseFile Cmova Cmovae Cmovb Cmovbe Cmovc Cmove Cmovg Cmovge Cmovl Cmovle Cmovna Cmovnae Cmovnb Cmp Comment CommentWithTraceBack ConcatenateShortStrings ConvertUtf8ToUtf32 CopyMemory Cpuid CreateArena Cstrlen DComment Db Dbwdq Dd Dec Dq Ds Dw Else Enter Exit Extern Fail For ForEver ForIn Fork FreeMemory G GetLengthOfShortString GetNextUtf8CharAsUtf32 GetPPid GetPid GetPidInHex GetUid Hash ISA Idiv If IfC IfEq IfGe IfGt IfLe IfLt IfNc IfNe IfNz IfZ Imul Inc InsertOneIntoRegisterAtPoint InsertZeroIntoRegisterAtPoint Ja Jae Jb Jbe Jc Jcxz Je Jecxz Jg Jge Jl Jle Jmp Jna Jnae Jnb Jnbe Jnc Jne Jng Jnge Jnl Jnle Jno Jnp Jns Jnz Jo Jp Jpe Jpo Jrcxz Js Jz K Kaddb Kaddd Kaddq Kaddw Kandb Kandd Kandnb Kandnd Kandnq Kandnw Kandq Kandw Kmovb Kmovd Kmovq Kmovw Knotb Knotd Knotq Knotw Korb Kord Korq Kortestb Kortestd Kortestq Kortestw Korw Kshiftlb Kshiftld Kshiftlq Kshiftlw Kshiftrb Kshiftrd Kshiftrq Kshiftrw Ktestb Ktestd Ktestq Ktestw Kunpckb Kunpckd Kunpckq Kunpckw Kxnorb Kxnord Kxnorq Kxnorw Kxorb Kxord Kxorq Kxorw Label Lahf Lea Leave Link LoadBitsIntoMaskRegister LoadConstantIntoMaskRegister LoadShortStringFromMemoryToZmm LoadZmm LocalData LocateIntelEmulator Loop Lzcnt Macro MaskMemory22 MaskMemoryInRange4_22 Mov Movdqa Mulpd Neg Not OnSegv OpenRead OpenWrite Optimize Or OrBlock Pass PeekR Pextrb Pextrd Pextrq Pextrw Pi32 Pi64 Pinsrb Pinsrd Pinsrq Pinsrw Pop PopEax PopMask PopR PopRR PopZmm Popcnt Popfq PrintErrMemory PrintErrMemoryInHex PrintErrMemoryInHexNL PrintErrMemoryNL PrintErrNL PrintErrRaxInHex PrintErrRegisterInHex PrintErrSpace PrintErrString PrintErrStringNL PrintErrTraceBack PrintErrZF PrintMemory PrintMemoryInHex PrintMemoryNL PrintNL PrintOneRegisterInHex PrintOutMemory PrintOutMemoryInHex PrintOutMemoryInHexNL PrintOutMemoryNL PrintOutNL PrintOutRaxInHex PrintOutRaxInReverseInHex PrintOutRegisterInHex PrintOutRegistersInHex PrintOutRflagsInHex PrintOutRipInHex PrintOutSpace PrintOutString PrintOutStringNL PrintOutTraceBack PrintOutZF PrintRaxInHex PrintRegisterInHex PrintSpace PrintString PrintStringNL PrintTraceBack PrintUtf32 Pslldq Psrldq Push PushMask PushR PushRR PushZmm Pushfq R RComment Rb Rbwdq Rd Rdtsc ReadFile ReadTimeStampCounter RegisterSize RegistersAvailable RegistersFree ReorderSyscallRegisters RestoreFirstFour RestoreFirstFourExceptRax RestoreFirstFourExceptRaxAndRdi RestoreFirstSeven RestoreFirstSevenExceptRax RestoreFirstSevenExceptRaxAndRdi Ret Rq Rs Rutf8 Rw SaveFirstFour SaveFirstSeven SetLabel SetLengthOfShortString SetMaskRegister SetZF Seta Setae Setb Setbe Setc Sete Setg Setge Setl Setle Setna Setnae Setnb Setnbe Setnc Setne Setng Setnge Setnl Setno Setnp Setns Setnz Seto Setp Setpe Setpo Sets Setz Shl Shr Start StatSize StringLength Structure Sub Subroutine SubroutineStartStack Syscall Test Then Tzcnt UnReorderSyscallRegisters V VERSION Vaddd Vaddpd Variable Vcvtudq2pd Vcvtudq2ps Vcvtuqq2pd Vdpps Vgetmantps Vmovd Vmovdqa32 Vmovdqa64 Vmovdqu Vmovdqu32 Vmovdqu64 Vmovdqu8 Vmovq Vmulpd Vpandb Vpandd Vpandnb Vpandnd Vpandnq Vpandnw Vpandq Vpandw Vpbroadcastb Vpbroadcastd Vpbroadcastq Vpbroadcastw Vpcmpeqb Vpcmpeqd Vpcmpeqq Vpcmpeqw Vpcmpub Vpcmpud Vpcmpuq Vpcmpuw Vpcompressd Vpcompressq Vpexpandd Vpexpandq Vpextrb Vpextrd Vpextrq Vpextrw Vpinsrb Vpinsrd Vpinsrq Vpinsrw Vpmullb Vpmulld Vpmullq Vpmullw Vporb Vpord Vporq Vporvpcmpeqb Vporvpcmpeqd Vporvpcmpeqq Vporvpcmpeqw Vporw Vprolq Vpsubb Vpsubd Vpsubq Vpsubw Vptestb Vptestd Vptestq Vptestw Vpxorb Vpxord Vpxorq Vpxorw Vsqrtpd WaitPid Xchg Xor ah al ax bh bl bp bpl bx ch cl cs cx dh di dil dl ds dx eax ebp ebx ecx edi edx es esi esp fs gs k0 k1 k2 k3 k4 k5 k6 k7 mm0 mm1 mm2 mm3 mm4 mm5 mm6 mm7 r10 r10b r10d r10l r10w r11 r11b r11d r11l r11w r12 r12b r12d r12l r12w r13 r13b r13d r13l r13w r14 r14b r14d r14l r14w r15 r15b r15d r15l r15w r8 r8b r8d r8l r8w r9 r9b r9d r9l r9w rax rbp rbx rcx rdi rdx rflags rip rsi rsp si sil sp spl ss st0 st1 st2 st3 st4 st5 st6 st7 xmm0 xmm1 xmm10 xmm11 xmm12 xmm13 xmm14 xmm15 xmm16 xmm17 xmm18 xmm19 xmm2 xmm20 xmm21 xmm22 xmm23 xmm24 xmm25 xmm26 xmm27 xmm28 xmm29 xmm3 xmm30 xmm31 xmm4 xmm5 xmm6 xmm7 xmm8 xmm9 ymm0 ymm1 ymm10 ymm11 ymm12 ymm13 ymm14 ymm15 ymm16 ymm17 ymm18 ymm19 ymm2 ymm20 ymm21 ymm22 ymm23 ymm24 ymm25 ymm26 ymm27 ymm28 ymm29 ymm3 ymm30 ymm31 ymm4 ymm5 ymm6 ymm7 ymm8 ymm9 zmm0 zmm1 zmm10 zmm11 zmm12 zmm13 zmm14 zmm15 zmm16 zmm17 zmm18 zmm19 zmm2 zmm20 zmm21 zmm22 zmm23 zmm24 zmm25 zmm26 zmm27 zmm28 zmm29 zmm3 zmm30 zmm31 zmm4 zmm5 zmm6 zmm7 zmm8 zmm9);
 %EXPORT_TAGS  = (all => [@EXPORT, @EXPORT_OK]);
 
 # podDocumentation
@@ -21511,13 +21528,26 @@ if (1) {                                                                        
   ok Assemble(debug => 0, eq => "𝗮𝗯\n");
  }
 
+latest:
+if (1) {                                                                        #TPrintUtf8Char
+  my $u = Rd(convertUtf32ToUtf8LE(ord('α')));
+  Mov rax, $u;
+  PrintUtf8Char(1);
+  PrintOutNL;
+
+  ok Assemble(debug => 0, trace => 0, eq => <<END);
+α
+END
+ }
+
+
 #latest:
 if (0) {
   is_deeply Assemble(debug=>1), <<END;
 END
  }
 
-ok 1 for 4..18;
+ok 1 for 5..18;
 
 #unlink $_ for qw(hash print2 sde-log.txt sde-ptr-check.out.txt z.txt);         # Remove incidental files
 unlink $_ for qw(hash print2);                                                  # Remove incidental files
