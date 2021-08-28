@@ -9,7 +9,7 @@
 # Remove @variables and replace with actual references to the required variables
 # Remove as much variable arithmetic as possible as it is slower and bigger than register arithmetic
 # Replace empty in boolean arithmetic with boolean and then check it in If to confirm that we are testing a boolean value
-# M: optimize PushR, would the print routines work better off the stack?
+# M: optimize PushR, would the print routines work better off the stack? elif ? switch statement?  confess?
 package Nasm::X86;
 our $VERSION = "20210828";
 use warnings FATAL => qw(all);
@@ -20,6 +20,8 @@ use Data::Table::Text qw(:all);
 use Asm::C qw(:all);
 use feature qw(say current_sub);
 use utf8;
+
+makeDieConfess;
 
 my %rodata;                                                                     # Read only data already written
 my %rodatas;                                                                    # Read only string already written
@@ -1477,7 +1479,7 @@ sub PrintUtf8Char($)                                                            
     Sub rdi, r15;                                                               # Width in bytes
     PrintMemory($channel);                                                      # Print letter from stack
     PopR;
-   } [], name => qq(Unisyn::Parse::printLexicalChar_$channel);
+   } [], name => qq(Nasm::X86::printUtf8Char_$channel);
 
   $s->call();
  }
@@ -1488,6 +1490,56 @@ sub PrintErrUtf8Char()                                                          
 
 sub PrintOutUtf8Char()                                                          # Print the utf 8 character addressed by rax to stdout.
  {PrintUtf8Char($stdout);
+ }
+
+sub PrintUtf32($$$)                                                             #P Print the specified number of utf32 characters at the specified address to the specified channel
+ {my ($channel, $size, $address) = @_;                                          # Channel, variable: number of characters to print, variable: address of memory
+  @_ == 3 or confess;
+
+  my $s = Subroutine                                                            # Subroutine
+   {my ($p, $s) = @_;                                                           # Parameters, subroutine description
+
+    PushR (rax, r14, r15);
+    my $count = $$p{size} / 2; my $count1 = $count - 1;
+    $count->for(sub
+     {my ($index, $start, $next, $end) = @_;
+      my $a = $$p{address} + $index * 8;
+      $a->setReg(rax);
+      Mov rax, "[rax]";
+      Mov r14, rax;
+      Mov r15, rax;
+      Shl r15, 32;
+      Shr r14, 32;
+      Or r14,r15;
+      Mov rax, r14;
+      PrintOutRaxInHex;
+      If ($index % 8 == 7,
+      Then
+       {PrintOutNL;
+       },
+      Else
+       {If($index != $count1, sub
+         {PrintOutString "  ";
+         });
+       });
+     });
+    PrintOutNL;
+    PopR;
+   } [qw(size address)], name => qq(Nasm::X86::printUtf32_$channel);
+
+  $s->call(size => $size, address => $address);
+ }
+
+sub PrintErrUtf32($$)                                                           # Print the utf 8 character addressed by rax to stderr.
+ {my ($size, $address) = @_;                                                    # Variable: number of characters to print, variable: address of memory
+  @_ == 2 or confess;
+  PrintUtf32($stderr, $size, $address);
+ }
+
+sub PrintOutUtf32($$)                                                           # Print the utf 8 character addressed by rax to stdout.
+ {my ($size, $address) = @_;                                                    # Variable: number of characters to print, variable: address of memory
+  @_ == 2 or confess;
+  PrintUtf32($stderr, $size, $address);
  }
 
 #D1 Variables                                                                   # Variable definitions and operations
@@ -2589,7 +2641,7 @@ sub Nasm::X86::Variable::copyMemory($$$)                                        
   &CopyMemory(target => $target, source => $source, size => $size);             # Copy the memory
  }
 
-sub Nasm::X86::Variable::printMemoryInHexNL($$$)                                # Write the memory addressed by a variable to stdout or stderr.
+sub Nasm::X86::Variable::printMemoryInHexNL($$$)                                # Write, in hexadecimal, the memory addressed by a variable to stdout or stderr.
  {my ($address, $channel, $size) = @_;                                          # Address of memory, channel to print on, number of bytes to print
   $address->name eq q(address) or confess "Need address";
   $size   ->name eq q(size)    or confess "Need size";
@@ -2997,6 +3049,14 @@ sub PrintMemoryInHex($)                                                         
   Call Macro
    {my $size = RegisterSize rax;
     SaveFirstFour;
+
+    Test rdi, 0x7;                                                              # Round the number of bytes to be printed
+    IfNz
+    Then                                                                        # Round up
+     {Add rdi, 8;
+     };
+    And rdi, 0x3f8;                                                             # Limit the number of bytes to be printed to 1024
+
     Mov rsi, rax;                                                               # Position in memory
     Lea rdi,"[rax+rdi-$size+1]";                                                # Upper limit of printing with an 8 byte register
     For                                                                         # Print string in blocks
@@ -3774,36 +3834,6 @@ sub ClassifyWithInRange(@)                                                      
 sub ClassifyWithInRangeAndSaveOffset(@)                                         # Alphabetic classification: classify the utf32 characters in a block of memory of specified length using a range specification held in zmm0, zmm1 formatted in double words with the classification code in the high byte of zmm1 and the offset of the first element in the range in the high byte of zmm0.  The lowest 21 bits of each double word in zmm0 and zmm1  contain the utf32 characters marking the start and end of each range. The classification bits from zmm1 for the first matching range are copied into the high byte of each utf32 character in the block of memory.  The offset in the range is copied into the lowest byte of each utf32 character in the block of memory.  The middle two bytes are cleared.  The net effect is to reduce 21 bits of utf32 to 16 bits.
  {my (@parameters) = @_;                                                        # Parameters
   ClassifyRange(2, @_);
- }
-
-sub PrintUtf32($$)                                                              #P Print the specified number of utf32 characters at the specified address.
- {my ($n, $m) = @_;                                                             # Variable: number of characters to print, variable: address of memory
-  PushR (rax, r14, r15);
-  my $count = $n / 2; my $count1 = $count - 1;
-  $count->for(sub
-   {my ($index, $start, $next, $end) = @_;
-    my $a = $m + $index * 8;
-    $a->setReg(rax);
-    Mov rax, "[rax]";
-    Mov r14, rax;
-    Mov r15, rax;
-    Shl r15, 32;
-    Shr r14, 32;
-    Or r14,r15;
-    Mov rax, r14;
-    PrintOutRaxInHex;
-    If ($index % 8 == 7,
-    Then
-     {PrintOutNL;
-     },
-    Else
-     {If($index != $count1, sub
-       {PrintOutString "  ";
-       });
-     });
-   });
-  PrintOutNL;
-  PopR;
  }
 
 #D1 Short Strings                                                               # Operations on Short Strings
@@ -20106,7 +20136,7 @@ outB : 0000 0000 0000 000A size : 0000 0000 0000 0001
 outC : 0000 0000 0000 0020 size : 0000 0000 0000 0001
 outD : 0000 0000 0000 0020 size : 0000 0000 0000 0001
 outE : 0000 0000 0000 0010 size : 0000 0000 0000 0002
-F09D 96BA 0A20 F09D918E F09D 91A0 F09D91A0 F09D 9196 F09D9194 F09D 919B 20E38090 E380 90F0 9D96BB20 F09D 90A9 F09D90A5 F09D 90AE F09D90AC 20F0 9D96 BCE38091 E380 910A 4141
+F09D 96BA 0A20 F09D918E F09D 91A0 F09D91A0 F09D 9196 F09D9194 F09D 919B 20E38090 E380 90F0 9D96BB20 F09D 90A9 F09D90A5 F09D 90AE F09D90AC 20F0 9D96 BCE38091 E380 910A 41414141 4141 4141 0000
 END
  }
 
@@ -21545,6 +21575,18 @@ if (1) {                                                                        
 
   ok Assemble(debug => 0, trace => 0, eq => <<END);
 α
+END
+ }
+
+#latest:
+if (1) {                                                                        #TNasm::X86::Variable::printOutMemoryInHexNL
+  my $u = Rd(ord('𝝰'), ord('𝝱'), ord('𝝲'), ord('𝝳'));
+  Mov rax, $u;
+  my $address = V(address)->getReg(rax);
+  $address->printOutMemoryInHexNL(K(size, 16));
+
+  ok Assemble(debug => 0, trace => 0, eq => <<END);
+70D7 0100 71D7 010072D7 0100 73D7 0100
 END
  }
 
