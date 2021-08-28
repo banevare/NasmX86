@@ -1482,6 +1482,14 @@ sub PrintUtf8Char($)                                                            
   $s->call();
  }
 
+sub PrintErrUtf8Char()                                                          # Print the utf 8 character addressed by rax to stderr.
+ {PrintUtf8Char($stdout);
+ }
+
+sub PrintOutUtf8Char()                                                          # Print the utf 8 character addressed by rax to stdout.
+ {PrintUtf8Char($stdout);
+ }
+
 #D1 Variables                                                                   # Variable definitions and operations
 
 #D2 Definitions                                                                 # Variable definitions
@@ -21528,11 +21536,11 @@ if (1) {                                                                        
   ok Assemble(debug => 0, eq => "𝗮𝗯\n");
  }
 
-latest:
-if (1) {                                                                        #TPrintUtf8Char
+#latest:
+if (1) {                                                                        #TPrintOutUtf8Char
   my $u = Rd(convertUtf32ToUtf8LE(ord('α')));
   Mov rax, $u;
-  PrintUtf8Char(1);
+  PrintOutUtf8Char;
   PrintOutNL;
 
   ok Assemble(debug => 0, trace => 0, eq => <<END);
