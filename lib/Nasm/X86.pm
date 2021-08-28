@@ -11,7 +11,7 @@
 # Replace empty in boolean arithmetic with boolean and then check it in If to confirm that we are testing a boolean value
 # M: optimize PushR, would the print routines work better off the stack? elif ? switch statement?  confess? Number of parameters test?  Remove macro?
 package Nasm::X86;
-our $VERSION = "20210828";
+our $VERSION = "20210830";
 use warnings FATAL => qw(all);
 use strict;
 use Carp qw(confess cluck);
@@ -1467,7 +1467,7 @@ sub PrintOutZF                                                                  
   Popfq;
  }
 
-sub PrintUtf8Char($)                                                            # Print the utf 8 character addressed by rax to the specified channel. The character must be in little endian forma.
+sub PrintUtf8Char($)                                                            # Print the utf 8 character addressed by rax to the specified channel. The character must be in little endian form.
  {my ($channel) = @_;                                                           # Channel
 
   my $s = Subroutine
@@ -1493,7 +1493,7 @@ sub PrintOutUtf8Char()                                                          
  {PrintUtf8Char($stdout);
  }
 
-sub PrintUtf32($$$)                                                             #P Print the specified number of utf32 characters at the specified address to the specified channel
+sub PrintUtf32($$$)                                                             #P Print the specified number of utf32 characters at the specified address to the specified channel.
  {my ($channel, $size, $address) = @_;                                          # Channel, variable: number of characters to print, variable: address of memory
   @_ == 3 or confess;
 
@@ -5093,7 +5093,7 @@ sub Nasm::X86::Array::dump($@)                                                  
        });
 
       my $lastBlockCount = $size % $N;                                          # Number of elements in the last block
-      If $lastBlockCount > 0, sub                                              # Print non empty last block
+      If $lastBlockCount > 0, sub                                               # Print non empty last block
        {my $S = getDFromZmm(31, ($T + 1) * $w, r8);                             # Address secondary block from first block
         $b->getBlock($B, $S, 30);                                               # Get the secondary block
         $S->out("Last: ", "  ");
@@ -5582,7 +5582,7 @@ sub Nasm::X86::Tree::reParent($$$$$@)                                           
     my $L = $t->getLengthInKeys($PK) + 1;                                       # Number of children
     my $p = $t->getUpFromData  ($PD, r8);                                       # Parent node offset as a variable
 
-    If $t->getLoop($PD, r8) > 0, sub                                           # Not a leaf
+    If $t->getLoop($PD, r8) > 0, sub                                            # Not a leaf
      {PushR (rax, rdi);
       Mov rdi, rsp;                                                             # Save stack base
       PushRR "zmm$PN";                                                          # Child nodes on stack
@@ -5790,7 +5790,7 @@ sub Nasm::X86::Tree::splitFullLeftOrRightNode($$)                               
     PushR (r8);
     my $transfer = r8;                                                          # Use this register to transfer data between zmm blocks and variables
 
-    If $t->getLengthInKeys($right ? $RK : $LK) != $t->maxKeys,                 # Only split full blocks
+    If $t->getLengthInKeys($right ? $RK : $LK) != $t->maxKeys,                  # Only split full blocks
     Then {Jmp $success};
 
     my $n  = $t->getLoop($right ? $RD : $LD, $transfer);                        # Offset of node block or zero if there is no node block for the right node
@@ -6107,7 +6107,7 @@ sub Nasm::X86::Tree::insertDataOrTree($$$$)                                     
     $t->getKeysDataNode($B, $F, 31, 30, 29, $transfer, $work);                  # Get the first block
 
     my $l = $t->getLengthInKeys(31);                                            # Length of the block
-    If $l == 0,                                                                # Check for  empty tree.
+    If $l == 0,                                                                 # Check for  empty tree.
     Then                                                                        # Empty tree
      {$K->putDIntoZmm    (31, 0, $transfer);                                    # Write key
       $t->putLengthInKeys(31, K(one, 1));                                       # Set the length of the block
@@ -6687,7 +6687,7 @@ sub Nasm::X86::Tree::dump($;$$)                                                 
      {my ($index, $start, $next, $end) = @_;
       my $i = $index * $t->width;                                               # Key/Data offset
       my $d = getDFromZmm(29, $i, $transfer);                                   # Data
-      If $d > 0,                                                               # Print any sub nodes
+      If $d > 0,                                                                # Print any sub nodes
       Then
        {$s->call($B, first => $d);
        };
@@ -6775,7 +6775,7 @@ sub Nasm::X86::Tree::Iterator::next($)                                          
       $t->getKeysDataNode($B, $C, 31, 30, 29, r8, r9);                          # Load keys and data
 
       my $l = $t->getLengthInKeys(31);                                          # Length of the block
-      If $l == 0,                                                              # Check for  empty tree.
+      If $l == 0,                                                               # Check for  empty tree.
       Then                                                                      # Empty tree
        {&$done;
         Jmp $end;
