@@ -9,7 +9,7 @@
 # Remove @variables and replace with actual references to the required variables
 # Remove as much variable arithmetic as possible as it is slower and bigger than register arithmetic
 # Replace empty in boolean arithmetic with boolean and then check it in If to confirm that we are testing a boolean value
-# M: optimize PushR, would the print routines work better off the stack? elif ? switch statement?  confess?
+# M: optimize PushR, would the print routines work better off the stack? elif ? switch statement?  confess? Number of parameters test?
 package Nasm::X86;
 our $VERSION = "20210828";
 use warnings FATAL => qw(all);
@@ -2635,16 +2635,18 @@ sub Nasm::X86::Variable::clearMemory($$)                                        
 
 sub Nasm::X86::Variable::copyMemory($$$)                                        # Copy from one block of memory to another.
  {my ($target, $source, $size) = @_;                                            # Address of target, address of source, length to copy
-  $target->name eq q(target) or confess "Need target";
-  $source->name eq q(source) or confess "Need source";
-  $size  ->name eq q(size)   or confess "Need size";
+  @_ == 3 or confess;
+#  $target->name eq q(target) or confess "Need target";
+#  $source->name eq q(source) or confess "Need source";
+#  $size  ->name eq q(size)   or confess "Need size";
   &CopyMemory(target => $target, source => $source, size => $size);             # Copy the memory
  }
 
 sub Nasm::X86::Variable::printMemoryInHexNL($$$)                                # Write, in hexadecimal, the memory addressed by a variable to stdout or stderr.
  {my ($address, $channel, $size) = @_;                                          # Address of memory, channel to print on, number of bytes to print
-  $address->name eq q(address) or confess "Need address";
-  $size   ->name eq q(size)    or confess "Need size";
+  @_ == 3 or confess;
+#  $address->name eq q(address) or confess "Need address";
+#  $size   ->name eq q(size)    or confess "Need size";
   PushR (rax, rdi);
   $address->setReg(rax);
   $size->setReg(rdi);
