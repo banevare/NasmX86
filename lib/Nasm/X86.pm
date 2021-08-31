@@ -2563,10 +2563,10 @@ sub Nasm::X86::Variable::putDIntoZmm($$$;$)                                     
   $content->putBwdqIntoMm('d', "zmm$zmm", $offset, $transfer)                   # Place the value of the content variable at the byte|word|double word|quad word in the numbered zmm register
  }
 
-sub Nasm::X86::Variable::putQIntoZmm($$$)                                       # Place the value of the content variable at the quad word in the numbered zmm register.
- {my ($content, $zmm, $offset) = @_;                                            # Variable with content, numbered zmm, offset in bytes
+sub Nasm::X86::Variable::putQIntoZmm($$$;$)                                     # Place the value of the content variable at the quad word in the numbered zmm register.
+ {my ($content, $zmm, $offset, $transfer) = @_;                                 # Variable with content, numbered zmm, offset in bytes, optional transfer register
   $zmm =~ m(\A(0|1|2|3|4|5|6|7|8|9|10|11|12|13|14|15|16|17|18|19|20|21|22|23|24|25|26|27|28|29|30|31)\Z) or confess;
-  $content->putBwdqIntoMm('q', "zmm$zmm", $offset)                              # Place the value of the content variable at the byte|word|double word|quad word in the numbered zmm register
+  $content->putBwdqIntoMm('q', "zmm$zmm", $offset, $transfer)                   # Place the value of the content variable at the byte|word|double word|quad word in the numbered zmm register
  }
 
 #D2 Broadcast                                                                   # Broadcast from a variable into a zmm
