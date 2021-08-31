@@ -2358,6 +2358,23 @@ sub putIntoZmm($*$$)                                                            
   PopR "zmm$zmm";                                                               # Reload zmm
  }
 
+sub loadRegFromMm($$$)                                                          # Load the specified register from the numbered zmm at the quad offset specified as a constant number.
+ {my ($mm, $offset, $reg) = @_;                                                 # Mm register, offset in quads, general purpose register to load
+  @_ == 3 or confess;
+  my $w = RegisterSize $mm;                                                     # Size of mm register
+  Vmovdqu64 "[rsp-$w]", $mm;                                                    # Write below the stack
+  Mov $reg, "[rsp+8*$offset-$w]";                                               # Load register from offset
+ }
+
+sub saveRegIntoMm($$$)                                                          # Save the specified register into the numbered zmm at the quad offset specified as a constant number.
+ {my ($mm, $offset, $reg) = @_;                                                 # Mm register, offset in quads, general purpose register to load
+  @_ == 3 or confess;
+  my $w = RegisterSize $mm;                                                     # Size of mm register
+  Vmovdqu64 "[rsp-$w]", $mm;                                                    # Write below the stack
+  Mov "[rsp+8*$offset-$w]", $reg;                                               # Save register into offset
+  Vmovdqu64 $mm, "[rsp-$w]";                                                    # Reload from the stack
+ }
+
 sub getBwdqFromMm($$$;$$)                                                       # Get the numbered byte|word|double word|quad word from the numbered zmm register and return it in a variable.
  {my ($size, $mm, $offset, $Transfer, $target) = @_;                            # Size of get, mm register, offset in bytes either as a constant or as a variable, optional transfer register, optional target variable - if none supplied we create a variable
   @_ == 3 or @_ == 4 or @_ == 5 or confess;
@@ -2368,17 +2385,15 @@ sub getBwdqFromMm($$$;$$)                                                       
   my $o;                                                                        # The offset into the mm register
   if (ref($offset))                                                             # The offset is being passed in a variable
    {my $name = $offset->name;
-    Comment "Get $size at $name in $mm";
     PushR ($o = r14);
     $offset->setReg($o);
    }
   else                                                                          # The offset is being passed as a register expression
    {$o = $offset;
-    Comment "Get $size at $offset in $mm";
     $offset >= 0 && $offset <= RegisterSize $mm or
       confess "Out of range" if $offset =~ m(\A\d+\Z);                          # Check the offset if it is a number
-    $offset =~ m(r15)
-      and confess "Cannot pass offset: '$offset', in r15, choose another register";
+    $offset =~ m(r15) and
+      confess "Cannot pass offset: '$offset', in r15, choose another register";
    }
 
   PushR $transfer unless $Transfer;
@@ -2404,48 +2419,6 @@ sub getBwdqFromMm($$$;$$)                                                       
     PopR $o if ref($offset);                                                    # The offset is being passed in a variable
     return $v                                                                   # Return variable
    }
- }
-
-sub getBwdqFromMm22($$$;$$)                                                     # Get the numbered byte|word|double word|quad word from the numbered zmm register and return it in a variable.
- {my ($size, $mm, $offset, $Transfer, $target) = @_;                            # Size of get, mm register, offset in bytes either as a constant or as a variable, optional transfer register, optional target variable - if none supplied we create a variable
-  @_ == 3 or @_ == 4 or @_ == 5 or confess;
-  my $w = RegisterSize $mm;                                                     # Size of mm register
-  CheckNumberedGeneralPurposeRegister $Transfer if $Transfer;                   # Check that we have a numbered register
-  my $transfer = $Transfer // r15;                                              # Register to use to transfer value to variable
-
-  my $o;                                                                        # The offset into the mm register
-  if (ref($offset))                                                             # The offset is being passed in a variable
-   {my $name = $offset->name;
-    Comment "Get $size at $name in $mm";
-    PushR ($o = r14);
-    $offset->setReg($o);
-   }
-  else                                                                          # The offset is being passed as a register expression
-   {$o = $offset;
-    Comment "Get $size at $offset in $mm";
-    $offset >= 0 && $offset <= RegisterSize $mm or
-      confess "Out of range" if $offset =~ m(\A\d+\Z);                          # Check the offset if it is a number
-    $offset =~ m(r15)
-      and confess "Cannot pass offset: '$offset', in r15, choose another register";
-   }
-
-  PushR $transfer unless $Transfer;
-  Vmovdqu32 "[rsp-$w]", $mm;                                                    # Write below the stack
-
-  if ($size !~ m(q|d))                                                          # Clear the register if necessary
-   {ClearRegisters r15;
-   }
-
-  Mov $transfer."b", "[rsp+$o-$w]" if $size =~ m(b);                            # Load byte register from offset
-  Mov $transfer."w", "[rsp+$o-$w]" if $size =~ m(w);                            # Load word register from offset
-  Mov $transfer."d", "[rsp+$o-$w]" if $size =~ m(d);                            # Load double word register from offset
-  Mov $transfer,     "[rsp+$o-$w]" if $size =~ m(q);                            # Load register from offset
-
-  my $v = V("$size at offset $offset in $mm", $transfer);                       # Create variable
-  PopR $transfer unless $Transfer;
-  PopR $o if ref($offset);                                                      # The offset is being passed in a variable
-
-  $v                                                                            # Return variable
  }
 
 sub getBFromXmm($$)                                                             # Get the byte from the numbered xmm register and return it in a variable.
@@ -21607,12 +21580,34 @@ END
  }
 
 #latest:
+if (1) {                                                                        #TloadRegFromMm #TsaveRegIntoMm
+  Mov rax, 1; saveRegIntoMm(zmm0, 0, rax);
+  Mov rax, 2; saveRegIntoMm(zmm0, 1, rax);
+  Mov rax, 3; saveRegIntoMm(zmm0, 2, rax);
+  Mov rax, 4; saveRegIntoMm(zmm0, 3, rax);
+
+  loadRegFromMm(zmm0, 0, r15);
+  loadRegFromMm(zmm0, 1, r14);
+  loadRegFromMm(zmm0, 2, r13);
+  loadRegFromMm(zmm0, 3, r12);
+
+  PrintOutRegisterInHex ymm0, r15, r14, r13, r12;
+  ok Assemble(debug => 0, trace => 1, eq => <<END);
+  ymm0: 0000 0000 0000 0004   0000 0000 0000 0003   0000 0000 0000 0002   0000 0000 0000 0001
+   r15: 0000 0000 0000 0001
+   r14: 0000 0000 0000 0002
+   r13: 0000 0000 0000 0003
+   r12: 0000 0000 0000 0004
+END
+ }
+
+#latest:
 if (0) {
   is_deeply Assemble(debug=>1), <<END;
 END
  }
 
-ok 1 for 7..18;
+ok 1 for 1..11;
 
 #unlink $_ for qw(hash print2 sde-log.txt sde-ptr-check.out.txt z.txt);         # Remove incidental files
 unlink $_ for qw(hash print2);                                                  # Remove incidental files
