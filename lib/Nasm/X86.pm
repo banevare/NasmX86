@@ -7011,6 +7011,42 @@ sub Nasm::X86::Tree::by($&;$$)                                                  
   SetLabel $end;                                                                # End of the loop
  }
 
+#D1 Quarks                                                                      # Quarks allow us to replace unique strings with unique numbers.  We can translate either from a string to its associated number or from a number to its associated string.
+
+sub Nasm::X86::Arena::DescribeQuark($)                                          # Return a descriptor for a tree in the specified arena.
+ {my ($arena) = @_;                                                             # Arena descriptor
+
+  genHash(__PACKAGE__."::Tree",                                                 # Tree.
+    array        => undef,                                                      # The array maps a quark to Arena definition.
+    tree         => undef,                                                      # Variable containing the last data found
+   );
+ }
+
+sub Nasm::X86::Arena::CreateQuarks($;$)                                         # Create quarks ina a specified arena
+ {my ($arena, $bs) = @_;                                                        # Arena description, optional arena address
+  @_ == 1 or @_ == 2 or confess "1 or 2 parameters";
+
+  my $t = $arena->DescribeTree;                                                 # Return a descriptor for a tree at the specified offset in the specified arena
+
+  my $s = Subroutine
+   {my ($p) = @_;
+    Comment "Create a block multiway Tree start";
+    my $keys = $t->allocBlock($$p{bs});                                         # Allocate first keys block
+    $$p{first}->copy($keys);
+    PushR my @save = (r8, r9, zmm31);
+    ClearRegisters zmm31;
+    $t->putLoop($t->allocBlock($$p{bs}), 31, r8);                               # Keys loops to data - for the first 7 keys we should store the corresponding data further up in the block rather than creating a new block.
+    $arena->putBlock($$p{bs}, $keys, 31, r8, r9);                               # Write first keys
+    PopR;
+
+    Comment "Create a block multiway Tree end";
+   } [qw(bs first)], name => 'Nasm::X86::Arena::CreateTree';
+
+  $s->call(bs => ($bs//$t->address), first => $t->first);
+
+  $t                                                                            # Description of array
+ }
+
 #D1 Assemble                                                                    # Assemble generated code
 
 sub CallC($@)                                                                   # Call a C subroutine.
