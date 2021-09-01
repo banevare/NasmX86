@@ -21,6 +21,8 @@ use Asm::C qw(:all);
 use feature qw(say current_sub);
 use utf8;
 
+makeDieConfess;
+
 my %rodata;                                                                     # Read only data already written
 my %rodatas;                                                                    # Read only string already written
 my %subroutines;                                                                # Subroutines generated
@@ -555,6 +557,7 @@ sub UnReorderSyscallRegisters(@)                                                
 sub RegisterSize($)                                                             # Return the size of a register.
  {my ($r) = @_;                                                                 # Register
   defined($r) or confess;
+  defined($Registers{$r}) or confess;
   eval "${r}Size()";
  }
 
@@ -2451,7 +2454,7 @@ sub getWFromZmm($$)                                                             
   getBwdqFromMm('w', "zmm$zmm", $offset)                                        # Get the numbered byte|word|double word|quad word from the numbered zmm register and return it in a variable
  }
 
-sub getDFromZmm($$$)                                                            # Get the double word from the numbered zmm register and return it in a variable.
+sub getDFromZmm($$$;$)                                                          # Get the double word from the numbered zmm register and return it in a variable.
  {my ($zmm, $offset, $transfer) = @_;                                           # Numbered zmm, offset in bytes, optional transfer register
   getBwdqFromMm('d', "zmm$zmm", $offset, $transfer)                             # Get the numbered byte|word|double word|quad word from the numbered zmm register and return it in a variable
  }
@@ -5553,7 +5556,7 @@ sub Nasm::X86::Tree::reParent($$$$$@)                                           
 
     my $B = $$parameters{bs};                                                   # Arena
     my $L = $t->getLengthInKeys($PK) + 1;                                       # Number of children
-    my $p = $t->getUpFromData  ($PD, r8);                                       # Parent node offset as a variable
+    my $p = $t->getUpFromDataNM($PD, r8);                                       # Parent node offset in compressed format as a variable
 
     If $t->getLoop($PD, r8) > 0, sub                                            # Not a leaf
      {PushR (rax, rdi);
@@ -6059,6 +6062,28 @@ sub Nasm::X86::Tree::findAndClone($$)                                           
    };
  }
 
+sub Nasm::X86::Tree::size($)                                                    # Return a variable containing the number of keys in the specified tree.
+ {my ($t) = @_;                                                                 # Tree descriptor
+  @_ == 1 or confess;
+
+  my $s = Subroutine
+   {my ($p) = @_;                                                               # Parameters
+
+    PushR r8, r9;
+    my $transfer =  r8;                                                         # Use this register to transfer data between zmm blocks and variables
+    my $work     =  r9;                                                         # Work register
+
+    $t->getKeysData($$p{bs}, $$p{first}, 31, 30, $transfer, $work);             # Get the first block so we can update the key count
+    my $size = $t->getCountFromData(30, $transfer);                             # Get key count
+    $$p{size}->copy($size);                                                     # Set result
+    PopR;
+   } [qw(bs first size)], name => "Nasm::X86::Tree::size";
+
+  $s->call(bs => $t->address, first => $t->first, my $size = V(size));
+
+  $size;
+ } # size
+
 sub Nasm::X86::Tree::insertDataOrTree($$$$)                                     # Insert either a key, data pair into the tree or create a sub tree at the specified key (if it does not already exist) and return the offset of the first block of the sub tree in the data variable.
  {my ($t, $tnd, $key, $data) = @_;                                              # Tree descriptor, 0 - data or 1 - tree, key as a dword, data as a dword
   @_ >= 2 or confess;
@@ -6089,7 +6114,8 @@ sub Nasm::X86::Tree::insertDataOrTree($$$$)                                     
         Mov r15, 1;                                                             # Indicate first position
         $t->setTree(r15,  31);                                                  # Mark this key as addressing a sub tree from the existing tree
        }
-      $D->putDIntoZmm    (30,  0, $transfer);                                   # Write data
+      $D->putDIntoZmm    (30,  0,     $transfer);                               # Write data
+      $t->incCountInData (30,         $transfer);                               # Update count
       $t->putKeysData($B, $F, 31, 30, $transfer, $work);                        # Write the data block back into the underlying arena
       Jmp $success;                                                             # Insert completed successfully
      };
@@ -6155,6 +6181,7 @@ sub Nasm::X86::Tree::insertDataOrTree($$$$)                                     
         $D->setReg(r14);                                                        # Corresponding data
         Vpbroadcastd "zmm30{k6}", r14d;                                         # Load data
         $t->putLengthInKeys( 31, $l + 1);                                       # Set the length of the block
+        $t->incCountInData ( 30, $transfer);                                    # Update count
 
         If $l + 1 == $t->maxKeys,
         Then                                                                    # Root is now full: allocate the node block for it and chain it in
@@ -6216,6 +6243,10 @@ sub Nasm::X86::Tree::insertDataOrTree($$$$)                                     
       $t->putLengthInKeys(31, $length + 1);                                     # Set the new length of the block
       $t->putKeysDataNode($B, $offset, 31, 30, 29, $transfer, $work);           # Rewrite data and keys
       $t->splitNode($B, $offset, $K);                                           # Split if the leaf has got too big
+
+      $t->getKeysData($B, $F, 31, 30, $transfer, $work);                        # Get the first block so we can update the key count
+      $t->incCountInData (30, $transfer);                                       # Update key count
+      $t->putKeysData($B, $F, 31, 30, $transfer, $work);                        # Write the first block with the updated key count
      };
 
     SetLabel $success;                                                          # Insert completed successfully
@@ -6323,17 +6354,138 @@ sub Nasm::X86::Tree::putLengthInKeys($$$)                                       
   $length->putBIntoZmm($zmm, $t->lengthOffset)                                  # Set the length field
  }
 
-sub Nasm::X86::Tree::getUpFromData($$$)                                         #P Get the up offset from the data block in the numbered zmm and return it as a variable.
+sub Nasm::X86::Tree::getUpFromData11($$$)                                       #P Get the up offset from the data block in the numbered zmm and return it as a variable.
  {my ($t, $zmm, $transfer) = @_;                                                # Tree descriptor, zmm number, transfer register
   @_ == 3 or confess "3 parameters";
-  getDFromZmm($zmm, $t->lengthOffset, $transfer);                               # The length field as a variable
+  getDFromZmm($zmm, $t->up, $transfer);                                         # The length field as a variable
  }
 
-sub Nasm::X86::Tree::putUpIntoData($$$;$)                                       #P Put the offset of the parent keys block expressed as a variable into the numbered zmm.
+sub Nasm::X86::Tree::putUpIntoData11($$$;$)                                     #P Put the offset of the parent keys block expressed as a variable into the numbered zmm.
  {my ($t, $offset, $zmm, $transfer) = @_;                                       # Tree descriptor, variable containing up offset, zmm number, optional transfer register
   @_ == 3 or @_ == 4 or confess "3 or 4 parameters";
   defined($offset) or confess;
-  $offset->putDIntoZmm($zmm, $t->lengthOffset, $transfer);                      # Save the up offset into the data block
+  $offset->putDIntoZmm($zmm, $t->up, $transfer);                                # Save the up offset into the data block
+ }
+
+sub Nasm::X86::Tree::getUpFromData($$$)                                         #P Get the decompressed up offset from the data block in the numbered zmm and return it as a variable.  The lowest 6 bits of an offset are always 0b011000. The up field becomes the count field for the root node which has no node above it.  To differentiate between up and count, the lowest bit of the up field is set for offsets, and cleared for the count of the number of nodes in the tree held in the root node. Thus if this dword is set to zero it means that this is the count field for an empty tree.
+ {my ($t, $zmm, $transfer) = @_;                                                # Tree descriptor, zmm number, transfer register
+  @_ == 3 or confess "3 parameters";
+  my $z = "zmm$zmm";
+  my $w = RegisterSize $z;                                                      # Size of zmm register
+  my $o = $t->up;                                                               # Offset into register in bytes
+  Vmovdqu32 "[rsp-$w]", $z;                                                     # Write below the stack
+  Mov $transfer."d", "[rsp+$o-$w]";                                             # Load double word register from offset
+  Shr $transfer."d", 1;                                                         # Shift out the lowest bit which tells us whether this is an offset(1) or a count (0) and set the flags accordingly
+  IfC
+  Then                                                                          # Low bit set so it is an offset
+   {Shl $transfer, 6;                                                           # Divide the offset by 64 being the minimum size of a block
+    Add $transfer, 0x18;                                                        # Blocks are always offset by this amount which represents the header overhead for an arena. If anything other than 64 byte allocations have been made in the arena this formula becomes inaccurate.
+   },
+  Else                                                                          # Low bit clear so it is a count in the root node and so the up offset is zero.
+   {ClearRegisters $transfer;
+   };
+  V(up, $transfer);
+ }
+
+sub Nasm::X86::Tree::getUpFromDataNM($$$)                                       #P Get the compressed up offset//count from the data block in the numbered zmm and return it as a variable.
+ {my ($t, $zmm, $transfer) = @_;                                                # Tree descriptor, zmm number, transfer register
+  @_ == 3 or confess "3 parameters";
+  my $z = "zmm$zmm";
+  my $w = RegisterSize $z;                                                      # Size of zmm register
+  my $o = $t->up;                                                               # Offset into register in bytes
+  Vmovdqu32 "[rsp-$w]", $z;                                                     # Write below the stack
+  Mov $transfer."d", "[rsp+$o-$w]";                                             # Load double word register from offset
+  V(up, $transfer);
+ }
+
+sub Nasm::X86::Tree::putUpIntoData($$$$)                                        #P Put the offset of the parent keys block expressed as a variable into the numbered zmm. Offsets always end in 0b01100 as long as only 64 byte allocations have been made in the arena. Offsets are indicated by setting the lowest bit in the dword containing the offset to 1.
+ {my ($t, $offset, $zmm, $transfer) = @_;                                       # Tree descriptor, variable containing up offset, zmm number, transfer register
+  @_ == 4 or confess "4 parameters";
+
+  $offset->setReg($transfer);
+  Shr $transfer."d", 5;                                                         # The lowest 6 bits of an offset are always 0b011000 so we shift them off to save space but we need one bit to indicate whether this is an offset(1) or a count(0)
+  Or $transfer, 1;                                                              # Set highest lowest bit to show that it is an offset
+  my $z = "zmm$zmm";
+  my $w = RegisterSize $z;                                                      # Size of zmm register
+  my $o = $t->up;                                                               # Offset into zmm register in bytes of count/up field
+  Vmovdqu64 "[rsp-$w]", $z;                                                     # Write zmm below the stack
+  Mov "[rsp+$o-$w]", $transfer."d";                                             # Save offset
+  Vmovdqu64 $z, "[rsp-$w]";                                                     # Reload zmm
+ }
+
+sub Nasm::X86::Tree::getCountFromData($$$)                                      #P Get the number of keys in the tree. The number of keys in the tree is stored in the up field of the data block associated with the root. If the lowest bit in this field is set then the field is an offset, if it is clear then it is a count.
+ {my ($t, $zmm, $transfer) = @_;                                                # Tree descriptor, zmm number, transfer register
+  @_ == 3 or confess "3 parameters";
+
+  my $z = "zmm$zmm";
+  my $w = RegisterSize $z;                                                      # Size of zmm register
+  my $o = $t->up;                                                               # Offset into register in bytes
+  Vmovdqu32 "[rsp-$w]", $z;                                                     # Write below the stack
+  Mov $transfer."d", "[rsp+$o-$w]";                                             # Load double word register from offset
+  my $size = V(size, 0);
+  Shr $transfer, 1;                                                             # Remove and test the lowest bit
+  IfNc
+  Then                                                                          # Highest bit is zero so the field is a count
+   {$size->getReg($transfer);                                                   # Load count
+   },
+  Else                                                                          # Complain because we are being asked for an invalid field
+   {PrintErrTraceBack;
+    PrintErrStringNL "Cannot get count field from non root node data block";
+    Exit(1);
+   };
+
+  $size;                                                                        # Return variable containing size of tree
+ }
+
+sub Nasm::X86::Tree::incCountInData($$$)                                        #P Increment the count field in the up field of the data block associate with the root node.
+ {my ($t, $zmm, $transfer) = @_;                                                # Tree descriptor, zmm number, transfer register
+  @_ == 3 or confess "3 parameters";
+
+  my $z = "zmm$zmm";
+  my $w = RegisterSize $z;                                                      # Size of zmm register
+  my $o = $t->up;                                                               # Offset into zmm register in bytes of count/up field
+  Vmovdqu64 "[rsp-$w]", $z;                                                     # Write zmm below the stack
+  Mov $transfer."d", "[rsp+$o-$w]";                                             # Load current count
+  Shr $transfer, 1;                                                             # Remove and test the lowest bit - if it is set then this is an offset, else if clear it is a count
+  IfC
+  Then                                                                          # We are trying to manipulate an offset not a count
+   {PrintErrTraceBack;                                                          # Complain because we are being asked for an invalid field
+    PrintErrStringNL "Not a root node";
+    Exit(1);
+   };
+  Inc $transfer;                                                                # Increment
+  Shl $transfer, 1;                                                             # Space for indicator bit cleared.
+  Mov "[rsp+$o-$w]", $transfer."d";                                             # Save count
+  Vmovdqu64 "zmm$zmm", "[rsp-$w]";                                              # Reload zmm
+ }
+
+sub Nasm::X86::Tree::decCountInData($$$)                                        #P Decrement the count field in the up field of the data block associate with the root node.
+ {my ($t, $zmm, $transfer) = @_;                                                # Tree descriptor, zmm number, transfer register
+  @_ == 3 or confess "3 parameters";
+
+  my $z = "zmm$zmm";
+  my $w = RegisterSize $z;                                                      # Size of zmm register
+  my $o = $t->up;                                                               # Offset into zmm register in bytes of count/up field
+  Vmovdqu64 "[rsp-$w]", $z;                                                     # Write zmm below the stack
+  Mov $transfer."d", "[rsp+$o-$w]";                                             # Load current count
+  Shr $transfer, 1;                                                             # Remove and test the lowest bit - if it is set then this is an offset, else if clear it is a count
+  IfC
+  Then                                                                          # We are trying to manipulate an offset not a count
+   {PrintErrTraceBack;                                                          # Complain because we are being asked for an invalid field
+    PrintErrStringNL "Not a root node";
+    Exit(1);
+   };
+  Cmp $transfer, 0;                                                             # Check that we are able to reduce the count
+  IfEq
+  Then                                                                          # We are trying to manipulate an offset not a count
+   {PrintErrTraceBack;                                                          # Complain because we are being asked for an invalid field
+    PrintErrStringNL "Cannot reduce node count below zero";
+    Exit(1);
+   };
+  Dec $transfer;                                                                # Increment
+  Shl $transfer, 1;                                                             # Space for indicator bit cleared.
+  Mov "[rsp+$o-$w]", $transfer."d";                                             # Save count
+  Vmovdqu64 "zmm$zmm", "[rsp-$w]";                                              # Reload zmm
  }
 
 sub Nasm::X86::Tree::getLoop($$;$)                                              #P Return the value of the loop field as a variable.
@@ -20352,7 +20504,7 @@ if (1) {                                                                        
   my $k = V(key,  15);
   my $d = V(data, 14);
 
-  $t->insert($k, $d);  $d->outNL;
+  $t->insert($k, $d);  $d->outNL;                                               # Uses 'up'
   $t->insertTree($k);  $t->data->outNL;                                         # Retrieve the sub tree rather than creating a new new sub tree
   $t->insertTree($k);  $t->data->outNL;
 
@@ -20392,7 +20544,7 @@ Arena
   Used: 0000 0000 0000 0618
 0000: 0010 0000 0000 00001806 0000 0000 00000000 0000 0000 00000100 0000 0200 00000300 0000 0400 00000500 0000 0600 00000700 0000 0800 00000900 0000 0A00 0000
 0040: 0B00 0000 0000 00000000 0000 0000 00000B00 FF07 5800 00009800 0000 1801 00009801 0000 1802 00009802 0000 1803 00009803 0000 1804 00009804 0000 1805 0000
-0080: 9805 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+0080: 9805 0000 0000 00000000 0000 0000 00001600 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
 00C0: 0000 0000 0000 00000000 0000 0000 00000000 0000 D800 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
 END
  }
@@ -20502,14 +20654,18 @@ END
  }
 
 #latest:
-if (1) {
+if (1) {                                                                        #TNasm::X86::Tree::size
   my $b = CreateArena;
   my $t = $b->CreateTree;
+  my $s = $t->size;
+     $s->outNL;
 
   V(count, 24)->for(sub
    {my ($index, $start, $next, $end) = @_;
     my $k = $index + 1; my $d = $k + 0x100;
     $t->insert($k, $d);
+    my $s = $t->size;
+       $s->outNL;
    });
 
   $t->getKeysDataNode($b->bs, $t->first, 31, 30, 29);
@@ -20529,22 +20685,47 @@ if (1) {
   PrintOutRegisterInHex zmm28, zmm27, zmm26;
 
   ok Assemble(debug => 0, eq => <<END);
+size: 0000 0000 0000 0000
+size: 0000 0000 0000 0001
+size: 0000 0000 0000 0002
+size: 0000 0000 0000 0003
+size: 0000 0000 0000 0004
+size: 0000 0000 0000 0005
+size: 0000 0000 0000 0006
+size: 0000 0000 0000 0007
+size: 0000 0000 0000 0008
+size: 0000 0000 0000 0009
+size: 0000 0000 0000 000A
+size: 0000 0000 0000 000B
+size: 0000 0000 0000 000C
+size: 0000 0000 0000 000D
+size: 0000 0000 0000 000E
+size: 0000 0000 0000 000F
+size: 0000 0000 0000 0010
+size: 0000 0000 0000 0011
+size: 0000 0000 0000 0012
+size: 0000 0000 0000 0013
+size: 0000 0000 0000 0014
+size: 0000 0000 0000 0015
+size: 0000 0000 0000 0016
+size: 0000 0000 0000 0017
+size: 0000 0000 0000 0018
 Root
 First: 0000 0000 0000 0018
  zmm31: 0000 0058 0000 0002   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0010 0000 0008
- zmm30: 0000 0098 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0110 0000 0108
+ zmm30: 0000 0098 0000 0030   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0110 0000 0108
  zmm29: 0000 0018 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0198   0000 0258 0000 00D8
 Left
  zmm28: 0000 0118 0000 0007   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0007   0000 0006 0000 0005   0000 0004 0000 0003   0000 0002 0000 0001
- zmm27: 0000 0158 0000 0018   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0107   0000 0106 0000 0105   0000 0104 0000 0103   0000 0102 0000 0101
+ zmm27: 0000 0158 0000 0001   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0107   0000 0106 0000 0105   0000 0104 0000 0103   0000 0102 0000 0101
  zmm26: 0000 00D8 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
 Left
  zmm28: 0000 0298 0000 0007   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 000F   0000 000E 0000 000D   0000 000C 0000 000B   0000 000A 0000 0009
- zmm27: 0000 02D8 0000 0018   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 010F   0000 010E 0000 010D   0000 010C 0000 010B   0000 010A 0000 0109
+ zmm27: 0000 02D8 0000 0001   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 010F   0000 010E 0000 010D   0000 010C 0000 010B   0000 010A 0000 0109
  zmm26: 0000 0258 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
 Left
  zmm28: 0000 01D8 0000 0008   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0018 0000 0017   0000 0016 0000 0015   0000 0014 0000 0013   0000 0012 0000 0011
- zmm27: 0000 0218 0000 0018   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0118 0000 0117   0000 0116 0000 0115   0000 0114 0000 0113   0000 0112 0000 0111
+ zmm27: 0000 0218 0000 0001   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0118 0000 0117   0000 0116 0000 0115   0000 0114 0000 0113   0000 0112 0000 0111
  zmm26: 0000 0198 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
 END
  }
@@ -20583,7 +20764,7 @@ Arena
   Used: 0000 0000 0000 05D8
 0000: 0010 0000 0000 0000D805 0000 0000 00000000 0000 0000 00000800 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
 0040: 0000 0000 0000 00000000 0000 0000 00000100 0100 5800 00001802 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
-0080: 0000 0000 0000 00000000 0000 0000 00000000 0000 1804 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+0080: 0000 0000 0000 00000000 0000 0000 00001E00 0000 1804 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
 00C0: 0000 0000 0000 00000000 0000 0000 00000000 0000 D800 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
 0100: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
 0140: 0000 0000 0000 00000000 0000 0000 00000000 0000 5801 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
@@ -20600,7 +20781,7 @@ Arena
 0400: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00005804 0000 1805 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
 0440: 0000 0000 0000 00000000 0000 0000 00000000 0000 1800 00000100 0000 0200 00000300 0000 0400 00000500 0000 0600 00000700 0000 0000 00000000 0000 0000 0000
 0480: 0000 0000 0000 00000000 0000 0000 00000700 2A00 9804 00000200 0000 9800 00000600 0000 1801 00000A00 0000 9801 00000E00 0000 0000 00000000 0000 0000 0000
-04C0: 0000 0000 0000 00000000 0000 0000 00001800 0000 D804 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+04C0: 0000 0000 0000 00000000 0000 0000 00000100 0000 D804 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
 END
  }
 
@@ -20801,27 +20982,27 @@ if (1) {
 Root
 First: 0000 0000 0000 0018
  zmm31: 0000 0058 0000 0004   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0024 0000 001A   0000 000F 0000 0008
- zmm30: 0000 0098 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0124 0000 011A   0000 010F 0000 0108
+ zmm30: 0000 0098 0000 0060   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0124 0000 011A   0000 010F 0000 0108
  zmm29: 0000 0018 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0198   0000 00D8 0000 0318   0000 03D8 0000 0258
 Left
  zmm28: 0000 0298 0000 0007   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0007   0000 0006 0000 0005   0000 0004 0000 0003   0000 0002 0000 0001
- zmm27: 0000 02D8 0000 0018   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0107   0000 0106 0000 0105   0000 0104 0000 0103   0000 0102 0000 0101
+ zmm27: 0000 02D8 0000 0001   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0107   0000 0106 0000 0105   0000 0104 0000 0103   0000 0102 0000 0101
  zmm26: 0000 0258 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
 Left
  zmm28: 0000 0418 0000 0006   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 000E 0000 000D   0000 000C 0000 000B   0000 000A 0000 0009
- zmm27: 0000 0458 0000 0018   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 010E 0000 010D   0000 010C 0000 010B   0000 010A 0000 0109
+ zmm27: 0000 0458 0000 0001   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 010E 0000 010D   0000 010C 0000 010B   0000 010A 0000 0109
  zmm26: 0000 03D8 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
 Left
  zmm28: 0000 0358 0000 000A   0000 0000 0000 0000   0000 0000 0000 0000   0000 0019 0000 0018   0000 0017 0000 0016   0000 0015 0000 0014   0000 0013 0000 0012   0000 0011 0000 0010
- zmm27: 0000 0398 0000 0018   0000 0000 0000 0000   0000 0000 0000 0000   0000 0119 0000 0118   0000 0117 0000 0116   0000 0115 0000 0114   0000 0113 0000 0112   0000 0111 0000 0110
+ zmm27: 0000 0398 0000 0001   0000 0000 0000 0000   0000 0000 0000 0000   0000 0119 0000 0118   0000 0117 0000 0116   0000 0115 0000 0114   0000 0113 0000 0112   0000 0111 0000 0110
  zmm26: 0000 0318 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
 Left
  zmm28: 0000 0118 0000 0009   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0023   0000 0022 0000 0021   0000 0020 0000 001F   0000 001E 0000 001D   0000 001C 0000 001B
- zmm27: 0000 0158 0000 0018   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0123   0000 0122 0000 0121   0000 0120 0000 011F   0000 011E 0000 011D   0000 011C 0000 011B
+ zmm27: 0000 0158 0000 0001   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0123   0000 0122 0000 0121   0000 0120 0000 011F   0000 011E 0000 011D   0000 011C 0000 011B
  zmm26: 0000 00D8 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
 Left
  zmm28: 0000 01D8 0000 000C   0000 0000 0000 0000   0000 0030 0000 002F   0000 002E 0000 002D   0000 002C 0000 002B   0000 002A 0000 0029   0000 0028 0000 0027   0000 0026 0000 0025
- zmm27: 0000 0218 0000 0018   0000 0000 0000 0000   0000 0130 0000 012F   0000 012E 0000 012D   0000 012C 0000 012B   0000 012A 0000 0129   0000 0128 0000 0127   0000 0126 0000 0125
+ zmm27: 0000 0218 0000 0001   0000 0000 0000 0000   0000 0130 0000 012F   0000 012E 0000 012D   0000 012C 0000 012B   0000 012A 0000 0129   0000 0128 0000 0127   0000 0126 0000 0125
  zmm26: 0000 0198 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
 Found: 0000 0000 0000 0000
 Found: 0000 0000 0000 0001
@@ -20972,14 +21153,14 @@ Arena
   Used: 0000 0000 0000 0098
 0000: 0010 0000 0000 00009800 0000 0000 00000000 0000 0000 00001100 0000 1200 00001300 0000 1400 00001500 0000 1600 00001700 0000 1800 00001900 0000 1A00 0000
 0040: 1B00 0000 0000 00000000 0000 0000 00000B00 0000 5800 0000FF00 0000 FF00 0000FF00 0000 FF00 0000FF00 0000 FF00 0000FF00 0000 FF00 0000FF00 0000 FF00 0000
-0080: FF00 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+0080: FF00 0000 0000 00000000 0000 0000 00001600 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
 00C0: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
 Arena
   Size: 0000 0000 0000 1000
   Used: 0000 0000 0000 0098
 0000: 0010 0000 0000 00009800 0000 0000 00000000 0000 0000 00002200 0000 2300 00002400 0000 2500 00002600 0000 2700 00002800 0000 2900 00002A00 0000 2B00 0000
 0040: 2C00 0000 0000 00000000 0000 0000 00000B00 0000 5800 0000DD00 0000 DD00 0000DD00 0000 DD00 0000DD00 0000 DD00 0000DD00 0000 DD00 0000DD00 0000 DD00 0000
-0080: DD00 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
+0080: DD00 0000 0000 00000000 0000 0000 00001600 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
 00C0: 0000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 00000000 0000 0000 0000
 Tree at:  0000 0000 0000 0018
 key: 0000 0000 0000 0011 data: 0000 0000 0000 00FF depth: 0000 0000 0000 0001
@@ -21140,7 +21321,7 @@ if (1) {                                                                        
   ok Assemble(debug => 0, eq => <<END);
 Tree at:  0000 0000 0000 0018  length: 0000 0000 0000 0004
   0000 0018 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0198   0000 03D8 0000 0318   0000 0258 0000 00D8
-  0000 0098 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 001F 0000 0017   0000 000F 0000 0007
+  0000 0098 0000 005A   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 001F 0000 0017   0000 000F 0000 0007
   0000 0058 0000 0004   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 001F 0000 0017   0000 000F 0000 0007
     index: 0000 0000 0000 0000   key: 0000 0000 0000 0007   data: 0000 0000 0000 0007
     index: 0000 0000 0000 0001   key: 0000 0000 0000 000F   data: 0000 0000 0000 000F
@@ -21148,7 +21329,7 @@ Tree at:  0000 0000 0000 0018  length: 0000 0000 0000 0004
     index: 0000 0000 0000 0003   key: 0000 0000 0000 001F   data: 0000 0000 0000 001F
   Tree at:  0000 0000 0000 00D8  length: 0000 0000 0000 0007
     0000 00D8 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
-    0000 0158 0000 0018   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0006   0000 0005 0000 0004   0000 0003 0000 0002   0000 0001 0000 0000
+    0000 0158 0000 0001   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0006   0000 0005 0000 0004   0000 0003 0000 0002   0000 0001 0000 0000
     0000 0118 0000 0007   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0006   0000 0005 0000 0004   0000 0003 0000 0002   0000 0001 0000 0000
       index: 0000 0000 0000 0000   key: 0000 0000 0000 0000   data: 0000 0000 0000 0000
       index: 0000 0000 0000 0001   key: 0000 0000 0000 0001   data: 0000 0000 0000 0001
@@ -21160,7 +21341,7 @@ Tree at:  0000 0000 0000 0018  length: 0000 0000 0000 0004
   end
   Tree at:  0000 0000 0000 0258  length: 0000 0000 0000 0007
     0000 0258 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
-    0000 02D8 0000 0018   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 000E   0000 000D 0000 000C   0000 000B 0000 000A   0000 0009 0000 0008
+    0000 02D8 0000 0001   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 000E   0000 000D 0000 000C   0000 000B 0000 000A   0000 0009 0000 0008
     0000 0298 0000 0007   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 000E   0000 000D 0000 000C   0000 000B 0000 000A   0000 0009 0000 0008
       index: 0000 0000 0000 0000   key: 0000 0000 0000 0008   data: 0000 0000 0000 0008
       index: 0000 0000 0000 0001   key: 0000 0000 0000 0009   data: 0000 0000 0000 0009
@@ -21172,7 +21353,7 @@ Tree at:  0000 0000 0000 0018  length: 0000 0000 0000 0004
   end
   Tree at:  0000 0000 0000 0318  length: 0000 0000 0000 0007
     0000 0318 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
-    0000 0398 0000 0018   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0016   0000 0015 0000 0014   0000 0013 0000 0012   0000 0011 0000 0010
+    0000 0398 0000 0001   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0016   0000 0015 0000 0014   0000 0013 0000 0012   0000 0011 0000 0010
     0000 0358 0000 0007   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0016   0000 0015 0000 0014   0000 0013 0000 0012   0000 0011 0000 0010
       index: 0000 0000 0000 0000   key: 0000 0000 0000 0010   data: 0000 0000 0000 0010
       index: 0000 0000 0000 0001   key: 0000 0000 0000 0011   data: 0000 0000 0000 0011
@@ -21184,7 +21365,7 @@ Tree at:  0000 0000 0000 0018  length: 0000 0000 0000 0004
   end
   Tree at:  0000 0000 0000 03D8  length: 0000 0000 0000 0007
     0000 03D8 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
-    0000 0458 0000 0018   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 001E   0000 001D 0000 001C   0000 001B 0000 001A   0000 0019 0000 0018
+    0000 0458 0000 0001   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 001E   0000 001D 0000 001C   0000 001B 0000 001A   0000 0019 0000 0018
     0000 0418 0000 0007   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 001E   0000 001D 0000 001C   0000 001B 0000 001A   0000 0019 0000 0018
       index: 0000 0000 0000 0000   key: 0000 0000 0000 0018   data: 0000 0000 0000 0018
       index: 0000 0000 0000 0001   key: 0000 0000 0000 0019   data: 0000 0000 0000 0019
@@ -21196,7 +21377,7 @@ Tree at:  0000 0000 0000 0018  length: 0000 0000 0000 0004
   end
   Tree at:  0000 0000 0000 0198  length: 0000 0000 0000 000D
     0000 0198 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
-    0000 0218 0000 0018   0000 0000 0000 002C   0000 002B 0000 002A   0000 0029 0000 0028   0000 0027 0000 0026   0000 0025 0000 0024   0000 0023 0000 0022   0000 0021 0000 0020
+    0000 0218 0000 0001   0000 0000 0000 002C   0000 002B 0000 002A   0000 0029 0000 0028   0000 0027 0000 0026   0000 0025 0000 0024   0000 0023 0000 0022   0000 0021 0000 0020
     0000 01D8 0000 000D   0000 0000 0000 002C   0000 002B 0000 002A   0000 0029 0000 0028   0000 0027 0000 0026   0000 0025 0000 0024   0000 0023 0000 0022   0000 0021 0000 0020
       index: 0000 0000 0000 0000   key: 0000 0000 0000 0020   data: 0000 0000 0000 0020
       index: 0000 0000 0000 0001   key: 0000 0000 0000 0021   data: 0000 0000 0000 0021
@@ -21239,7 +21420,7 @@ if (1) {                                                                        
   ok Assemble(debug => 0, eq => <<END);
 Tree at:  0000 0000 0000 0018  length: 0000 0000 0000 0001
   0000 0018 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0518 0000 0458
-  0000 0418 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0218
+  0000 0418 0000 001E   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0218
   0000 0058 0001 0001   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0007
     index: 0000 0000 0000 0000   key: 0000 0000 0000 0007   data: 0000 0000 0000 0218 subTree
   Tree at:  0000 0000 0000 0218  length: 0000 0000 0000 0000
@@ -21249,7 +21430,7 @@ Tree at:  0000 0000 0000 0018  length: 0000 0000 0000 0001
   end
   Tree at:  0000 0000 0000 0458  length: 0000 0000 0000 0007
     0000 0458 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
-    0000 04D8 0000 0018   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0006   0000 0198 0000 0004   0000 0118 0000 0002   0000 0098 0000 0000
+    0000 04D8 0000 0001   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0006   0000 0198 0000 0004   0000 0118 0000 0002   0000 0098 0000 0000
     0000 0498 002A 0007   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0006   0000 0005 0000 0004   0000 0003 0000 0002   0000 0001 0000 0000
       index: 0000 0000 0000 0000   key: 0000 0000 0000 0000   data: 0000 0000 0000 0000
       index: 0000 0000 0000 0001   key: 0000 0000 0000 0001   data: 0000 0000 0000 0098 subTree
@@ -21276,7 +21457,7 @@ Tree at:  0000 0000 0000 0018  length: 0000 0000 0000 0001
   end
   Tree at:  0000 0000 0000 0518  length: 0000 0000 0000 0007
     0000 0518 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000
-    0000 0598 0000 0018   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 000E   0000 0398 0000 000C   0000 0318 0000 000A   0000 0298 0000 0008
+    0000 0598 0000 0001   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 000E   0000 0398 0000 000C   0000 0318 0000 000A   0000 0298 0000 0008
     0000 0558 002A 0007   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 000E   0000 000D 0000 000C   0000 000B 0000 000A   0000 0009 0000 0008
       index: 0000 0000 0000 0000   key: 0000 0000 0000 0008   data: 0000 0000 0000 0008
       index: 0000 0000 0000 0001   key: 0000 0000 0000 0009   data: 0000 0000 0000 0298 subTree
