@@ -10,6 +10,7 @@
 # Remove as much variable arithmetic as possible as it is slower and bigger than register arithmetic
 # Replace empty in boolean arithmetic with boolean and then check it in If to confirm that we are testing a boolean value
 # M: optimize PushR, would the print routines work better off the stack? elif ? switch statement?  confess? Number of parameters test?  Remove macro? Extend short strings.
+# M: Make sure all tests uses: ok Assemble(debug => 0, eq => <<END) unless there are reasons otherwise
 package Nasm::X86;
 our $VERSION = "20210903";
 use warnings FATAL => qw(all);
@@ -2155,27 +2156,39 @@ sub Nasm::X86::Variable::str($)                                                 
  }
 
 sub Nasm::X86::Variable::min($$)                                                # Minimum of two variables.
- {my ($left, $right) = @_;                                                      # Left variable, Right variable,
+ {my ($left, $right) = @_;                                                      # Left variable, right variable or constant
   PushR (r12, r14, r15);
   $left->setReg(r14);
-  $right->setReg(r15);
-  Cmp r14, r15;
-  IfLt(sub {Mov r12, r14},
-       sub {Mov r12, r15});
-  my $r = V("Minimum(".$left->name.", ".$right->name.")", r12);
+
+  if (ref($right))                                                              # Right hand side is a variable
+   {$right->setReg(r15);
+    Cmp r14, r15;
+   }
+  else                                                                          # Right hand side is a constant
+   {Cmp r14, $right;
+   }
+
+  IfLt Then {Mov r12, r14}, Else sub {Mov r12, r15};   ### Cmov?
+  my $r = V("min", r12);
   PopR;
   $r
  }
 
 sub Nasm::X86::Variable::max($$)                                                # Maximum of two variables.
- {my ($left, $right) = @_;                                                      # Left variable, Right variable,
+ {my ($left, $right) = @_;                                                      # Left variable, right variable or constant
   PushR (r12, r14, r15);
   $left->setReg(r14);
-  $right->setReg(r15);
-  Cmp r14, r15;
-  &IfGt(sub {Mov r12, r14},
-        sub {Mov r12, r15});
-  my $r = V("Maximum(".$left->name.", ".$right->name.")", r12);
+
+  if (ref($right))                                                              # Right hand side is a variable
+   {$right->setReg(r15);
+    Cmp r14, r15;
+   }
+  else                                                                          # Right hand side is a constant
+   {Cmp r14, $right;
+   }
+
+  IfGt Then {Mov r12, r14}, Else sub {Mov r12, r15};   ### Cmov?
+  my $r = V("max", r12);
   PopR;
   $r
  }
@@ -3821,11 +3834,18 @@ sub CreateShortString($)                                                        
   @_ == 1 or confess;
 
   genHash(__PACKAGE__."::ShortString",                                          # A short string up to 63 bytes long held in a zmm register.
-    maximumLength => 63,                                                        # The maximum length of a short string
+    maximumLength => RegisterSize(zmm0) - 1,                                    # The maximum length of a short string
     zmm           => $zmm,                                                      # The number of the zmm register containing the string
     x             => "xmm$zmm",                                                 # The associated xmm register
     z             => "zmm$zmm",                                                 # The full name of the zmm register
    );
+ }
+
+sub Nasm::X86::ShortString::clear($)                                            # Clear a short string
+ {my ($string) = @_;                                                            # String
+  @_ == 1 or confess;
+  my $z = $string->z;                                                           # Zmm register to use
+  ClearRegisters $z;                                                            # Clear the register we are going to use as a short string
  }
 
 sub Nasm::X86::ShortString::load($$$)                                           # Load the variable addressed data with the variable length into the short string.
@@ -3834,7 +3854,7 @@ sub Nasm::X86::ShortString::load($$$)                                           
   my $z = $string->z;                                                           # Zmm register to use
   my $x = $string->x;                                                           # Corresponding xmm
 
-  ClearRegisters $z;                                                            # Clear the register we are going to use as a short string
+  $string->clear;                                                               # Clear the register we are going to use as a short string
 
   PushR (r14, r15, k7);                                                         # Use these registers
   $length->setReg(r15);                                                         # Length of string
@@ -4528,15 +4548,13 @@ sub Nasm::X86::Arena::dump($;$)                                                 
 
 #D1 String                                                                      # Strings made from zmm sized blocks of text
 
-sub Nasm::X86::Arena::CreateString($)                                           # Create a string from a doubly link linked list of 64 byte blocks linked via 4 byte offsets in an arena and return its descriptor.
+sub Nasm::X86::Arena::DescribeString($)                                         # Describe a string
  {my ($arena) = @_;                                                             # Arena description
   @_ == 1 or confess;
   my $b = RegisterSize zmm0;                                                    # Size of a block == size of a zmm register
   my $o = RegisterSize eax;                                                     # Size of a double word
 
-  Comment "Allocate a new string in an arena";
-
-  my $s = genHash(__PACKAGE__."::String",                                       # String definition
+  genHash(__PACKAGE__."::String",                                               # String definition
     bs      => $arena,                                                          # Bytes string definition
     links   => $b - 2 * $o,                                                     # Location of links in bytes in zmm
     next    => $b - 1 * $o,                                                     # Location of next offset in block in bytes
@@ -4544,7 +4562,13 @@ sub Nasm::X86::Arena::CreateString($)                                           
     length  => $b - 2 * $o - 1,                                                 # Maximum length in a block
     first   => G('first'),                                                      # Variable addressing first block in string
    );
+ }
 
+sub Nasm::X86::Arena::CreateString($)                                           # Create a string from a doubly link linked list of 64 byte blocks linked via 4 byte offsets in an arena and return its descriptor.
+ {my ($arena) = @_;                                                             # Arena description
+  @_ == 1 or confess;
+
+  my $s = $arena->DescribeString;                                               # String descriptor
   my $first = $s->allocBlock($arena->bs);                                       # Allocate first block
   $s->first->copy($first);                                                      # Record offset of first block
 
@@ -4693,7 +4717,7 @@ sub Nasm::X86::String::len($;$$)                                                
     ForEver                                                                     # Each block in string
      {my ($start, $end) = @_;
       my ($next, $prev) = $String->getNextAndPrevBlockOffsetFromZmm(31);        # Get links from current block
-      If  $next == $block, sub{Jmp $end};                                       # Next block is the first block so we have printed the string
+      If  $next == $block, sub{Jmp $end};                                       # Next block is the first block so we have traversed the entire string
       $String->getBlock($$p{bs}, $next, 31);                                    # Next block in zmm
       $length += $String->getBlockLength(31);                                   # Add length of block
      };
@@ -5011,6 +5035,31 @@ sub Nasm::X86::String::appendShortString($$)                                    
   my $S = V(source, r15);
   $string->append($S, $L);
   PopR;
+ }
+
+sub Nasm::X86::String::saveToShortString($$;$)                                  # Place as much as possible of the specified string into the specified short string
+ {my ($string, $short, $first) = @_;                                            # String descriptor, short string descriptor, optional offset to first block of string
+  @_ == 2 or confess;
+  my $z = $short->z; $z eq zmm31 and confess "Cannot use zmm31";                # Zmm register in short string to load must not be zmm31
+
+  my $s = Subroutine       ### At the moment we only read the first block - we need to read more data out of the string if necessary
+   {my ($p) = @_;                                                               # Parameters
+    PushR k7, zmm31, r14, r15;
+    $string->getBlock($$p{bs}, $$p{first}, 31);                                 # The first block in zmm31
+
+    Mov r15, -1; Shr r15, 1; Shl r15, 9; Shr r15, 8; Kmovq k7, r15;             # Mask for the most we can get out of a block of the string
+    $short->clear;
+    Vmovdqu8 "${z}{k7}", zmm31;                                                 # Move all the data in the first block
+
+    my $b = $string->getBlockLength(31);                                        # Length of block
+    $short->setLength($b);                                                      # Set length of short string
+
+    PopR;
+   } [qw(first bs)], name => 'Nasm::X86::String::saveToShortString_$z';         # Separate by zmm register being loaded
+
+  $s->call($string->address, $first//$string->first);
+
+  $short                                                                        # Chain
  }
 
 sub Nasm::X86::String::clear($)                                                 # Clear the block by freeing all but the first block.
@@ -7214,19 +7263,28 @@ sub Nasm::X86::Quarks::quarkFromShortString($$)                                 
   $Q                                                                            # Quark number for short string in a variable
  }
 
-sub Nasm::X86::Quarks::shortStringFromQuark($$$)                                # Load a short string from the quark with the specified number.
+sub Nasm::X86::Quarks::shortStringFromQuark($$$)                                # Load a short string from the quark with the specified number.  returns a varibale taht is set to one if the quark was found else zero.
  {my ($q, $number, $string) = @_;                                               # Quarks, variable quark number, short string to load
   @_ == 3 or confess "3 parameters";
 
-  my $N = $q->numbersToStrings->size;                                           # Get the number of quarks
-  If $number < $N,
-  Then                                                                          # String tree does not contain the short string
-   {$q->numbersToStrings->get(index => $number, my $e = V(element));
-    $string->fromString(string => $e);
-   },
-  Else
-   {$string->clear;
+  my $f = V(found);                                                             # Whether the quark was found
+
+  AndBlock
+   {my ($fail, $end, $start) = @_;                                              # Fail block, end of fail block, start of test block
+    my $N = $q->numbersToStrings->size;                                         # Get the number of quarks
+    If $number >= $N, Then {Jmp $fail};
+    $q->numbersToStrings->get(index => $number, my $e = V(element));
+
+    my $S = $q->numbersToStrings->bs->DescribeString;  #### The next two lines should be elided
+    $S->first->copy($e);
+    $S->saveToShortString($string);
+    $f->copy(K(one, 1));
+   }
+  Fail                                                                          # Quark too big
+   {$f->copy(K(zero, 0));                                                       # Show failure code
    };
+
+  $f
  }
 
 #D1 Assemble                                                                    # Assemble generated code
@@ -19981,13 +20039,7 @@ index: 0000 0000 0000 0009
 END
  }
 
-if (1) {                                                                        #T
-  Mov rax, 2;
-  PrintOutRegisterInHex rax;
-
-  ok Assemble =~ m(rax: 0000 0000 0000 0002);
- }
-
+#latest:;
 if (1) {                                                                        #TNasm::X86::Variable::min #TNasm::X86::Variable::max
   my $a = V("a", 1);
   my $b = V("b", 2);
@@ -19998,11 +20050,11 @@ if (1) {                                                                        
   $c->outNL;
   $d->outNL;
 
-  is_deeply Assemble,<<END;
+  ok Assemble(debug => 0, eq => <<END);
 a: 0000 0000 0000 0001
 b: 0000 0000 0000 0002
-Minimum(a, b): 0000 0000 0000 0001
-Maximum(a, b): 0000 0000 0000 0002
+min: 0000 0000 0000 0001
+max: 0000 0000 0000 0002
 END
  }
 
@@ -20012,7 +20064,7 @@ if (1) {                                                                        
   $start->setMask($length, k7);
   PrintOutRegisterInHex k7;
 
-  is_deeply Assemble, <<END;
+  ok Assemble(debug => 0, eq => <<END);
     k7: 0000 0000 0000 0380
 END
  }
@@ -20035,7 +20087,7 @@ if (1) {                                                                        
 
   PrintOutRegisterInHex zmm0;
 
-  is_deeply Assemble, <<END;
+  ok Assemble(debug => 0, eq => <<END);
   zmm0: 0000 0000 0000 0000   0000 0000 0000 0000   0000 000B 0A09 0807   0605 0403 0201 0000   0000 0000 0000 0000   0000 0000 0000 0000   0000 0000 0000 0201   0000 0000 0000 0000
 END
  }
@@ -22712,6 +22764,14 @@ if (1) {                                                                        
     $q->outNL;
    }
 
+  for my $i(1..$N)
+   {my $j = $i - 1;
+     $s->clear;
+    $Q->shortStringFromQuark(K(quark, $j), $s);
+    PrintOutString "Quark: $j ";
+    PrintOutRegisterInHex xmm0;
+   }
+
   ok Assemble(debug => 0, trace => 0, eq => <<END);
 quark: 0000 0000 0000 0000
 quark: 0000 0000 0000 0001
@@ -22723,10 +22783,15 @@ quark: 0000 0000 0000 0003
 quark: 0000 0000 0000 0002
 quark: 0000 0000 0000 0001
 quark: 0000 0000 0000 0000
+Quark: 0   xmm0: 0000 0000 0000 0000   0000 0504 0302 0105
+Quark: 1   xmm0: 0000 0000 0000 0000   0006 0504 0302 0106
+Quark: 2   xmm0: 0000 0000 0000 0000   0706 0504 0302 0107
+Quark: 3   xmm0: 0000 0000 0000 0008   0706 0504 0302 0108
+Quark: 4   xmm0: 0000 0000 0000 0908   0706 0504 0302 0109
 END
  }
 
-ok 1 for 1..10;
+ok 1 for 0..10;
 
 #unlink $_ for qw(hash print2 sde-log.txt sde-ptr-check.out.txt z.txt);         # Remove incidental files
 unlink $_ for qw(hash print2);                                                  # Remove incidental files
