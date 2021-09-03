@@ -22746,48 +22746,54 @@ END
 #latest:
 if (1) {                                                                        #TNasm::X86::Arena::CreateQuarks #TNasm::X86::Quarks::quarkFromShortString #TNasm::X86::Quarks::shortStringFromQuark
   my $N = 5;
-  my $a = CreateArena;
-  my $Q = $a->CreateQuarks;
+  my $a = CreateArena;                                                          # Arena containing quarks
+  my $Q = $a->CreateQuarks;                                                     # Quarks
 
-  my $s = CreateShortString(0);
+  my $s = CreateShortString(0);                                                 # Short string used to load and unload quarks
   my $d = Rb(1..63);
 
-  for my $i(1..$N)
-   {$s->load(K(address, $d), K(size, 4+$i));
+  for my $i(1..$N)                                                              # Load a set of quarks
+   {my $j = $i - 1;
+    $s->load(K(address, $d), K(size, 4+$i));
     my $q = $Q->quarkFromShortString($s);
-    $q->outNL;
+    $q->outNL("New quark    $j: ");                                             # New quark, new number
    }
+  PrintOutNL;
 
-  for my $i(reverse 1..$N)
-   {$s->load(K(address, $d), K(size, 4+$i));
+  for my $i(reverse 1..$N)                                                      # Reload a set of quarks
+   {my $j = $i - 1;
+    $s->load(K(address, $d), K(size, 4+$i));
     my $q = $Q->quarkFromShortString($s);
-    $q->outNL;
+    $q->outNL("Old quark    $j: ");                                             # Old quark, old number
    }
+  PrintOutNL;
 
-  for my $i(1..$N)
+  for my $i(1..$N)                                                              # Dump quarks
    {my $j = $i - 1;
      $s->clear;
     $Q->shortStringFromQuark(K(quark, $j), $s);
-    PrintOutString "Quark: $j ";
+    PrintOutString "Quark string $j: ";
     PrintOutRegisterInHex xmm0;
    }
 
   ok Assemble(debug => 0, trace => 0, eq => <<END);
-quark: 0000 0000 0000 0000
-quark: 0000 0000 0000 0001
-quark: 0000 0000 0000 0002
-quark: 0000 0000 0000 0003
-quark: 0000 0000 0000 0004
-quark: 0000 0000 0000 0004
-quark: 0000 0000 0000 0003
-quark: 0000 0000 0000 0002
-quark: 0000 0000 0000 0001
-quark: 0000 0000 0000 0000
-Quark: 0   xmm0: 0000 0000 0000 0000   0000 0504 0302 0105
-Quark: 1   xmm0: 0000 0000 0000 0000   0006 0504 0302 0106
-Quark: 2   xmm0: 0000 0000 0000 0000   0706 0504 0302 0107
-Quark: 3   xmm0: 0000 0000 0000 0008   0706 0504 0302 0108
-Quark: 4   xmm0: 0000 0000 0000 0908   0706 0504 0302 0109
+New quark    0: 0000 0000 0000 0000
+New quark    1: 0000 0000 0000 0001
+New quark    2: 0000 0000 0000 0002
+New quark    3: 0000 0000 0000 0003
+New quark    4: 0000 0000 0000 0004
+
+Old quark    4: 0000 0000 0000 0004
+Old quark    3: 0000 0000 0000 0003
+Old quark    2: 0000 0000 0000 0002
+Old quark    1: 0000 0000 0000 0001
+Old quark    0: 0000 0000 0000 0000
+
+Quark string 0:   xmm0: 0000 0000 0000 0000   0000 0504 0302 0105
+Quark string 1:   xmm0: 0000 0000 0000 0000   0006 0504 0302 0106
+Quark string 2:   xmm0: 0000 0000 0000 0000   0706 0504 0302 0107
+Quark string 3:   xmm0: 0000 0000 0000 0008   0706 0504 0302 0108
+Quark string 4:   xmm0: 0000 0000 0000 0908   0706 0504 0302 0109
 END
  }
 
