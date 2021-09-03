@@ -22744,7 +22744,7 @@ END
  }
 
 #latest:
-if (1) {                                                                        #TNasm::X86::String::appendShortString
+if (1) {                                                                        #TNasm::X86::Arena::CreateQuarks #TNasm::X86::Quarks::quarkFromShortString #TNasm::X86::Quarks::shortStringFromQuark
   my $N = 5;
   my $a = CreateArena;
   my $Q = $a->CreateQuarks;
