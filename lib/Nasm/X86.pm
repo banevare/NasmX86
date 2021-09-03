@@ -3816,7 +3816,7 @@ sub ClassifyWithInRangeAndSaveOffset(@)                                         
 
 #D1 Short Strings                                                               # Operations on Short Strings
 
-sub CreateShortString($)                                                        # Create a description of a short string
+sub CreateShortString($)                                                        # Create a description of a short string.
  {my ($zmm) = @_;                                                               # Numbered zmm containing the string
   @_ == 1 or confess;
 
@@ -3897,7 +3897,7 @@ sub Nasm::X86::ShortString::appendByte($$)                                      
   $s->call;
  }
 
-sub Nasm::X86::ShortString::append($$)                                          # Append the right hand short string to the left hand short string
+sub Nasm::X86::ShortString::append($$)                                          # Append the right hand short string to the left hand short string.
  {my ($left, $right) = @_;                                                      # Target zmm, source zmm
   @_ == 2 or confess;
   my $lz = $left ->z;                                                           # Zmm register for left string
@@ -4548,7 +4548,7 @@ sub Nasm::X86::Arena::CreateString($)                                           
   my $first = $s->allocBlock($arena->bs);                                       # Allocate first block
   $s->first->copy($first);                                                      # Record offset of first block
 
-  if (1)                                                                        # Initialize circular list - really it would be better to allow the first block not to have pointers until it actually needed them for compatability with short strings.
+  if (1)                                                                        # Initialize circular list - really it would be better to allow the first block not to have pointers until it actually needed them for compatibility with short strings.
    {my $nn = $s->next;
     my $pp = $s->prev;
     PushR (r14, r15);
@@ -5000,7 +5000,7 @@ sub Nasm::X86::String::append($@)                                               
   $s->call($String->address, $String->first, @variables);
  }
 
-sub Nasm::X86::String::appendShortString($$)                                    # Append the content of the specified short string
+sub Nasm::X86::String::appendShortString($$)                                    # Append the content of the specified short string.
  {my ($string, $short) = @_;                                                    # String descriptor, short string
   @_ == 2 or confess;
   my $z = $short->z;                                                            # Zmm register containing short string
@@ -6418,7 +6418,7 @@ sub Nasm::X86::Tree::insertShortString($$$)                                     
     Lea rax, "[rsp+1]";                                                         # Address first data byte of short string
     $L->setReg(r15);                                                            # Length of key remaining to write into key chain
 
-    my $t = $tree->Clone($$p{first});                                              # Clone the input tree so we can walk down the chain from it.
+    my $t = $tree->Clone($$p{first});                                           # Clone the input tree so we can walk down the chain from it.
 
     AndBlock
      {my ($fail, $end, $start) = @_;                                            # Fail block, end of fail block, start of test block
@@ -7172,7 +7172,7 @@ sub Nasm::X86::Arena::DescribeQuarks($)                                         
    );
  }
 
-sub Nasm::X86::Arena::CreateQuarks($)                                           # Create quarks in a specified arena
+sub Nasm::X86::Arena::CreateQuarks($)                                           # Create quarks in a specified arena.
  {my ($arena) = @_;                                                             # Arena description optional arena address
   @_ == 1 or confess "1 parameter";
 
@@ -7183,7 +7183,7 @@ sub Nasm::X86::Arena::CreateQuarks($)                                           
   $q                                                                            # Description of array
  }
 
-sub Nasm::X86::Quarks::quarkFromShortString($$)                                 # Create a quark from a short string
+sub Nasm::X86::Quarks::quarkFromShortString($$)                                 # Create a quark from a short string.
  {my ($q, $string) = @_;                                                        # Quarks, short string
   @_ == 2 or confess "2 parameters";
 
@@ -7214,7 +7214,7 @@ sub Nasm::X86::Quarks::quarkFromShortString($$)                                 
   $Q                                                                            # Quark number for short string in a variable
  }
 
-sub Nasm::X86::Quarks::shortStringFromQuark($$$)                                # Load a short string from the quark with the specified number
+sub Nasm::X86::Quarks::shortStringFromQuark($$$)                                # Load a short string from the quark with the specified number.
  {my ($q, $number, $string) = @_;                                               # Quarks, variable quark number, short string to load
   @_ == 3 or confess "3 parameters";
 
@@ -22726,7 +22726,7 @@ quark: 0000 0000 0000 0000
 END
  }
 
-ok 1 for 0..10;
+ok 1 for 1..10;
 
 #unlink $_ for qw(hash print2 sde-log.txt sde-ptr-check.out.txt z.txt);         # Remove incidental files
 unlink $_ for qw(hash print2);                                                  # Remove incidental files
