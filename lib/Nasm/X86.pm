@@ -2480,13 +2480,6 @@ sub Nasm::X86::Variable::getWFromZmm($$$)                                       
   $variable->copy(getBwdqFromMm('w', "zmm$zmm", $offset))                       # Get the numbered byte|word|double word|quad word from the numbered zmm register and put it in a variable
  }
 
-sub Nasm::X86::Variable::getDFromZmmUnOPtimized($$$;$)                          # Get the double word from the numbered zmm register and put it in a variable.
- {my ($variable, $zmm, $offset, $transfer) = @_;                                # Variable, numbered zmm, offset in bytes, transfer register
-  my $r = getBwdqFromMm 'd', "zmm$zmm", $offset, $transfer;                     # Get the numbered byte|word|double word|quad word from the numbered zmm register and put it in a variable
-  $variable->copy($r);                                                          # Copy the result into the designated variable
-  $variable                                                                     # Return input variable so we can assign or chain
- }
-
 sub Nasm::X86::Variable::getDFromZmm($$$;$)                                     # Get the double word from the numbered zmm register and put it in a variable.
  {my ($variable, $zmm, $offset, $transfer) = @_;                                # Variable, numbered zmm, offset in bytes, transfer register
   getBwdqFromMm 'd', "zmm$zmm", $offset, $transfer, $variable;                  # Get the numbered byte|word|double word|quad word from the numbered zmm register and put it in a variable
@@ -3619,7 +3612,7 @@ sub GetNextUtf8CharAsUtf32(@)                                                   
     IfLe
     Then
      {$$p{out}->getReg(r14);
-      $$p{size}->copy(K(one, 1));
+      $$p{size}->copy(1);
       Jmp $success;
      };
 
@@ -3632,7 +3625,7 @@ sub GetNextUtf8CharAsUtf32(@)                                                   
       Shl r14, 6;
       Or  r14,  r13;
       $$p{out}->getReg(r14);
-      $$p{size}->copy(K(two, 2));
+      $$p{size}->copy(2);
       Jmp $success;
      };
 
@@ -3649,7 +3642,7 @@ sub GetNextUtf8CharAsUtf32(@)                                                   
       Or  r14,  r13;
       Or  r14,  r12;
       $$p{out}->getReg(r14);
-      $$p{size}->copy(K(three, 3));
+      $$p{size}->copy(3);
       Jmp $success;
      };
 
@@ -3670,7 +3663,7 @@ sub GetNextUtf8CharAsUtf32(@)                                                   
       Or  r14,  r12;
       Or  r14,  r11;
       $$p{out}->getReg(r14);
-      $$p{size}->copy(K(four, 4));
+      $$p{size}->copy(4);
       Jmp $success;
      };
 
@@ -23049,8 +23042,8 @@ if (1) {                                                                        
 END
  }
 
-latest:
-if (1) {                                                                        #TNasm::X86::Arena::CreateQuarks #TNasm::X86::Quarks::quarkFromShortString #TNasm::X86::Quarks::shortStringFromQuark
+#latest:
+if (1) {                                                                        #TNasm::Variable::copy  #TNasm::Variable::copyRef
 makeDieConfess;
   my $a = V('a', 1);
   my $r = R('r')->copyRef($a);
@@ -23070,6 +23063,9 @@ makeDieConfess;
 a: 0000 0000 0000 0001
 r: 0000 0000 0000 0001
 R: 0000 0000 0000 0001
+a: 0000 0000 0000 0002
+r: 0000 0000 0000 0002
+R: 0000 0000 0000 0002
 END
  }
 
