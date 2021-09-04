@@ -1710,61 +1710,54 @@ sub Nasm::X86::Variable::copy($$;$)                                             
 
   my $transfer = $Transfer // r15;                                              # Transfer register
 
-  ref($right) =~ m(Variable) or confess "Variable required";
+# ref($right) =~ m(Variable) or confess "Variable required";
   my $l = $left ->address;
-  my $r = $right->address;
-
-  my $lr = $left ->reference;
-  my $rr = $right->reference;
+  my $r = ref($right) ? $right->address : $right;                               # Variable address or register expression (which might in fact be a constant)
 
   PushR $transfer unless $Transfer;
-  Mov $transfer, $r;
-  if ($rr)
+  Mov $transfer, $r;                                                            # Load right hand side
+
+  if (ref($right) and $right->reference)                                        # Dereference a reference
    {Mov $transfer, "[$transfer]";
    }
-  if (!$lr)
-   {Mov $l, $transfer;
-   }
-  else
-   {Comment "Copy ".$right->name.' to '.$left->name;
-    my ($ref) = ChooseRegisters(1, $transfer);
+
+  if ($left ->reference)                                                        # Copy a reference
+   {my ($ref) = ChooseRegisters(1, $transfer);
     PushR $ref;
     Mov $ref, $l;
     Mov "[$ref]", $transfer;
     PopR $ref;
    }
+  else                                                                          # Copy a non reference
+   {Mov $l, $transfer;
+   }
   PopR $transfer unless $Transfer;
   $left                                                                         # Return the variable on the left now that it has had the right hand side copied into it.
  }
 
-sub Nasm::X86::Variable::copyAddress($$;$)                                      # Copy a reference to a variable.
+sub Nasm::X86::Variable::copyRef($$;$)                                          # Copy a reference to a variable.
  {my ($left, $right, $Transfer) = @_;                                           # Left variable, right variable, optional transfer register
   CheckGeneralPurposeRegister $Transfer if $Transfer;
 
   my $transfer = $Transfer // r15;
 
   $left->reference  or confess "Left hand side must be a reference";
-  $left->size == 3  or confess "Left hand side must be size 3";
 
   my $l = $left ->address;
   my $r = $right->address;
 
-  if ($right->size == 3)
-   {PushR $transfer unless $Transfer;
-    if ($right->reference)                                                      # Right is a reference so we copy its value
-     {Mov $transfer, $r;
-     }
-    else                                                                        # Right is not a reference so we copy its address
-     {Lea $transfer, $r;
-     }
-    Mov $l, $transfer;                                                          # Save value of address in left
-    PopR $transfer unless $Transfer;
-    return;
+  PushR $transfer unless $Transfer;
+  if ($right->reference)                                                        # Right is a reference so we copy its value to create a new reference to the original data
+   {Mov $transfer, $r;
    }
+  else                                                                          # Right is not a reference so we copy its address to make a reference to the data
+   {Lea $transfer, $r;
+   }
+  Mov $l, $transfer;                                                            # Save value of address in left
+  PopR $transfer unless $Transfer;
 
-  confess "Need more code";
+  $left;                                                                        # Chain
  }
-
 
 sub Nasm::X86::Variable::copyZF($)                                              # Copy the current state of the zero flag into a variable.
  {my ($var) = @_;                                                               # Variable
@@ -3890,7 +3883,7 @@ sub Nasm::X86::ShortString::loadDwordBytes($$$$)                                
    {my ($index, $start, $next, $end) = @_;                                      # Execute block
     $index->setReg(r14);                                                        # Index source and target
     Mov r13b, "[r15+4*r14+$byte]";                                              # Load next byte from specified position in the source dword
-    Mov "[rsp+r14+1]", r13b;                                                     # Save next byte skipping length
+    Mov "[rsp+r14+1]", r13b;                                                    # Save next byte skipping length
    });
 
   PopR;
@@ -5577,7 +5570,7 @@ sub Nasm::X86::Arena::CreateTree($;$)                                           
   $t                                                                            # Description of array
  }
 
-sub Nasm::X86::Tree::Clone($;$)                                                 # Clone the specified tree descriptions.
+sub Nasm::X86::Tree::Reload($;$)                                                # Reload the specified tree descriptions.
  {my ($tree, $first) = @_;                                                      # Tree descriptor, optional first node of tree
   @_ == 1 or @_ == 2 or confess;
 
@@ -6191,10 +6184,10 @@ sub Nasm::X86::Tree::find($$;$$)                                                
     found => $t->found, subTree => $t->subTree);
  } # find
 
-sub Nasm::X86::Tree::findAndClone($$)                                           # Find a key in the specified tree and clone it is it is a sub tree.
+sub Nasm::X86::Tree::findAndReload($$)                                          # Find a key in the specified tree and clone it is it is a sub tree.
  {my ($t, $key) = @_;                                                           # Tree descriptor, key as a dword
   @_ == 2 or confess;
-  Comment "Nasm::X86::Tree::findAndClone";
+  Comment "Nasm::X86::Tree::findAndReload";
   $t->find($key);
   If $t->found > 0,
   Then
@@ -6205,14 +6198,14 @@ sub Nasm::X86::Tree::findAndClone($$)                                           
 sub Nasm::X86::Tree::findShortString($$)                                        # Find the data at the end of a key chain held in a short string.  Return a tree descriptor referencing the data located or marked as failed to find.
  {my ($tree, $string) = @_;                                                     # Tree descriptor, short string
   @_ == 2 or confess "2 parameters";
-  my $t = $tree->Clone;                                                         # Clone the input tree so we can walk down the chain
+  my $t = $tree->Reload;                                                        # Reload the input tree so we can walk down the chain
   my $w = $tree->width;                                                         # Size of a key on the tree
   my $z = $string->z;                                                           # The zmm containing the short string
 
   my $s = Subroutine
    {my ($p) = @_;
     my $L = $string->len;                                                       # Length of the short string
-    $t->first->copy($$p{first});                                                # Clone the input tree so we can walk down the chain
+    $t->first->copy($$p{first});                                                # Reload the input tree so we can walk down the chain
     $$p{found}->copy(K(zero, 0));                                               # Not yet found
 
     PushR, rax, r14, r15;
@@ -6227,7 +6220,7 @@ sub Nasm::X86::Tree::findShortString($$)                                        
       IfGt
       Then                                                                      # Full dwords from key still to load
        {Mov r14d, "[rax]";                                                      # Load dword from string
-        $t->findAndClone(V(key, r14));                                          # Find dword of key
+        $t->findAndReload(V(key, r14));                                         # Find dword of key
         If $t->found == 0,                                                      # Failed to find dword
         Then
          {Jmp $end;
@@ -6471,7 +6464,7 @@ sub Nasm::X86::Tree::insertTree($$;$)                                           
    }
  }
 
-sub Nasm::X86::Tree::insertTreeAndClone($$)                                     # Insert a new sub tree into the specified tree tree under the specified key and return a descriptor for it.  If the tree already exists, return a descriptor for it.
+sub Nasm::X86::Tree::insertTreeAndReload($$)                                    # Insert a new sub tree into the specified tree tree under the specified key and return a descriptor for it.  If the tree already exists, return a descriptor for it.
  {my ($t, $key) = @_;                                                           # Tree descriptor, key as a dword
   @_ == 2 or confess;
   $t->insertTree($key);
@@ -6494,7 +6487,7 @@ sub Nasm::X86::Tree::insertShortString($$$)                                     
     Lea rax, "[rsp+1]";                                                         # Address first data byte of short string
     $L->setReg(r15);                                                            # Length of key remaining to write into key chain
 
-    my $t = $tree->Clone($$p{first});                                           # Clone the input tree so we can walk down the chain from it.
+    my $t = $tree->Reload($$p{first});                                          # Reload the input tree so we can walk down the chain from it.
 
     AndBlock
      {my ($fail, $end, $start) = @_;                                            # Fail block, end of fail block, start of test block
@@ -6502,7 +6495,7 @@ sub Nasm::X86::Tree::insertShortString($$$)                                     
       IfGt
       Then                                                                      # Full dwords from key still to load
        {Mov r14d, "[rax]";                                                      # Load dword from string
-        $t->insertTreeAndClone(V(key, r14));                                    # Create sub tree
+        $t->insertTreeAndReload(V(key, r14));                                   # Create sub tree
         Add rax, $w;                                                            # Move up over inserted key
         Sub r15, $w;                                                            # Reduce amount of key still to write
         Jmp $start;                                                             # Restart
@@ -7269,8 +7262,8 @@ sub Nasm::X86::Quarks::quarkFromShortString($$)                                 
   AndBlock
    {my ($fail, $end, $start) = @_;                                              # Fail block, end of fail block, start of test block
 
-    my $t = $q->stringsToNumbers->Clone;                                        # Clone strings to numbers
-    $t->findAndClone($l);                                                       # Separate by length
+    my $t = $q->stringsToNumbers->Reload;                                       # Reload strings to numbers
+    $t->findAndReload($l);                                                      # Separate by length
     If $t->found == 0, Then {Jmp $fail};                                        # Length not found
     $t->findShortString($string);                                               # Find the specified short string
     If $t->found == 0, Then {Jmp $fail};                                        # Length not found
@@ -7280,8 +7273,8 @@ sub Nasm::X86::Quarks::quarkFromShortString($$)                                 
    {my $N = $q->numbersToStrings->size;                                         # Get the number of quarks
     my $S = $q->arena->CreateString;
        $S->appendShortString($string);
-    my $T = $q->stringsToNumbers->Clone;                                        # Clone strings to numbers tree descriptor
-    $T->insertTreeAndClone($l);                                                 # Classify strings by length
+    my $T = $q->stringsToNumbers->Reload;                                       # Reload strings to numbers tree descriptor
+    $T->insertTreeAndReload($l);                                                # Classify strings by length
     $T->insertShortString($string, $N);                                         # Insert the string with the  quark number as data
     $q->numbersToStrings->push(element => $S->first);                           # Append the quark number with a reference to the string
     $Q->copy($N);
@@ -7673,7 +7666,7 @@ use vars qw(@ISA @EXPORT @EXPORT_OK %EXPORT_TAGS);
 
 @ISA          = qw(Exporter);
 @EXPORT       = qw();
-@EXPORT_OK    = qw(Add All8Structure AllocateAll8OnStack AllocateMemory And AndBlock Andn Assemble Bswap Bt Btc Btr Bts Bzhi Call CallC CheckGeneralPurposeRegister CheckMaskRegister CheckNumberedGeneralPurposeRegister ChooseRegisters ClassifyInRange ClassifyRange ClassifyWithInRange ClassifyWithInRangeAndSaveOffset ClearMemory ClearRegisters ClearZF CloseFile Cmova Cmovae Cmovb Cmovbe Cmovc Cmove Cmovg Cmovge Cmovl Cmovle Cmovna Cmovnae Cmovnb Cmp Comment CommentWithTraceBack ConcatenateShortStrings ConvertUtf8ToUtf32 CopyMemory Cpuid CreateArena Cstrlen DComment Db Dbwdq Dd Dec Dq Ds Dw Ef Else Enter Exit Extern Fail For ForEver ForIn Fork FreeMemory G GetLengthOfShortString GetNextUtf8CharAsUtf32 GetPPid GetPid GetPidInHex GetUid Hash ISA Idiv If IfC IfEq IfGe IfGt IfLe IfLt IfNc IfNe IfNz IfZ Imul Inc InsertOneIntoRegisterAtPoint InsertZeroIntoRegisterAtPoint Ja Jae Jb Jbe Jc Jcxz Je Jecxz Jg Jge Jl Jle Jmp Jna Jnae Jnb Jnbe Jnc Jne Jng Jnge Jnl Jnle Jno Jnp Jns Jnz Jo Jp Jpe Jpo Jrcxz Js Jz K Kaddb Kaddd Kaddq Kaddw Kandb Kandd Kandnb Kandnd Kandnq Kandnw Kandq Kandw Kmovb Kmovd Kmovq Kmovw Knotb Knotd Knotq Knotw Korb Kord Korq Kortestb Kortestd Kortestq Kortestw Korw Kshiftlb Kshiftld Kshiftlq Kshiftlw Kshiftrb Kshiftrd Kshiftrq Kshiftrw Ktestb Ktestd Ktestq Ktestw Kunpckb Kunpckd Kunpckq Kunpckw Kxnorb Kxnord Kxnorq Kxnorw Kxorb Kxord Kxorq Kxorw Label Lahf Lea Leave Link LoadBitsIntoMaskRegister LoadConstantIntoMaskRegister LoadRegFromMm LoadShortStringFromMemoryToZmm LoadZmm LocalData LocateIntelEmulator Loop Lzcnt Macro MaskMemory22 MaskMemoryInRange4_22 Mov Movdqa Mulpd Neg Not OnSegv OpenRead OpenWrite Optimize Or OrBlock Pass PeekR Pextrb Pextrd Pextrq Pextrw Pi32 Pi64 Pinsrb Pinsrd Pinsrq Pinsrw Pop PopEax PopMask PopR PopRR PopZmm Popcnt Popfq PrintErrMemory PrintErrMemoryInHex PrintErrMemoryInHexNL PrintErrMemoryNL PrintErrNL PrintErrRaxInHex PrintErrRegisterInHex PrintErrSpace PrintErrString PrintErrStringNL PrintErrTraceBack PrintErrUtf32 PrintErrUtf8Char PrintErrZF PrintMemory PrintMemoryInHex PrintMemoryNL PrintNL PrintOneRegisterInHex PrintOutMemory PrintOutMemoryInHex PrintOutMemoryInHexNL PrintOutMemoryNL PrintOutNL PrintOutRaxInHex PrintOutRaxInReverseInHex PrintOutRegisterInHex PrintOutRegistersInHex PrintOutRflagsInHex PrintOutRipInHex PrintOutSpace PrintOutString PrintOutStringNL PrintOutTraceBack PrintOutUtf32 PrintOutUtf8Char PrintOutZF PrintRaxInHex PrintRegisterInHex PrintSpace PrintString PrintStringNL PrintTraceBack PrintUtf32 PrintUtf8Char Pslldq Psrldq Push PushMask PushR PushRR PushZmm Pushfq R RComment Rb Rbwdq Rd Rdtsc ReadFile ReadTimeStampCounter RegisterSize RegistersAvailable RegistersFree ReorderSyscallRegisters RestoreFirstFour RestoreFirstFourExceptRax RestoreFirstFourExceptRaxAndRdi RestoreFirstSeven RestoreFirstSevenExceptRax RestoreFirstSevenExceptRaxAndRdi Ret Rq Rs Rutf8 Rw SaveFirstFour SaveFirstSeven SaveRegIntoMm SetLabel SetLengthOfShortString SetMaskRegister SetZF Seta Setae Setb Setbe Setc Sete Setg Setge Setl Setle Setna Setnae Setnb Setnbe Setnc Setne Setng Setnge Setnl Setno Setnp Setns Setnz Seto Setp Setpe Setpo Sets Setz Shl Shr Start StatSize StringLength Structure Sub Subroutine SubroutineStartStack Syscall Test Then Tzcnt UnReorderSyscallRegisters V VERSION Vaddd Vaddpd Variable Vcvtudq2pd Vcvtudq2ps Vcvtuqq2pd Vdpps Vgetmantps Vmovd Vmovdqa32 Vmovdqa64 Vmovdqu Vmovdqu32 Vmovdqu64 Vmovdqu8 Vmovq Vmulpd Vpandb Vpandd Vpandnb Vpandnd Vpandnq Vpandnw Vpandq Vpandw Vpbroadcastb Vpbroadcastd Vpbroadcastq Vpbroadcastw Vpcmpeqb Vpcmpeqd Vpcmpeqq Vpcmpeqw Vpcmpub Vpcmpud Vpcmpuq Vpcmpuw Vpcompressd Vpcompressq Vpexpandd Vpexpandq Vpextrb Vpextrd Vpextrq Vpextrw Vpinsrb Vpinsrd Vpinsrq Vpinsrw Vpmullb Vpmulld Vpmullq Vpmullw Vporb Vpord Vporq Vporvpcmpeqb Vporvpcmpeqd Vporvpcmpeqq Vporvpcmpeqw Vporw Vprolq Vpsubb Vpsubd Vpsubq Vpsubw Vptestb Vptestd Vptestq Vptestw Vpxorb Vpxord Vpxorq Vpxorw Vsqrtpd WaitPid Xchg Xor ah al ax bh bl bp bpl bx ch cl cs cx dh di dil dl ds dx eax ebp ebx ecx edi edx es esi esp fs gs k0 k1 k2 k3 k4 k5 k6 k7 mm0 mm1 mm2 mm3 mm4 mm5 mm6 mm7 r10 r10b r10d r10l r10w r11 r11b r11d r11l r11w r12 r12b r12d r12l r12w r13 r13b r13d r13l r13w r14 r14b r14d r14l r14w r15 r15b r15d r15l r15w r8 r8b r8d r8l r8w r9 r9b r9d r9l r9w rax rbp rbx rcx rdi rdx rflags rip rsi rsp si sil sp spl ss st0 st1 st2 st3 st4 st5 st6 st7 xmm0 xmm1 xmm10 xmm11 xmm12 xmm13 xmm14 xmm15 xmm16 xmm17 xmm18 xmm19 xmm2 xmm20 xmm21 xmm22 xmm23 xmm24 xmm25 xmm26 xmm27 xmm28 xmm29 xmm3 xmm30 xmm31 xmm4 xmm5 xmm6 xmm7 xmm8 xmm9 ymm0 ymm1 ymm10 ymm11 ymm12 ymm13 ymm14 ymm15 ymm16 ymm17 ymm18 ymm19 ymm2 ymm20 ymm21 ymm22 ymm23 ymm24 ymm25 ymm26 ymm27 ymm28 ymm29 ymm3 ymm30 ymm31 ymm4 ymm5 ymm6 ymm7 ymm8 ymm9 zmm0 zmm1 zmm10 zmm11 zmm12 zmm13 zmm14 zmm15 zmm16 zmm17 zmm18 zmm19 zmm2 zmm20 zmm21 zmm22 zmm23 zmm24 zmm25 zmm26 zmm27 zmm28 zmm29 zmm3 zmm30 zmm31 zmm4 zmm5 zmm6 zmm7 zmm8 zmm9);
+@EXPORT_OK    = qw(Add All8Structure AllocateAll8OnStack AllocateMemory And AndBlock Andn Assemble Bswap Bt Btc Btr Bts Bzhi Call CallC CheckGeneralPurposeRegister CheckMaskRegister CheckNumberedGeneralPurposeRegister ChooseRegisters ClassifyInRange ClassifyRange ClassifyWithInRange ClassifyWithInRangeAndSaveOffset ClearMemory ClearRegisters ClearZF CloseFile Cmova Cmovae Cmovb Cmovbe Cmovc Cmove Cmovg Cmovge Cmovl Cmovle Cmovna Cmovnae Cmovnb Cmp Comment CommentWithTraceBack ConvertUtf8ToUtf32 CopyMemory Cpuid CreateArena CreateShortString Cstrlen DComment Db Dbwdq Dd Dec Dq Ds Dw Ef Else Enter Exit Extern Fail For ForEver ForIn Fork FreeMemory G GetNextUtf8CharAsUtf32 GetPPid GetPid GetPidInHex GetUid Hash ISA Idiv If IfC IfEq IfGe IfGt IfLe IfLt IfNc IfNe IfNz IfZ Imul Inc InsertOneIntoRegisterAtPoint InsertZeroIntoRegisterAtPoint Ja Jae Jb Jbe Jc Jcxz Je Jecxz Jg Jge Jl Jle Jmp Jna Jnae Jnb Jnbe Jnc Jne Jng Jnge Jnl Jnle Jno Jnp Jns Jnz Jo Jp Jpe Jpo Jrcxz Js Jz K Kaddb Kaddd Kaddq Kaddw Kandb Kandd Kandnb Kandnd Kandnq Kandnw Kandq Kandw Kmovb Kmovd Kmovq Kmovw Knotb Knotd Knotq Knotw Korb Kord Korq Kortestb Kortestd Kortestq Kortestw Korw Kshiftlb Kshiftld Kshiftlq Kshiftlw Kshiftrb Kshiftrd Kshiftrq Kshiftrw Ktestb Ktestd Ktestq Ktestw Kunpckb Kunpckd Kunpckq Kunpckw Kxnorb Kxnord Kxnorq Kxnorw Kxorb Kxord Kxorq Kxorw Label Lahf Lea Leave Link LoadBitsIntoMaskRegister LoadConstantIntoMaskRegister LoadRegFromMm LoadZmm LocalData LocateIntelEmulator Loop Lzcnt Macro MaskMemory22 MaskMemoryInRange4_22 Mov Movdqa Mulpd Neg Not OnSegv OpenRead OpenWrite Optimize Or OrBlock Pass PeekR Pextrb Pextrd Pextrq Pextrw Pi32 Pi64 Pinsrb Pinsrd Pinsrq Pinsrw Pop PopEax PopMask PopR PopRR PopZmm Popcnt Popfq PrintErrMemory PrintErrMemoryInHex PrintErrMemoryInHexNL PrintErrMemoryNL PrintErrNL PrintErrRaxInHex PrintErrRegisterInHex PrintErrSpace PrintErrString PrintErrStringNL PrintErrTraceBack PrintErrUtf32 PrintErrUtf8Char PrintErrZF PrintMemory PrintMemoryInHex PrintMemoryNL PrintNL PrintOneRegisterInHex PrintOutMemory PrintOutMemoryInHex PrintOutMemoryInHexNL PrintOutMemoryNL PrintOutNL PrintOutRaxInHex PrintOutRaxInReverseInHex PrintOutRegisterInHex PrintOutRegistersInHex PrintOutRflagsInHex PrintOutRipInHex PrintOutSpace PrintOutString PrintOutStringNL PrintOutTraceBack PrintOutUtf32 PrintOutUtf8Char PrintOutZF PrintRaxInHex PrintRegisterInHex PrintSpace PrintString PrintStringNL PrintTraceBack PrintUtf32 PrintUtf8Char Pslldq Psrldq Push PushMask PushR PushRR PushZmm Pushfq R RComment Rb Rbwdq Rd Rdtsc ReadFile ReadTimeStampCounter RegisterSize RegistersAvailable RegistersFree ReorderSyscallRegisters RestoreFirstFour RestoreFirstFourExceptRax RestoreFirstFourExceptRaxAndRdi RestoreFirstSeven RestoreFirstSevenExceptRax RestoreFirstSevenExceptRaxAndRdi Ret Rq Rs Rutf8 Rw SaveFirstFour SaveFirstSeven SaveRegIntoMm SetLabel SetMaskRegister SetZF Seta Setae Setb Setbe Setc Sete Setg Setge Setl Setle Setna Setnae Setnb Setnbe Setnc Setne Setng Setnge Setnl Setno Setnp Setns Setnz Seto Setp Setpe Setpo Sets Setz Shl Shr Start StatSize StringLength Structure Sub Subroutine SubroutineStartStack Syscall Test Then Tzcnt UnReorderSyscallRegisters V VERSION Vaddd Vaddpd Variable Vcvtudq2pd Vcvtudq2ps Vcvtuqq2pd Vdpps Vgetmantps Vmovd Vmovdqa32 Vmovdqa64 Vmovdqu Vmovdqu32 Vmovdqu64 Vmovdqu8 Vmovq Vmulpd Vpandb Vpandd Vpandnb Vpandnd Vpandnq Vpandnw Vpandq Vpandw Vpbroadcastb Vpbroadcastd Vpbroadcastq Vpbroadcastw Vpcmpeqb Vpcmpeqd Vpcmpeqq Vpcmpeqw Vpcmpub Vpcmpud Vpcmpuq Vpcmpuw Vpcompressd Vpcompressq Vpexpandd Vpexpandq Vpextrb Vpextrd Vpextrq Vpextrw Vpinsrb Vpinsrd Vpinsrq Vpinsrw Vpmullb Vpmulld Vpmullq Vpmullw Vporb Vpord Vporq Vporvpcmpeqb Vporvpcmpeqd Vporvpcmpeqq Vporvpcmpeqw Vporw Vprolq Vpsubb Vpsubd Vpsubq Vpsubw Vptestb Vptestd Vptestq Vptestw Vpxorb Vpxord Vpxorq Vpxorw Vsqrtpd WaitPid Xchg Xor ah al ax bh bl bp bpl bx ch cl cs cx dh di dil dl ds dx eax ebp ebx ecx edi edx es esi esp fs gs k0 k1 k2 k3 k4 k5 k6 k7 mm0 mm1 mm2 mm3 mm4 mm5 mm6 mm7 r10 r10b r10d r10l r10w r11 r11b r11d r11l r11w r12 r12b r12d r12l r12w r13 r13b r13d r13l r13w r14 r14b r14d r14l r14w r15 r15b r15d r15l r15w r8 r8b r8d r8l r8w r9 r9b r9d r9l r9w rax rbp rbx rcx rdi rdx rflags rip rsi rsp si sil sp spl ss st0 st1 st2 st3 st4 st5 st6 st7 xmm0 xmm1 xmm10 xmm11 xmm12 xmm13 xmm14 xmm15 xmm16 xmm17 xmm18 xmm19 xmm2 xmm20 xmm21 xmm22 xmm23 xmm24 xmm25 xmm26 xmm27 xmm28 xmm29 xmm3 xmm30 xmm31 xmm4 xmm5 xmm6 xmm7 xmm8 xmm9 ymm0 ymm1 ymm10 ymm11 ymm12 ymm13 ymm14 ymm15 ymm16 ymm17 ymm18 ymm19 ymm2 ymm20 ymm21 ymm22 ymm23 ymm24 ymm25 ymm26 ymm27 ymm28 ymm29 ymm3 ymm30 ymm31 ymm4 ymm5 ymm6 ymm7 ymm8 ymm9 zmm0 zmm1 zmm10 zmm11 zmm12 zmm13 zmm14 zmm15 zmm16 zmm17 zmm18 zmm19 zmm2 zmm20 zmm21 zmm22 zmm23 zmm24 zmm25 zmm26 zmm27 zmm28 zmm29 zmm3 zmm30 zmm31 zmm4 zmm5 zmm6 zmm7 zmm8 zmm9);
 %EXPORT_TAGS  = (all => [@EXPORT, @EXPORT_OK]);
 
 # podDocumentation
@@ -15659,9 +15652,9 @@ B<Example:>
   END
 
 
-=head2 Nasm::X86::Tree::Clone($tree, $first)
+=head2 Nasm::X86::Tree::Reload($tree, $first)
 
-Clone the specified tree descriptions.
+Reload the specified tree descriptions.
 
      Parameter  Description
   1  $tree      Tree descriptor
@@ -15673,20 +15666,20 @@ B<Example:>
     my $L = K(loop, 4);
     my $b = CreateArena;
     my $T = $b->CreateTree;
-    my $t = $T->Clone;
+    my $t = $T->Reload;
 
     $L->for(sub
      {my ($i, $start, $next, $end) = @_;
-      $t->insertTreeAndClone($i);
+      $t->insertTreeAndReload($i);
       $t->first->outNL;
      });
 
     $t->insert($L, $L*2);
 
-    my $f = $T->Clone;
+    my $f = $T->Reload;
     $L->for(sub
      {my ($i, $start, $next, $end) = @_;
-      $f->findAndClone($i);
+      $f->findAndReload($i);
       $i->out('i: '); $f->found->out('  f: '); $f->data->out('  d: '); $f->subTree->outNL('  s: ');
      });
     $f->find($L);
@@ -15715,7 +15708,7 @@ Find a key in a tree and test whether the found data is a sub tree.  The results
   3  $bs        Optional arena address
   4  $first     Optional start node
 
-=head2 Nasm::X86::Tree::findAndClone($t, $key)
+=head2 Nasm::X86::Tree::findAndReload($t, $key)
 
 Find a key in the specified tree and clone it is it is a sub tree.
 
@@ -15729,20 +15722,20 @@ B<Example:>
     my $L = K(loop, 4);
     my $b = CreateArena;
     my $T = $b->CreateTree;
-    my $t = $T->Clone;
+    my $t = $T->Reload;
 
     $L->for(sub
      {my ($i, $start, $next, $end) = @_;
-      $t->insertTreeAndClone($i);
+      $t->insertTreeAndReload($i);
       $t->first->outNL;
      });
 
     $t->insert($L, $L*2);
 
-    my $f = $T->Clone;
+    my $f = $T->Reload;
     $L->for(sub
      {my ($i, $start, $next, $end) = @_;
-      $f->findAndClone($i);
+      $f->findAndReload($i);
       $i->out('i: '); $f->found->out('  f: '); $f->data->out('  d: '); $f->subTree->outNL('  s: ');
      });
     $f->find($L);
@@ -15961,7 +15954,7 @@ B<Example:>
   END
 
 
-=head2 Nasm::X86::Tree::insertTreeAndClone($t, $key)
+=head2 Nasm::X86::Tree::insertTreeAndReload($t, $key)
 
 Insert a new sub tree into the specified tree tree under the specified key and return a descriptor for it.  If the tree already exists, return a descriptor for it.
 
@@ -15975,20 +15968,20 @@ B<Example:>
     my $L = K(loop, 4);
     my $b = CreateArena;
     my $T = $b->CreateTree;
-    my $t = $T->Clone;
+    my $t = $T->Reload;
 
     $L->for(sub
      {my ($i, $start, $next, $end) = @_;
-      $t->insertTreeAndClone($i);
+      $t->insertTreeAndReload($i);
       $t->first->outNL;
      });
 
     $t->insert($L, $L*2);
 
-    my $f = $T->Clone;
+    my $f = $T->Reload;
     $L->for(sub
      {my ($i, $start, $next, $end) = @_;
-      $f->findAndClone($i);
+      $f->findAndReload($i);
       $i->out('i: '); $f->found->out('  f: '); $f->data->out('  d: '); $f->subTree->outNL('  s: ');
      });
     $f->find($L);
@@ -18402,7 +18395,7 @@ Total size in bytes of all files assembled during testing.
 
 173 L<Nasm::X86::Tree::clearTree|/Nasm::X86::Tree::clearTree> - Clear the tree bit in the numbered zmm register holding the keys of a node to indicate that the data element indexed by the specified register is an offset to a sub tree in the containing arena.
 
-174 L<Nasm::X86::Tree::Clone|/Nasm::X86::Tree::Clone> - Clone the specified tree descriptions.
+174 L<Nasm::X86::Tree::Reload|/Nasm::X86::Tree::Reload> - Reload the specified tree descriptions.
 
 175 L<Nasm::X86::Tree::decCountInData|/Nasm::X86::Tree::decCountInData> - Decrement the count field in the up field of the data block associate with the root node.
 
@@ -18418,7 +18411,7 @@ Total size in bytes of all files assembled during testing.
 
 181 L<Nasm::X86::Tree::find|/Nasm::X86::Tree::find> - Find a key in a tree and test whether the found data is a sub tree.
 
-182 L<Nasm::X86::Tree::findAndClone|/Nasm::X86::Tree::findAndClone> - Find a key in the specified tree and clone it is it is a sub tree.
+182 L<Nasm::X86::Tree::findAndReload|/Nasm::X86::Tree::findAndReload> - Find a key in the specified tree and clone it is it is a sub tree.
 
 183 L<Nasm::X86::Tree::findAndSplit|/Nasm::X86::Tree::findAndSplit> - Find a key in a tree which is known to contain at least one key splitting full nodes along the path to the key.
 
@@ -18452,7 +18445,7 @@ Total size in bytes of all files assembled during testing.
 
 198 L<Nasm::X86::Tree::insertTree|/Nasm::X86::Tree::insertTree> - Insert a sub tree into the specified tree tree under the specified key.
 
-199 L<Nasm::X86::Tree::insertTreeAndClone|/Nasm::X86::Tree::insertTreeAndClone> - Insert a new sub tree into the specified tree tree under the specified key and return a descriptor for it.
+199 L<Nasm::X86::Tree::insertTreeAndReload|/Nasm::X86::Tree::insertTreeAndReload> - Insert a new sub tree into the specified tree tree under the specified key and return a descriptor for it.
 
 200 L<Nasm::X86::Tree::isTree|/Nasm::X86::Tree::isTree> - Set the Zero Flag to oppose the tree bit in the numbered zmm register holding the keys of a node to indicate whether the data element indicated by the specified register is an offset to a sub tree in the containing arena or not.
 
@@ -22196,24 +22189,24 @@ END
  }
 
 #latest:
-if (1) {                                                                        #TNasm::X86::Tree::insertTreeAndClone #TNasm::X86::Tree::Clone  #TNasm::X86::Tree::findAndClone
+if (1) {                                                                        #TNasm::X86::Tree::insertTreeAndReload #TNasm::X86::Tree::Reload  #TNasm::X86::Tree::findAndReload
   my $L = K(loop, 4);
   my $b = CreateArena;
   my $T = $b->CreateTree;
-  my $t = $T->Clone;
+  my $t = $T->Reload;
 
   $L->for(sub
    {my ($i, $start, $next, $end) = @_;
-    $t->insertTreeAndClone($i);
+    $t->insertTreeAndReload($i);
     $t->first->outNL;
    });
 
   $t->insert($L, $L*2);
 
-  my $f = $T->Clone;
+  my $f = $T->Reload;
   $L->for(sub
    {my ($i, $start, $next, $end) = @_;
-    $f->findAndClone($i);
+    $f->findAndReload($i);
     $i->out('i: '); $f->found->out('  f: '); $f->data->out('  d: '); $f->subTree->outNL('  s: ');
    });
   $f->find($L);
@@ -23056,7 +23049,31 @@ if (1) {                                                                        
 END
  }
 
-ok 1 for 1..10;
+latest:
+if (1) {                                                                        #TNasm::X86::Arena::CreateQuarks #TNasm::X86::Quarks::quarkFromShortString #TNasm::X86::Quarks::shortStringFromQuark
+makeDieConfess;
+  my $a = V('a', 1);
+  my $r = R('r')->copyRef($a);
+  my $R = R('R')->copyRef($r);
+
+  $a->outNL;
+  $r->outNL;
+  $R->outNL;
+
+  $a->copy(2);
+
+  $a->outNL;
+  $r->outNL;
+  $R->outNL;
+
+  ok Assemble(debug => 0, trace => 0, eq => <<END);
+a: 0000 0000 0000 0001
+r: 0000 0000 0000 0001
+R: 0000 0000 0000 0001
+END
+ }
+
+ok 1 for 2..10;
 
 #unlink $_ for qw(hash print2 sde-log.txt sde-ptr-check.out.txt z.txt);         # Remove incidental files
 unlink $_ for qw(hash print2);                                                  # Remove incidental files
