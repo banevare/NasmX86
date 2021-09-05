@@ -5569,7 +5569,7 @@ sub Nasm::X86::Arena::CreateTree($;$)                                           
    {my ($p) = @_;
     Comment "Create a block multiway Tree start";
     my $keys = $t->allocBlock($$p{bs});                                         # Allocate first keys block
-    $$p{first}->copy($keys);
+    $$p{first}->copy($keys);                                                    # Save address of first block used to contain the root of the tree
     PushR my @save = (r8, r9, zmm31);
     ClearRegisters zmm31;
     $t->putLoop($t->allocBlock($$p{bs}), 31, r8);                               # Keys loops to data - for the first 7 keys we should store the corresponding data further up in the block rather than creating a new block.
@@ -5582,12 +5582,12 @@ sub Nasm::X86::Arena::CreateTree($;$)                                           
   $t                                                                            # Description of array
  }
 
-sub Nasm::X86::Tree::Reload($;$)  ## Needs arena                                              # Reload the specified tree descriptions.
- {my ($tree, $first) = @_;                                                      # Tree descriptor, optional first node of tree
-  @_ == 1 or @_ == 2 or confess;
+sub Nasm::X86::Tree::reload($%)                                                 # Reload the specified tree descriptions.
+ {my ($tree, %options) = @_;                                                    # Tree descriptor, {first=>first node of tree if not the existing first node; arena=>arena used by tree if not the existing arena}
+  @_ >= 1 or confess "At least one parameter";
 
-  my $t = $tree->bs->DescribeTree;                                              # Return a descriptor for a tree
-  $t->first->copy($first//$tree->first);
+  my $t = $tree->bs->DescribeTree($options{arena});                             # Return a descriptor for a tree
+  $t->first->copy($options{first}//$tree->first);                                # Set the first block
   $t
  }
 
@@ -6210,7 +6210,7 @@ sub Nasm::X86::Tree::findAndReload($$)                                          
 sub Nasm::X86::Tree::findShortString($$)                                        # Find the data at the end of a key chain held in a short string.  Return a tree descriptor referencing the data located or marked as failed to find.
  {my ($tree, $string) = @_;                                                     # Tree descriptor, short string
   @_ == 2 or confess "2 parameters";
-  my $t = $tree->Reload;                                                        # Reload the input tree so we can walk down the chain
+  my $t = $tree->reload;                                                        # Reload the input tree so we can walk down the chain
   my $w = $tree->width;                                                         # Size of a key on the tree
   my $z = $string->z;                                                           # The zmm containing the short string
 
@@ -6499,7 +6499,7 @@ sub Nasm::X86::Tree::insertShortString($$$)                                     
     Lea rax, "[rsp+1]";                                                         # Address first data byte of short string
     $L->setReg(r15);                                                            # Length of key remaining to write into key chain
 
-    my $t = $tree->Reload($$p{first});                                          # Reload the input tree so we can walk down the chain from it.
+    my $t = $tree->reload(first=>$$p{first});                                   # Reload the input tree so we can walk down the chain from it.
 
     AndBlock
      {my ($fail, $end, $start) = @_;                                            # Fail block, end of fail block, start of test block
@@ -7274,7 +7274,7 @@ sub Nasm::X86::Quarks::quarkFromShortString($$)                                 
   AndBlock
    {my ($fail, $end, $start) = @_;                                              # Fail block, end of fail block, start of test block
 
-    my $t = $q->stringsToNumbers->Reload;                                       # Reload strings to numbers
+    my $t = $q->stringsToNumbers->reload;                                       # Reload strings to numbers
     $t->findAndReload($l);                                                      # Separate by length
     If $t->found == 0, Then {Jmp $fail};                                        # Length not found
     $t->findShortString($string);                                               # Find the specified short string
@@ -7285,7 +7285,7 @@ sub Nasm::X86::Quarks::quarkFromShortString($$)                                 
    {my $N = $q->numbersToStrings->size;                                         # Get the number of quarks
     my $S = $q->arena->CreateString;
        $S->appendShortString($string);
-    my $T = $q->stringsToNumbers->Reload;                                       # Reload strings to numbers tree descriptor
+    my $T = $q->stringsToNumbers->reload;                                       # Reload strings to numbers tree descriptor
     $T->insertTreeAndReload($l);                                                # Classify strings by length
     $T->insertShortString($string, $N);                                         # Insert the string with the  quark number as data
     $q->numbersToStrings->push(element => $S->first);                           # Append the quark number with a reference to the string
@@ -22232,7 +22232,7 @@ if (1) {                                                                        
   my $L = K(loop, 4);
   my $b = CreateArena;
   my $T = $b->CreateTree;
-  my $t = $T->Reload;
+  my $t = $T->reload;
 
   $L->for(sub
    {my ($i, $start, $next, $end) = @_;
@@ -22242,7 +22242,7 @@ if (1) {                                                                        
 
   $t->insert($L, $L*2);
 
-  my $f = $T->Reload;
+  my $f = $T->reload;
   $L->for(sub
    {my ($i, $start, $next, $end) = @_;
     $f->findAndReload($i);
