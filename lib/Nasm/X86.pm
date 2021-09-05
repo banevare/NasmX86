@@ -1761,6 +1761,11 @@ sub Nasm::X86::Variable::copyRef($$;$)                                          
   $left;                                                                        # Chain
  }
 
+sub Nasm::X86::Variable::equate($$)                                             # Equate the left hand variable to the right hand variable so that they share a common location in memory.
+ {my ($left, $right, $Transfer) = @_;                                           # Left variable, right variable
+  $left->label = $right->label;
+ }
+
 sub Nasm::X86::Variable::copyZF($)                                              # Copy the current state of the zero flag into a variable.
  {my ($var) = @_;                                                               # Variable
   @_ == 1 or confess;
@@ -4003,8 +4008,8 @@ sub StringLength(@)                                                             
   $z
  }
 
-sub DescribeArena()                                                             # Describe a relocatable arena.
- {my (%options) = @_;                                                           # Free=>1 adds a free chain.
+sub DescribeArena(;$)                                                           # Describe a relocatable arena.
+ {my ($bs) = @_;                                                                # Optional variable addressing the start of the arena
   my $N = 4096;                                                                 # Initial size of arena
 
   my $quad = RegisterSize rax;                                                  # Field offsets
@@ -4019,11 +4024,11 @@ sub DescribeArena()                                                             
     used      => $used,                                                         # Used field offset
     free      => $free,                                                         # Free chain offset
     data      => $data,                                                         # The start of the data
-    bs        => undef,                                                         # Variable that addresses the arena
+    bs        => $bs,                                                           # Variable that addresses the arena
    );
  }
 
-sub CreateArena(%)                                                              # Create an relocatable arena and returns its address in rax. Optionally add a chain header so that 64 byte blocks of memory can be freed and reused within the arena.
+sub CreateArena(%)                                                              # Create an relocatable arena and returns its address in rax. We add a chain header so that 64 byte blocks of memory can be freed and reused within the arena.
  {my (%options) = @_;                                                           # Free=>1 adds a free chain.
   my $arena = DescribeArena;                                                    # Describe an arena
   my $N     = $arena->N;
@@ -4045,17 +4050,9 @@ sub CreateArena(%)                                                              
     RestoreFirstFour;
    } [qw(bs)], name => 'CreateArena';
 
-  $s->call(my $bs = G(bs));                                                     # Variable that holds the reference to the arena
+  $s->call(my $bs = G(bs));                                                     # Variable that holds the reference to the arena which is uodated when the arena is reallocated
 
-  $arena->reload($bs);                                                          # Reload arena
-
-  $arena
- }
-
-sub Nasm::X86::Arena::reload($$)                                                # Reload an arena so that it uses the supplied address as its base address
- {my ($arena, $bs) = @_;                                                        # Arena descriptor, arena address
-  @_ == 2 or confess '2 parameters';
-  $arena->bs = $bs;                                                             # Set the base address of the arena
+  DescribeArena($bs);                                                           # Describe the arena with its address
  }
 
 sub Nasm::X86::Arena::chain($$$@)                                               #P Return a variable with the end point of a chain of double words in the arena starting at the specified variable.
@@ -5585,7 +5582,7 @@ sub Nasm::X86::Arena::CreateTree($;$)                                           
   $t                                                                            # Description of array
  }
 
-sub Nasm::X86::Tree::Reload($;$)                                                # Reload the specified tree descriptions.
+sub Nasm::X86::Tree::Reload($;$)  ## Needs arena                                              # Reload the specified tree descriptions.
  {my ($tree, $first) = @_;                                                      # Tree descriptor, optional first node of tree
   @_ == 1 or @_ == 2 or confess;
 
