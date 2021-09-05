@@ -5165,19 +5165,6 @@ sub Nasm::X86::Arena::DescribeArray($)                                          
   $s                                                                            # Description of array
  }
 
-sub Nasm::X86::Arena::CreateArray22($)                                            # Create a dynamic array held in an arena.
- {my ($arena) = @_;                                                             # Arena description
-  @_ == 1 or confess;
-  my $b = RegisterSize zmm0;                                                    # Size of a block == size of a zmm register
-  my $o = RegisterSize eax;                                                     # Size of a double word
-
-  my $a = $arena->DescribeArray;                                                # Describe array
-
-  my $first = $a->allocBlock($arena->bs);                                       # Allocate first block
-  $a->first->copy($first);                                                      # Save first block
-  $a                                                                            # Description of array
- }
-
 sub Nasm::X86::Arena::CreateArray($)                                            # Create a dynamic array held in an arena.
  {my ($arena) = @_;                                                             # Arena description
   @_ == 1 or confess;
@@ -7293,6 +7280,16 @@ sub Nasm::X86::Arena::CreateQuarks($)                                           
   $q->numbersToStrings = $arena->CreateArray;
 
   $q                                                                            # Description of array
+ }
+
+sub Nasm::X86::Quarks::reload($%)                                               # Reload the description of a set of quarks.
+ {my ($q, %options) = @_;                                                       # Quarks, {arena=>arena to use; tree => first tree block; array => first array block}
+  @_ >= 1 or confess "One or more parameters";
+
+  $q->stringsToNumbers->reload(arena=>$options{arena}, first=>$options{tree});
+  $q->numbersToStrings->reload(arena=>$options{arena}, first=>$options{array});
+
+  $q                                                                            # Return upgraded quarks descriptor
  }
 
 sub Nasm::X86::Quarks::quarkFromShortString($$)                                 # Create a quark from a short string.
