@@ -923,6 +923,7 @@ sub Subroutine(&$%)                                                             
   $text[$E] = $N ? <<END : '';                                                  # Rewrite enter instruction now that we know how much stack space we need
   Enter $N*8, 0
 END
+
   $s                                                                            # Subroutine definition
  }
 
@@ -3826,6 +3827,8 @@ sub ClassifyWithInRangeAndSaveOffset(@)                                         
 sub CreateShortString($)                                                        # Create a description of a short string.
  {my ($zmm) = @_;                                                               # Numbered zmm containing the string
   @_ == 1 or confess;
+  $zmm =~ m(\A\d+\Z) && $zmm >=0 && $zmm < 32 or
+    confess "Zmm register number required";
 
   genHash(__PACKAGE__."::ShortString",                                          # A short string up to 63 bytes long held in a zmm register.
     maximumLength => RegisterSize(zmm0) - 1,                                    # The maximum length of a short string
@@ -6238,7 +6241,7 @@ sub Nasm::X86::Tree::findShortString($$)                                        
     $t->first->copy($$p{first});                                                # Reload the input tree so we can walk down the chain
     $$p{found}->copy(K(zero, 0));                                               # Not yet found
 
-    PushR, rax, r14, r15;
+    PushR rax, r14, r15;
     ClearRegisters r15;
     PushR r15, $z;                                                              # Put the zmm holding the short string onto the stack with a register block full of zeroes above it
     Lea rax, "[rsp+1]";                                                         # Address first data byte of short string
@@ -6511,7 +6514,7 @@ sub Nasm::X86::Tree::insertShortString($$$)                                     
    {my ($p) = @_;
     my $L = $string->len;                                                       # Length of the short string
 
-    PushR, rax, r14, r15;
+    PushR rax, r14, r15;
     ClearRegisters r15;
     PushR r15, $z;                                                              # Put the zmm holding the short string onto the stack with a register block full of zeroes above it
     Lea rax, "[rsp+1]";                                                         # Address first data byte of short string
