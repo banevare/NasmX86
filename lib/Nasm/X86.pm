@@ -5146,15 +5146,13 @@ sub Nasm::X86::String::clear($)                                                 
 
 #D1 Array                                                                       # Array constructed as a set of blocks in an arena
 
-sub Nasm::X86::Arena::CreateArray($)                                            # Create a array in an arena.
+sub Nasm::X86::Arena::DescribeArray($)                                          # Describe a dynamic array held in an arena.
  {my ($arena) = @_;                                                             # Arena description
   @_ == 1 or confess;
   my $b = RegisterSize zmm0;                                                    # Size of a block == size of a zmm register
   my $o = RegisterSize eax;                                                     # Size of a double word
 
-  Comment "Allocate a new array in an arena";
-
-  my $p = 0;                                                                    # Position in block
+#  my $p = 0;                                                                    # Position in block
   my $s = genHash(__PACKAGE__."::Array",                                        # String definition
     bs     => $arena,                                                           # Bytes string definition
     width  => $o,                                                               # Width of each element
@@ -5164,9 +5162,39 @@ sub Nasm::X86::Arena::CreateArray($)                                            
    );
   $s->slots2 == 16 or confess "Number of slots per block not 16";               # Slots per block
 
-  my $first = $s->allocBlock($arena->bs);                                       # Allocate first block
-  $s->first->copy($first);                                                      # Save first block
   $s                                                                            # Description of array
+ }
+
+sub Nasm::X86::Arena::CreateArray22($)                                            # Create a dynamic array held in an arena.
+ {my ($arena) = @_;                                                             # Arena description
+  @_ == 1 or confess;
+  my $b = RegisterSize zmm0;                                                    # Size of a block == size of a zmm register
+  my $o = RegisterSize eax;                                                     # Size of a double word
+
+  my $a = $arena->DescribeArray;                                                # Describe array
+
+  my $first = $a->allocBlock($arena->bs);                                       # Allocate first block
+  $a->first->copy($first);                                                      # Save first block
+  $a                                                                            # Description of array
+ }
+
+sub Nasm::X86::Arena::CreateArray($)                                            # Create a dynamic array held in an arena.
+ {my ($arena) = @_;                                                             # Arena description
+  @_ == 1 or confess;
+
+  my $a = $arena->DescribeArray;                                                # Describe array
+
+  $a->reload(first => $a->allocBlock($arena->bs));                              # Allocate first block and return created array descriptor
+ }
+
+sub Nasm::X86::Array::reload($%)                                                # Reload the specified array description.
+ {my ($array, %options) = @_;                                                   # Array descriptor, {first=>first block of array if not the existing first node; arena=>arena used by array if not the existing arena}
+  @_ >= 1 or confess "At least one parameter";
+
+  my $a = $array->bs->DescribeArray;                                            # Return a descriptor for an array
+  $a->bs = $options{arena} if $options{arena};
+  $a->first->copy($options{first}//$array->first);                              # Set the first block
+  $a
  }
 
 sub Nasm::X86::Array::address($)                                                #P Address of a string.
@@ -5531,6 +5559,8 @@ sub Nasm::X86::Array::put($@)                                                   
 
 sub Nasm::X86::Arena::DescribeTree($)                                           # Return a descriptor for a tree in the specified arena.
  {my ($arena) = @_;                                                             # Arena descriptor
+  @_ == 1 or confess;
+
   my $b = RegisterSize zmm0;                                                    # Size of a block == size of a zmm register
   my $o = RegisterSize eax;                                                     # Size of a double word
 
@@ -5582,12 +5612,13 @@ sub Nasm::X86::Arena::CreateTree($;$)                                           
   $t                                                                            # Description of array
  }
 
-sub Nasm::X86::Tree::reload($%)                                                 # Reload the specified tree descriptions.
+sub Nasm::X86::Tree::reload($%)                                                 # Reload the specified tree description.
  {my ($tree, %options) = @_;                                                    # Tree descriptor, {first=>first node of tree if not the existing first node; arena=>arena used by tree if not the existing arena}
   @_ >= 1 or confess "At least one parameter";
 
-  my $t = $tree->bs->DescribeTree($options{arena});                             # Return a descriptor for a tree
-  $t->first->copy($options{first}//$tree->first);                                # Set the first block
+  my $t = $tree->bs->DescribeTree;                                              # Return a descriptor for a tree
+  $t->bs = $options{arena} if $options{arena};                                  # Set the arena if requested
+  $t->first->copy($options{first}//$tree->first);                               # Set the first block
   $t
  }
 
