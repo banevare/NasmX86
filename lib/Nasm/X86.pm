@@ -7255,7 +7255,7 @@ sub Nasm::X86::Tree::by($&;$$)                                                  
   SetLabel $end;                                                                # End of the loop
  }
 
-#D1 Quarks                                                                      # Quarks allow us to replace unique strings with unique numbers.  We can translate either from a string to its associated number or from a number to its associated string.
+#D1 Quarks                                                                      # Quarks allow us to replace unique strings with unique numbers.  We can translate either from a string to its associated number or from a number to its associated string or from a quark in one set of quarks to the corresponding quark with the same string in another set of quarks.
 
 sub Nasm::X86::Arena::DescribeQuarks($)                                         # Return a descriptor for a tree in the specified arena.
  {my ($arena) = @_;                                                             # Arena descriptor
@@ -7319,7 +7319,7 @@ sub Nasm::X86::Quarks::quarkFromShortString($$)                                 
   $Q                                                                            # Quark number for short string in a variable
  }
 
-sub Nasm::X86::Quarks::locateQuarkFromShortString($$)                           # Locate (if possible) but do not create a quark from a short string. A quark of -1 is returned if ther is no matching quark.
+sub Nasm::X86::Quarks::locateQuarkFromShortString($$)                           # Locate (if possible) but do not create a quark from a short string. A quark of -1 is returned if there is no matching quark otherwise the number of the matching quark is returned in a variable.
  {my ($q, $string) = @_;                                                        # Quarks, short string
   @_ == 2 or confess "2 parameters";
 
@@ -7366,7 +7366,7 @@ sub Nasm::X86::Quarks::shortStringFromQuark($$$)                                
   $f
  }
 
-sub Nasm::X86::Quarks::quarkToQuark($$$)                                        # Given a variable quark number in one set of quarks find the corresponding number in another set of quarks and return it in a variable.
+sub Nasm::X86::Quarks::quarkToQuark($$$)                                        # Given a variable quark number in one set of quarks find the corresponding quark in another set of quarks and return it in a variable.  No new quarks are created in this process.  If the quark cannot be found in the forst set we return -1, if it cannot be found in teh seciond set we return -2 else the number of the matching quark.
  {my ($Q, $number, $q) = @_;                                                    # Firsts et of quarks, variable quark number in first set, second set of quarks
   @_ == 3 or confess "3 parameters";
 
@@ -23175,8 +23175,10 @@ if (1) {                                                                        
    }
   PrintOutNL;
 
-  my $q3 = $Q1->quarkToQuark(K(three,3), $Q2);
-  $q3->outNL;
+  $Q1->quarkToQuark(K(three,3), $Q1)->outNL;
+  $Q1->quarkToQuark(K(three,3), $Q2)->outNL;
+  $Q2->quarkToQuark(K(two,  2), $Q1)->outNL;
+  $Q2->quarkToQuark(K(two,  2), $Q2)->outNL;
 
   ok Assemble(debug => 0, trace => 0, eq => <<END);
 Q1 0: 0000 0000 0000 0000
@@ -23191,6 +23193,9 @@ Q2 2: 0000 0000 0000 0002
 Q2 3: 0000 0000 0000 0003
 Q2 4: 0000 0000 0000 0004
 
+found: 0000 0000 0000 0003
+found: 0000 0000 0000 0002
+found: 0000 0000 0000 0003
 found: 0000 0000 0000 0002
 END
  }
