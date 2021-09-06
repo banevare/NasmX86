@@ -8,6 +8,7 @@
 # tree::print - speed up decision as to whether we are on a tree or not
 # Replace empty in boolean arithmetic with boolean and then check it in If to confirm that we are testing a boolean value
 # M: optimize PushR, would the print routines work better off the stack? elif ? switch statement?  confess? Number of parameters test?  Remove macro? Extend short strings.
+# M: v->copy now allows constant numbers so remove K(xxx, number)
 package Nasm::X86;
 our $VERSION = "20210905";
 use warnings FATAL => qw(all);
@@ -4575,9 +4576,9 @@ sub Nasm::X86::Arena::dump($;$)                                                 
 
 #D1 String                                                                      # Strings made from zmm sized blocks of text
 
-sub Nasm::X86::Arena::DescribeString($)                                         # Describe a string.
- {my ($arena) = @_;                                                             # Arena description
-  @_ == 1 or confess;
+sub Nasm::X86::Arena::DescribeString($%)                                        # Describe a string and optionally set its first block .
+ {my ($arena, %options) = @_;                                                   # Arena description, {first=> offset of first block}
+  @_ >= 1 or confess;
   my $b = RegisterSize zmm0;                                                    # Size of a block == size of a zmm register
   my $o = RegisterSize eax;                                                     # Size of a double word
 
@@ -4587,7 +4588,7 @@ sub Nasm::X86::Arena::DescribeString($)                                         
     next    => $b - 1 * $o,                                                     # Location of next offset in block in bytes
     prev    => $b - 2 * $o,                                                     # Location of prev offset in block in bytes
     length  => $b - 2 * $o - 1,                                                 # Maximum length in a block
-    first   => G('first'),                                                      # Variable addressing first block in string
+    first   => ($options{first}//G('first')),                                   # Variable addressing first block in string if one has not been supplied
    );
  }
 
@@ -5082,9 +5083,9 @@ sub Nasm::X86::String::saveToShortString($$;$)                                  
     $short->setLength($b);                                                      # Set length of short string
 
     PopR;
-   } [qw(first bs)], name => 'Nasm::X86::String::saveToShortString_$z';         # Separate by zmm register being loaded
+   } [qw(bs first)], name => "Nasm::X86::String::saveToShortString_$z";         # Separate by zmm register being loaded
 
-  $s->call($string->address, $first//$string->first);
+  $s->call(bs => $string->address, first => ($first//$string->first));
 
   $short                                                                        # Chain
  }
@@ -7318,6 +7319,30 @@ sub Nasm::X86::Quarks::quarkFromShortString($$)                                 
   $Q                                                                            # Quark number for short string in a variable
  }
 
+sub Nasm::X86::Quarks::locateQuarkFromShortString($$)                           # Locate (if possible) but do not create a quark from a short string. A quark of -1 is returned if ther is no matching quark.
+ {my ($q, $string) = @_;                                                        # Quarks, short string
+  @_ == 2 or confess "2 parameters";
+
+  my $l = $string->len;
+  my $Q = V(quark);                                                             # The variable that will hold the quark number
+
+  AndBlock
+   {my ($fail, $end, $start) = @_;                                              # Fail block, end of fail block, start of test block
+
+    my $t = $q->stringsToNumbers->reload;                                       # Reload strings to numbers
+    $t->findAndReload($l);                                                      # Separate by length
+    If $t->found == 0, Then {Jmp $fail};                                        # Length not found
+    $t->findShortString($string);                                               # Find the specified short string
+    If $t->found == 0, Then {Jmp $fail};                                        # Length not found
+    $Q->copy($t->data);                                                         # Load found quark number
+   }
+  Fail
+   {$Q->copy(-1);
+   };
+
+  $Q                                                                            # Quark number for short string in a variable
+ }
+
 sub Nasm::X86::Quarks::shortStringFromQuark($$$)                                # Load a short string from the quark with the specified number. Returns a variable that is set to one if the quark was found else zero.
  {my ($q, $number, $string) = @_;                                               # Quarks, variable quark number, short string to load
   @_ == 3 or confess "3 parameters";
@@ -7327,19 +7352,44 @@ sub Nasm::X86::Quarks::shortStringFromQuark($$$)                                
   AndBlock
    {my ($fail, $end, $start) = @_;                                              # Fail block, end of fail block, start of test block
     my $N = $q->numbersToStrings->size;                                         # Get the number of quarks
-    If $number >= $N, Then {Jmp $fail};
-    $q->numbersToStrings->get(index => $number, my $e = V(element));
+    If $number >= $N, Then {Jmp $fail};                                         # Quark number too big to be valid
+    $q->numbersToStrings->get(index => $number, my $e = V(element));            # Get long string indexed by quark
 
-    my $S = $q->numbersToStrings->bs->DescribeString;  #### The next two lines should be elided
-    $S->first->copy($e);
-    $S->saveToShortString($string);
-    $f->copy(K(one, 1));
+    my $S = $q->numbersToStrings->bs->DescribeString(first=>$e);                # Long string descriptor
+    $S->saveToShortString($string);                                             # Load long string into short string
+    $f->copy(K(one, 1));                                                        # Show short string is valid
    }
   Fail                                                                          # Quark too big
    {$f->copy(K(zero, 0));                                                       # Show failure code
    };
 
   $f
+ }
+
+sub Nasm::X86::Quarks::quarkToQuark($$$)                                        # Given a variable quark number in one set of quarks find the corresponding number in another set of quarks and return it in a variable.
+ {my ($Q, $number, $q) = @_;                                                    # Firsts et of quarks, variable quark number in first set, second set of quarks
+  @_ == 3 or confess "3 parameters";
+
+  my $N = V(found);                                                             # Whether the quark was found
+
+  PushR zmm31;
+
+  my $s = CreateShortString 0;
+  If $Q->shortStringFromQuark($number, $s) == 0,                                # Quark not found in the first set
+  Then
+   {$N->copy(-1);                                                               # Not found in first set
+   },
+  Ef {$q->locateQuarkFromShortString($s) >= 0}                                  # Found the matching quark in the second set
+  Then
+   {$N->copy($q->locateQuarkFromShortString($s));                               # Load string from quark in second set
+   },
+  Else
+   {$N->copy(-2);                                                               # Not found in second set
+   };
+
+  PopR;
+
+  $N                                                                            # Return the variable containing thq matching quark or -1 if no such quark
  }
 
 #D1 Assemble                                                                    # Assemble generated code
@@ -23101,6 +23151,52 @@ END
 
 #latest:
 if (1) {                                                                        #TNasm::X86::Arena::CreateQuarks #TNasm::X86::Quarks::quarkFromShortString #TNasm::X86::Quarks::shortStringFromQuark
+  my $N  = 5;
+  my $a  = CreateArena;                                                         # Arena containing quarks
+  my $Q1 = $a->CreateQuarks;                                                    # Quarks
+  my $Q2 = $a->CreateQuarks;                                                    # Quarks
+
+  my $s = CreateShortString(0);                                                 # Short string used to load and unload quarks
+  my $d = Rb(1..63);
+
+  for my $i(1..$N)                                                              # Load first set of quarks
+   {my $j = $i - 1;
+    $s->load(K(address, $d), K(size, 4+$i));
+    my $q = $Q1->quarkFromShortString($s);
+    $q->outNL("Q1 $j: ");
+   }
+  PrintOutNL;
+
+  for my $i(1..$N)                                                              # Load second set of quarks
+   {my $j = $i - 1;
+    $s->load(K(address, $d), K(size, 5+$i));
+    my $q = $Q2->quarkFromShortString($s);
+    $q->outNL("Q2 $j: ");
+   }
+  PrintOutNL;
+
+  my $q3 = $Q1->quarkToQuark(K(three,3), $Q2);
+  $q3->outNL;
+
+  ok Assemble(debug => 0, trace => 0, eq => <<END);
+Q1 0: 0000 0000 0000 0000
+Q1 1: 0000 0000 0000 0001
+Q1 2: 0000 0000 0000 0002
+Q1 3: 0000 0000 0000 0003
+Q1 4: 0000 0000 0000 0004
+
+Q2 0: 0000 0000 0000 0000
+Q2 1: 0000 0000 0000 0001
+Q2 2: 0000 0000 0000 0002
+Q2 3: 0000 0000 0000 0003
+Q2 4: 0000 0000 0000 0004
+
+found: 0000 0000 0000 0002
+END
+ }
+
+#latest:
+if (1) {                                                                        #TNasm::X86::Arena::CreateQuarks #TNasm::X86::Quarks::quarkFromShortString #TNasm::X86::Quarks::shortStringFromQuark
   my $s = CreateShortString(0);                                                 # Short string used to load and unload quarks
   my $d = Rb(1..63);
   $s->loadDwordBytes(0, K(address, $d), K(size, 9));
@@ -23113,7 +23209,6 @@ END
 
 #latest:
 if (1) {                                                                        #TNasm::Variable::copy  #TNasm::Variable::copyRef
-makeDieConfess;
   my $a = V('a', 1);
   my $r = R('r')->copyRef($a);
   my $R = R('R')->copyRef($r);
@@ -23156,7 +23251,7 @@ R: 0000 0000 0000 0004
 END
  }
 
-ok 1 for 2..10;
+ok 1 for 3..10;
 
 #unlink $_ for qw(hash print2 sde-log.txt sde-ptr-check.out.txt z.txt);         # Remove incidental files
 unlink $_ for qw(hash print2);                                                  # Remove incidental files
