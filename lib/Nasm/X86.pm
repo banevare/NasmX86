@@ -1001,7 +1001,7 @@ sub Nasm::X86::Sub::via($$@)                                                    
 
 sub Nasm::X86::Sub::V($)                                                        # Put the address of a subroutine into a stack variable so that it can be passed as a parameter.
  {my ($sub) = @_;                                                               # Subroutine descriptor
-  V('sub', $sub->start);                                                        # Address subroutine via a stack variable
+  V('call', $sub->start);                                                       # Address subroutine via a stack variable
  }
 
 sub PrintTraceBack($)                                                           # Trace the call stack.
@@ -22713,9 +22713,8 @@ if (1) {                                                                        
 END
  }
 
-latest:
-if (1) {                                                                        # Passing a procedure reference
-  Comment "SSSS";
+#latest:
+if (1) {                                                                        #TNasm::X86::Sub::call  #TNasm::X86::Sub::via
   my $s = Subroutine
    {my ($p) = @_;
     $$p{in}->outNL;
@@ -22728,16 +22727,15 @@ if (1) {                                                                        
 
   my $c = Subroutine
    {my ($p) = @_;
-    $s->via($$p{call}, $$p{in});
+    $t->via($$p{call}, $$p{in});
    } [qw(call in)], name => 'ccc';
 
-  $c->call(call => $t->V, V(in, 42));
+  $c->call($t->V, V(in, 42));
 
   ok Assemble(debug => 0, eq => <<END);
 in: 0000 0000 0000 002A
 END
  }
-exit;
 
 #latest:
 if (1) {                                                                        # An example of using sigaction in x86 and x64 assembler code.  Linux on x86 requires not only a signal handler but a signal trampoline.  The following code shows how to set up a signal and its associated trampoline using sigaction or rt_sigaction.
