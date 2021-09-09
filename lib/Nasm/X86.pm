@@ -23319,24 +23319,37 @@ END
 
 #latest:
 if (1) {                                                                        #TNasm::X86::Quarks::quarkFromSub #TNasm::X86::Quarks::subFromQuark
-  my $s = Subroutine
-   {PrintOutStringNL "AAAAA";
-   } [], name => 'test';
+  my $s1 = Subroutine
+   {PrintOutStringNL "11111";
+   } [], name => 'test1';
 
-  my $a = CreateArena;
-  my $q = $a->CreateQuarks;
-  my $n = $q->quarkFromSub($s);
+  my $s2 = Subroutine
+   {PrintOutStringNL "22222";
+   } [], name => 'test2';
 
-  my $S = $q->subFromQuark($n);
-  $s->V->outNL;
-  $S   ->outNL(" sub: ");
+  my $a  = CreateArena;
+  my $q  = $a->CreateQuarks;
+  my $n1 = $q->quarkFromSub($s1);
+  my $n2 = $q->quarkFromSub($s2);
 
-  $q->call($n);
+  my $S1 = $q->subFromQuark($n1);
+  $s1->V->outNL;
+  $S1   ->outNL(" sub: ");
+
+  my $S2 = $q->subFromQuark($n2);
+  $s2->V->outNL;
+  $S2   ->outNL(" sub: ");
+
+  $q->call($n1);
+  $q->call($n2);
 
   ok Assemble(debug => 0, trace => 0, eq => <<END);
 call: 0000 0000 0040 1006
  sub: 0000 0000 0040 1006
-AAAAA
+call: 0000 0000 0040 107A
+ sub: 0000 0000 0040 107A
+11111
+22222
 END
  }
 
