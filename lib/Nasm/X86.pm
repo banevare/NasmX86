@@ -3859,9 +3859,10 @@ sub Nasm::X86::ShortString::load($$$)                                           
   PopR;
  }
 
-sub Nasm::X86::ShortString::loadDwordBytes($$$$)                                # Load the specified byte of each dword in the variable addressed data with the variable length into the short string.
- {my ($string, $byte, $address, $length) = @_;                                  # String, byte offset 0-3, variable address, variable length
-  @_ == 4 or confess "4 parameters";
+sub Nasm::X86::ShortString::loadDwordBytes($$$$;$)                              # Load the specified byte of each dword in the variable addressed data with the variable length into the short string.
+ {my ($string, $byte, $address, $length, $Offset) = @_;                         # String, byte offset 0-3, variable address, variable length, variable offset in short string at which to start
+  @_ == 4 or @_ == 5 or confess "4 or 5 parameters";
+  my $offset = $Offset // 0;                                                    # Offset in short string at which to start the load
   $byte >= 0 and $byte < 4 or confess "Invalid offset in dword";
   my $z = $string->z;                                                           # Zmm register to use
   my $x = $string->x;                                                           # Corresponding xmm
@@ -3879,7 +3880,7 @@ sub Nasm::X86::ShortString::loadDwordBytes($$$$)                                
    {my ($index, $start, $next, $end) = @_;                                      # Execute block
     $index->setReg(r14);                                                        # Index source and target
     Mov r13b, "[r15+4*r14+$byte]";                                              # Load next byte from specified position in the source dword
-    Mov "[rsp+r14+1]", r13b;                                                    # Save next byte skipping length
+    Mov "[rsp+r14+1+$offset]", r13b;                                            # Save next byte skipping length
    });
 
   PopR;
