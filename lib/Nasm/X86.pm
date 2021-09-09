@@ -7392,6 +7392,67 @@ sub Nasm::X86::Quarks::quarkToQuark($$$)                                        
   $N                                                                            # Return the variable containing thq matching quark or -1 if no such quark
  }
 
+sub Nasm::X86::Quarks::quarkFromSub($$)                                         # Create a quark from a subroutine definition
+ {my ($q, $sub) = @_;                                                           # Quarks, subroutine definition
+  @_ == 2 or confess "2 parameters";
+
+  PushR zmm0;
+  my $string = CreateShortString(0);                                            # Short string to hold the subroutine name
+  my $name = K('address', Rs($sub->name));
+  $string->load($name, K(size, length($sub->name)));                            # Load the short string with the subroutine name
+
+  my $N = $q->quarkFromShortString($string);                                    # Create quark
+  $q->numbersToStrings->put(index => $N, element => $sub->V);                   # Repurpose array component to point to the sub
+
+  PopR;
+  $N                                                                            # Quark number gives rapid access to the sub
+ }
+
+sub Nasm::X86::Quarks::subFromQuark($$)                                         # Create a quark from a subroutine definition
+ {my ($q, $number) = @_;                                                        # Quarks, variable subroutine number
+  @_ == 2 or confess "2 parameters";
+
+  my $s = V('sub');                                                             # Whether the quark was found
+
+  AndBlock
+   {my ($fail, $end, $start) = @_;                                              # Fail block, end of fail block, start of test block
+    my $N = $q->numbersToStrings->size;                                         # Get the number of quarks
+    If $number >= $N, Then {Jmp $fail};                                         # Quark number too big to be valid
+    $q->numbersToStrings->get(index => $number, my $e = V(element));            # Get subroutine indexed by quark
+    $s->copy($e);                                                               # Subroutine offset
+   }
+  Fail                                                                          # Quark too big
+   {$s->copy(K(minusOne, -1));                                                  # Show failure
+   };
+
+  $s                                                                            # Return subroutine offset or -1
+ }
+
+sub Nasm::X86::Quarks::call($$)                                                 # Call a subroutine via its quark number. Return one in a variable if the subroutine was found and called else zero.
+ {my ($q, $number) = @_;                                                        # Quarks, variable subroutine number
+  @_ == 2 or confess "2 parameters";
+
+  my $s = V(found);                                                             # Whether the quark was found
+
+  AndBlock
+   {my ($fail, $end, $start) = @_;                                              # Fail block, end of fail block, start of test block
+    my $N = $q->numbersToStrings->size;                                         # Get the number of quarks
+    If $number >= $N, Then {Jmp $fail};                                         # Quark number too big to be valid
+    $q->numbersToStrings->get(index => $number, my $e = V(element));            # Get subroutine indexed by quark
+
+    PushR r15;
+    $e->setReg(r15);                                                            # Offset to subroutine
+    Call r15;                                                                   # Call sub routine
+    PopR r15;
+    $s->copy(1);                                                                # Show subroutine was found and called
+   }
+  Fail                                                                          # Quark too big
+   {$s->copy(0);                                                                # Show failure
+   };
+
+  $s                                                                            # Return subroutine offset or -1
+ }
+
 #D1 Assemble                                                                    # Assemble generated code
 
 sub CallC($@)                                                                   # Call a C subroutine.
@@ -23256,7 +23317,30 @@ R: 0000 0000 0000 0004
 END
  }
 
-ok 1 for 3..10;
+#latest:
+if (1) {                                                                        #TNasm::X86::Quarks::quarkFromSub #TNasm::X86::Quarks::subFromQuark
+  my $s = Subroutine
+   {PrintOutStringNL "AAAAA";
+   } [], name => 'test';
+
+  my $a = CreateArena;
+  my $q = $a->CreateQuarks;
+  my $n = $q->quarkFromSub($s);
+
+  my $S = $q->subFromQuark($n);
+  $s->V->outNL;
+  $S   ->outNL(" sub: ");
+
+  $q->call($n);
+
+  ok Assemble(debug => 0, trace => 0, eq => <<END);
+call: 0000 0000 0040 1006
+ sub: 0000 0000 0040 1006
+AAAAA
+END
+ }
+
+ok 1 for 4..10;
 
 #unlink $_ for qw(hash print2 sde-log.txt sde-ptr-check.out.txt z.txt);         # Remove incidental files
 unlink $_ for qw(hash print2);                                                  # Remove incidental files
