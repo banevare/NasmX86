@@ -3873,6 +3873,7 @@ sub Nasm::X86::ShortString::loadDwordBytes($$$$;$)                              
 
   my $m = $length->min($string->maximumLength);                                 # Length to load
   $m->setReg(r15);
+  Add r15, $offset if $Offset;                                                  # Include the offset in the length of the string if an offset has been supplied
   Mov "[rsp]", r15b;                                                            # Save length on stack image of short string
 
   $address->setReg(r15);                                                        # Source dwords
