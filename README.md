@@ -21,8 +21,9 @@ at
 step.
 
 
-This [module](https://en.wikipedia.org/wiki/Modular_programming) provides Dynamic Strings, Arrays, Trees and Quarks in Arenas: every
-data structure is [process](https://en.wikipedia.org/wiki/Process_management_(computing)) friendly because the Arenas are completely [relocatable](https://en.wikipedia.org/wiki/Relocation_%28computing%29) and so can be moved directly between different processes via a [file](https://en.wikipedia.org/wiki/Computer_file) or a socket.
+This [module](https://en.wikipedia.org/wiki/Modular_programming) provides Dynamic [string](https://en.wikipedia.org/wiki/String_(computer_science)), [array](https://en.wikipedia.org/wiki/Dynamic_array), [tree](https://en.wikipedia.org/wiki/Tree_(data_structure)) and Quarks in [arena](https://en.wikipedia.org/wiki/Region-based_memory_management): every data
+structure is [process](https://en.wikipedia.org/wiki/Process_management_(computing)) friendly because the Arenas are completely [relocatable](https://en.wikipedia.org/wiki/Relocation_%28computing%29) and
+so can be moved directly between different processes via a [file](https://en.wikipedia.org/wiki/Computer_file) or a socket.
 
 
 Please feel free to join in with this interesting project - we need all the [help](https://en.wikipedia.org/wiki/Online_help) we can get.
@@ -69,16 +70,15 @@ END
 ```
 
 
-# Dynamic string held in an [arena](https://en.wikipedia.org/wiki/Region-based_memory_management) 
+# Dynamic [string](https://en.wikipedia.org/wiki/String_(computer_science)) held in an [arena](https://en.wikipedia.org/wiki/Region-based_memory_management) 
 
-Create a dynamic byte string, add some content to it, write the byte string to
+Create a dynamic byte [string](https://en.wikipedia.org/wiki/String_(computer_science)), add some content to it, write the byte [string](https://en.wikipedia.org/wiki/String_(computer_science)) to
 a [file](https://en.wikipedia.org/wiki/Computer_file) and then execute it:
 
 ```
   use Nasm::X86 qw(:all);
 
-  my $s = CreateByteString;          # Create a string
-  $s->ql(<<END);                     # Write [code](https://en.wikipedia.org/wiki/Computer_program) to execute
+  my $s = CreateByteString;          # Create a [string](https://en.wikipedia.org/wiki/String_(computer_science))   $s->ql(<<END);                     # Write [code](https://en.wikipedia.org/wiki/Computer_program) to execute
 #!/usr/bin/bash
 whoami
 ls -lapwd
