@@ -3840,7 +3840,7 @@ sub Nasm::X86::ShortString::clear($)                                            
 
 sub Nasm::X86::ShortString::load($$$)                                           # Load the variable addressed data with the variable length into the short string.
  {my ($string, $address, $length) = @_;                                         # String, address, length
-  @_ == 3 or confess;
+  @_ == 3 or confess '3 parameters';
   my $z = $string->z;                                                           # Zmm register to use
   my $x = $string->x;                                                           # Corresponding xmm
 
@@ -3857,6 +3857,28 @@ sub Nasm::X86::ShortString::load($$$)                                           
   Vmovdqu8 "${z}{k7}", "[r14-1]";                                               # Load string skipping length byte
   Pinsrb $x, r15b, 0;                                                           # Set length in zmm
   PopR;
+ }
+
+sub Nasm::X86::ShortString::loadConstantString($$)                              # Load the a short string with a constant string
+ {my ($string, $data) = @_;                                                     # Short string, string to load
+  @_ == 2 or confess '2 parameters';
+  my $z = $string->z;                                                           # Zmm register to use
+  my $x = $string->x;                                                           # Corresponding xmm
+
+  $string->clear;                                                               # Clear the register we are going to use as a short string
+
+  PushR r14, r15, k7;
+  Mov r15, length $data;                                                        # Length of string
+  Mov r14, -1;                                                                  # Clear bits that we do not wish to load
+  Bzhi r14, r14, r15;
+  Shl r14, 1;                                                                   # Move over length byte
+  Kmovq k7, r14;                                                                # Load mask
+
+  Mov r14, Rs($data);                                                           # Address of data to load
+  Vmovdqu8 "${z}{k7}", "[r14-1]";                                               # Load string skipping length byte
+  Pinsrb $x, r15b, 0;                                                           # Set length in zmm
+  PopR;
+  $string
  }
 
 sub Nasm::X86::ShortString::loadDwordBytes($$$$;$)                              # Load the specified byte of each dword in the variable addressed data with the variable length into the short string.
@@ -7394,34 +7416,37 @@ sub Nasm::X86::Quarks::quarkToQuark($$$)                                        
   $N                                                                            # Return the variable containing the matching quark or -1 if no such quark
  }
 
-sub Nasm::X86::Quarks::quarkFromSub($$)                                         # Create a quark from a subroutine definition.
- {my ($q, $sub) = @_;                                                           # Quarks, subroutine definition
-  @_ == 2 or confess "2 parameters";
+sub Nasm::X86::Quarks::quarkFromSub($$;$)                                       # Create a quark from a subroutine definition.
+ {my ($q, $sub, $String) = @_;                                                  # Quarks, subroutine definition, optional overriding name as a short string
+  @_ == 2 or @_ == 3 or confess "2 or 3 parameters";
 
-  PushR zmm0;
-  my $string = CreateShortString(0);                                            # Short string to hold the subroutine name
-  my $name = K('address', Rs($sub->name));
-  $string->load($name, K(size, length($sub->name)));                            # Load the short string with the subroutine name
+  my $string = $String;
+  if (!defined $String)                                                         # Create a short string from the subroutine name
+   {PushR zmm0;
+    $string = CreateShortString(0);                                             # Short string to hold the subroutine name
+    my $name = K('address', Rs($sub->name));
+    $string->load($name, K(size, length($sub->name)));                          # Load the short string with the subroutine name
+   }
 
   my $N = $q->quarkFromShortString($string);                                    # Create quark
   $q->numbersToStrings->put(index => $N, element => $sub->V);                   # Reuse the array component to point to the sub
 
-  PopR;
+  PopR if defined $String;                                                      # Free short string if we created one
   $N                                                                            # Quark number gives rapid access to the sub
  }
 
-sub Nasm::X86::Quarks::subFromQuark($$)                                         # Create a quark from a subroutine definition.
+sub Nasm::X86::Quarks::subFromQuark($$)                                         # Get the offset of a subroutine as a variable from a set of quarks
  {my ($q, $number) = @_;                                                        # Quarks, variable subroutine number
   @_ == 2 or confess "2 parameters";
 
-  my $s = V('sub');                                                             # Whether the quark was found
+  my $s = V('sub');                                                             # The offset of the subroutine or -1 if the subroutine cannot be found
 
   AndBlock
    {my ($fail, $end, $start) = @_;                                              # Fail block, end of fail block, start of test block
     my $N = $q->numbersToStrings->size;                                         # Get the number of quarks
     If $number >= $N, Then {Jmp $fail};                                         # Quark number too big to be valid
     $q->numbersToStrings->get(index => $number, my $e = V(element));            # Get subroutine indexed by quark
-    $s->copy($e);                                                               # Subroutine offset
+    $s->copy($e);                                                               # Subroutine address
    }
   Fail                                                                          # Quark too big
    {$s->copy(K(minusOne, -1));                                                  # Show failure
@@ -7710,9 +7735,14 @@ END
     my $bytes = fileSize($e) - 9512 + 64;                                       # Estimate the size of the output program
     $totalBytesAssembled += $bytes;                                             # Estimate total of all programs assembled
 
-    my (undef, $file, $line) = caller();
-                                                                                # Line in caller
-    say STDERR sprintf("%4d    %12s    %12s    %12s    %12s  at $file line $line",
+    my (undef, $file, $line) = caller();                                        # Line in caller
+
+    say STDERR sprintf("       %-12s    %-12s    %-12s    %-12s",               # Header if necessary
+       "Clocks", "Bytes", "Total Clocks", "Total Bytes")
+      if $assembliesPerformed % 100 == 1;
+
+    say STDERR                                                                  # Rows
+      sprintf("%4d    %12s    %12s    %12s    %12s  at $file line $line",
       $assembliesPerformed,
       map {numberWithCommas $_} $instructions,         $bytes,
                                 $instructionsExecuted, $totalBytesAssembled);
@@ -7736,7 +7766,7 @@ END
   unlink $o;                                                                    # Delete files
   unlink $e unless $k;                                                          # Delete executable unless asked to keep it
 
-  if (my $N = $options{countComments})                                          # Count the comments so we can see what code to put into sub routines
+  if (my $N = $options{countComments})                                          # Count the comments so we can see what code to put into subroutines
    {my %c;
 
     for my $c(grep {m/\A\;/} split /\n/, $A)
@@ -23640,8 +23670,8 @@ R: 0000 0000 0000 0004
 END
  }
 
-#latest:
-if (1) {                                                                        #TNasm::X86::Quarks::quarkFromSub #TNasm::X86::Quarks::subFromQuark
+latest:
+if (1) {                                                                        #TNasm::X86::Quarks::quarkFromSub #TNasm::X86::Quarks::subFromQuark #TNasm::X86::Quarks::loadConstantString
   my $s1 = Subroutine
    {PrintOutStringNL "11111";
    } [], name => 'test1';
@@ -23653,7 +23683,10 @@ if (1) {                                                                        
   my $a  = CreateArena;
   my $q  = $a->CreateQuarks;
   my $n1 = $q->quarkFromSub($s1);
-  my $n2 = $q->quarkFromSub($s2);
+
+  my $s  = CreateShortString(0);
+  $s->loadConstantString("assign");
+  my $n2 = $q->quarkFromSub($s2, $s);
 
   my $S1 = $q->subFromQuark($n1);
   $s1->V->outNL;
@@ -23679,10 +23712,8 @@ END
 ok 1 for 4..10;
 
 #unlink $_ for qw(hash print2 sde-log.txt sde-ptr-check.out.txt z.txt);         # Remove incidental files
-unlink $_ for qw(hash print2);                                                  # Remove incidental files
+unlink $_ for qw(hash print2 pin-log.txt pin-tool-log.txt sde-footprint.txt sde-log.txt clear hash signal z.o);
 
 say STDERR sprintf("# Time: %.2fs, bytes: %s, execs: %s",
   time - $start,
   map {numberWithCommas $_} totalBytesAssembled, $instructionsExecuted);
-
-# malikamina81@gmail.com
