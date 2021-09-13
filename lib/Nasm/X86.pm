@@ -5583,7 +5583,7 @@ sub DescribeTree(%)                                                             
   confess "Splitting key offset must be 28" unless $split  == 28;               # Splitting key offset
 
   genHash(__PACKAGE__."::Tree",                                                 # Tree.
-    bs           => $options{arena},                                            # Arena definition.
+    bs           => DescribeArena($options{arena}),                             # Arena definition.
     data         => G(data),                                                    # Variable containing the last data found
     first        => ($options{first} // G(first)),                              # Variable addressing offset to first block of keys.
     found        => G(found),                                                   # Variable indicating whether the last find was successful or not
@@ -5605,7 +5605,7 @@ sub Nasm::X86::Arena::DescribeTree($%)                                          
  {my ($arena, %options) = @_;                                                   # Arena descriptor, options for tree
   @_ >= 1 or confess;
 
-  DescribeTree(arena=>$arena, %options)
+  DescribeTree(arena=>$arena->bs, %options)
  }
 
 sub Nasm::X86::Arena::CreateTree($;$)                                           # Create a tree in an arena.
@@ -6212,7 +6212,7 @@ sub Nasm::X86::Tree::find($$;$$)                                                
         $$p{found}->copy(K(one, 1));                                            # Key found
         $$p{data} ->copy(getDFromZmm $zmmData, "r14*$W", $transfer);            # Data associated with the key
         $t->isTree(r15, $zmmKeys);                                              # Check whether the data so found is a sub tree
-        $$p{subTree}->copyZFInverted;                                           # Copy zero flag which opposes the notion that this element is a sub tree
+        $$p{subTree}->copyZFInverted;                                            # Copy zero flag which opposes the notion that this element is a sub tree
         Jmp $success;                                                           # Return
        };
 
