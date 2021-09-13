@@ -4601,7 +4601,23 @@ sub Nasm::X86::Arena::dump($;$)                                                 
 
 #D1 String                                                                      # Strings made from zmm sized blocks of text
 
-sub Nasm::X86::Arena::DescribeString($%)                                        # Describe a string and optionally set its first block .
+sub DescribeString(%)                                                           # Describe a string
+ {my (%options) = @_;                                                           # String options
+  @_ >= 1 or confess;
+  my $b = RegisterSize zmm0;                                                    # Size of a block == size of a zmm register
+  my $o = RegisterSize eax;                                                     # Size of a double word
+
+  genHash(__PACKAGE__."::String",                                               # String definition
+    bs      => DescribeArena($options{arena}),                                  # Arena
+    links   => $b - 2 * $o,                                                     # Location of links in bytes in zmm
+    next    => $b - 1 * $o,                                                     # Location of next offset in block in bytes
+    prev    => $b - 2 * $o,                                                     # Location of prev offset in block in bytes
+    length  => $b - 2 * $o - 1,                                                 # Maximum length in a block
+    first   => ($options{first}//G('first')),                                   # Variable addressing first block in string if one has not been supplied
+   );
+ }
+
+sub Nasm::X86::Arena::DescribeString22($%)                                        # Describe a string and optionally set its first block .
  {my ($arena, %options) = @_;                                                   # Arena description, {first=> offset of first block}
   @_ >= 1 or confess;
   my $b = RegisterSize zmm0;                                                    # Size of a block == size of a zmm register
@@ -4615,6 +4631,11 @@ sub Nasm::X86::Arena::DescribeString($%)                                        
     length  => $b - 2 * $o - 1,                                                 # Maximum length in a block
     first   => ($options{first}//G('first')),                                   # Variable addressing first block in string if one has not been supplied
    );
+ }
+
+sub Nasm::X86::Arena::DescribeString($%)                                        # Describe a string and optionally set its first block .
+ {my ($arena, %options) = @_;                                                   # Arena description, arena options
+  DescribeString(arena=>$arena->bs, %options);
  }
 
 sub Nasm::X86::Arena::CreateString($)                                           # Create a string from a doubly link linked list of 64 byte blocks linked via 4 byte offsets in an arena and return its descriptor.
