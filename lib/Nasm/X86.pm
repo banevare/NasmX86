@@ -20,8 +20,6 @@ use Asm::C qw(:all);
 use feature qw(say current_sub);
 use utf8;
 
-makeDieConfess;
-
 my %rodata;                                                                     # Read only data already written
 my %rodatas;                                                                    # Read only string already written
 my %subroutines;                                                                # Subroutines generated
@@ -4600,7 +4598,7 @@ sub Nasm::X86::Arena::dump($;$)                                                 
 
 #D1 String                                                                      # Strings made from zmm sized blocks of text
 
-sub DescribeString(%)                                                           # Describe a string
+sub DescribeString(%)                                                           # Describe a string.
  {my (%options) = @_;                                                           # String options
   @_ >= 1 or confess;
   my $b = RegisterSize zmm0;                                                    # Size of a block == size of a zmm register
@@ -4616,7 +4614,7 @@ sub DescribeString(%)                                                           
    );
  }
 
-sub Nasm::X86::Arena::DescribeString22($%)                                        # Describe a string and optionally set its first block .
+sub Nasm::X86::Arena::DescribeString22($%)                                      # Describe a string and optionally set its first block.
  {my ($arena, %options) = @_;                                                   # Arena description, {first=> offset of first block}
   @_ >= 1 or confess;
   my $b = RegisterSize zmm0;                                                    # Size of a block == size of a zmm register
@@ -5590,7 +5588,7 @@ sub Nasm::X86::Array::put($@)                                                   
 
 #D1 Tree                                                                        # Tree constructed as sets of blocks in an arena.
 
-sub DescribeTree(%)                                                             # Return a descriptor for a tree with the specified options
+sub DescribeTree(%)                                                             # Return a descriptor for a tree with the specified options.
  {my (%options) = @_;                                                           # Tree description options
 
   my $b = RegisterSize zmm0;                                                    # Size of a block == size of a zmm register
@@ -5621,7 +5619,7 @@ sub DescribeTree(%)                                                             
    );
  }
 
-sub Nasm::X86::Arena::DescribeTree($%)                                          # Return a descriptor for a tree in the specified arena with the specified options
+sub Nasm::X86::Arena::DescribeTree($%)                                          # Return a descriptor for a tree in the specified arena with the specified options.
  {my ($arena, %options) = @_;                                                   # Arena descriptor, options for tree
   @_ >= 1 or confess;
 
@@ -7313,7 +7311,7 @@ sub Nasm::X86::Tree::by($&;$$)                                                  
 
 #D1 Quarks                                                                      # Quarks allow us to replace unique strings with unique numbers.  We can translate either from a string to its associated number or from a number to its associated string or from a quark in one set of quarks to the corresponding quark with the same string in another set of quarks.
 
-sub DescribeQuarks(%)                                                           # Return a descriptor for a set of quarks
+sub DescribeQuarks(%)                                                           # Return a descriptor for a set of quarks.
  {my (%options) = @_;                                                           # Options
 
   genHash(__PACKAGE__."::Quarks",                                               # Quarks
@@ -7325,7 +7323,7 @@ sub DescribeQuarks(%)                                                           
 
 sub Nasm::X86::Arena::DescribeQuarks($)                                         # Return a descriptor for a tree in the specified arena.
  {my ($arena) = @_;                                                             # Arena descriptor
-  DescribeArena($arena->bs)
+  DescribeQuarks(arena=>$arena->bs)
  }
 
 sub Nasm::X86::Arena::CreateQuarks($)                                           # Create quarks in a specified arena.
