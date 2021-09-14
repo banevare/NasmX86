@@ -10,7 +10,7 @@
 # M: optimize PushR, would the print routines work better off the stack? Remove macro?
 # Make all describe routines work like DescribeTree
 package Nasm::X86;
-our $VERSION = "20210914";
+our $VERSION = "20210915";
 use warnings FATAL => qw(all);
 use strict;
 use Carp qw(confess cluck);
