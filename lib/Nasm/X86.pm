@@ -9,6 +9,7 @@
 # Replace empty in boolean arithmetic with boolean and then check it in If to confirm that we are testing a boolean value
 # M: optimize PushR, would the print routines work better off the stack? Remove macro?
 # Make all describe routines work like DescribeTree
+# 0x401000 from sde-mix-out addresses to get offsets in z.txt
 package Nasm::X86;
 our $VERSION = "20210915";
 use warnings FATAL => qw(all);
@@ -1141,8 +1142,9 @@ sub cr(&@)                                                                      
 sub CommentWithTraceBack(@)                                                     # Insert a comment into the assembly code with a traceback showing how it was generated.
  {my (@comment) = @_;                                                           # Text of comment
   my $c = join "", @comment;
-  eval {confess};
-  my $p = dump($@);
+#  eval {confess};
+#  my $p = dump($@);
+  my $p = subNameTraceBack =~ s(Nasm::X86::) ()gsr;
   push @text, <<END;
 ; $c  $p
 END
@@ -2705,6 +2707,7 @@ my @PushR;                                                                      
 sub PushR(@)                                                                    #P Push registers onto the stack.
  {my (@r) = @_;                                                                 # Register
   push @PushR, [@r];
+  CommentWithTraceBack;
   PushRR   @r;                                                                  # Push
  }
 
@@ -2732,6 +2735,7 @@ sub PopR(@)                                                                     
   my $r = pop @PushR;
   dump(\@r) eq dump($r) or confess "Mismatched registers:\n".dump($r, \@r) if @r;
   PopRR @$r;                                                                    # Pop registers from the stack without tracking
+  CommentWithTraceBack;
  }
 
 sub PopEax()                                                                    # We cannot pop a double word from the stack in 64 bit long mode using pop so we improvise.
@@ -6194,16 +6198,17 @@ sub Nasm::X86::Tree::find($$;$$)                                                
     my $F = $$p{first};                                                         # First keys block
     my $K = $$p{key};                                                           # Key to find
 
-    $$p{found}  ->copy(0);                                                      # Key not found
-    $$p{data}   ->copy(0);                                                      # Data not yet found
-    $$p{subTree}->copy(0);                                                      # Not yet a sub tree
-
-    my $tree = V(tree)->copy($F);                                               # Start at the first key block
     PushR k6, k7, r8, r9, r14, r15; PushZmm 28..31;
     my $zmmKeys = 31; my $zmmData = 30; my $zmmNode = 29; my $zmmTest = 28;
     my $lengthMask = k6; my $testMask = k7;
     my $transfer = r8;                                                          # Use this register to transfer data between zmm blocks and variables
     my $work     = r9;                                                          # Work register
+
+    $$p{found}  ->copy(0, $transfer);                                           # Key not found
+    $$p{data}   ->copy(0, $transfer);                                           # Data not yet found
+    $$p{subTree}->copy(0, $transfer);                                           # Not yet a sub tree
+
+    my $tree = V(tree)->copy($F, $transfer);                                    # Start at the first key block
 
     $K->setReg(r15);                                                            # Load key into test register
     Vpbroadcastd "zmm$zmmTest", r15d;
@@ -6227,7 +6232,7 @@ sub Nasm::X86::Tree::find($$;$$)                                                
       Then
        {Kmovq r15, $testMask;
         Tzcnt r14, r15;                                                         # Trailing zeros
-        $$p{found}->copy(1);                                                    # Key found
+        $$p{found}->copy(1, $transfer);                                         # Key found
         $$p{data} ->copy(getDFromZmm $zmmData, "r14*$W", $transfer);            # Data associated with the key
         $t->isTree(r15, $zmmKeys);                                              # Check whether the data so found is a sub tree
         $$p{subTree}->copyZFInverted;                                           # Copy zero flag which opposes the notion that this element is a sub tree
@@ -7817,20 +7822,25 @@ END
   unlink $e unless $k;                                                          # Delete executable unless asked to keep it
 
   if (my $N = $options{countComments})                                          # Count the comments so we can see what code to put into subroutines
-   {my %c;
-
-    for my $c(grep {m/\A\;/} split /\n/, $A)
-     {if ($c =~ m(line (\d+)))
-       {$c{$1}++;
+   {my %c; my %b;                                                               # The number of lines between the comments, the number of blocks
+    my $s;
+    for my $c(split /\n/, $A)
+     {if (!$s)
+       {if ($c =~ m(;\s+CommentWithTraceBack\s+PushR))
+         {$s = $c =~ s(Push) (Pop)r;
+          $b{$s}++;
+         }
        }
+      elsif ($c eq $s)  {$s = undef}
+      else              {$c{$s}++}
      }
 
     my @c;
     for my $c(keys %c)                                                          # Remove comments that do not appear often
-     {push @c, [$c{$c}, $c] if $c{$c} >= $N;
+     {push @c, [$c{$c}, $b{$c}, $c] if $c{$c} >= $N;
      }
     my @d = sort {$$b[0] <=> $$a[0]} @c;
-    say STDERR formatTable(\@d, [qw(Count Line)]);                              # Print frequently appearing comments
+    say STDERR formatTable(\@d, [qw(Lines Blocks Comment)]);                    # Print frequently appearing comments
    }
 
   Start;                                                                        # Clear work areas for next assembly
