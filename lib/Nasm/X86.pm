@@ -1144,7 +1144,7 @@ sub CommentWithTraceBack(@)                                                     
   my $c = join "", @comment;
 #  eval {confess};
 #  my $p = dump($@);
-  my $p = subNameTraceBack =~ s(Nasm::X86::) ()gsr;
+  my $p = &subNameTraceBack =~ s(Nasm::X86::) ()gsr;
   push @text, <<END;
 ; $c  $p
 END
