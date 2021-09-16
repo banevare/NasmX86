@@ -2707,7 +2707,7 @@ my @PushR;                                                                      
 sub PushR(@)                                                                    #P Push registers onto the stack.
  {my (@r) = @_;                                                                 # Register
   push @PushR, [@r];
-  CommentWithTraceBack;
+# CommentWithTraceBack;
   PushRR   @r;                                                                  # Push
  }
 
@@ -2735,7 +2735,7 @@ sub PopR(@)                                                                     
   my $r = pop @PushR;
   dump(\@r) eq dump($r) or confess "Mismatched registers:\n".dump($r, \@r) if @r;
   PopRR @$r;                                                                    # Pop registers from the stack without tracking
-  CommentWithTraceBack;
+# CommentWithTraceBack;
  }
 
 sub PopEax()                                                                    # We cannot pop a double word from the stack in 64 bit long mode using pop so we improvise.
