@@ -1672,6 +1672,16 @@ sub Nasm::X86::Variable::debug($)                                               
   PopR @regs;
  }
 
+sub Nasm::X86::Variable::printOutZeroString($)                                  # Print the variable addressed zero terminated string on stdout.
+ {my ($address) = @_;                                                           # Variable string address
+  PushR rax, rdi, r15;
+  $address->setReg(rax);                                                        # Address of string
+  &Cstrlen();                                                                   # Length of string
+  Mov rdi, r15;
+  &PrintOutMemoryNL();                                                          # Print string
+  PopR;
+ }
+
 #D2 Operations                                                                  # Variable operations
 
 if (1)                                                                          # Define operator overloading for Variables
@@ -3993,7 +4003,7 @@ sub Nasm::X86::ShortString::append($$)                                          
 #D1 Arenas                                                                      # An arena is single extensible block of memory which contains other data structures such as strings, arrays, trees within it.
 
 sub Cstrlen()                                                                   #P Length of the C style string addressed by rax returning the length in r15.
- {@_ == 0 or confess;
+ {@_ == 0 or confess "No parameters";
 
   my $sub  = Macro                                                              # Create arena
    {Comment "C strlen";
@@ -7528,6 +7538,7 @@ sub Nasm::X86::Quarks::dumpSubs($)                                              
   @_ == 1 or confess "1 parameter";
 
   my $l = $q->numbersToStrings->size;                                           # Number of subs
+
   $l->for(sub
    {my ($index, $start, $next, $end) = @_;
     $q->numbersToStrings->get(index => $index, my $e = V(element));             # Get long string indexed by quark
@@ -19589,7 +19600,7 @@ Test::More->builder->output("/dev/null") if $localTest;                         
 
 if ($^O =~ m(bsd|linux|cygwin)i)                                                # Supported systems
  {if (confirmHasCommandLineCommand(q(nasm)) and LocateIntelEmulator)            # Network assembler and Intel Software Development emulator
-   {plan tests => 150;
+   {plan tests => 151;
    }
   else
    {plan skip_all => qq(Nasm or Intel 64 emulator not available);
@@ -23507,6 +23518,16 @@ if (1) {                                                                        
 
   ok Assemble(debug => 0, trace => 0, eq => <<END);
 α
+END
+ }
+
+#latest:
+if (1) {                                                                        #TNasm::X86::Variable::printOutZeroString
+  my $s = Rutf8 '𝝰𝝱𝝲𝝳';
+  V(address, $s)->printOutZeroString;
+
+  ok Assemble(debug => 0, trace => 0, eq => <<END);
+𝝰𝝱𝝲𝝳
 END
  }
 
