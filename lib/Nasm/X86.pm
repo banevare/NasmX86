@@ -11,7 +11,7 @@
 # Make all describe routines work like DescribeTree
 # 0x401000 from sde-mix-out addresses to get offsets in z.txt
 package Nasm::X86;
-our $VERSION = "20210915";
+our $VERSION = "20210918";
 use warnings FATAL => qw(all);
 use strict;
 use Carp qw(confess cluck);
@@ -7376,7 +7376,7 @@ sub Nasm::X86::Quarks::quarkFromShortString($$)                                 
     $t->findAndReload($l);                                                      # Separate by length
     If $t->found == 0, Then {Jmp $fail};                                        # Length not found
     $t->findShortString($string);                                               # Find the specified short string
-    If $t->found == 0, Then {Jmp $fail};                                        # Length not found
+    If $t->found == 0, Then {Jmp $fail};                                        # Short string not found
     $Q->copy($t->data);                                                         # Load found quark number
    }
   Fail
@@ -8423,7 +8423,7 @@ present. If the test fails we continue rather than calling L<Carp::confess>.
 Generate X86 assembler code using Perl as a macro pre-processor.
 
 
-Version "20210912".
+Version "20210918".
 
 
 The following sections describe the methods in each functional area of this
@@ -11963,6 +11963,24 @@ Dump the value of a variable on stdout with an indication of where the dump came
      Parameter  Description
   1  $left      Left variable
 
+=head3 Nasm::X86::Variable::printOutZeroString($address)
+
+Print the variable addressed zero terminated string on stdout.
+
+     Parameter  Description
+  1  $address   Variable string address
+
+B<Example:>
+
+
+    my $s = Rutf8 '𝝰𝝱𝝲𝝳';
+    V(address, $s)->printOutZeroString;
+
+    ok Assemble(debug => 0, trace => 0, eq => <<END);
+  𝝰𝝱𝝲𝝳
+  END
+
+
 =head2 Operations
 
 Variable operations
@@ -14719,14 +14737,14 @@ Strings made from zmm sized blocks of text
 
 =head2 DescribeString(%options)
 
-Describe a string
+Describe a string.
 
      Parameter  Description
   1  %options   String options
 
 =head2 Nasm::X86::Arena::DescribeString22($arena, %options)
 
-Describe a string and optionally set its first block .
+Describe a string and optionally set its first block.
 
      Parameter  Description
   1  $arena     Arena description
@@ -15929,14 +15947,14 @@ Tree constructed as sets of blocks in an arena.
 
 =head2 DescribeTree(%options)
 
-Return a descriptor for a tree with the specified options
+Return a descriptor for a tree with the specified options.
 
      Parameter  Description
   1  %options   Tree description options
 
 =head2 Nasm::X86::Arena::DescribeTree($arena, %options)
 
-Return a descriptor for a tree in the specified arena with the specified options
+Return a descriptor for a tree in the specified arena with the specified options.
 
      Parameter  Description
   1  $arena     Arena descriptor
@@ -16616,7 +16634,7 @@ Quarks allow us to replace unique strings with unique numbers.  We can translate
 
 =head2 DescribeQuarks(%options)
 
-Return a descriptor for a set of quarks
+Return a descriptor for a set of quarks.
 
      Parameter  Description
   1  %options   Options
@@ -18755,11 +18773,11 @@ Total size in bytes of all files assembled during testing.
 
 32 L<DescribeArray|/DescribeArray> - Describe a dynamic array held in an arena.
 
-33 L<DescribeQuarks|/DescribeQuarks> - Return a descriptor for a set of quarks
+33 L<DescribeQuarks|/DescribeQuarks> - Return a descriptor for a set of quarks.
 
-34 L<DescribeString|/DescribeString> - Describe a string
+34 L<DescribeString|/DescribeString> - Describe a string.
 
-35 L<DescribeTree|/DescribeTree> - Return a descriptor for a tree with the specified options
+35 L<DescribeTree|/DescribeTree> - Return a descriptor for a tree with the specified options.
 
 36 L<Dq|/Dq> - Layout quad words in the data segment and return their label.
 
@@ -18909,9 +18927,9 @@ Total size in bytes of all files assembled during testing.
 
 109 L<Nasm::X86::Arena::DescribeString|/Nasm::X86::Arena::DescribeString> - Describe a string and optionally set its first block .
 
-110 L<Nasm::X86::Arena::DescribeString22|/Nasm::X86::Arena::DescribeString22> - Describe a string and optionally set its first block .
+110 L<Nasm::X86::Arena::DescribeString22|/Nasm::X86::Arena::DescribeString22> - Describe a string and optionally set its first block.
 
-111 L<Nasm::X86::Arena::DescribeTree|/Nasm::X86::Arena::DescribeTree> - Return a descriptor for a tree in the specified arena with the specified options
+111 L<Nasm::X86::Arena::DescribeTree|/Nasm::X86::Arena::DescribeTree> - Return a descriptor for a tree in the specified arena with the specified options.
 
 112 L<Nasm::X86::Arena::dump|/Nasm::X86::Arena::dump> - Dump details of an arena.
 
@@ -19295,257 +19313,259 @@ Total size in bytes of all files assembled during testing.
 
 302 L<Nasm::X86::Variable::printOutMemoryInHexNL|/Nasm::X86::Variable::printOutMemoryInHexNL> - Write the memory addressed by a variable to stdout.
 
-303 L<Nasm::X86::Variable::push|/Nasm::X86::Variable::push> - Push a variable onto the stack.
+303 L<Nasm::X86::Variable::printOutZeroString|/Nasm::X86::Variable::printOutZeroString> - Print the variable addressed zero terminated string on stdout.
 
-304 L<Nasm::X86::Variable::putBIntoXmm|/Nasm::X86::Variable::putBIntoXmm> - Place the value of the content variable at the byte in the numbered xmm register.
+304 L<Nasm::X86::Variable::push|/Nasm::X86::Variable::push> - Push a variable onto the stack.
 
-305 L<Nasm::X86::Variable::putBIntoZmm|/Nasm::X86::Variable::putBIntoZmm> - Place the value of the content variable at the byte in the numbered zmm register.
+305 L<Nasm::X86::Variable::putBIntoXmm|/Nasm::X86::Variable::putBIntoXmm> - Place the value of the content variable at the byte in the numbered xmm register.
 
-306 L<Nasm::X86::Variable::putBwdqIntoMm|/Nasm::X86::Variable::putBwdqIntoMm> - Place the value of the content variable at the byte|word|double word|quad word in the numbered zmm register.
+306 L<Nasm::X86::Variable::putBIntoZmm|/Nasm::X86::Variable::putBIntoZmm> - Place the value of the content variable at the byte in the numbered zmm register.
 
-307 L<Nasm::X86::Variable::putDIntoXmm|/Nasm::X86::Variable::putDIntoXmm> - Place the value of the content variable at the double word in the numbered xmm register.
+307 L<Nasm::X86::Variable::putBwdqIntoMm|/Nasm::X86::Variable::putBwdqIntoMm> - Place the value of the content variable at the byte|word|double word|quad word in the numbered zmm register.
 
-308 L<Nasm::X86::Variable::putDIntoZmm|/Nasm::X86::Variable::putDIntoZmm> - Place the value of the content variable at the double word in the numbered zmm register.
+308 L<Nasm::X86::Variable::putDIntoXmm|/Nasm::X86::Variable::putDIntoXmm> - Place the value of the content variable at the double word in the numbered xmm register.
 
-309 L<Nasm::X86::Variable::putQIntoXmm|/Nasm::X86::Variable::putQIntoXmm> - Place the value of the content variable at the quad word in the numbered xmm register.
+309 L<Nasm::X86::Variable::putDIntoZmm|/Nasm::X86::Variable::putDIntoZmm> - Place the value of the content variable at the double word in the numbered zmm register.
 
-310 L<Nasm::X86::Variable::putQIntoZmm|/Nasm::X86::Variable::putQIntoZmm> - Place the value of the content variable at the quad word in the numbered zmm register.
+310 L<Nasm::X86::Variable::putQIntoXmm|/Nasm::X86::Variable::putQIntoXmm> - Place the value of the content variable at the quad word in the numbered xmm register.
 
-311 L<Nasm::X86::Variable::putWIntoXmm|/Nasm::X86::Variable::putWIntoXmm> - Place the value of the content variable at the word in the numbered xmm register.
+311 L<Nasm::X86::Variable::putQIntoZmm|/Nasm::X86::Variable::putQIntoZmm> - Place the value of the content variable at the quad word in the numbered zmm register.
 
-312 L<Nasm::X86::Variable::putWIntoZmm|/Nasm::X86::Variable::putWIntoZmm> - Place the value of the content variable at the word in the numbered zmm register.
+312 L<Nasm::X86::Variable::putWIntoXmm|/Nasm::X86::Variable::putWIntoXmm> - Place the value of the content variable at the word in the numbered xmm register.
 
-313 L<Nasm::X86::Variable::setBit|/Nasm::X86::Variable::setBit> - Set a bit in the specified register retaining the other bits.
+313 L<Nasm::X86::Variable::putWIntoZmm|/Nasm::X86::Variable::putWIntoZmm> - Place the value of the content variable at the word in the numbered zmm register.
 
-314 L<Nasm::X86::Variable::setMask|/Nasm::X86::Variable::setMask> - Set the mask register to ones starting at the specified position for the specified length and zeroes elsewhere.
+314 L<Nasm::X86::Variable::setBit|/Nasm::X86::Variable::setBit> - Set a bit in the specified register retaining the other bits.
 
-315 L<Nasm::X86::Variable::setMaskBit|/Nasm::X86::Variable::setMaskBit> - Set a bit in the specified mask register retaining the other bits.
+315 L<Nasm::X86::Variable::setMask|/Nasm::X86::Variable::setMask> - Set the mask register to ones starting at the specified position for the specified length and zeroes elsewhere.
 
-316 L<Nasm::X86::Variable::setMaskFirst|/Nasm::X86::Variable::setMaskFirst> - Set the first bits in the specified mask register.
+316 L<Nasm::X86::Variable::setMaskBit|/Nasm::X86::Variable::setMaskBit> - Set a bit in the specified mask register retaining the other bits.
 
-317 L<Nasm::X86::Variable::setReg|/Nasm::X86::Variable::setReg> - Set the named registers from the content of the variable.
+317 L<Nasm::X86::Variable::setMaskFirst|/Nasm::X86::Variable::setMaskFirst> - Set the first bits in the specified mask register.
 
-318 L<Nasm::X86::Variable::setZmm|/Nasm::X86::Variable::setZmm> - Load bytes from the memory addressed by specified source variable into the numbered zmm register at the offset in the specified offset moving the number of bytes in the specified variable.
+318 L<Nasm::X86::Variable::setReg|/Nasm::X86::Variable::setReg> - Set the named registers from the content of the variable.
 
-319 L<Nasm::X86::Variable::str|/Nasm::X86::Variable::str> - The name of the variable.
+319 L<Nasm::X86::Variable::setZmm|/Nasm::X86::Variable::setZmm> - Load bytes from the memory addressed by specified source variable into the numbered zmm register at the offset in the specified offset moving the number of bytes in the specified variable.
 
-320 L<Nasm::X86::Variable::sub|/Nasm::X86::Variable::sub> - Subtract the right hand variable from the left hand variable and return the result as a new variable.
+320 L<Nasm::X86::Variable::str|/Nasm::X86::Variable::str> - The name of the variable.
 
-321 L<Nasm::X86::Variable::times|/Nasm::X86::Variable::times> - Multiply the left hand variable by the right hand variable and return the result as a new variable.
+321 L<Nasm::X86::Variable::sub|/Nasm::X86::Variable::sub> - Subtract the right hand variable from the left hand variable and return the result as a new variable.
 
-322 L<Nasm::X86::Variable::zBroadCastD|/Nasm::X86::Variable::zBroadCastD> - Broadcast a double word in a variable into the numbered zmm.
+322 L<Nasm::X86::Variable::times|/Nasm::X86::Variable::times> - Multiply the left hand variable by the right hand variable and return the result as a new variable.
 
-323 L<OnSegv|/OnSegv> - Request a trace back followed by exit on a B<segv> signal.
+323 L<Nasm::X86::Variable::zBroadCastD|/Nasm::X86::Variable::zBroadCastD> - Broadcast a double word in a variable into the numbered zmm.
 
-324 L<OpenRead|/OpenRead> - Open a file, whose name is addressed by rax, for read and return the file descriptor in rax.
+324 L<OnSegv|/OnSegv> - Request a trace back followed by exit on a B<segv> signal.
 
-325 L<OpenWrite|/OpenWrite> - Create the file named by the terminated string addressed by rax for write.
+325 L<OpenRead|/OpenRead> - Open a file, whose name is addressed by rax, for read and return the file descriptor in rax.
 
-326 L<Optimize|/Optimize> - Perform code optimizations.
+326 L<OpenWrite|/OpenWrite> - Create the file named by the terminated string addressed by rax for write.
 
-327 L<OrBlock|/OrBlock> - Short circuit B<or>: execute a block of code to test conditions which, if one of them is met, leads on to the execution of the pass block, if all of the tests fail we continue withe the test block.
+327 L<Optimize|/Optimize> - Perform code optimizations.
 
-328 L<Pass|/Pass> - Pass block for an L<OrBlock>.
+328 L<OrBlock|/OrBlock> - Short circuit B<or>: execute a block of code to test conditions which, if one of them is met, leads on to the execution of the pass block, if all of the tests fail we continue withe the test block.
 
-329 L<PeekR|/PeekR> - Peek at register on stack.
+329 L<Pass|/Pass> - Pass block for an L<OrBlock>.
 
-330 L<PopEax|/PopEax> - We cannot pop a double word from the stack in 64 bit long mode using pop so we improvise.
+330 L<PeekR|/PeekR> - Peek at register on stack.
 
-331 L<PopMask|/PopMask> - Pop Mask registers.
+331 L<PopEax|/PopEax> - We cannot pop a double word from the stack in 64 bit long mode using pop so we improvise.
 
-332 L<PopR|/PopR> - Pop registers from the stack.
+332 L<PopMask|/PopMask> - Pop Mask registers.
 
-333 L<PopRR|/PopRR> - Pop registers from the stack without tracking.
+333 L<PopR|/PopR> - Pop registers from the stack.
 
-334 L<PopZmm|/PopZmm> - Pop zmm registers.
+334 L<PopRR|/PopRR> - Pop registers from the stack without tracking.
 
-335 L<PrintErrMemory|/PrintErrMemory> - Print the memory addressed by rax for a length of rdi on stderr.
+335 L<PopZmm|/PopZmm> - Pop zmm registers.
 
-336 L<PrintErrMemoryInHex|/PrintErrMemoryInHex> - Dump memory from the address in rax for the length in rdi on stderr.
+336 L<PrintErrMemory|/PrintErrMemory> - Print the memory addressed by rax for a length of rdi on stderr.
 
-337 L<PrintErrMemoryInHexNL|/PrintErrMemoryInHexNL> - Dump memory from the address in rax for the length in rdi and then print a new line.
+337 L<PrintErrMemoryInHex|/PrintErrMemoryInHex> - Dump memory from the address in rax for the length in rdi on stderr.
 
-338 L<PrintErrMemoryNL|/PrintErrMemoryNL> - Print the memory addressed by rax for a length of rdi followed by a new line on stderr.
+338 L<PrintErrMemoryInHexNL|/PrintErrMemoryInHexNL> - Dump memory from the address in rax for the length in rdi and then print a new line.
 
-339 L<PrintErrNL|/PrintErrNL> - Print a new line to stderr.
+339 L<PrintErrMemoryNL|/PrintErrMemoryNL> - Print the memory addressed by rax for a length of rdi followed by a new line on stderr.
 
-340 L<PrintErrRaxInHex|/PrintErrRaxInHex> - Write the content of register rax in hexadecimal in big endian notation to stderr.
+340 L<PrintErrNL|/PrintErrNL> - Print a new line to stderr.
 
-341 L<PrintErrRegisterInHex|/PrintErrRegisterInHex> - Print the named registers as hex strings on stderr.
+341 L<PrintErrRaxInHex|/PrintErrRaxInHex> - Write the content of register rax in hexadecimal in big endian notation to stderr.
 
-342 L<PrintErrSpace|/PrintErrSpace> - Print one or more spaces to stderr.
+342 L<PrintErrRegisterInHex|/PrintErrRegisterInHex> - Print the named registers as hex strings on stderr.
 
-343 L<PrintErrString|/PrintErrString> - Print a constant string to stderr.
+343 L<PrintErrSpace|/PrintErrSpace> - Print one or more spaces to stderr.
 
-344 L<PrintErrStringNL|/PrintErrStringNL> - Print a constant string followed by a new line to stderr.
+344 L<PrintErrString|/PrintErrString> - Print a constant string to stderr.
 
-345 L<PrintErrTraceBack|/PrintErrTraceBack> - Print sub routine track back on stderr.
+345 L<PrintErrStringNL|/PrintErrStringNL> - Print a constant string followed by a new line to stderr.
 
-346 L<PrintErrUtf32|/PrintErrUtf32> - Print the utf 8 character addressed by rax to stderr.
+346 L<PrintErrTraceBack|/PrintErrTraceBack> - Print sub routine track back on stderr.
 
-347 L<PrintErrUtf8Char|/PrintErrUtf8Char> - Print the utf 8 character addressed by rax to stderr.
+347 L<PrintErrUtf32|/PrintErrUtf32> - Print the utf 8 character addressed by rax to stderr.
 
-348 L<PrintErrZF|/PrintErrZF> - Print the zero flag without disturbing it on stderr.
+348 L<PrintErrUtf8Char|/PrintErrUtf8Char> - Print the utf 8 character addressed by rax to stderr.
 
-349 L<PrintMemory|/PrintMemory> - Print the memory addressed by rax for a length of rdi on the specified channel.
+349 L<PrintErrZF|/PrintErrZF> - Print the zero flag without disturbing it on stderr.
 
-350 L<PrintMemoryInHex|/PrintMemoryInHex> - Dump memory from the address in rax for the length in rdi on the specified channel.
+350 L<PrintMemory|/PrintMemory> - Print the memory addressed by rax for a length of rdi on the specified channel.
 
-351 L<PrintMemoryNL|/PrintMemoryNL> - Print the memory addressed by rax for a length of rdi on the specified channel followed by a new line.
+351 L<PrintMemoryInHex|/PrintMemoryInHex> - Dump memory from the address in rax for the length in rdi on the specified channel.
 
-352 L<PrintNL|/PrintNL> - Print a new line to stdout  or stderr.
+352 L<PrintMemoryNL|/PrintMemoryNL> - Print the memory addressed by rax for a length of rdi on the specified channel followed by a new line.
 
-353 L<PrintOneRegisterInHex|/PrintOneRegisterInHex> - Print the named register as a hex strings.
+353 L<PrintNL|/PrintNL> - Print a new line to stdout  or stderr.
 
-354 L<PrintOutMemory|/PrintOutMemory> - Print the memory addressed by rax for a length of rdi on stdout.
+354 L<PrintOneRegisterInHex|/PrintOneRegisterInHex> - Print the named register as a hex strings.
 
-355 L<PrintOutMemoryInHex|/PrintOutMemoryInHex> - Dump memory from the address in rax for the length in rdi on stdout.
+355 L<PrintOutMemory|/PrintOutMemory> - Print the memory addressed by rax for a length of rdi on stdout.
 
-356 L<PrintOutMemoryInHexNL|/PrintOutMemoryInHexNL> - Dump memory from the address in rax for the length in rdi and then print a new line.
+356 L<PrintOutMemoryInHex|/PrintOutMemoryInHex> - Dump memory from the address in rax for the length in rdi on stdout.
 
-357 L<PrintOutMemoryNL|/PrintOutMemoryNL> - Print the memory addressed by rax for a length of rdi followed by a new line on stdout.
+357 L<PrintOutMemoryInHexNL|/PrintOutMemoryInHexNL> - Dump memory from the address in rax for the length in rdi and then print a new line.
 
-358 L<PrintOutNL|/PrintOutNL> - Print a new line to stderr.
+358 L<PrintOutMemoryNL|/PrintOutMemoryNL> - Print the memory addressed by rax for a length of rdi followed by a new line on stdout.
 
-359 L<PrintOutRaxInHex|/PrintOutRaxInHex> - Write the content of register rax in hexadecimal in big endian notation to stderr.
+359 L<PrintOutNL|/PrintOutNL> - Print a new line to stderr.
 
-360 L<PrintOutRaxInReverseInHex|/PrintOutRaxInReverseInHex> - Write the content of register rax to stderr in hexadecimal in little endian notation.
+360 L<PrintOutRaxInHex|/PrintOutRaxInHex> - Write the content of register rax in hexadecimal in big endian notation to stderr.
 
-361 L<PrintOutRegisterInHex|/PrintOutRegisterInHex> - Print the named registers as hex strings on stdout.
+361 L<PrintOutRaxInReverseInHex|/PrintOutRaxInReverseInHex> - Write the content of register rax to stderr in hexadecimal in little endian notation.
 
-362 L<PrintOutRegistersInHex|/PrintOutRegistersInHex> - Print the general purpose registers in hex.
+362 L<PrintOutRegisterInHex|/PrintOutRegisterInHex> - Print the named registers as hex strings on stdout.
 
-363 L<PrintOutRflagsInHex|/PrintOutRflagsInHex> - Print the flags register in hex.
+363 L<PrintOutRegistersInHex|/PrintOutRegistersInHex> - Print the general purpose registers in hex.
 
-364 L<PrintOutRipInHex|/PrintOutRipInHex> - Print the instruction pointer in hex.
+364 L<PrintOutRflagsInHex|/PrintOutRflagsInHex> - Print the flags register in hex.
 
-365 L<PrintOutSpace|/PrintOutSpace> - Print one or more spaces to stdout.
+365 L<PrintOutRipInHex|/PrintOutRipInHex> - Print the instruction pointer in hex.
 
-366 L<PrintOutString|/PrintOutString> - Print a constant string to stdout.
+366 L<PrintOutSpace|/PrintOutSpace> - Print one or more spaces to stdout.
 
-367 L<PrintOutStringNL|/PrintOutStringNL> - Print a constant string followed by a new line to stdout.
+367 L<PrintOutString|/PrintOutString> - Print a constant string to stdout.
 
-368 L<PrintOutTraceBack|/PrintOutTraceBack> - Print sub routine track back on stdout.
+368 L<PrintOutStringNL|/PrintOutStringNL> - Print a constant string followed by a new line to stdout.
 
-369 L<PrintOutUtf32|/PrintOutUtf32> - Print the utf 8 character addressed by rax to stdout.
+369 L<PrintOutTraceBack|/PrintOutTraceBack> - Print sub routine track back on stdout.
 
-370 L<PrintOutUtf8Char|/PrintOutUtf8Char> - Print the utf 8 character addressed by rax to stdout.
+370 L<PrintOutUtf32|/PrintOutUtf32> - Print the utf 8 character addressed by rax to stdout.
 
-371 L<PrintOutZF|/PrintOutZF> - Print the zero flag without disturbing it on stdout.
+371 L<PrintOutUtf8Char|/PrintOutUtf8Char> - Print the utf 8 character addressed by rax to stdout.
 
-372 L<PrintRaxInHex|/PrintRaxInHex> - Write the content of register rax in hexadecimal in big endian notation to the specified channel.
+372 L<PrintOutZF|/PrintOutZF> - Print the zero flag without disturbing it on stdout.
 
-373 L<PrintRegisterInHex|/PrintRegisterInHex> - Print the named registers as hex strings.
+373 L<PrintRaxInHex|/PrintRaxInHex> - Write the content of register rax in hexadecimal in big endian notation to the specified channel.
 
-374 L<PrintSpace|/PrintSpace> - Print one or more spaces to the specified channel.
+374 L<PrintRegisterInHex|/PrintRegisterInHex> - Print the named registers as hex strings.
 
-375 L<PrintString|/PrintString> - Print a constant string to the specified channel.
+375 L<PrintSpace|/PrintSpace> - Print one or more spaces to the specified channel.
 
-376 L<PrintStringNL|/PrintStringNL> - Print a constant string to the specified channel followed by a new line.
+376 L<PrintString|/PrintString> - Print a constant string to the specified channel.
 
-377 L<PrintTraceBack|/PrintTraceBack> - Trace the call stack.
+377 L<PrintStringNL|/PrintStringNL> - Print a constant string to the specified channel followed by a new line.
 
-378 L<PrintUtf32|/PrintUtf32> - Print the specified number of utf32 characters at the specified address to the specified channel.
+378 L<PrintTraceBack|/PrintTraceBack> - Trace the call stack.
 
-379 L<PrintUtf8Char|/PrintUtf8Char> - Print the utf 8 character addressed by rax to the specified channel.
+379 L<PrintUtf32|/PrintUtf32> - Print the specified number of utf32 characters at the specified address to the specified channel.
 
-380 L<PushMask|/PushMask> - Push several Mask registers.
+380 L<PrintUtf8Char|/PrintUtf8Char> - Print the utf 8 character addressed by rax to the specified channel.
 
-381 L<PushR|/PushR> - Push registers onto the stack.
+381 L<PushMask|/PushMask> - Push several Mask registers.
 
-382 L<PushRR|/PushRR> - Push registers onto the stack without tracking.
+382 L<PushR|/PushR> - Push registers onto the stack.
 
-383 L<PushZmm|/PushZmm> - Push several zmm registers.
+383 L<PushRR|/PushRR> - Push registers onto the stack without tracking.
 
-384 L<putIntoZmm|/putIntoZmm> - Put the specified register into the numbered zmm at the specified offset in the zmm.
+384 L<PushZmm|/PushZmm> - Push several zmm registers.
 
-385 L<R|/R> - Define a reference variable.
+385 L<putIntoZmm|/putIntoZmm> - Put the specified register into the numbered zmm at the specified offset in the zmm.
 
-386 L<Rb|/Rb> - Layout bytes in the data segment and return their label.
+386 L<R|/R> - Define a reference variable.
 
-387 L<Rbwdq|/Rbwdq> - Layout data.
+387 L<Rb|/Rb> - Layout bytes in the data segment and return their label.
 
-388 L<RComment|/RComment> - Insert a comment into the read only data segment.
+388 L<Rbwdq|/Rbwdq> - Layout data.
 
-389 L<Rd|/Rd> - Layout double words in the data segment and return their label.
+389 L<RComment|/RComment> - Insert a comment into the read only data segment.
 
-390 L<ReadFile|/ReadFile> - Read a file whose name is addressed by rax into memory.
+390 L<Rd|/Rd> - Layout double words in the data segment and return their label.
 
-391 L<ReadTimeStampCounter|/ReadTimeStampCounter> - Read the time stamp counter and return the time in nanoseconds in rax.
+391 L<ReadFile|/ReadFile> - Read a file whose name is addressed by rax into memory.
 
-392 L<RegistersAvailable|/RegistersAvailable> - Add a new set of registers that are available.
+392 L<ReadTimeStampCounter|/ReadTimeStampCounter> - Read the time stamp counter and return the time in nanoseconds in rax.
 
-393 L<RegistersFree|/RegistersFree> - Remove the current set of registers known to be free.
+393 L<RegistersAvailable|/RegistersAvailable> - Add a new set of registers that are available.
 
-394 L<RegisterSize|/RegisterSize> - Return the size of a register.
+394 L<RegistersFree|/RegistersFree> - Remove the current set of registers known to be free.
 
-395 L<removeNonAsciiChars|/removeNonAsciiChars> - Return a copy of the specified string with all the non ascii characters removed.
+395 L<RegisterSize|/RegisterSize> - Return the size of a register.
 
-396 L<ReorderSyscallRegisters|/ReorderSyscallRegisters> - Map the list of registers provided to the 64 bit system call sequence.
+396 L<removeNonAsciiChars|/removeNonAsciiChars> - Return a copy of the specified string with all the non ascii characters removed.
 
-397 L<RestoreFirstFour|/RestoreFirstFour> - Restore the first 4 parameter registers.
+397 L<ReorderSyscallRegisters|/ReorderSyscallRegisters> - Map the list of registers provided to the 64 bit system call sequence.
 
-398 L<RestoreFirstFourExceptRax|/RestoreFirstFourExceptRax> - Restore the first 4 parameter registers except rax so it can return its value.
+398 L<RestoreFirstFour|/RestoreFirstFour> - Restore the first 4 parameter registers.
 
-399 L<RestoreFirstFourExceptRaxAndRdi|/RestoreFirstFourExceptRaxAndRdi> - Restore the first 4 parameter registers except rax  and rdi so we can return a pair of values.
+399 L<RestoreFirstFourExceptRax|/RestoreFirstFourExceptRax> - Restore the first 4 parameter registers except rax so it can return its value.
 
-400 L<RestoreFirstSeven|/RestoreFirstSeven> - Restore the first 7 parameter registers.
+400 L<RestoreFirstFourExceptRaxAndRdi|/RestoreFirstFourExceptRaxAndRdi> - Restore the first 4 parameter registers except rax  and rdi so we can return a pair of values.
 
-401 L<RestoreFirstSevenExceptRax|/RestoreFirstSevenExceptRax> - Restore the first 7 parameter registers except rax which is being used to return the result.
+401 L<RestoreFirstSeven|/RestoreFirstSeven> - Restore the first 7 parameter registers.
 
-402 L<RestoreFirstSevenExceptRaxAndRdi|/RestoreFirstSevenExceptRaxAndRdi> - Restore the first 7 parameter registers except rax and rdi which are being used to return the results.
+402 L<RestoreFirstSevenExceptRax|/RestoreFirstSevenExceptRax> - Restore the first 7 parameter registers except rax which is being used to return the result.
 
-403 L<Rq|/Rq> - Layout quad words in the data segment and return their label.
+403 L<RestoreFirstSevenExceptRaxAndRdi|/RestoreFirstSevenExceptRaxAndRdi> - Restore the first 7 parameter registers except rax and rdi which are being used to return the results.
 
-404 L<Rs|/Rs> - Layout bytes in read only memory and return their label.
+404 L<Rq|/Rq> - Layout quad words in the data segment and return their label.
 
-405 L<Rutf8|/Rutf8> - Layout a utf8 encoded string as bytes in read only memory and return their label.
+405 L<Rs|/Rs> - Layout bytes in read only memory and return their label.
 
-406 L<Rw|/Rw> - Layout words in the data segment and return their label.
+406 L<Rutf8|/Rutf8> - Layout a utf8 encoded string as bytes in read only memory and return their label.
 
-407 L<SaveFirstFour|/SaveFirstFour> - Save the first 4 parameter registers making any parameter registers read only.
+407 L<Rw|/Rw> - Layout words in the data segment and return their label.
 
-408 L<SaveFirstSeven|/SaveFirstSeven> - Save the first 7 parameter registers.
+408 L<SaveFirstFour|/SaveFirstFour> - Save the first 4 parameter registers making any parameter registers read only.
 
-409 L<SaveRegIntoMm|/SaveRegIntoMm> - Save the specified register into the numbered zmm at the quad offset specified as a constant number.
+409 L<SaveFirstSeven|/SaveFirstSeven> - Save the first 7 parameter registers.
 
-410 L<SetLabel|/SetLabel> - Create (if necessary) and set a label in the code section returning the label so set.
+410 L<SaveRegIntoMm|/SaveRegIntoMm> - Save the specified register into the numbered zmm at the quad offset specified as a constant number.
 
-411 L<SetMaskRegister|/SetMaskRegister> - Set the mask register to ones starting at the specified position for the specified length and zeroes elsewhere.
+411 L<SetLabel|/SetLabel> - Create (if necessary) and set a label in the code section returning the label so set.
 
-412 L<SetZF|/SetZF> - Set the zero flag.
+412 L<SetMaskRegister|/SetMaskRegister> - Set the mask register to ones starting at the specified position for the specified length and zeroes elsewhere.
 
-413 L<Start|/Start> - Initialize the assembler.
+413 L<SetZF|/SetZF> - Set the zero flag.
 
-414 L<StatSize|/StatSize> - Stat a file whose name is addressed by rax to get its size in rax.
+414 L<Start|/Start> - Initialize the assembler.
 
-415 L<StringLength|/StringLength> - Length of a zero terminated string.
+415 L<StatSize|/StatSize> - Stat a file whose name is addressed by rax to get its size in rax.
 
-416 L<Structure|/Structure> - Create a structure addressed by a register.
+416 L<StringLength|/StringLength> - Length of a zero terminated string.
 
-417 L<Subroutine|/Subroutine> - Create a subroutine that can be called in assembler code.
+417 L<Structure|/Structure> - Create a structure addressed by a register.
 
-418 L<SubroutineStartStack|/SubroutineStartStack> - Initialize a new stack frame.
+418 L<Subroutine|/Subroutine> - Create a subroutine that can be called in assembler code.
 
-419 L<Then|/Then> - Then block for an If statement.
+419 L<SubroutineStartStack|/SubroutineStartStack> - Initialize a new stack frame.
 
-420 L<totalBytesAssembled|/totalBytesAssembled> - Total size in bytes of all files assembled during testing.
+420 L<Then|/Then> - Then block for an If statement.
 
-421 L<unlinkFile|/unlinkFile> - Unlink the named file.
+421 L<totalBytesAssembled|/totalBytesAssembled> - Total size in bytes of all files assembled during testing.
 
-422 L<UnReorderSyscallRegisters|/UnReorderSyscallRegisters> - Recover the initial values in registers that were reordered.
+422 L<unlinkFile|/unlinkFile> - Unlink the named file.
 
-423 L<V|/V> - Define a variable.
+423 L<UnReorderSyscallRegisters|/UnReorderSyscallRegisters> - Recover the initial values in registers that were reordered.
 
-424 L<Variable|/Variable> - Create a new variable with the specified name initialized via an optional expression.
+424 L<V|/V> - Define a variable.
 
-425 L<WaitPid|/WaitPid> - Wait for the pid in rax to complete.
+425 L<Variable|/Variable> - Create a new variable with the specified name initialized via an optional expression.
 
-426 L<xmm|/xmm> - Add xmm to the front of a list of register expressions.
+426 L<WaitPid|/WaitPid> - Wait for the pid in rax to complete.
 
-427 L<ymm|/ymm> - Add ymm to the front of a list of register expressions.
+427 L<xmm|/xmm> - Add xmm to the front of a list of register expressions.
 
-428 L<zmm|/zmm> - Add zmm to the front of a list of register expressions.
+428 L<ymm|/ymm> - Add ymm to the front of a list of register expressions.
+
+429 L<zmm|/zmm> - Add zmm to the front of a list of register expressions.
 
 =head1 Installation
 
