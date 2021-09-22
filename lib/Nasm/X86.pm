@@ -939,7 +939,7 @@ sub Nasm::X86::Sub::callTo($$$@)                                                
       my $t = formatTable([@t], [qw(Name)]);
       confess "Invalid parameter: '$n'\n$t";
      }
-    $p{$n} = $v;
+    $p{$n} = ref($v) ? $v : V($n, $v);
    }
 
   my %callingArgs = ($sub->options->{callingArgs}//{})->%*;                     # The list of args the containing subroutine was called with
@@ -974,13 +974,12 @@ sub Nasm::X86::Sub::callTo($$$@)                                                
         else                                                                    # Source is not a reference
          {Lea r15, "[$label]";
          }
+        my $q = $sub->variables->{$a}->label;
+           $q =~ s(rbp) (rsp);                                                    # Labels are based off the stack fram but we are building a new stack frame here
+        Mov "[$q-$w*2]", r15;                                                     # Step over subroutine name pointer and previous frame pointer.
        }
-      else                                                                      # Load a register expression into the parameter
-       {Mov r15, $p;
-       }
-      my $q = $sub->variables->{$a}->label;
-         $q =~ s(rbp) (rsp);                                                    # Labels are based off the stack fram but we are building a new stack frame here
-      Mov "[$q-$w*2]", r15;                                                     # Step over subroutine name pointer and previous frame pointer.
+      else {confess "AAAA"};
+Comment "GGGG";
      }
    }
 
@@ -19628,7 +19627,7 @@ Test::More->builder->output("/dev/null") if $localTest;                         
 
 if ($^O =~ m(bsd|linux|cygwin)i)                                                # Supported systems
  {if (confirmHasCommandLineCommand(q(nasm)) and LocateIntelEmulator)            # Network assembler and Intel Software Development emulator
-   {plan tests => 151;
+   {plan tests => 152;
    }
   else
    {plan skip_all => qq(Nasm or Intel 64 emulator not available);
@@ -23891,10 +23890,24 @@ call: 0000 0000 0040 107A
 END
  }
 
+#latest:
+if (1) {                                                                        #TNasm::X86::Quarks::quarkFromSub #TNasm::X86::Quarks::subFromQuark #TNasm::X86::Quarks::loadConstantString
+  my $s = Subroutine
+   {my ($p) = @_;
+    $$p{p}->outNL;
+   } [qw(p)], name => 'test';
+
+  $s->call(p => 221);
+
+  ok Assemble(debug => 0, trace => 1, eq => <<END);
+p: 0000 0000 0000 00DD
+END
+ }
+
 ok 1 for 4..10;
 
 #unlink $_ for qw(hash print2 sde-log.txt sde-ptr-check.out.txt z.txt);         # Remove incidental files
-unlink $_ for qw(hash print2 pin-log.txt pin-tool-log.txt sde-footprint.txt sde-log.txt clear hash signal z.o);
+#unlink $_ for qw(hash print2 pin-log.txt pin-tool-log.txt sde-footprint.txt sde-log.txt clear hash signal z.o);
 
 say STDERR sprintf("# Time: %.2fs, bytes: %s, execs: %s",
   time - $start,
