@@ -960,25 +960,25 @@ sub Nasm::X86::Sub::callTo($$$@)                                                
   Mov "byte [rsp-1-$w*2]", scalar $sub->parameters->@*;                         # Number of parameters to enable traceback with parameters
 
   for my $p(sort keys %p)                                                       # Transfer parameters from current frame to next frame
-   {my $r = ref $p{$p};
+   {my $r = ref(my $P = $p{$p});
     if ($r and $r =~ m(variable)i)                                              # Load a variable
-     {my $P = $p{$p}->label;                                                    # Source in current frame
-      if ($p{$p}->reference)                                                    # Source is a reference
-       {Mov r15, "[$P]";
+     {my $label = $P->label;                                                    # Source in current frame
+      if ($P->reference)                                                        # Source is a reference
+       {Mov r15, "[$label]";
        }
       else                                                                      # Source is not a reference
-       {Lea r15, "[$P]";
+       {Lea r15, "[$label]";
        }
      }
     else                                                                        # Load a register expression into the parameter
-     {Mov r15, $p{$p};
+     {Mov r15, $P;
      }
     my $Q = $sub->variables->{$p}->label;
        $Q =~ s(rbp) (rsp);                                                      # Labels are based off the stack fram but we are building a new stack frame here
     Mov "[$Q-$w*2]", r15;                                                       # Step over subroutine name pointer and number of parameters
    }
 
-  if ($mode)                                                                    # Dereference and call
+  if ($mode)                                                                    # Dereference and call subrotuine
    {Mov r15, $label;
     Mov r15, "[r15]";
     Call r15;
