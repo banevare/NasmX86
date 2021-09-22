@@ -942,15 +942,18 @@ sub Nasm::X86::Sub::callTo($$$@)                                                
     $p{$n} = $v;
    }
 
+  my %callingArgs = ($sub->options->{callingArgs}//{})->%*;                     # The list of args the containing subroutine was called with
+
   if (1)                                                                        # Check for missing arguments
-   {my %m = map {$_=>1} keys $sub->args->%*;                                    # Formal arguments
+   {my %m = $sub->args->%*;                                                     # Formal arguments
     delete $m{$_} for sort keys %p;                                             # Remove actual arguments
+    delete $m{$_} for sort keys %callingArgs;                                   # Remove arguments from calling environment if supplied
     keys %m and confess "Missing arguments ".dump([sort keys %m]);              # Print missing parameter names
    }
 
   if (1)                                                                        # Check for misnamed arguments
-   {my %m = map {$_=>1} keys %p;                                                # Actual arguments
-    delete $m{$_} for sort keys $sub->args->%*;                                 # Remove formal arguments
+   {my %m = %p;                                                                 # Actual arguments
+    delete $m{$_} for sort keys($sub->args->%*), sort keys(%callingArgs);       # Remove formal arguments
     keys %m and confess "Invalid arguments ".dump([sort keys %m]);              # Print misnamed arguments
    }
 
@@ -959,23 +962,26 @@ sub Nasm::X86::Sub::callTo($$$@)                                                
   Mov "dword[rsp  -$w*3]", $sub->nameString;                                    # Point to name
   Mov "byte [rsp-1-$w*2]", scalar $sub->parameters->@*;                         # Number of parameters to enable traceback with parameters
 
-  for my $p(sort keys %p)                                                       # Transfer parameters from current frame to next frame
-   {my $r = ref(my $P = $p{$p});
-    if ($r and $r =~ m(variable)i)                                              # Load a variable
-     {my $label = $P->label;                                                    # Source in current frame
-      if ($P->reference)                                                        # Source is a reference
-       {Mov r15, "[$label]";
+  if (1)                                                                        # Transfer parameters by copying them to the base of the stack frame
+   {my %a = (%callingArgs, %p);                                                 # The consolidated argument list
+    for my $a(sort keys %a)                                                     # Transfer parameters from current frame to next frame
+     {my $r = ref(my $p = $a{$a});
+      if ($r and $r =~ m(variable)i)                                            # Load a variable
+       {my $label = $p->label;                                                  # Source in current frame
+        if ($p->reference)                                                      # Source is a reference
+         {Mov r15, "[$label]";
+         }
+        else                                                                    # Source is not a reference
+         {Lea r15, "[$label]";
+         }
        }
-      else                                                                      # Source is not a reference
-       {Lea r15, "[$label]";
+      else                                                                      # Load a register expression into the parameter
+       {Mov r15, $p;
        }
+      my $q = $sub->variables->{$a}->label;
+         $q =~ s(rbp) (rsp);                                                    # Labels are based off the stack fram but we are building a new stack frame here
+      Mov "[$q-$w*2]", r15;                                                     # Step over subroutine name pointer and previous frame pointer.
      }
-    else                                                                        # Load a register expression into the parameter
-     {Mov r15, $P;
-     }
-    my $Q = $sub->variables->{$p}->label;
-       $Q =~ s(rbp) (rsp);                                                      # Labels are based off the stack fram but we are building a new stack frame here
-    Mov "[$Q-$w*2]", r15;                                                       # Step over subroutine name pointer and number of parameters
    }
 
   if ($mode)                                                                    # Dereference and call subrotuine
