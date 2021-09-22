@@ -881,6 +881,17 @@ sub Subroutine(&$%)                                                             
   !$parameters or ref($parameters) =~ m(array)i or
     confess "Reference to array of parameter names required";
 
+  if (1)                                                                        # Check for duplicate parameters
+   {my %c;
+    $c{$_}++ && confess "Duplicate parameter $_" for @$parameters;
+    if (my $with = $options{with})                                              # Copy the argument list of the caller if requested
+     {for my $p($with->parameters->@*)
+       {$c{$p}++ and confess "Duplicate copied parameter $p";
+       }
+      @$parameters = sort keys %c;
+     }
+   }
+
   my $name    = $options{name};                                                 # Subroutine name
   $name or confess "Name required for subroutine, use [], name=>";
 
@@ -889,20 +900,20 @@ sub Subroutine(&$%)                                                             
   SubroutineStartStack;                                                         # Open new stack layout with references to parameters
   my %p; $p{$_} = R($_) for @$parameters;                                       # Reference each parameter
 
-  my $end = Label; Jmp $end;                                                    # End label
+  my $end   =    Label; Jmp $end;                                               # End label
   my $start = SetLabel;                                                         # Start label
 
   my $s = $subroutines{$name} = genHash(__PACKAGE__."::Sub",                    # Subroutine definition
-    start     => $start,                                                        # Start label for this subroutine
-    end       => $start,                                                        # End label for this subroutine
-    name      => $name,                                                         # Name of the subroutine from which the entry label is located
-    args      => {map {$_=>1} @$parameters},                                    # Hash of {argument name, argument variable}
-    variables => {%p},                                                          # Argument variables
-    options   => \%options,                                                     # Options
-    parameters=> $parameters,                                                   # Parameters
-    vars      => $VariableStack[-1],                                            # Number of variables in subroutine
-    depth     => scalar @VariableStack,                                         # Lexical depth
-    nameString=> Rs($name),                                                     # Name of the sub as a string constant
+    start      => $start,                                                       # Start label for this subroutine
+    end        => $start,                                                       # End label for this subroutine
+    name       => $name,                                                        # Name of the subroutine from which the entry label is located
+    args       => {map {$_=>1} @$parameters},                                   # Hash of {argument name, argument variable}
+    variables  => {%p},                                                         # Argument variables
+    options    => \%options,                                                    # Options
+    parameters => $parameters,                                                  # Parameters
+    vars       => $VariableStack[-1],                                           # Number of variables in subroutine
+    depth      => scalar @VariableStack,                                        # Lexical depth
+    nameString => Rs($name),                                                    # Name of the sub as a string constant
    );
 
   my $E = @text;                                                                # Code entry that will contain the Enter instruction
@@ -942,18 +953,18 @@ sub Nasm::X86::Sub::callTo($$$@)                                                
     $p{$n} = ref($v) ? $v : V($n, $v);
    }
 
-  my %callingArgs = ($sub->options->{callingArgs}//{})->%*;                     # The list of args the containing subroutine was called with
+  my %with = ($sub->options->{with}{variables}//{})->%*;                        # The list of args the containing subroutine was called with
 
   if (1)                                                                        # Check for missing arguments
    {my %m = $sub->args->%*;                                                     # Formal arguments
     delete $m{$_} for sort keys %p;                                             # Remove actual arguments
-    delete $m{$_} for sort keys %callingArgs;                                   # Remove arguments from calling environment if supplied
+    delete $m{$_} for sort keys %with;                                          # Remove arguments from calling environment if supplied
     keys %m and confess "Missing arguments ".dump([sort keys %m]);              # Print missing parameter names
    }
 
   if (1)                                                                        # Check for misnamed arguments
    {my %m = %p;                                                                 # Actual arguments
-    delete $m{$_} for sort keys($sub->args->%*), sort keys(%callingArgs);       # Remove formal arguments
+    delete $m{$_} for sort keys($sub->args->%*), sort keys(%with);              # Remove formal arguments
     keys %m and confess "Invalid arguments ".dump([sort keys %m]);              # Print misnamed arguments
    }
 
@@ -963,23 +974,18 @@ sub Nasm::X86::Sub::callTo($$$@)                                                
   Mov "byte [rsp-1-$w*2]", scalar $sub->parameters->@*;                         # Number of parameters to enable traceback with parameters
 
   if (1)                                                                        # Transfer parameters by copying them to the base of the stack frame
-   {my %a = (%callingArgs, %p);                                                 # The consolidated argument list
+   {my %a = (%with, %p);                                                        # The consolidated argument list
     for my $a(sort keys %a)                                                     # Transfer parameters from current frame to next frame
-     {my $r = ref(my $p = $a{$a});
-      if ($r and $r =~ m(variable)i)                                            # Load a variable
-       {my $label = $p->label;                                                  # Source in current frame
-        if ($p->reference)                                                      # Source is a reference
-         {Mov r15, "[$label]";
-         }
-        else                                                                    # Source is not a reference
-         {Lea r15, "[$label]";
-         }
-        my $q = $sub->variables->{$a}->label;
-           $q =~ s(rbp) (rsp);                                                    # Labels are based off the stack fram but we are building a new stack frame here
-        Mov "[$q-$w*2]", r15;                                                     # Step over subroutine name pointer and previous frame pointer.
+     {my $label = $a{$a}->label;                                                # Source in current frame
+      if ($a{$a}->reference)                                                    # Source is a reference
+       {Mov r15, "[$label]";
        }
-      else {confess "AAAA"};
-Comment "GGGG";
+      else                                                                      # Source is not a reference
+       {Lea r15, "[$label]";
+       }
+      my $q = $sub->variables->{$a}->label;
+         $q =~ s(rbp) (rsp);                                                    # Labels are based off the stack fram but we are building a new stack frame here
+      Mov "[$q-$w*2]", r15;                                                     # Step over subroutine name pointer and previous frame pointer.
      }
    }
 
@@ -6279,7 +6285,7 @@ sub Nasm::X86::Tree::find($$;$$)                                                
 
     SetLabel $success;                                                          # Insert completed successfully
     PopZmm; PopR;
-   } [qw(bs first key data found data subTree)], name => 'Nasm::X86::Tree::find';
+   } [qw(bs first key data found subTree)], name => 'Nasm::X86::Tree::find';
 
   $s->call(bs => ($bs // $t->address), first => ($first // $t->first),
     key   => $key,      data    => $t->data,
@@ -19627,7 +19633,7 @@ Test::More->builder->output("/dev/null") if $localTest;                         
 
 if ($^O =~ m(bsd|linux|cygwin)i)                                                # Supported systems
  {if (confirmHasCommandLineCommand(q(nasm)) and LocateIntelEmulator)            # Network assembler and Intel Software Development emulator
-   {plan tests => 152;
+   {plan tests => 153;
    }
   else
    {plan skip_all => qq(Nasm or Intel 64 emulator not available);
@@ -23891,16 +23897,42 @@ END
  }
 
 #latest:
-if (1) {                                                                        #TNasm::X86::Quarks::quarkFromSub #TNasm::X86::Quarks::subFromQuark #TNasm::X86::Quarks::loadConstantString
+if (1) {                                                                        # Register expressions in parameter lists
   my $s = Subroutine
    {my ($p) = @_;
     $$p{p}->outNL;
    } [qw(p)], name => 'test';
 
   $s->call(p => 221);
+  Mov r15, 0xcc;
+  $s->call(p => r15);
 
   ok Assemble(debug => 0, trace => 1, eq => <<END);
 p: 0000 0000 0000 00DD
+p: 0000 0000 0000 00CC
+END
+ }
+
+#latest:
+if (1) {                                                                        # Consolidated parameter lists
+  my $s = Subroutine
+   {my ($p, $s) = @_;
+
+    my $t = Subroutine
+     {my ($p) = @_;
+      $$p{p}->outNL;
+      $$p{q}->outNL;
+     } [], name => 'tttt', with => $s;
+
+    $t->call(q => 0xcc);
+
+   } [qw(p q)], name => 'ssss';
+
+  $s->call(p => 0xee, q => 0xdd);
+
+  ok Assemble(debug => 0, trace => 1, eq => <<END);
+p: 0000 0000 0000 00EE
+q: 0000 0000 0000 00CC
 END
  }
 
