@@ -932,7 +932,7 @@ sub Nasm::X86::Sub::callTo($$$@)                                                
    {my $p = shift @parameters;                                                  # Check parameters provided by caller
     my $n = ref($p) ? $p->name : $p;
     defined($n) or confess "No name or variable";
-    my $v = ref($p) ? $p       : shift @parameters;
+    my $v = ref($p) ? $p       : shift @parameters;                             # Each actual parameter is a variable or an expression that can loaded into a register
     unless ($sub->args->{$n})                                                   # Describe valid parameters using a table
      {my @t;
       push @t, map {[$_]} keys $sub->args->%*;
@@ -960,20 +960,22 @@ sub Nasm::X86::Sub::callTo($$$@)                                                
   Mov "byte [rsp-1-$w*2]", scalar $sub->parameters->@*;                         # Number of parameters to enable traceback with parameters
 
   for my $p(sort keys %p)                                                       # Transfer parameters from current frame to next frame
-   {!ref($p{$p}) or ref($p{$p}) =~ m(variable)i or
-      confess "Variable required, not: ".ref($p{$p});
-    my $P = $p{$p}->label;                                                      # Source in current frame
-    if (my $q = $sub->variables->{$p})                                          # Target in new frame
-     {if ($p{$p}->reference)                                                    # Source is a reference
+   {my $r = ref $p{$p};
+    if ($r and $r =~ m(variable)i)                                              # Load a variable
+     {my $P = $p{$p}->label;                                                    # Source in current frame
+      if ($p{$p}->reference)                                                    # Source is a reference
        {Mov r15, "[$P]";
        }
       else                                                                      # Source is not a reference
        {Lea r15, "[$P]";
        }
-      my $Q = $q->label;
-         $Q =~ s(rbp) (rsp);
-      Mov "[$Q-$w*2]", r15;
      }
+    else                                                                        # Load a register expression into the parameter
+     {Mov r15, $p{$p};
+     }
+    my $Q = $sub->variables->{$p}->label;
+       $Q =~ s(rbp) (rsp);                                                      # Labels are based off the stack fram but we are building a new stack frame here
+    Mov "[$Q-$w*2]", r15;                                                       # Step over subroutine name pointer and number of parameters
    }
 
   if ($mode)                                                                    # Dereference and call
